@@ -1,0 +1,23 @@
+{
+  "name": "@seo-os/worker-general",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Background job worker — handlers registered Sprint 4+",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --max-warnings 0"
+  },
+  "dependencies": {
+    "@seo-os/shared": "*",
+    "dotenv": "^16.4.7",
+    "pino": "^9.6.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

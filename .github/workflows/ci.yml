@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Lint, format, typecheck, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Local API health smoke
+        run: node scripts/smoke-local-health.mjs
+
+  deploy-staging:
+    name: Deploy staging
+    needs: quality
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build for deploy
+        run: npm run build
+
+      - name: Deploy API to Railway
+        if: ${{ secrets.RAILWAY_TOKEN != '' }}
+        run: |
+          npm install -g @railway/cli
+          railway up --service api --detach
+        working-directory: apps/api
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+      - name: Deploy Web to Netlify
+        if: ${{ secrets.NETLIFY_AUTH_TOKEN != '' && secrets.NETLIFY_SITE_ID != '' }}
+        run: npx netlify-cli deploy --prod --dir=apps/web/dist
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+
+      - name: Staging deploy note
+        if: ${{ secrets.RAILWAY_TOKEN == '' && secrets.NETLIFY_AUTH_TOKEN == '' }}
+        run: |
+          echo "::warning::Staging secrets not configured. See docs/deployment.md to enable auto-deploy."
+
+  smoke-staging:
+    name: Staging health smoke
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Smoke test /health
+        if: ${{ secrets.STAGING_API_URL != '' }}
+        run: STAGING_API_URL=${{ secrets.STAGING_API_URL }} node scripts/smoke-staging.mjs
+
+      - name: Staging smoke skipped
+        if: ${{ secrets.STAGING_API_URL == '' }}
+        run: |
+          echo "::warning::STAGING_API_URL not set. Configure after first Railway deploy. See docs/deployment.md."

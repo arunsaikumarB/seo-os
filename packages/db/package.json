@@ -1,0 +1,21 @@
+{
+  "name": "@seo-os/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Database migration references and RLS test utilities (Sprint 1+)",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests --max-warnings 0",
+    "test": "vitest run",
+    "clean": "rimraf dist"
+  },
+  "devDependencies": {
+    "rimraf": "^6.0.1",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

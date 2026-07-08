@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext"
+  },
+  "include": ["src/**/*"],
+  "references": [
+    { "path": "../../packages/shared" },
+    { "path": "../../packages/providers" },
+    { "path": "../../packages/agent-contracts" },
+    { "path": "../../packages/ai-runtime" },
+    { "path": "../../packages/knowledge-engine" },
+    { "path": "../../packages/seo-intelligence" },
+    { "path": "../../packages/campaign-engine" },
+    { "path": "../../packages/backlink-builder" }
+  ]
+}

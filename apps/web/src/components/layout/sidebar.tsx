@@ -1,0 +1,79 @@
+import { NavLink } from 'react-router-dom';
+import { APP_NAME, APP_TAGLINE } from '@seo-os/shared';
+import { projectNav } from '@/config/navigation';
+import { useFeatureFlags } from '@/hooks/use-feature-flags';
+import { cn } from '@/lib/utils';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+
+interface SidebarProps {
+  projectId: string;
+  className?: string;
+}
+
+export function Sidebar({ projectId, className }: SidebarProps) {
+  const base = `/projects/${projectId}`;
+  const { isEnabled } = useFeatureFlags();
+
+  const visibleNav = projectNav.filter((item) => {
+    if (!item.featureFlag) return true;
+    return isEnabled(item.featureFlag);
+  });
+
+  return (
+    <aside className={cn('flex h-full w-64 flex-col border-r bg-card', className)}>
+      <div className="flex h-14 items-center border-b px-4">
+        <div>
+          <p className="font-semibold tracking-tight">{APP_NAME}</p>
+          <p className="text-[10px] text-muted-foreground leading-tight">{APP_TAGLINE}</p>
+        </div>
+      </div>
+      <nav className="flex-1 overflow-y-auto p-3 space-y-0.5">
+        {visibleNav.map((item, i) => {
+          if (item.label === 'Prospects' && i > 0) {
+            return (
+              <div key={item.label}>
+                <Separator className="my-3" />
+                <NavItemLink item={item} to={`${base}/${item.href}`} />
+              </div>
+            );
+          }
+          if (item.label === 'Technical SEO') {
+            return (
+              <div key={item.label}>
+                <Separator className="my-3" />
+                <NavItemLink item={item} to={`${base}/${item.href}`} />
+              </div>
+            );
+          }
+          return <NavItemLink key={item.label} item={item} to={`${base}/${item.href}`} />;
+        })}
+      </nav>
+    </aside>
+  );
+}
+
+function NavItemLink({ item, to }: { item: (typeof projectNav)[0]; to: string }) {
+  const Icon = item.icon;
+  return (
+    <NavLink
+      to={to}
+      className={({ isActive }) =>
+        cn(
+          'flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
+          isActive
+            ? 'bg-primary/10 text-primary font-medium'
+            : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+        )
+      }
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      <span className="flex-1 truncate">{item.label}</span>
+      {item.sprint && (
+        <Badge className="text-[9px] px-1 py-0 border-muted-foreground/30 text-muted-foreground">
+          {item.sprint}
+        </Badge>
+      )}
+    </NavLink>
+  );
+}
