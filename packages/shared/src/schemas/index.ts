@@ -1,6 +1,11 @@
 import { z } from 'zod';
 import { ORG_ROLES, WORKSPACE_STATUSES } from '../constants/index.js';
 
+function emptyToUndefined(value: unknown): unknown {
+  if (typeof value === 'string' && value.trim() === '') return undefined;
+  return value;
+}
+
 export const createOrganizationSchema = z.object({
   name: z.string().min(2).max(100),
   slug: z
@@ -12,15 +17,16 @@ export const createOrganizationSchema = z.object({
 });
 
 export const createProjectSchema = z.object({
-  name: z.string().min(2).max(100),
+  name: z.string().trim().min(2).max(100),
   domain: z
     .string()
+    .trim()
     .min(3)
     .max(253)
     .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i, 'Invalid domain'),
-  url: z.string().url().optional(),
-  industry: z.string().max(100).optional(),
-  description: z.string().max(2000).optional(),
+  url: z.preprocess(emptyToUndefined, z.string().url().optional()),
+  industry: z.preprocess(emptyToUndefined, z.string().max(100).optional()),
+  description: z.preprocess(emptyToUndefined, z.string().max(2000).optional()),
 });
 
 export const updateProjectSchema = createProjectSchema.partial().extend({

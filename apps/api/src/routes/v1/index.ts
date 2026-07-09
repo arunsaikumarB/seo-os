@@ -53,6 +53,7 @@ import { backlinkBuilderRouter } from './backlink-builder.routes.js';
 import { relationshipRouter } from './relationship.routes.js';
 import { outreachRouter } from './outreach.routes.js';
 import { getExecutiveSummary } from '../../modules/executive/executive.service.js';
+import { logger } from '../../lib/logger.js';
 
 function param(value: string | string[]): string {
   return Array.isArray(value) ? value[0] : value;
@@ -198,6 +199,24 @@ v1Router.post(
   requireRole('member'),
   async (req, res, next) => {
     try {
+      const routeOrgId = param(req.params.orgId);
+      const { userId, orgId } = (req as AuthenticatedRequest).auth;
+
+      logger.info(
+        {
+          routeOrgId,
+          orgId,
+          userId,
+          body: req.body,
+          action: 'create_project_request',
+        },
+        'Incoming create project request'
+      );
+
+      if (routeOrgId !== orgId) {
+        throw new AppError(403, 'TENANT_MISMATCH', 'Organization id mismatch');
+      }
+
       const parsed = createProjectSchema.safeParse(req.body);
       if (!parsed.success) {
         throw new AppError(
@@ -207,8 +226,8 @@ v1Router.post(
           parsed.error.flatten().fieldErrors as never
         );
       }
-      const { userId } = (req as AuthenticatedRequest).auth;
-      const project = await createProject(param(req.params.orgId), userId, parsed.data);
+
+      const project = await createProject(routeOrgId, userId, parsed.data);
       res.status(201).json({ data: project });
     } catch (err) {
       next(err);

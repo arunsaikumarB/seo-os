@@ -1,5 +1,6 @@
 import type { Organization } from '@seo-os/shared';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
+import { ensureProfile } from './member.service.js';
 
 function mapOrg(row: Record<string, unknown>): Organization {
   return {
@@ -18,6 +19,8 @@ export async function createOrganization(
   userId: string,
   input: { name: string; slug: string; industry?: string }
 ): Promise<Organization> {
+  await ensureProfile(userId);
+
   const { data: org, error: orgError } = await getSupabaseAdmin()
     .from('organizations')
     .insert({

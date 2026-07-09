@@ -30,10 +30,13 @@ export function DemoModeProvider({ children }: { children: ReactNode }) {
   const toggleDemoMode = useCallback(() => {
     if (isDemoMode) {
       setDemoMode(false);
+      // Clear demo-scoped ids so live API calls use a real org from /v1/me
+      setCurrentOrgId(null);
+      setCurrentProjectId(null);
     } else {
       enableDemoMode();
     }
-  }, [isDemoMode, setDemoMode, enableDemoMode]);
+  }, [isDemoMode, setDemoMode, enableDemoMode, setCurrentOrgId, setCurrentProjectId]);
 
   const restartTour = useCallback(() => {
     setTourCompleted(false);

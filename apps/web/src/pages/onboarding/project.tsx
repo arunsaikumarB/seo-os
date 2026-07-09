@@ -31,8 +31,14 @@ export function OnboardingProjectPage() {
       setCurrentProjectId(res.data.id);
       toast.success('Project created');
       navigate(`/projects/${res.data.id}/mission-control`);
-    } catch {
-      toast.error('Failed to create project');
+    } catch (err) {
+      const detail =
+        typeof err === 'object' && err !== null && 'detail' in err
+          ? String((err as { detail?: string }).detail ?? '')
+          : undefined;
+      toast.error('Failed to create project', {
+        description: detail || 'Check organization access and domain format.',
+      });
     }
   };
 

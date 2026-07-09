@@ -23,6 +23,28 @@ export async function getProfile(userId: string): Promise<Profile | null> {
   return mapProfile(data);
 }
 
+/** Backfill profile when auth.users exists but handle_new_user did not run */
+export async function ensureProfile(userId: string): Promise<void> {
+  const supabase = getSupabaseAdmin();
+  const { data: existing } = await supabase.from('profiles').select('id').eq('id', userId).maybeSingle();
+  if (existing) return;
+
+  const { data: authData, error: authError } = await supabase.auth.admin.getUserById(userId);
+  if (authError) throw authError;
+
+  const user = authData.user;
+  const { error } = await supabase.from('profiles').insert({
+    id: userId,
+    full_name:
+      (user?.user_metadata?.full_name as string | undefined) ??
+      user?.email ??
+      'User',
+    avatar_url: (user?.user_metadata?.avatar_url as string | undefined) ?? null,
+  });
+
+  if (error) throw error;
+}
+
 export async function updateProfile(
   userId: string,
   input: { fullName?: string; timezone?: string; avatarUrl?: string }

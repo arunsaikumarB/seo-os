@@ -11,7 +11,14 @@ export interface AuthenticatedRequest extends RequestWithTrace {
   accessToken: string;
 }
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
+
+function isUuid(value: string): boolean {
+  return UUID_RE.test(value);
+}
 
 function getJwks(supabaseUrl: string) {
   if (!jwksCache.has(supabaseUrl)) {
@@ -59,6 +66,10 @@ export async function authMiddleware(
 
     if (!orgId) {
       throw new AppError(403, 'AUTH_FORBIDDEN', 'X-Org-Id header required');
+    }
+
+    if (!isUuid(orgId)) {
+      throw new AppError(400, 'VALIDATION_ERROR', 'X-Org-Id must be a valid organization UUID');
     }
 
     const supabase = getSupabaseAdmin();

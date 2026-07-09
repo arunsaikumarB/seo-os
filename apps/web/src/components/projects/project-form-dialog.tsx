@@ -12,6 +12,14 @@ import { toast } from 'sonner';
 import type { Project } from '@seo-os/shared';
 import { useApi } from '@/hooks/use-api';
 import { useAppStore } from '@/stores/app-store';
+
+function apiErrorMessage(err: unknown, fallback: string): string {
+  if (typeof err === 'object' && err !== null && 'detail' in err) {
+    const detail = (err as { detail?: string }).detail;
+    if (detail) return detail;
+  }
+  return fallback;
+}
 import {
   Dialog,
   DialogContent,
@@ -69,7 +77,12 @@ export function ProjectFormDialog({ open, onOpenChange, mode, project }: Project
   const onSubmit = async (data: CreateProjectInput | UpdateProjectInput) => {
     try {
       if (mode === 'create') {
-        if (!currentOrgId) return;
+        if (!currentOrgId) {
+          toast.error('No organization selected', {
+            description: 'Create or select an organization first.',
+          });
+          return;
+        }
         await createProject(currentOrgId, data as CreateProjectInput);
         toast.success('Project created');
       } else if (project) {
@@ -79,8 +92,10 @@ export function ProjectFormDialog({ open, onOpenChange, mode, project }: Project
       queryClient.invalidateQueries({ queryKey: ['projects', currentOrgId] });
       onOpenChange(false);
       reset();
-    } catch {
-      toast.error(mode === 'create' ? 'Failed to create project' : 'Failed to update project');
+    } catch (err) {
+      toast.error(mode === 'create' ? 'Failed to create project' : 'Failed to update project', {
+        description: apiErrorMessage(err, 'Check organization access and domain format.'),
+      });
     }
   };
 

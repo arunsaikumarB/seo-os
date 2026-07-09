@@ -14,8 +14,14 @@ export function OrgBootstrap({ children }: { children: React.ReactNode }) {
   });
 
   useEffect(() => {
-    if (!currentOrgId && data?.data.organizations?.length) {
-      setCurrentOrgId(data.data.organizations[0].org_id);
+    const memberships = data?.data.organizations ?? [];
+    if (!memberships.length) return;
+
+    const validOrgIds = new Set(memberships.map((m) => m.org_id));
+    const hasValidOrg = currentOrgId && validOrgIds.has(currentOrgId);
+
+    if (!hasValidOrg) {
+      setCurrentOrgId(memberships[0].org_id);
     }
   }, [currentOrgId, data, setCurrentOrgId]);
 

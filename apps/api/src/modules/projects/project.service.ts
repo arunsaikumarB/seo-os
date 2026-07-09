@@ -1,5 +1,7 @@
 import type { Project, UpdateProjectInput } from '@seo-os/shared';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
+import { logger } from '../../lib/logger.js';
+import { ensureProfile } from '../organizations/member.service.js';
 
 function mapWorkspace(row: Record<string, unknown>): Project {
   return {
@@ -46,26 +48,50 @@ export async function createProject(
   userId: string,
   input: { name: string; domain: string; url?: string; industry?: string; description?: string }
 ): Promise<Project> {
+  await ensureProfile(userId);
+
+  const insertPayload = {
+    org_id: orgId,
+    name: input.name.trim(),
+    domain: input.domain.trim().toLowerCase(),
+    url: input.url ?? null,
+    industry: input.industry ?? null,
+    description: input.description ?? null,
+    created_by: userId,
+  };
+
+  logger.info(
+    { orgId, userId, insertPayload, action: 'create_project' },
+    'Creating workspace (project)'
+  );
+
   const { data, error } = await getSupabaseAdmin()
     .from('workspaces')
-    .insert({
-      org_id: orgId,
-      name: input.name,
-      domain: input.domain.toLowerCase(),
-      url: input.url ?? null,
-      industry: input.industry ?? null,
-      description: input.description ?? null,
-      created_by: userId,
-    })
+    .insert(insertPayload)
     .select()
     .single();
 
-  if (error) throw error;
+  if (error) {
+    logger.error(
+      { orgId, userId, insertPayload, supabaseError: error },
+      'Workspace insert failed'
+    );
+    throw error;
+  }
 
-  await getSupabaseAdmin().from('workspace_settings').insert({
+  const { error: settingsError } = await getSupabaseAdmin().from('workspace_settings').insert({
     workspace_id: data.id,
   });
 
+  if (settingsError) {
+    logger.error(
+      { workspaceId: data.id, orgId, userId, supabaseError: settingsError },
+      'Workspace settings insert failed'
+    );
+    throw settingsError;
+  }
+
+  logger.info({ orgId, userId, projectId: data.id }, 'Workspace created');
   return mapWorkspace(data);
 }
 
