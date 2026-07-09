@@ -2,6 +2,9 @@
 builder = "DOCKERFILE"
 dockerfilePath = "apps/api/Dockerfile"
 
+[build.environment]
+NODE_VERSION = "22"
+
 [deploy]
 startCommand = "node apps/api/dist/index.js"
 healthcheckPath = "/health"
