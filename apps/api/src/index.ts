@@ -15,8 +15,8 @@ async function main() {
     logger.info('Background job workers disabled (ENABLE_WORKERS=false)');
   }
 
-  app.listen(env.PORT, () => {
-    logger.info({ port: env.PORT, env: env.NODE_ENV }, 'SEO OS API started');
+  app.listen(env.PORT, '0.0.0.0', () => {
+    logger.info({ port: env.PORT, host: '0.0.0.0', env: env.NODE_ENV }, 'SEO OS API started');
   });
 }
 
