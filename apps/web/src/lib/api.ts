@@ -1,11 +1,16 @@
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001';
+function resolveApiUrl(): string {
+  const configured = import.meta.env.VITE_API_URL;
+  if (configured) return configured.replace(/\/$/, '');
+  if (import.meta.env.DEV) return 'http://localhost:3001';
+  return '';
+}
 
 export async function apiFetch<T>(
   path: string,
   options: RequestInit & { orgId?: string; token?: string } = {}
 ): Promise<T> {
   const { orgId, token, headers, ...rest } = options;
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await fetch(`${resolveApiUrl()}${path}`, {
     ...rest,
     headers: {
       'Content-Type': 'application/json',
@@ -19,4 +24,6 @@ export async function apiFetch<T>(
   return body as T;
 }
 
-export { API_URL };
+export function getApiUrl(): string {
+  return resolveApiUrl();
+}
