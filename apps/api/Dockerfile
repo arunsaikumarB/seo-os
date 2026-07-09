@@ -12,7 +12,7 @@ RUN npm ci --workspace=@seo-os/api --include-workspace-root
 FROM base AS build
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npm run build --workspace=@seo-os/api
+RUN npx turbo run build --filter=@seo-os/api
 
 FROM node:20-alpine AS runner
 WORKDIR /app
