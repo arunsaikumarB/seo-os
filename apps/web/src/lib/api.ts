@@ -1,6 +1,14 @@
 function resolveApiUrl(): string {
   const configured = import.meta.env.VITE_API_URL;
-  if (configured) return configured.replace(/\/$/, '');
+  if (configured) {
+    const normalized = configured.replace(/\/$/, '');
+    if (normalized.includes('supabase.co') || normalized.includes('supabase.in')) {
+      throw new Error(
+        'VITE_API_URL is misconfigured (points at Supabase). Set it to your Railway API URL in Netlify and redeploy.'
+      );
+    }
+    return normalized;
+  }
   if (import.meta.env.DEV) return 'http://localhost:3001';
   throw new Error(
     'VITE_API_URL is not configured for this deployment. Set it in Netlify environment variables and redeploy.'
