@@ -47,7 +47,7 @@ export function ProjectSwitcher({ projectId }: ProjectSwitcherProps) {
         {projects.map((p) => (
           <DropdownMenuItem
             key={p.id}
-            onClick={() => navigate(`/projects/${p.id}/mission-control`)}
+            onClick={() => navigate(`/projects/${p.id}/home`)}
             className="flex items-center justify-between"
           >
             <span className="truncate">{p.name}</span>

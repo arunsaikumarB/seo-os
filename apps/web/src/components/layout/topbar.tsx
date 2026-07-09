@@ -9,6 +9,7 @@ import { OrgSwitcher } from './org-switcher';
 import { ProjectSwitcher } from './project-switcher';
 import { UserMenu } from './user-menu';
 import { NotificationsMenu } from './notifications-menu';
+import { ModeToggles } from '@/components/workflow/mode-toggles';
 
 interface TopbarProps {
   projectId?: string;
@@ -47,6 +48,7 @@ export function Topbar({ projectId, showProjectSwitcher = false }: TopbarProps) 
         </Badge>
       </div>
       <div className="flex items-center gap-1">
+        <ModeToggles />
         <NotificationsMenu />
         <Button
           variant="ghost"

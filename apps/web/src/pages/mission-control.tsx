@@ -12,6 +12,7 @@ import { KnowledgeEngineViz } from '@/components/demo/knowledge-viz';
 import { LiveTimeline } from '@/components/demo/live-timeline';
 import { AnimatedCounter } from '@/components/demo/animated-counter';
 import { PageTransition, StaggerGrid, StaggerItem } from '@/components/demo/page-transition';
+import { WorkflowCelebration } from '@/components/workflow/workflow-celebration';
 import { BacklinkBuilderWidget } from '@/components/backlink-builder/backlink-builder-widget';
 import { AutomationWidget } from '@/components/backlink-builder/automation-widget';
 import { BrowserIntelligenceWidget } from '@/components/intelligence/browser-intelligence-widget';
@@ -114,6 +115,7 @@ export function MissionControlPage() {
 
   return (
     <PageTransition className="space-y-6">
+      <WorkflowCelebration projectId={projectId} />
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">

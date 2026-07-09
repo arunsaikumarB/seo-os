@@ -5,6 +5,7 @@ import { createProjectSchema, type CreateProjectInput } from '@seo-os/shared';
 import { toast } from 'sonner';
 import { useApi } from '@/hooks/use-api';
 import { useAppStore } from '@/stores/app-store';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -30,7 +31,7 @@ export function OnboardingProjectPage() {
       const res = await createProject(currentOrgId, data);
       setCurrentProjectId(res.data.id);
       toast.success('Project created');
-      navigate(`/projects/${res.data.id}/mission-control`);
+      navigate(`/projects/${res.data.id}/home`);
     } catch (err) {
       const detail =
         typeof err === 'object' && err !== null && 'detail' in err
@@ -46,9 +47,10 @@ export function OnboardingProjectPage() {
     <div className="flex min-h-screen items-center justify-center p-4">
       <Card className="w-full max-w-lg">
         <CardHeader>
+          <Badge className="w-fit mb-2 border-border bg-muted/50 text-xs">Step 2 of 17</Badge>
           <CardTitle>Create your first project</CardTitle>
           <CardDescription>
-            A project represents one website you manage with SEO OS.
+            One project per website. This becomes the central workspace for all SEO activities.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -64,7 +66,7 @@ export function OnboardingProjectPage() {
               {errors.domain && <p className="text-xs text-destructive">{errors.domain.message}</p>}
             </div>
             <Button type="submit" disabled={isSubmitting}>
-              Open Mission Control
+              Create Project &amp; Start
             </Button>
           </form>
         </CardContent>

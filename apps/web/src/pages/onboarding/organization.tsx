@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { useApi } from '@/hooks/use-api';
 import { useAppStore } from '@/stores/app-store';
 import { getApiErrorMessage } from '@/lib/api';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -85,9 +86,11 @@ export function OnboardingOrganizationPage() {
     <div className="flex min-h-screen items-center justify-center p-4">
       <Card className="w-full max-w-lg">
         <CardHeader>
+          <Badge className="w-fit mb-2 border-border bg-muted/50 text-xs">Step 1 of 17</Badge>
           <CardTitle>Create your organization</CardTitle>
           <CardDescription>
-            Agencies and teams start here. You can add unlimited projects next.
+            Organizations separate users, projects, campaigns, reports, and AI memory. Agencies and
+            teams start here.
           </CardDescription>
         </CardHeader>
         <CardContent>

@@ -14,6 +14,7 @@ import { LoginPage } from '@/pages/login';
 import { SignupPage } from '@/pages/signup';
 import { ProjectsPage } from '@/pages/projects';
 import { MissionControlPage } from '@/pages/mission-control';
+import { ProjectHomePage } from '@/pages/project-home';
 import { CommandCenterPage } from '@/pages/command-center';
 import { KnowledgeLibraryPage } from '@/pages/knowledge/library';
 import { WebsiteAnalyzerPage } from '@/pages/intelligence/website-analyzer';
@@ -46,6 +47,7 @@ import { BacklinkTrackingPage } from '@/pages/backlink-builder/tracking';
 import { ApprovalCenterPage } from '@/pages/campaigns/approval-center';
 import { MemoryTimelinePage } from '@/pages/memory/timeline';
 import { SearchPage } from '@/pages/search';
+import { OnboardingWelcomePage } from '@/pages/onboarding/welcome';
 import { OnboardingOrganizationPage } from '@/pages/onboarding/organization';
 import { OnboardingProjectPage } from '@/pages/onboarding/project';
 import { OrgTeamPage } from '@/pages/org/team';
@@ -62,6 +64,7 @@ function ProjectLayout() {
 }
 
 const IMPLEMENTED_ROUTES = new Set([
+  'home',
   'mission-control',
   'backlink-builder',
   'backlink-builder/explorer',
@@ -148,6 +151,14 @@ export function AppRouter() {
                   <Route path="/signup" element={<SignupPage />} />
 
                   <Route
+                    path="/onboarding"
+                    element={
+                      <ProtectedRoute>
+                        <OnboardingWelcomePage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
                     path="/onboarding/organization"
                     element={
                       <ProtectedRoute>
@@ -198,7 +209,8 @@ export function AppRouter() {
                       </ProtectedRoute>
                     }
                   >
-                    <Route index element={<Navigate to="mission-control" replace />} />
+                    <Route index element={<Navigate to="home" replace />} />
+                    <Route path="home" element={<ProjectHomePage />} />
                     <Route path="mission-control" element={<MissionControlPage />} />
                     <Route path="backlink-builder" element={<BacklinkBuilderDashboardPage />} />
                     <Route path="backlink-builder/explorer" element={<BacklinkExplorerPage />} />

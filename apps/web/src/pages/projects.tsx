@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, MoreHorizontal, Pencil, Archive } from 'lucide-react';
+import { Plus, MoreHorizontal, Pencil, Archive, Building2, FolderKanban } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Project } from '@seo-os/shared';
 import { useApi } from '@/hooks/use-api';
@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ProjectFormDialog } from '@/components/projects/project-form-dialog';
+import { GuidedEmptyState } from '@/components/workflow/guided-empty-state';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -44,17 +45,16 @@ function ProjectsContent() {
 
   if (isReady && !hasOrganizations) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>No organization</CardTitle>
-          <CardDescription>Create an organization to manage projects.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Button asChild>
-            <Link to="/onboarding/organization">Create organization</Link>
-          </Button>
-        </CardContent>
-      </Card>
+      <GuidedEmptyState
+        icon={Building2}
+        title="Create your first organization"
+        description="Organizations separate users, projects, campaigns, reports, and AI memory. This is Step 1 of your SEO journey."
+        actionLabel="Create Organization"
+        actionHref="/onboarding/organization"
+        stepLabel="Step 1 of 17"
+        estimatedMinutes={2}
+        difficulty="Beginner"
+      />
     );
   }
 
@@ -78,15 +78,16 @@ function ProjectsContent() {
           ))}
         </div>
       ) : projects.length === 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>No projects yet</CardTitle>
-            <CardDescription>Create your first project to open Mission Control.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button onClick={() => setCreateOpen(true)}>Create project</Button>
-          </CardContent>
-        </Card>
+        <GuidedEmptyState
+          icon={FolderKanban}
+          title="Create your first SEO project"
+          description="Projects organize your website, campaigns, backlinks, and AI knowledge. One project per website."
+          actionLabel="Create Project"
+          onAction={() => setCreateOpen(true)}
+          stepLabel="Step 2 of 17"
+          estimatedMinutes={3}
+          difficulty="Beginner"
+        />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {projects.map((project) => (
@@ -116,7 +117,7 @@ function ProjectsContent() {
               </CardHeader>
               <CardContent>
                 <Button asChild>
-                  <Link to={`/projects/${project.id}/mission-control`}>Open Mission Control</Link>
+                  <Link to={`/projects/${project.id}/home`}>Open Project</Link>
                 </Button>
               </CardContent>
             </Card>

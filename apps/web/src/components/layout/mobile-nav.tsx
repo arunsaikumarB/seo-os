@@ -1,14 +1,22 @@
 import { NavLink } from 'react-router-dom';
-import { mobileNavItems } from '@/config/navigation';
+import { LayoutDashboard, Globe, Link2, Mail, Target } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface MobileNavProps {
   projectId?: string;
 }
 
+const workflowMobileItems = (projectId: string) => [
+  { label: 'Home', href: `/projects/${projectId}/home`, icon: LayoutDashboard },
+  { label: 'Analyze', href: `/projects/${projectId}/intelligence/browser`, icon: Globe },
+  { label: 'Backlinks', href: `/projects/${projectId}/backlink-builder`, icon: Link2 },
+  { label: 'Outreach', href: `/projects/${projectId}/outreach/inbox`, icon: Mail },
+  { label: 'Mission', href: `/projects/${projectId}/mission-control`, icon: Target },
+];
+
 export function MobileNav({ projectId }: MobileNavProps) {
   if (!projectId) return null;
-  const items = mobileNavItems(projectId);
+  const items = workflowMobileItems(projectId);
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 flex border-t bg-background/95 backdrop-blur md:hidden">
