@@ -21,8 +21,7 @@ export function BacklinkAuditPage() {
 
   const audit = useQuery({
     queryKey: ['backlink-audit', projectId],
-    queryFn: () =>
-      request<{ data: AuditData }>(`/v1/projects/${projectId}/backlink-builder/audit`),
+    queryFn: () => request<{ data: AuditData }>(`/v1/projects/${projectId}/backlink-builder/audit`),
     enabled: !!projectId,
   });
 
@@ -65,10 +64,15 @@ export function BacklinkAuditPage() {
           </CardHeader>
           <CardContent className="space-y-2 max-h-[400px] overflow-y-auto">
             {(data?.backlinks ?? []).map((bl) => (
-              <div key={bl.id} className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
+              <div
+                key={bl.id}
+                className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"
+              >
                 <div className="min-w-0">
                   <p className="font-medium truncate">{bl.domain}</p>
-                  <p className="text-[10px] text-muted-foreground capitalize">{formatType(bl.backlink_type)}</p>
+                  <p className="text-[10px] text-muted-foreground capitalize">
+                    {formatType(bl.backlink_type)}
+                  </p>
                 </div>
                 <Badge className={verificationBadgeClass(bl.verification_status)}>
                   {bl.verification_status}

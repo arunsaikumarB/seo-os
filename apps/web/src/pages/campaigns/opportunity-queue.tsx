@@ -77,9 +77,16 @@ export function OpportunityQueuePage() {
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
             <ListChecks className="h-6 w-6" /> Opportunity Queue
           </h1>
-          <p className="text-muted-foreground">Review, prioritize, and approve discovered opportunities</p>
+          <p className="text-muted-foreground">
+            Review, prioritize, and approve discovered opportunities
+          </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => enrich.mutate()} disabled={enrich.isPending}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => enrich.mutate()}
+          disabled={enrich.isPending}
+        >
           <Sparkles className="h-3 w-3 mr-1" /> AI Recommendations
         </Button>
       </div>
@@ -109,17 +116,27 @@ export function OpportunityQueuePage() {
                 <div className="flex items-center gap-2 flex-wrap">
                   <p className="font-medium">{opp.title}</p>
                   <Badge className="text-[10px]">Score {opp.score}</Badge>
-                  <Badge className="text-[10px] capitalize">{opp.opportunity_type.replace(/_/g, ' ')}</Badge>
+                  <Badge className="text-[10px] capitalize">
+                    {opp.opportunity_type.replace(/_/g, ' ')}
+                  </Badge>
                 </div>
                 {opp.ai_recommendation && (
                   <p className="text-xs text-muted-foreground mt-1">{opp.ai_recommendation}</p>
                 )}
               </div>
               <div className="flex gap-1 shrink-0">
-                <Button size="sm" variant="outline" onClick={() => review.mutate({ id: opp.id, action: 'approve' })}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => review.mutate({ id: opp.id, action: 'approve' })}
+                >
                   Approve
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => review.mutate({ id: opp.id, action: 'reject' })}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => review.mutate({ id: opp.id, action: 'reject' })}
+                >
                   Reject
                 </Button>
               </div>
@@ -127,7 +144,9 @@ export function OpportunityQueuePage() {
           </Card>
         ))}
         {items.length === 0 && (
-          <p className="text-sm text-muted-foreground">No opportunities pending review. Run discovery first.</p>
+          <p className="text-sm text-muted-foreground">
+            No opportunities pending review. Run discovery first.
+          </p>
         )}
       </div>
     </div>

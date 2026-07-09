@@ -16,6 +16,7 @@
     { "path": "../../packages/knowledge-engine" },
     { "path": "../../packages/seo-intelligence" },
     { "path": "../../packages/campaign-engine" },
-    { "path": "../../packages/backlink-builder" }
+    { "path": "../../packages/backlink-builder" },
+    { "path": "../../packages/outreach-engine" }
   ]
 }

@@ -2,10 +2,13 @@ import { recommendOpportunities } from '@seo-os/campaign-engine';
 import type { CampaignType } from '@seo-os/campaign-engine';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 
-export async function listOpportunityQueue(workspaceId: string, filters?: {
-  queueStatus?: string;
-  campaignType?: string;
-}) {
+export async function listOpportunityQueue(
+  workspaceId: string,
+  filters?: {
+    queueStatus?: string;
+    campaignType?: string;
+  }
+) {
   let query = getSupabaseAdmin()
     .from('opportunities')
     .select('*')
@@ -33,11 +36,7 @@ export async function getOpportunityRecommendations(
     score: Number(o.score),
     opportunity_type: o.opportunity_type as string,
   }));
-  return recommendOpportunities(
-    typed,
-    campaignType ?? 'guest_post',
-    10
-  );
+  return recommendOpportunities(typed, campaignType ?? 'guest_post', 10);
 }
 
 export async function reviewOpportunity(

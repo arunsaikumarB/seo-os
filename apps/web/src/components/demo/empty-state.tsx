@@ -37,11 +37,14 @@ export function EmptyState({
       <h2 className="text-lg font-semibold mb-2">{title}</h2>
       <p className="text-sm text-muted-foreground mb-6">{description}</p>
       <div className="flex flex-col gap-2 items-center">
-        {actionLabel && onAction && (
-          <Button onClick={onAction}>{actionLabel}</Button>
-        )}
+        {actionLabel && onAction && <Button onClick={onAction}>{actionLabel}</Button>}
         {aiCommand && onAiCommand && (
-          <Button variant="outline" size="sm" className="text-xs" onClick={() => onAiCommand(aiCommand)}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-xs"
+            onClick={() => onAiCommand(aiCommand)}
+          >
             <Sparkles className="h-3 w-3 mr-1" />
             Try: &quot;{aiCommand}&quot;
           </Button>

@@ -31,6 +31,7 @@ export const APPROVAL_TYPES = [
   'email_draft',
   'content_draft',
   'campaign_launch',
+  'outreach_send',
 ] as const;
 
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];

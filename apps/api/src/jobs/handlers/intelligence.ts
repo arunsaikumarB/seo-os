@@ -5,8 +5,12 @@ export async function handleIntelligenceScanJobs(
   jobs: Array<{ id: string; data: Record<string, unknown> }>
 ): Promise<void> {
   for (const job of jobs) {
-    const { scanId, workspaceId } = job.data as { scanId: string; workspaceId: string };
-    logger.info({ jobId: job.id, scanId }, 'Processing website scan job');
-    await executeWebsiteScan(scanId, workspaceId);
+    const { scanId, workspaceId, orgId } = job.data as {
+      scanId: string;
+      workspaceId: string;
+      orgId?: string;
+    };
+    logger.info({ jobId: job.id, scanId }, 'Processing browser intelligence scan job');
+    await executeWebsiteScan(scanId, workspaceId, orgId);
   }
 }

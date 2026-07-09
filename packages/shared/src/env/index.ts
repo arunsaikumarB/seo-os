@@ -23,7 +23,12 @@ export const apiEnvSchema = z.object({
 export type ApiEnv = z.infer<typeof apiEnvSchema>;
 
 export function parseApiEnv(env: NodeJS.ProcessEnv): ApiEnv {
-  return apiEnvSchema.parse(env);
+  const parsed = apiEnvSchema.parse(env);
+  const enableWorkers =
+    env.ENABLE_WORKERS !== undefined
+      ? env.ENABLE_WORKERS === 'true'
+      : parsed.NODE_ENV === 'production';
+  return { ...parsed, ENABLE_WORKERS: enableWorkers };
 }
 
 export const webEnvSchema = z.object({

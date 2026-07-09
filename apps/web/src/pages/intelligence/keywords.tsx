@@ -38,7 +38,9 @@ export function KeywordsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Keyword Intelligence</h1>
-          <p className="text-muted-foreground">Clustering, intent classification, and priority scoring</p>
+          <p className="text-muted-foreground">
+            Clustering, intent classification, and priority scoring
+          </p>
         </div>
         <Button onClick={() => discover.mutate()} disabled={discover.isPending}>
           <Sparkles className="h-4 w-4 mr-1" /> Discover keywords
@@ -66,7 +68,10 @@ export function KeywordsPage() {
         </CardHeader>
         <CardContent className="space-y-2">
           {(data.data?.data.keywords ?? []).map((k) => (
-            <div key={String(k.id)} className="flex justify-between rounded-md border px-3 py-2 text-sm">
+            <div
+              key={String(k.id)}
+              className="flex justify-between rounded-md border px-3 py-2 text-sm"
+            >
               <span>{String(k.keyword)}</span>
               <div className="flex gap-2">
                 <Badge className="text-[10px]">{String(k.search_intent ?? '—')}</Badge>

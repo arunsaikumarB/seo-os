@@ -39,9 +39,9 @@ Project: ${project.name} (${project.domain})
 Goals: ${input.goals.join(', ')}
 Context: ${plannerInput.brandSummary}
 List phases and actions as bullet points.`;
-      const result = await rt.providers.getAIProviderRouter().completeWithFailover([
-        { role: 'user', content: prompt },
-      ]);
+      const result = await rt.providers
+        .getAIProviderRouter()
+        .completeWithFailover([{ role: 'user', content: prompt }]);
       return parseAiPlanResponse(result.text, input.campaignType);
     } catch {
       /* fallback */

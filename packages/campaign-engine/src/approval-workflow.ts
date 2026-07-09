@@ -15,6 +15,7 @@ export function approvalTitle(type: ApprovalType, subject: string): string {
     email_draft: 'Email draft review',
     content_draft: 'Content draft review',
     campaign_launch: 'Campaign launch approval',
+    outreach_send: 'Outreach send approval',
   };
   return `${labels[type]}: ${subject}`;
 }

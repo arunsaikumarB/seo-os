@@ -8,7 +8,10 @@ import { useApi } from '@/hooks/use-api';
 import { useDemoMode } from '@/hooks/use-demo-mode';
 import { AnimatedCounter } from '@/components/demo/animated-counter';
 import { StaggerGrid, StaggerItem } from '@/components/demo/page-transition';
-import { BacklinkBuilderHero, BacklinkBuilderWidget } from '@/components/backlink-builder/backlink-builder-widget';
+import {
+  BacklinkBuilderHero,
+  BacklinkBuilderWidget,
+} from '@/components/backlink-builder/backlink-builder-widget';
 import type { BacklinkOpportunity, BacklinkSummary } from '@/components/backlink-builder/types';
 import { scoreBadgeClass, formatType } from '@/components/backlink-builder/types';
 import { Sparkles, ArrowRight, Target, ShieldCheck, Link2 } from 'lucide-react';
@@ -79,7 +82,7 @@ export function BacklinkBuilderDashboardPage() {
               <p className="text-3xl font-semibold">
                 <AnimatedCounter value={data?.totalOpportunities ?? 0} />
               </p>
-              <p className="text-xs text-muted-foreground mt-1">Across 26 backlink types</p>
+              <p className="text-xs text-muted-foreground mt-1">Across 34 backlink types</p>
               <Button variant="ghost" size="sm" className="mt-2 px-0" asChild>
                 <Link to={`/projects/${projectId}/backlink-builder/explorer`}>
                   Explore <ArrowRight className="h-3 w-3 ml-1" />
@@ -100,7 +103,9 @@ export function BacklinkBuilderDashboardPage() {
               <p className="text-3xl font-semibold">
                 <AnimatedCounter value={data?.activeCampaigns ?? 0} />
               </p>
-              <p className="text-xs text-muted-foreground mt-1">Opportunities attached to campaigns</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Opportunities attached to campaigns
+              </p>
               <Button variant="ghost" size="sm" className="mt-2 px-0" asChild>
                 <Link to={`/projects/${projectId}/campaigns`}>
                   View campaigns <ArrowRight className="h-3 w-3 ml-1" />

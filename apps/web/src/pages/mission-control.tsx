@@ -13,8 +13,31 @@ import { LiveTimeline } from '@/components/demo/live-timeline';
 import { AnimatedCounter } from '@/components/demo/animated-counter';
 import { PageTransition, StaggerGrid, StaggerItem } from '@/components/demo/page-transition';
 import { BacklinkBuilderWidget } from '@/components/backlink-builder/backlink-builder-widget';
-import type { BacklinkSummary } from '@/components/backlink-builder/types';
-import { Bot, Activity, HeartPulse, Layers, Server, BookOpen, MessageSquare, Globe, Radar, Target, Link2, ShieldCheck, Users, CheckSquare, Zap } from 'lucide-react';
+import { AutomationWidget } from '@/components/backlink-builder/automation-widget';
+import { BrowserIntelligenceWidget } from '@/components/intelligence/browser-intelligence-widget';
+import { RelationshipIntelligenceWidget } from '@/components/relationships/relationship-intelligence-widget';
+import { OutreachWidget } from '@/components/outreach/outreach-widget';
+import type { BrowserIntelligenceSummary } from '@/components/intelligence/browser-intelligence-widget';
+import type { RelationshipIntelligenceSummary } from '@/components/relationships/relationship-intelligence-widget';
+import type { OutreachSummary } from '@/components/outreach/outreach-widget';
+import type { BacklinkSummary, AutomationSummary } from '@/components/backlink-builder/types';
+import {
+  Bot,
+  Activity,
+  HeartPulse,
+  Layers,
+  Server,
+  BookOpen,
+  MessageSquare,
+  Globe,
+  Radar,
+  Target,
+  Link2,
+  ShieldCheck,
+  Users,
+  CheckSquare,
+  Zap,
+} from 'lucide-react';
 
 function StatusBadge({ status }: { status: string }) {
   const className =
@@ -43,7 +66,11 @@ export function MissionControlPage() {
           workforce: { registered: number; activeRuns: number; completedRuns: number };
           intelligence?: {
             websiteScanner: { status: string; phase: string; pagesAnalyzed: number };
-            discovery: { keywordCount: number; prospectTotal: number; opportunityCounts: Record<string, number> };
+            discovery: {
+              keywordCount: number;
+              prospectTotal: number;
+              opportunityCounts: Record<string, number>;
+            };
             timeline: Array<{ title: string; event_type: string; created_at: string }>;
           };
           campaigns?: {
@@ -53,9 +80,18 @@ export function MissionControlPage() {
             avgProgress: number;
             pendingApprovals: number;
             recent: Array<{ id: string; name: string; status: string; progress: number }>;
-            timeline: Array<{ title: string; event_type: string; created_at: string; campaign_id: string }>;
+            timeline: Array<{
+              title: string;
+              event_type: string;
+              created_at: string;
+              campaign_id: string;
+            }>;
           };
           backlinkBuilder?: BacklinkSummary;
+          automation?: AutomationSummary;
+          browserIntelligence?: BrowserIntelligenceSummary;
+          relationshipIntelligence?: RelationshipIntelligenceSummary;
+          outreach?: OutreachSummary;
         };
       }>(`/v1/projects/${projectId}/mission-control/summary`),
     enabled: !!projectId,
@@ -82,9 +118,13 @@ export function MissionControlPage() {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-semibold tracking-tight">Mission Control</h1>
-            {isDemoMode && <Badge className="text-[10px] border-primary/30 text-primary">Live Demo</Badge>}
+            {isDemoMode && (
+              <Badge className="text-[10px] border-primary/30 text-primary">Live Demo</Badge>
+            )}
           </div>
-          <p className="text-muted-foreground">AI Operations Center — workforce, intelligence, campaigns</p>
+          <p className="text-muted-foreground">
+            AI Operations Center — workforce, intelligence, campaigns
+          </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" asChild>
@@ -112,52 +152,58 @@ export function MissionControlPage() {
 
       {summary.isLoading ? (
         <Skeleton className="h-16 w-full" />
-      ) : summaryData && (
-        <StaggerGrid className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <StaggerItem>
-          <Card className="transition-all hover:shadow-md hover:-translate-y-0.5">
-            <CardContent className="pt-4">
-              <p className="text-xs text-muted-foreground">KB documents</p>
-              <p className="text-2xl font-semibold">
-                <AnimatedCounter value={summaryData.knowledge.readyDocuments} />
-              </p>
-              <p className="text-xs text-muted-foreground">{summaryData.knowledge.totalChunks} chunks</p>
-            </CardContent>
-          </Card>
-          </StaggerItem>
-          <StaggerItem>
-          <Card className="transition-all hover:shadow-md hover:-translate-y-0.5">
-            <CardContent className="pt-4">
-              <p className="text-xs text-muted-foreground">Memory entries</p>
-              <p className="text-2xl font-semibold">
-                <AnimatedCounter value={summaryData.memory.entries} />
-              </p>
-              <p className="text-xs text-muted-foreground">{summaryData.memory.facts} facts</p>
-            </CardContent>
-          </Card>
-          </StaggerItem>
-          <StaggerItem>
-          <Card className="transition-all hover:shadow-md hover:-translate-y-0.5">
-            <CardContent className="pt-4">
-              <p className="text-xs text-muted-foreground">Conversations</p>
-              <p className="text-2xl font-semibold">
-                <AnimatedCounter value={summaryData.conversations} />
-              </p>
-            </CardContent>
-          </Card>
-          </StaggerItem>
-          <StaggerItem>
-          <Card className="transition-all hover:shadow-md hover:-translate-y-0.5">
-            <CardContent className="pt-4">
-              <p className="text-xs text-muted-foreground">Agent runs</p>
-              <p className="text-2xl font-semibold">
-                <AnimatedCounter value={summaryData.workforce.completedRuns} />
-              </p>
-              <p className="text-xs text-muted-foreground">{summaryData.workforce.activeRuns} active</p>
-            </CardContent>
-          </Card>
-          </StaggerItem>
-        </StaggerGrid>
+      ) : (
+        summaryData && (
+          <StaggerGrid className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <StaggerItem>
+              <Card className="transition-all hover:shadow-md hover:-translate-y-0.5">
+                <CardContent className="pt-4">
+                  <p className="text-xs text-muted-foreground">KB documents</p>
+                  <p className="text-2xl font-semibold">
+                    <AnimatedCounter value={summaryData.knowledge.readyDocuments} />
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {summaryData.knowledge.totalChunks} chunks
+                  </p>
+                </CardContent>
+              </Card>
+            </StaggerItem>
+            <StaggerItem>
+              <Card className="transition-all hover:shadow-md hover:-translate-y-0.5">
+                <CardContent className="pt-4">
+                  <p className="text-xs text-muted-foreground">Memory entries</p>
+                  <p className="text-2xl font-semibold">
+                    <AnimatedCounter value={summaryData.memory.entries} />
+                  </p>
+                  <p className="text-xs text-muted-foreground">{summaryData.memory.facts} facts</p>
+                </CardContent>
+              </Card>
+            </StaggerItem>
+            <StaggerItem>
+              <Card className="transition-all hover:shadow-md hover:-translate-y-0.5">
+                <CardContent className="pt-4">
+                  <p className="text-xs text-muted-foreground">Conversations</p>
+                  <p className="text-2xl font-semibold">
+                    <AnimatedCounter value={summaryData.conversations} />
+                  </p>
+                </CardContent>
+              </Card>
+            </StaggerItem>
+            <StaggerItem>
+              <Card className="transition-all hover:shadow-md hover:-translate-y-0.5">
+                <CardContent className="pt-4">
+                  <p className="text-xs text-muted-foreground">Agent runs</p>
+                  <p className="text-2xl font-semibold">
+                    <AnimatedCounter value={summaryData.workforce.completedRuns} />
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {summaryData.workforce.activeRuns} active
+                  </p>
+                </CardContent>
+              </Card>
+            </StaggerItem>
+          </StaggerGrid>
+        )
       )}
 
       <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
@@ -170,9 +216,22 @@ export function MissionControlPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="text-sm space-y-2">
-            <div className="flex justify-between"><span className="text-muted-foreground">Active relationships</span><span className="font-medium">89</span></div>
-            <div className="flex justify-between"><span className="text-muted-foreground">Warm leads</span><span className="font-medium text-primary">23</span></div>
-            <div className="flex justify-between"><span className="text-muted-foreground">Needs follow-up</span><span>7</span></div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Organizations</span>
+              <span className="font-medium">
+                {summaryData?.relationshipIntelligence?.organizations ?? 0}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Warm relationships</span>
+              <span className="font-medium text-primary">
+                {summaryData?.relationshipIntelligence?.warmRelationships ?? 0}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Pending follow-ups</span>
+              <span>{summaryData?.relationshipIntelligence?.pendingFollowUps ?? 0}</span>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -185,8 +244,16 @@ export function MissionControlPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
-            {['Approve guest post draft', 'Review 3 opportunities', 'Launch Digital PR campaign', 'QA content output'].map((t) => (
-              <div key={t} className="flex items-center gap-2 rounded-md border px-3 py-2 hover:bg-muted/50 transition-colors">
+            {[
+              'Approve guest post draft',
+              'Review 3 opportunities',
+              'Launch Digital PR campaign',
+              'QA content output',
+            ].map((t) => (
+              <div
+                key={t}
+                className="flex items-center gap-2 rounded-md border px-3 py-2 hover:bg-muted/50 transition-colors"
+              >
                 <span className="h-1.5 w-1.5 rounded-full bg-primary" />
                 {t}
               </div>
@@ -200,10 +267,22 @@ export function MissionControlPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="text-sm space-y-2">
-            <div className="flex justify-between"><span className="text-muted-foreground">API</span><StatusBadge status="healthy" /></div>
-            <div className="flex justify-between"><span className="text-muted-foreground">Database</span><StatusBadge status="healthy" /></div>
-            <div className="flex justify-between"><span className="text-muted-foreground">AI Providers</span><StatusBadge status="healthy" /></div>
-            <div className="flex justify-between"><span className="text-muted-foreground">Workers</span><StatusBadge status={queueData?.enabled ? 'healthy' : 'degraded'} /></div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">API</span>
+              <StatusBadge status="healthy" />
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Database</span>
+              <StatusBadge status="healthy" />
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">AI Providers</span>
+              <StatusBadge status="healthy" />
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Workers</span>
+              <StatusBadge status={queueData?.enabled ? 'healthy' : 'degraded'} />
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -211,10 +290,29 @@ export function MissionControlPage() {
       <LiveTimeline title="Recent AI Decisions" limit={6} />
 
       {summaryData?.backlinkBuilder && (
-        <BacklinkBuilderWidget
-          summary={summaryData.backlinkBuilder}
+        <BacklinkBuilderWidget summary={summaryData.backlinkBuilder} projectId={projectId} />
+      )}
+
+      {summaryData?.automation && (
+        <AutomationWidget summary={summaryData.automation} projectId={projectId} />
+      )}
+
+      {summaryData?.browserIntelligence && (
+        <BrowserIntelligenceWidget
+          summary={summaryData.browserIntelligence}
           projectId={projectId}
         />
+      )}
+
+      {summaryData?.relationshipIntelligence && (
+        <RelationshipIntelligenceWidget
+          summary={summaryData.relationshipIntelligence}
+          projectId={projectId}
+        />
+      )}
+
+      {summaryData?.outreach && (
+        <OutreachWidget summary={summaryData.outreach} projectId={projectId} />
       )}
 
       {summaryData?.intelligence && (
@@ -275,11 +373,13 @@ export function MissionControlPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="flex flex-wrap gap-1">
-              {Object.entries(summaryData.intelligence.discovery.opportunityCounts).map(([type, count]) => (
-                <Badge key={type} className="text-[10px]">
-                  {type.replace(/_/g, ' ')}: {count}
-                </Badge>
-              ))}
+              {Object.entries(summaryData.intelligence.discovery.opportunityCounts).map(
+                ([type, count]) => (
+                  <Badge key={type} className="text-[10px]">
+                    {type.replace(/_/g, ' ')}: {count}
+                  </Badge>
+                )
+              )}
             </CardContent>
           </Card>
         </div>
@@ -339,8 +439,14 @@ export function MissionControlPage() {
                 <p className="text-sm text-muted-foreground">No campaigns yet.</p>
               ) : (
                 summaryData.campaigns.recent.map((c) => (
-                  <div key={c.id} className="flex justify-between text-sm rounded-md border px-3 py-2">
-                    <Link to={`/projects/${projectId}/campaigns/${c.id}`} className="font-medium hover:underline">
+                  <div
+                    key={c.id}
+                    className="flex justify-between text-sm rounded-md border px-3 py-2"
+                  >
+                    <Link
+                      to={`/projects/${projectId}/campaigns/${c.id}`}
+                      className="font-medium hover:underline"
+                    >
                       {c.name}
                     </Link>
                     <span className="text-muted-foreground">{c.progress}%</span>
@@ -362,7 +468,10 @@ export function MissionControlPage() {
           </CardHeader>
           <CardContent className="space-y-2">
             {summaryData.campaigns.timeline.slice(0, 8).map((evt) => (
-              <div key={`${evt.event_type}-${evt.created_at}`} className="rounded-md border px-3 py-2 text-sm">
+              <div
+                key={`${evt.event_type}-${evt.created_at}`}
+                className="rounded-md border px-3 py-2 text-sm"
+              >
                 <div className="flex justify-between gap-2">
                   <span className="font-medium">{evt.title}</span>
                   <span className="text-xs text-muted-foreground">
@@ -386,7 +495,10 @@ export function MissionControlPage() {
           </CardHeader>
           <CardContent className="space-y-2">
             {summaryData.intelligence.timeline.slice(0, 8).map((evt) => (
-              <div key={`${evt.event_type}-${evt.created_at}`} className="rounded-md border px-3 py-2 text-sm">
+              <div
+                key={`${evt.event_type}-${evt.created_at}`}
+                className="rounded-md border px-3 py-2 text-sm"
+              >
                 <div className="flex justify-between gap-2">
                   <span className="font-medium">{evt.title}</span>
                   <span className="text-xs text-muted-foreground">
@@ -501,12 +613,23 @@ export function MissionControlPage() {
             {events.isLoading ? (
               <Skeleton className="h-32 w-full" />
             ) : liveEvents.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No AI activity yet. Run an agent to populate.</p>
+              <p className="text-sm text-muted-foreground">
+                No AI activity yet. Run an agent to populate.
+              </p>
             ) : (
-              (liveEvents as Array<{ type: string; createdAt: string; payload: Record<string, unknown> }>)
+              (
+                liveEvents as Array<{
+                  type: string;
+                  createdAt: string;
+                  payload: Record<string, unknown>;
+                }>
+              )
                 .slice(0, 8)
                 .map((evt) => (
-                  <div key={`${evt.type}-${evt.createdAt}`} className="rounded-md border px-3 py-2 text-sm">
+                  <div
+                    key={`${evt.type}-${evt.createdAt}`}
+                    className="rounded-md border px-3 py-2 text-sm"
+                  >
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-medium">{evt.type}</span>
                       <span className="text-xs text-muted-foreground">

@@ -13,7 +13,8 @@ const DEFAULT_TEMPLATES: PromptTemplate[] = [
     id: 'ceo_v1',
     agentType: 'ceo',
     version: 1,
-    systemPrompt: 'You are the CEO Agent for an SEO workforce platform. Provide strategic oversight.',
+    systemPrompt:
+      'You are the CEO Agent for an SEO workforce platform. Provide strategic oversight.',
     userPromptTemplate: 'Workspace context: {{context}}\nTask: {{task}}',
   },
   {

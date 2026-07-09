@@ -6,12 +6,32 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { PageTransition } from '@/components/demo/page-transition';
 import { useDemoMode } from '@/hooks/use-demo-mode';
-import { DEMO_CHAT_PROMPTS, DEMO_PROJECTS, DEMO_KB_DOCUMENTS, DEMO_OPPORTUNITIES } from '@/demo/data';
+import {
+  DEMO_CHAT_PROMPTS,
+  DEMO_PROJECTS,
+  DEMO_KB_DOCUMENTS,
+  DEMO_OPPORTUNITIES,
+} from '@/demo/data';
 
 const DEMO_SEARCH_RESULTS = [
-  ...DEMO_PROJECTS.map((p) => ({ type: 'Project', title: p.name, subtitle: p.domain, href: 'mission-control' })),
-  ...DEMO_KB_DOCUMENTS.map((d) => ({ type: 'Document', title: d.title, subtitle: `${d.chunks} chunks`, href: 'knowledge/library' })),
-  ...DEMO_OPPORTUNITIES.map((o) => ({ type: 'Opportunity', title: o.title, subtitle: `Score ${o.score}`, href: 'campaigns/queue' })),
+  ...DEMO_PROJECTS.map((p) => ({
+    type: 'Project',
+    title: p.name,
+    subtitle: p.domain,
+    href: 'mission-control',
+  })),
+  ...DEMO_KB_DOCUMENTS.map((d) => ({
+    type: 'Document',
+    title: d.title,
+    subtitle: `${d.chunks} chunks`,
+    href: 'knowledge/library',
+  })),
+  ...DEMO_OPPORTUNITIES.map((o) => ({
+    type: 'Opportunity',
+    title: o.title,
+    subtitle: `Score ${o.score}`,
+    href: 'campaigns/queue',
+  })),
 ];
 
 export function SearchPage() {
@@ -20,13 +40,14 @@ export function SearchPage() {
   const { isDemoMode } = useDemoMode();
   const [query, setQuery] = useState('');
 
-  const results = query.length > 0
-    ? DEMO_SEARCH_RESULTS.filter(
-        (r) =>
-          r.title.toLowerCase().includes(query.toLowerCase()) ||
-          r.subtitle.toLowerCase().includes(query.toLowerCase())
-      )
-    : DEMO_SEARCH_RESULTS.slice(0, 6);
+  const results =
+    query.length > 0
+      ? DEMO_SEARCH_RESULTS.filter(
+          (r) =>
+            r.title.toLowerCase().includes(query.toLowerCase()) ||
+            r.subtitle.toLowerCase().includes(query.toLowerCase())
+        )
+      : DEMO_SEARCH_RESULTS.slice(0, 6);
 
   return (
     <PageTransition className="space-y-6 max-w-2xl mx-auto">
@@ -48,7 +69,9 @@ export function SearchPage() {
       </div>
 
       {!isDemoMode && (
-        <p className="text-sm text-muted-foreground text-center">Enable Demo Mode for instant search results.</p>
+        <p className="text-sm text-muted-foreground text-center">
+          Enable Demo Mode for instant search results.
+        </p>
       )}
 
       <div className="space-y-2">

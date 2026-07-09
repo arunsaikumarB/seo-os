@@ -62,7 +62,10 @@ export async function checkGeminiHealth(apiKey?: string): Promise<{
   const start = Date.now();
   try {
     const provider = createGeminiProvider(apiKey);
-    await provider.complete([{ role: 'user', content: 'ping' }], { maxTokens: 16, timeoutMs: 10_000 });
+    await provider.complete([{ role: 'user', content: 'ping' }], {
+      maxTokens: 16,
+      timeoutMs: 10_000,
+    });
     return { status: 'healthy', latencyMs: Date.now() - start };
   } catch (err) {
     return {

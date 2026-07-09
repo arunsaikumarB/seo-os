@@ -41,7 +41,10 @@ export function WebsiteScanAnimation({
       <Card className="border-primary/20 bg-gradient-to-br from-primary/5 to-transparent">
         <CardHeader className="pb-2">
           <CardTitle className="text-base flex items-center gap-2">
-            <motion.div animate={{ rotate: active ? 360 : 0 }} transition={{ repeat: Infinity, duration: 3, ease: 'linear' }}>
+            <motion.div
+              animate={{ rotate: active ? 360 : 0 }}
+              transition={{ repeat: Infinity, duration: 3, ease: 'linear' }}
+            >
               <Globe className="h-4 w-4 text-primary" />
             </motion.div>
             Website Analysis in Progress
@@ -63,7 +66,11 @@ export function WebsiteScanAnimation({
                   ) : (
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
                   )}
-                  <span className={i === step && active ? 'text-foreground font-medium' : 'text-muted-foreground'}>
+                  <span
+                    className={
+                      i === step && active ? 'text-foreground font-medium' : 'text-muted-foreground'
+                    }
+                  >
                     {s}
                   </span>
                 </motion.div>

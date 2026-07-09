@@ -6,6 +6,7 @@ import {
   type CampaignType,
 } from '@seo-os/campaign-engine';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
+import { logRelationshipTimeline } from '../relationships/relationship-intelligence.service.js';
 import { createApproval } from './approval.service.js';
 
 export async function listCampaignTypes() {
@@ -69,14 +70,16 @@ async function logTimeline(
   title: string,
   payload?: Record<string, unknown>
 ) {
-  await getSupabaseAdmin().from('campaign_timeline_events').insert({
-    id: randomUUID(),
-    campaign_id: campaignId,
-    workspace_id: workspaceId,
-    event_type: eventType,
-    title,
-    payload: payload ?? {},
-  });
+  await getSupabaseAdmin()
+    .from('campaign_timeline_events')
+    .insert({
+      id: randomUUID(),
+      campaign_id: campaignId,
+      workspace_id: workspaceId,
+      event_type: eventType,
+      title,
+      payload: payload ?? {},
+    });
 }
 
 export async function createCampaign(
@@ -108,6 +111,14 @@ export async function createCampaign(
     .single();
   if (error) throw error;
   await logTimeline(id, workspaceId, 'campaign.created', `Campaign "${input.name}" created`);
+  await logRelationshipTimeline(
+    workspaceId,
+    'campaign_created',
+    `Campaign created: ${input.name}`,
+    {
+      metadata: { campaignId: id, campaignType: input.campaignType },
+    }
+  );
   return data;
 }
 
@@ -168,7 +179,12 @@ export async function attachOpportunitiesToCampaign(
       .eq('id', oppId)
       .eq('workspace_id', workspaceId);
   }
-  await logTimeline(campaignId, workspaceId, 'campaign.opportunities_added', `Added ${opportunityIds.length} opportunities`);
+  await logTimeline(
+    campaignId,
+    workspaceId,
+    'campaign.opportunities_added',
+    `Added ${opportunityIds.length} opportunities`
+  );
 }
 
 export async function refreshCampaignProgress(campaignId: string, workspaceId: string) {

@@ -11,15 +11,15 @@
 
 Sprint 3 delivers the Knowledge Engine: document upload and ingestion, chunking + embedding pipeline, hybrid RAG search, context builder, AI memory (brand/project/prompt/conversation), workspace chat with streaming and agent delegation, and Mission Control connected to real knowledge + workforce operations.
 
-| Area | Status |
-|------|--------|
-| Knowledge Base (upload, chunk, embed, search) | ✅ |
-| RAG Foundation (retrieval, citations, validation) | ✅ |
-| AI Chat (streaming, history, prompts, agent invoke) | ✅ |
-| AI Memory (4 tiers v1) | ✅ |
-| Context Builder (auto-inject workspace context) | ✅ |
-| Mission Control (live KB + workforce stats) | ✅ |
-| Build / Lint / Typecheck | ✅ 10/10 packages |
+| Area                                                | Status            |
+| --------------------------------------------------- | ----------------- |
+| Knowledge Base (upload, chunk, embed, search)       | ✅                |
+| RAG Foundation (retrieval, citations, validation)   | ✅                |
+| AI Chat (streaming, history, prompts, agent invoke) | ✅                |
+| AI Memory (4 tiers v1)                              | ✅                |
+| Context Builder (auto-inject workspace context)     | ✅                |
+| Mission Control (live KB + workforce stats)         | ✅                |
+| Build / Lint / Typecheck                            | ✅ 10/10 packages |
 
 **Sprint score: 90/100**  
 **Recommendation: Conditional Go for Sprint 4**
@@ -70,15 +70,15 @@ Sprint 3 delivers the Knowledge Engine: document upload and ingestion, chunking 
 
 ## RAG Architecture
 
-| Stage | Implementation | Freeze alignment |
-|-------|----------------|------------------|
-| Chunking | `packages/knowledge-engine/src/chunking.ts` | 800 tokens / 100 overlap |
-| Embedding | `embedding.ts` — Gemini REST | text-embedding-004, 768-dim |
-| Index | HNSW cosine on `kb_embeddings` | D7 |
-| Search | `kb_hybrid_search` RPC | 0.7 vector + 0.3 tsvector |
-| Retrieval | `retrieval.ts` — min score 0.7, top 5 | D9 |
-| Citations | `citations.ts` — chunk → citation JSON | ai_messages.citations |
-| Validation | `validateRetrieval()` | flags low-confidence answers |
+| Stage      | Implementation                              | Freeze alignment             |
+| ---------- | ------------------------------------------- | ---------------------------- |
+| Chunking   | `packages/knowledge-engine/src/chunking.ts` | 800 tokens / 100 overlap     |
+| Embedding  | `embedding.ts` — Gemini REST                | text-embedding-004, 768-dim  |
+| Index      | HNSW cosine on `kb_embeddings`              | D7                           |
+| Search     | `kb_hybrid_search` RPC                      | 0.7 vector + 0.3 tsvector    |
+| Retrieval  | `retrieval.ts` — min score 0.7, top 5       | D9                           |
+| Citations  | `citations.ts` — chunk → citation JSON      | ai_messages.citations        |
+| Validation | `validateRetrieval()`                       | flags low-confidence answers |
 
 **Fallback:** Without `GEMINI_API_KEY`, ingestion stores chunks only; search uses PostgreSQL full-text on `search_vector`.
 
@@ -86,13 +86,13 @@ Sprint 3 delivers the Knowledge Engine: document upload and ingestion, chunking 
 
 ## Memory Architecture
 
-| Tier | Table | Sprint 3 support |
-|------|-------|------------------|
-| Brand memory | `memory_entries` (tier=`brand`) | ✅ Manual + auto from chat |
-| Project memory | `memory_entries` (tier=`project`) | ✅ Manual |
-| Approved prompt memory | `memory_entries` (tier=`prompt`) + `memory_facts` (approved_prompt) | ✅ |
-| Conversation memory | `memory_entries` (tier=`conversation`) | ✅ Auto on chat |
-| Semantic facts | `memory_facts` | ✅ Create + manager approve |
+| Tier                   | Table                                                               | Sprint 3 support            |
+| ---------------------- | ------------------------------------------------------------------- | --------------------------- |
+| Brand memory           | `memory_entries` (tier=`brand`)                                     | ✅ Manual + auto from chat  |
+| Project memory         | `memory_entries` (tier=`project`)                                   | ✅ Manual                   |
+| Approved prompt memory | `memory_entries` (tier=`prompt`) + `memory_facts` (approved_prompt) | ✅                          |
+| Conversation memory    | `memory_entries` (tier=`conversation`)                              | ✅ Auto on chat             |
+| Semantic facts         | `memory_facts`                                                      | ✅ Create + manager approve |
 
 **Context injection:** `loadMemoryForContext()` groups entries by tier; approved facts merged into brand/project/prompt buckets.
 
@@ -161,18 +161,18 @@ sequenceDiagram
 
 **Context Builder injects:**
 
-| Source | Data |
-|--------|------|
-| Project | name, domain, industry, description |
-| Organization | name, industry |
-| Brand voice | `workspace_settings.brand_voice` |
-| SEO goals | `workspace_settings.seo_goals` |
-| Keywords | `keywords` table |
-| Competitors | `competitors` table |
-| AI settings | `ai_settings` (provider, temperature, max tokens) |
-| Memory | brand, project, approved prompts, conversation, episodic |
-| Documents | ready KB document list |
-| Retrieval | top RAG chunks for current query |
+| Source       | Data                                                     |
+| ------------ | -------------------------------------------------------- |
+| Project      | name, domain, industry, description                      |
+| Organization | name, industry                                           |
+| Brand voice  | `workspace_settings.brand_voice`                         |
+| SEO goals    | `workspace_settings.seo_goals`                           |
+| Keywords     | `keywords` table                                         |
+| Competitors  | `competitors` table                                      |
+| AI settings  | `ai_settings` (provider, temperature, max tokens)        |
+| Memory       | brand, project, approved prompts, conversation, episodic |
+| Documents    | ready KB document list                                   |
+| Retrieval    | top RAG chunks for current query                         |
 
 ---
 
@@ -180,40 +180,40 @@ sequenceDiagram
 
 ### Knowledge Base — `/v1/projects/:id/knowledge`
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/documents` | List documents |
-| POST | `/documents` | Upload document |
-| GET | `/documents/:docId` | Get document |
-| DELETE | `/documents/:docId` | Archive document |
-| POST | `/documents/:docId/ingest` | Re-run ingestion |
-| GET | `/search?q=` | Hybrid KB search |
-| GET | `/stats` | KB statistics |
+| Method | Path                       | Description      |
+| ------ | -------------------------- | ---------------- |
+| GET    | `/documents`               | List documents   |
+| POST   | `/documents`               | Upload document  |
+| GET    | `/documents/:docId`        | Get document     |
+| DELETE | `/documents/:docId`        | Archive document |
+| POST   | `/documents/:docId/ingest` | Re-run ingestion |
+| GET    | `/search?q=`               | Hybrid KB search |
+| GET    | `/stats`                   | KB statistics    |
 
 ### Memory — `/v1/projects/:id/knowledge/memory`
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/` | List entries + facts |
-| POST | `/entries` | Create memory entry |
-| POST | `/facts` | Create semantic fact |
-| POST | `/facts/:id/approve` | Approve fact (manager+) |
+| Method | Path                 | Description             |
+| ------ | -------------------- | ----------------------- |
+| GET    | `/`                  | List entries + facts    |
+| POST   | `/entries`           | Create memory entry     |
+| POST   | `/facts`             | Create semantic fact    |
+| POST   | `/facts/:id/approve` | Approve fact (manager+) |
 
 ### AI Chat — `/v1/projects/:id/chat`
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/prompts` | Suggested prompts |
-| GET | `/conversations` | List conversations |
-| POST | `/conversations` | Create conversation |
-| GET | `/conversations/:id/messages` | Message history |
-| POST | `/conversations/:id/messages` | Send message (JSON or SSE stream) |
+| Method | Path                          | Description                       |
+| ------ | ----------------------------- | --------------------------------- |
+| GET    | `/prompts`                    | Suggested prompts                 |
+| GET    | `/conversations`              | List conversations                |
+| POST   | `/conversations`              | Create conversation               |
+| GET    | `/conversations/:id/messages` | Message history                   |
+| POST   | `/conversations/:id/messages` | Send message (JSON or SSE stream) |
 
 ### Mission Control
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/mission-control/summary` | KB + memory + chat + workforce stats |
+| Method | Path                       | Description                          |
+| ------ | -------------------------- | ------------------------------------ |
+| GET    | `/mission-control/summary` | KB + memory + chat + workforce stats |
 
 ---
 
@@ -221,18 +221,18 @@ sequenceDiagram
 
 **File:** `supabase/migrations/006_knowledge_engine.sql`
 
-| Table | Purpose |
-|-------|---------|
-| `kb_documents` | Uploaded document metadata + content |
-| `kb_chunks` | Chunked text + generated tsvector |
-| `kb_embeddings` | 768-dim vectors (HNSW index) |
-| `kb_ingestion_jobs` | Ingestion job tracking |
-| `memory_entries` | Episodic/brand/project/conversation/prompt memory |
-| `memory_facts` | Semantic facts with approval workflow |
-| `keywords` | Target keywords per project |
-| `competitors` | Competitor domains per project |
-| `ai_conversations` | Chat sessions |
-| `ai_messages` | Messages with citations + agent_run_id |
+| Table               | Purpose                                           |
+| ------------------- | ------------------------------------------------- |
+| `kb_documents`      | Uploaded document metadata + content              |
+| `kb_chunks`         | Chunked text + generated tsvector                 |
+| `kb_embeddings`     | 768-dim vectors (HNSW index)                      |
+| `kb_ingestion_jobs` | Ingestion job tracking                            |
+| `memory_entries`    | Episodic/brand/project/conversation/prompt memory |
+| `memory_facts`      | Semantic facts with approval workflow             |
+| `keywords`          | Target keywords per project                       |
+| `competitors`       | Competitor domains per project                    |
+| `ai_conversations`  | Chat sessions                                     |
+| `ai_messages`       | Messages with citations + agent_run_id            |
 
 **RPC:** `kb_hybrid_search(workspace_id, query, query_embedding, limit, min_score)`
 
@@ -242,12 +242,12 @@ sequenceDiagram
 
 ## Web UI
 
-| Page | Route | Features |
-|------|-------|----------|
-| Knowledge Library | `/projects/:id/knowledge/library` | Upload, list, re-ingest, archive |
-| AI Command Center | `/projects/:id/command-center` | Chat, suggested prompts, SSE streaming |
-| Memory Timeline | `/projects/:id/memory/timeline` | Add brand/project/prompt memory, approve facts |
-| Mission Control | `/projects/:id/mission-control` | Live KB/memory/chat/workforce summary cards |
+| Page              | Route                             | Features                                       |
+| ----------------- | --------------------------------- | ---------------------------------------------- |
+| Knowledge Library | `/projects/:id/knowledge/library` | Upload, list, re-ingest, archive               |
+| AI Command Center | `/projects/:id/command-center`    | Chat, suggested prompts, SSE streaming         |
+| Memory Timeline   | `/projects/:id/memory/timeline`   | Add brand/project/prompt memory, approve facts |
+| Mission Control   | `/projects/:id/mission-control`   | Live KB/memory/chat/workforce summary cards    |
 
 **Feature flags:** `knowledge_base` and `ai_memory` enabled by default in Sprint 3.
 
@@ -317,27 +317,27 @@ npm run typecheck  # ✅ 15/15 tasks
 
 ## Sprint Score: 90/100
 
-| Category | Score | Notes |
-|----------|-------|-------|
-| Knowledge Base | 18/20 | Text upload; PDF/DOCX parser deferred |
-| RAG | 17/20 | Hybrid search RPC; embedding insert may need raw SQL tuning |
-| AI Memory | 17/20 | 4 tiers v1; no nightly consolidation job |
-| AI Chat | 19/20 | SSE streaming; provider stream not native-token-level |
-| Context Builder | 19/20 | Full injection; keywords/competitors tables empty until populated |
-| **Total** | **90/100** | |
+| Category        | Score      | Notes                                                             |
+| --------------- | ---------- | ----------------------------------------------------------------- |
+| Knowledge Base  | 18/20      | Text upload; PDF/DOCX parser deferred                             |
+| RAG             | 17/20      | Hybrid search RPC; embedding insert may need raw SQL tuning       |
+| AI Memory       | 17/20      | 4 tiers v1; no nightly consolidation job                          |
+| AI Chat         | 19/20      | SSE streaming; provider stream not native-token-level             |
+| Context Builder | 19/20      | Full injection; keywords/competitors tables empty until populated |
+| **Total**       | **90/100** |                                                                   |
 
 ---
 
 ## Risks
 
-| Risk | Severity | Mitigation |
-|------|----------|------------|
-| pgvector extension unavailable on Supabase plan | High | Verify extension before `db:push` |
-| Embedding dimension mismatch | Medium | Truncation to 768 in embedding provider |
-| Vector insert via Supabase JS | Medium | Falls back to text-only search if embed insert fails |
-| No PDF/DOCX parsing | Low | Text paste upload works; parsers in Sprint 4+ |
-| Chat without API key | Medium | KB excerpt fallback message shown |
-| Migration 006 depends on 005 | High | Apply in order |
+| Risk                                            | Severity | Mitigation                                           |
+| ----------------------------------------------- | -------- | ---------------------------------------------------- |
+| pgvector extension unavailable on Supabase plan | High     | Verify extension before `db:push`                    |
+| Embedding dimension mismatch                    | Medium   | Truncation to 768 in embedding provider              |
+| Vector insert via Supabase JS                   | Medium   | Falls back to text-only search if embed insert fails |
+| No PDF/DOCX parsing                             | Low      | Text paste upload works; parsers in Sprint 4+        |
+| Chat without API key                            | Medium   | KB excerpt fallback message shown                    |
+| Migration 006 depends on 005                    | High     | Apply in order                                       |
 
 ---
 

@@ -18,7 +18,10 @@ export function AIThinkingPanel({
     <Card className="border-primary/20 bg-primary/5">
       <CardHeader className="pb-2">
         <CardTitle className="text-base flex items-center gap-2">
-          <motion.div animate={{ rotate: active ? 360 : 0 }} transition={{ repeat: active ? Infinity : 0, duration: 2, ease: 'linear' }}>
+          <motion.div
+            animate={{ rotate: active ? 360 : 0 }}
+            transition={{ repeat: active ? Infinity : 0, duration: 2, ease: 'linear' }}
+          >
             <Brain className="h-4 w-4 text-primary" />
           </motion.div>
           AI Thinking
@@ -28,7 +31,7 @@ export function AIThinkingPanel({
         <AnimatePresence mode="popLayout">
           {steps.slice(0, currentStep + 1).map((step, i) => {
             const isLast = i === currentStep;
-            const isDone = step === 'Completed.' || (i < currentStep);
+            const isDone = step === 'Completed.' || i < currentStep;
             return (
               <motion.div
                 key={`${step}-${i}`}

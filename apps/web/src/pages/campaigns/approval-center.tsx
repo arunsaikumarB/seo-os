@@ -23,9 +23,7 @@ export function ApprovalCenterPage() {
   const approvals = useQuery({
     queryKey: ['approvals', projectId],
     queryFn: () =>
-      request<{ data: Approval[] }>(
-        `/v1/projects/${projectId}/campaigns/approvals?status=pending`
-      ),
+      request<{ data: Approval[] }>(`/v1/projects/${projectId}/campaigns/approvals?status=pending`),
     enabled: !!projectId,
   });
 
@@ -57,16 +55,24 @@ export function ApprovalCenterPage() {
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between gap-2">
                 <CardTitle className="text-sm">{a.title}</CardTitle>
-                <Badge className="text-[10px] capitalize">{a.approval_type.replace(/_/g, ' ')}</Badge>
+                <Badge className="text-[10px] capitalize">
+                  {a.approval_type.replace(/_/g, ' ')}
+                </Badge>
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              {a.summary && <p className="text-sm text-muted-foreground line-clamp-2">{a.summary}</p>}
+              {a.summary && (
+                <p className="text-sm text-muted-foreground line-clamp-2">{a.summary}</p>
+              )}
               <div className="flex gap-2">
                 <Button size="sm" onClick={() => resolve.mutate({ id: a.id, action: 'approve' })}>
                   Approve
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => resolve.mutate({ id: a.id, action: 'reject' })}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => resolve.mutate({ id: a.id, action: 'reject' })}
+                >
                   Reject
                 </Button>
               </div>

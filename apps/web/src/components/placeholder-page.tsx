@@ -38,7 +38,9 @@ export function PlaceholderPage({
         actionLabel={projectId ? 'Open Mission Control' : undefined}
         onAction={projectId ? () => navigate(`/projects/${projectId}/mission-control`) : undefined}
         aiCommand="Analyze Chefgaa"
-        onAiCommand={projectId ? () => navigate(`/projects/${projectId}/command-center`) : undefined}
+        onAiCommand={
+          projectId ? () => navigate(`/projects/${projectId}/command-center`) : undefined
+        }
       />
     </PageTransition>
   );

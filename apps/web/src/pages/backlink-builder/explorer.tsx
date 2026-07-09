@@ -1,47 +1,36 @@
-import { useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useState, useCallback } from 'react';
+import { useParams } from 'react-router-dom';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useApi } from '@/hooks/use-api';
+import { toast } from 'sonner';
 import { BacklinkBuilderHero } from '@/components/backlink-builder/backlink-builder-widget';
-import {
-  BACKLINK_CATEGORIES,
-  type BacklinkOpportunity,
-  scoreBadgeClass,
-  formatType,
-} from '@/components/backlink-builder/types';
-import { Search, Filter } from 'lucide-react';
+import { OpportunityTable } from '@/components/backlink-builder/opportunity-table';
+import { BACKLINK_CATEGORIES, type BacklinkOpportunity } from '@/components/backlink-builder/types';
+import { Filter, Sparkles } from 'lucide-react';
 
 export function BacklinkExplorerPage() {
   const { projectId = '' } = useParams();
   const { request } = useApi();
+  const queryClient = useQueryClient();
   const [category, setCategory] = useState('');
   const [type, setType] = useState('');
   const [minScore, setMinScore] = useState('');
+  const [pipelineStage, setPipelineStage] = useState('');
   const [search, setSearch] = useState('');
-
-  const types = useQuery({
-    queryKey: ['backlink-types', category],
-    queryFn: () => {
-      const q = category ? `?category=${category}` : '';
-      return request<{ data: Array<{ id: string; display_name: string; category: string }> }>(
-        `/v1/projects/${projectId}/backlink-builder/types${q}`
-      );
-    },
-    enabled: !!projectId,
-  });
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const params = new URLSearchParams();
   if (category) params.set('category', category);
   if (type) params.set('type', type);
   if (minScore) params.set('minScore', minScore);
+  if (pipelineStage) params.set('pipelineStage', pipelineStage);
   if (search) params.set('search', search);
+  params.set('limit', '50');
 
   const opportunities = useQuery({
-    queryKey: ['backlink-explorer', projectId, category, type, minScore, search],
+    queryKey: ['backlink-explorer', projectId, category, type, minScore, pipelineStage, search],
     queryFn: () =>
       request<{ data: BacklinkOpportunity[] }>(
         `/v1/projects/${projectId}/backlink-builder/opportunities?${params.toString()}`
@@ -49,11 +38,40 @@ export function BacklinkExplorerPage() {
     enabled: !!projectId,
   });
 
+  const bulk = useMutation({
+    mutationFn: (body: { opportunityIds: string[]; action: string; stage?: string }) =>
+      request(`/v1/projects/${projectId}/backlink-builder/opportunities/bulk`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      toast.success('Bulk action completed');
+      queryClient.invalidateQueries({ queryKey: ['backlink-explorer', projectId] });
+      setSelected(new Set());
+    },
+  });
+
+  const approveOne = useCallback(
+    (id: string) => {
+      bulk.mutate({ opportunityIds: [id], action: 'approve' });
+    },
+    [bulk]
+  );
+
+  const rejectOne = useCallback(
+    (id: string) => {
+      bulk.mutate({ opportunityIds: [id], action: 'reject' });
+    },
+    [bulk]
+  );
+
+  const data = opportunities.data?.data ?? [];
+
   return (
     <div className="space-y-6">
       <BacklinkBuilderHero
         title="Opportunity Explorer"
-        subtitle="Browse, filter, and score backlink opportunities across all 26 types."
+        subtitle="Primary workspace — discover, score, approve, and assign every backlink opportunity."
       />
 
       <Card>
@@ -62,7 +80,7 @@ export function BacklinkExplorerPage() {
             <Filter className="h-4 w-4" /> Filters
           </CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <select
             className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
             value={category}
@@ -73,86 +91,90 @@ export function BacklinkExplorerPage() {
           >
             <option value="">All categories</option>
             {BACKLINK_CATEGORIES.map((c) => (
-              <option key={c.id} value={c.id}>{c.label}</option>
+              <option key={c.id} value={c.id}>
+                {c.label}
+              </option>
             ))}
           </select>
           <select
             className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
-            value={type}
-            onChange={(e) => setType(e.target.value)}
+            value={pipelineStage}
+            onChange={(e) => setPipelineStage(e.target.value)}
           >
-            <option value="">All types</option>
-            {(types.data?.data ?? []).map((t) => (
-              <option key={t.id} value={t.id}>{t.display_name}</option>
+            <option value="">All stages</option>
+            {[
+              'discovered',
+              'qualified',
+              'approved',
+              'campaign_ready',
+              'outreach',
+              'negotiation',
+              'won',
+              'lost',
+              'verified',
+            ].map((s) => (
+              <option key={s} value={s}>
+                {s.replace(/_/g, ' ')}
+              </option>
             ))}
           </select>
-          <Input
+          <input
             type="number"
             placeholder="Min score"
+            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
             value={minScore}
             onChange={(e) => setMinScore(e.target.value)}
-            min={0}
-            max={100}
           />
-          <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              className="pl-8"
-              placeholder="Search title or domain"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
+          <input
+            placeholder="Type filter"
+            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+            value={type}
+            onChange={(e) => setType(e.target.value)}
+          />
+          {selected.size > 0 && (
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                onClick={() => bulk.mutate({ opportunityIds: [...selected], action: 'approve' })}
+              >
+                Approve ({selected.size})
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => bulk.mutate({ opportunityIds: [...selected], action: 'reject' })}
+              >
+                Reject
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      <div className="grid gap-3">
-        {(opportunities.data?.data ?? []).map((opp) => (
-          <Card key={opp.id} className="transition-all hover:shadow-md hover:-translate-y-0.5">
-            <CardContent className="pt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="min-w-0 space-y-1">
-                <Link
-                  to={`/projects/${projectId}/backlink-builder/opportunities/${opp.id}`}
-                  className="font-medium hover:underline"
-                >
-                  {opp.title}
-                </Link>
-                <div className="flex flex-wrap gap-1">
-                  <Badge className="text-[10px] capitalize">{formatType(opp.opportunity_type)}</Badge>
-                  {opp.backlink_category && (
-                    <Badge className="text-[10px] border-muted-foreground/30">
-                      {opp.backlink_category.replace(/_/g, ' ')}
-                    </Badge>
-                  )}
-                  {opp.queue_status && (
-                    <Badge className="text-[10px] border-muted-foreground/30">
-                      {opp.queue_status.replace(/_/g, ' ')}
-                    </Badge>
-                  )}
-                </div>
-                {(opp.ai_suggestion ?? opp.ai_recommendation) && (
-                  <p className="text-xs text-muted-foreground line-clamp-1">
-                    {opp.ai_suggestion ?? opp.ai_recommendation}
-                  </p>
-                )}
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <Badge className={scoreBadgeClass(opp.score)}>Score {opp.score}</Badge>
-                <Button size="sm" variant="outline" asChild>
-                  <Link to={`/projects/${projectId}/backlink-builder/opportunities/${opp.id}`}>
-                    Details
-                  </Link>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-        {(opportunities.data?.data ?? []).length === 0 && (
-          <p className="text-sm text-muted-foreground text-center py-8">
-            No opportunities match your filters.
-          </p>
-        )}
-      </div>
+      <OpportunityTable
+        projectId={projectId}
+        data={data}
+        selected={selected}
+        onSelect={(id, checked) => {
+          const next = new Set(selected);
+          if (checked) next.add(id);
+          else next.delete(id);
+          setSelected(next);
+        }}
+        onSelectAll={(checked) => setSelected(checked ? new Set(data.map((d) => d.id)) : new Set())}
+        onApprove={approveOne}
+        onReject={rejectOne}
+        search={search}
+        onSearchChange={setSearch}
+      />
+
+      <Card className="border-primary/10 bg-primary/5">
+        <CardContent className="pt-4 flex items-center gap-2 text-sm text-muted-foreground">
+          <Sparkles className="h-4 w-4 text-primary shrink-0" />
+          AI continuously scores opportunities, predicts reply rates, and suggests outreach
+          strategy. Use bulk approve for high-score items (75+).
+        </CardContent>
+      </Card>
     </div>
   );
 }

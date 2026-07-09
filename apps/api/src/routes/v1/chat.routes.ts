@@ -1,9 +1,6 @@
 import { Router } from 'express';
 import { sendChatMessageSchema, createConversationSchema, AppError } from '@seo-os/shared';
-import {
-  authMiddleware,
-  type AuthenticatedRequest,
-} from '../../middleware/auth.js';
+import { authMiddleware, type AuthenticatedRequest } from '../../middleware/auth.js';
 import { requireRole } from '../../middleware/rbac.js';
 import {
   createConversation,
@@ -23,41 +20,31 @@ chatRouter.get('/prompts', authMiddleware, requireRole('viewer'), (_req, res) =>
   res.json({ data: SUGGESTED_PROMPTS });
 });
 
-chatRouter.get(
-  '/conversations',
-  authMiddleware,
-  requireRole('viewer'),
-  async (req, res, next) => {
-    try {
-      const { userId } = (req as AuthenticatedRequest).auth;
-      const conversations = await listConversations(param(req.params.projectId), userId);
-      res.json({ data: conversations });
-    } catch (err) {
-      next(err);
-    }
+chatRouter.get('/conversations', authMiddleware, requireRole('viewer'), async (req, res, next) => {
+  try {
+    const { userId } = (req as AuthenticatedRequest).auth;
+    const conversations = await listConversations(param(req.params.projectId), userId);
+    res.json({ data: conversations });
+  } catch (err) {
+    next(err);
   }
-);
+});
 
-chatRouter.post(
-  '/conversations',
-  authMiddleware,
-  requireRole('member'),
-  async (req, res, next) => {
-    try {
-      const parsed = createConversationSchema.safeParse(req.body);
-      if (!parsed.success) throw new AppError(400, 'VALIDATION_ERROR', 'Invalid conversation');
-      const { userId } = (req as AuthenticatedRequest).auth;
-      const conversation = await createConversation(
-        param(req.params.projectId),
-        userId,
-        parsed.data.title
-      );
-      res.status(201).json({ data: conversation });
-    } catch (err) {
-      next(err);
-    }
+chatRouter.post('/conversations', authMiddleware, requireRole('member'), async (req, res, next) => {
+  try {
+    const parsed = createConversationSchema.safeParse(req.body);
+    if (!parsed.success) throw new AppError(400, 'VALIDATION_ERROR', 'Invalid conversation');
+    const { userId } = (req as AuthenticatedRequest).auth;
+    const conversation = await createConversation(
+      param(req.params.projectId),
+      userId,
+      parsed.data.title
+    );
+    res.status(201).json({ data: conversation });
+  } catch (err) {
+    next(err);
   }
-);
+});
 
 chatRouter.get(
   '/conversations/:conversationId/messages',

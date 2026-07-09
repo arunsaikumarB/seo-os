@@ -32,12 +32,7 @@ export const AGENT_TYPES = [
 export type AgentType = (typeof AGENT_TYPES)[number];
 
 export type AgentRunStatus =
-  | 'pending'
-  | 'queued'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+  'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 export interface AgentDefinition {
   agentType: AgentType;

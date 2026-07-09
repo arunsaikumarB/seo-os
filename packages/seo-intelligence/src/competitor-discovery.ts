@@ -26,7 +26,11 @@ export function parseCompetitorsFromAiResponse(text: string): CompetitorSuggesti
     if (!domainMatch) continue;
     results.push({
       domain: domainMatch[1].toLowerCase(),
-      name: line.replace(domainMatch[0], '').replace(/^[-*:]\s*/, '').trim() || undefined,
+      name:
+        line
+          .replace(domainMatch[0], '')
+          .replace(/^[-*:]\s*/, '')
+          .trim() || undefined,
       confidenceScore: 70,
       reason: line.trim(),
     });

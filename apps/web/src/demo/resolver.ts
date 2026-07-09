@@ -8,6 +8,26 @@ import {
   DEMO_BACKLINKS_PENDING,
   DEMO_BACKLINKS_WON,
   DEMO_AI_BACKLINK_SUGGESTIONS,
+  DEMO_BACKLINK_PIPELINE,
+  DEMO_RELATIONSHIPS,
+  DEMO_RELATIONSHIP_SUMMARY,
+  DEMO_RELATIONSHIP_ORGANIZATIONS,
+  DEMO_RELATIONSHIP_CONTACTS,
+  DEMO_RELATIONSHIP_TIMELINE,
+  DEMO_RELATIONSHIP_ORG_DETAIL,
+  DEMO_OUTREACH_SUMMARY,
+  DEMO_OUTREACH_THREADS,
+  DEMO_OUTREACH_THREAD_DETAIL,
+  DEMO_OUTREACH_TEMPLATES,
+  DEMO_OUTREACH_SEQUENCES,
+  DEMO_OUTREACH_SEQUENCE_DETAIL,
+  DEMO_AUTOMATION_SUMMARY,
+  DEMO_IMPORTS,
+  DEMO_TRACKING,
+  DEMO_SUBMISSIONS,
+  DEMO_BROWSER_INTELLIGENCE,
+  DEMO_BROWSER_SCANS,
+  DEMO_BROWSER_PROFILES,
   DEMO_CAMPAIGNS,
   DEMO_CHAT_PROMPTS,
   DEMO_COMPETITORS,
@@ -53,11 +73,22 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
   if (m === '/v1/me') {
     return {
       data: {
-        user: { id: 'demo-user', full_name: 'Demo Executive', email: 'ceo@seoos.demo', avatar_url: null },
+        user: {
+          id: 'demo-user',
+          full_name: 'Demo Executive',
+          email: 'ceo@seoos.demo',
+          avatar_url: null,
+        },
         organizations: DEMO_ORGANIZATIONS.map((org) => ({
           role: 'owner',
           org_id: org.id,
-          organizations: { id: org.id, name: org.name, slug: org.slug, industry: org.industry, plan: org.plan },
+          organizations: {
+            id: org.id,
+            name: org.name,
+            slug: org.slug,
+            industry: org.industry,
+            plan: org.plan,
+          },
         })),
       },
     };
@@ -117,6 +148,10 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
           timeline: DEMO_TIMELINE.filter((t) => t.event_type.startsWith('campaign')),
         },
         backlinkBuilder: DEMO_BACKLINK_SUMMARY,
+        automation: DEMO_AUTOMATION_SUMMARY,
+        browserIntelligence: DEMO_BROWSER_INTELLIGENCE,
+        relationshipIntelligence: DEMO_RELATIONSHIP_SUMMARY,
+        outreach: DEMO_OUTREACH_SUMMARY,
       },
     };
   }
@@ -124,7 +159,9 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
   // AI endpoints
   if (m === '/v1/ai/agents') return { data: DEMO_AGENTS };
   if (m.includes('/ai/health')) {
-    return { data: { agentsRegistered: 5, handlersReady: 5, recentFailures: 0, status: 'healthy' } };
+    return {
+      data: { agentsRegistered: 5, handlersReady: 5, recentFailures: 0, status: 'healthy' },
+    };
   }
   if (m.includes('/ai/runs')) {
     return {
@@ -172,40 +209,91 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
   // Executive dashboard
   if (m.includes('/executive/summary')) return { data: DEMO_EXECUTIVE_METRICS };
 
-  // Intelligence
+  if (m.includes('/intelligence/browser/summary')) return { data: DEMO_BROWSER_INTELLIGENCE };
+  if (m.includes('/intelligence/browser/scans') && method === 'GET')
+    return { data: DEMO_BROWSER_SCANS };
+  if (m.includes('/intelligence/browser/scans') && method === 'POST')
+    return { data: { id: 'scan-new', status: 'queued', phase: 'discovering_pages' } };
+  if (m.includes('/intelligence/browser/profiles') && !m.includes('/profiles/'))
+    return { data: DEMO_BROWSER_PROFILES };
+  if (m.includes('/intelligence/website/scans')) {
+    if (m.match(/\/website\/scans\/[^/]+$/) && method === 'GET') {
+      return {
+        data: {
+          scan: DEMO_BROWSER_SCANS[0],
+          pages: [
+            { id: 'p1', title: 'Contact Us', path: '/contact', page_type: 'contact' },
+            { id: 'p2', title: 'Write for Us', path: '/write-for-us', page_type: 'guest_post' },
+          ],
+          discoveries: [
+            {
+              id: 'd1',
+              title: 'Guest post opportunity',
+              discovery_type: 'opportunity',
+              confidence: 88,
+            },
+            {
+              id: 'd2',
+              title: 'Resource page',
+              discovery_type: 'resource_page',
+              confidence: 70,
+              url: 'https://foodnetwork.com/resources',
+            },
+          ],
+        },
+      };
+    }
+    return { data: DEMO_BROWSER_SCANS };
+  }
+
+  // Intelligence (legacy)
   if (m.includes('/intelligence/summary')) {
     return {
       data: {
         websiteScanner: { status: 'completed', phase: 'done', pagesAnalyzed: 47 },
-        discovery: { keywordCount: 24, prospectTotal: 47, opportunityCounts: { guest_post: 8, resource_page: 5 } },
+        discovery: {
+          keywordCount: 24,
+          prospectTotal: 47,
+          opportunityCounts: { guest_post: 8, resource_page: 5 },
+        },
         timeline: DEMO_TIMELINE,
       },
     };
   }
   if (m.includes('/intelligence/website/scans') && method === 'GET') {
     return {
-      data: [{
-        id: 'scan1',
-        status: 'completed',
-        phase: 'completed',
-        target_url: project.url,
-        pages_analyzed: 47,
-        pages_discovered: 52,
-        brand_profile: { name: project.name, tagline: 'Premium catering & chef services', topics: ['catering', 'events', 'corporate'] },
-        tech_stack: { cms: 'WordPress', analytics: ['GA4'], frameworks: ['React'] },
-      }],
+      data: [
+        {
+          id: 'scan1',
+          status: 'completed',
+          phase: 'completed',
+          target_url: project.url,
+          pages_analyzed: 47,
+          pages_discovered: 52,
+          brand_profile: {
+            name: project.name,
+            tagline: 'Premium catering & chef services',
+            topics: ['catering', 'events', 'corporate'],
+          },
+          tech_stack: { cms: 'WordPress', analytics: ['GA4'], frameworks: ['React'] },
+        },
+      ],
     };
   }
-  if (m.includes('/intelligence/website/scans') && method === 'POST') return { data: { id: 'scan-new', status: 'running' } };
-  if (m.includes('/intelligence/discover') && method === 'POST') return { data: { status: 'started' } };
-  if (m.includes('/intelligence/competitors') && !m.includes('suggestions')) return { data: DEMO_COMPETITORS };
+  if (m.includes('/intelligence/website/scans') && method === 'POST')
+    return { data: { id: 'scan-new', status: 'running' } };
+  if (m.includes('/intelligence/discover') && method === 'POST')
+    return { data: { status: 'started' } };
+  if (m.includes('/intelligence/competitors') && !m.includes('suggestions'))
+    return { data: DEMO_COMPETITORS };
   if (m.includes('/intelligence/keywords')) return { data: DEMO_KEYWORDS };
   if (m.includes('/intelligence/opportunities')) return { data: DEMO_OPPORTUNITIES };
   if (m.includes('/intelligence/prospects/pipeline')) return { data: DEMO_PROSPECT_PIPELINE };
   if (m.includes('/intelligence/research/events')) return { data: DEMO_TIMELINE };
 
   // Knowledge
-  if (m.includes('/knowledge/stats')) return { data: { readyDocuments: 5, totalChunks: 136, processing: 0 } };
+  if (m.includes('/knowledge/stats'))
+    return { data: { readyDocuments: 5, totalChunks: 136, processing: 0 } };
   if (m.includes('/knowledge/documents')) return { data: DEMO_KB_DOCUMENTS };
 
   // Memory
@@ -223,7 +311,8 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
       ],
     };
   }
-  if (m.includes('/campaigns/summary')) return { data: { active: 2, pendingApproval: 1, total: 4, avgProgress: 31 } };
+  if (m.includes('/campaigns/summary'))
+    return { data: { active: 2, pendingApproval: 1, total: 4, avgProgress: 31 } };
   if (m.match(/\/campaigns$/) && method === 'GET') return { data: DEMO_CAMPAIGNS };
   if (m.includes('/campaigns/queue/opportunities')) return { data: DEMO_OPPORTUNITIES };
   if (m.includes('/campaigns/approvals')) return { data: DEMO_APPROVALS };
@@ -232,8 +321,16 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
       data: {
         summary: `AI campaign plan for ${project.name} targeting ${project.domain}`,
         phases: [
-          { name: 'Discovery & qualification', durationWeeks: 2, actions: ['Review opportunity queue', 'Approve top prospects'] },
-          { name: 'Outreach preparation', durationWeeks: 2, actions: ['Draft email templates', 'Personalize outreach'] },
+          {
+            name: 'Discovery & qualification',
+            durationWeeks: 2,
+            actions: ['Review opportunity queue', 'Approve top prospects'],
+          },
+          {
+            name: 'Outreach preparation',
+            durationWeeks: 2,
+            actions: ['Draft email templates', 'Personalize outreach'],
+          },
           { name: 'Execution', durationWeeks: 4, actions: ['Launch outreach', 'Track responses'] },
         ],
         targetOpportunities: 25,
@@ -242,17 +339,157 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
       },
     };
   }
-  if (m.includes('/campaigns/') && method === 'GET' && !m.includes('queue') && !m.includes('approvals')) {
+  if (
+    m.includes('/campaigns/') &&
+    method === 'GET' &&
+    !m.includes('queue') &&
+    !m.includes('approvals')
+  ) {
     const camp = DEMO_CAMPAIGNS[0];
-    return { data: { ...camp, plan: { summary: 'Guest post outreach for food & lifestyle publications', phases: [] }, goals: [] } };
+    return {
+      data: {
+        ...camp,
+        plan: { summary: 'Guest post outreach for food & lifestyle publications', phases: [] },
+        goals: [],
+      },
+    };
   }
-  if (m.includes('/timeline')) return { data: DEMO_TIMELINE.filter((t) => t.event_type.startsWith('campaign')) };
+  if (m.includes('/timeline'))
+    return { data: DEMO_TIMELINE.filter((t) => t.event_type.startsWith('campaign')) };
 
   // Backlink Builder (Sprint 5.5)
+  if (m.includes('/backlink-builder/automation/summary')) return { data: DEMO_AUTOMATION_SUMMARY };
+  if (m.includes('/backlink-builder/automation/imports') && method === 'GET')
+    return { data: DEMO_IMPORTS };
+  if (m.includes('/backlink-builder/automation/import') && method === 'POST') {
+    return {
+      data: { importId: 'imp-demo-new', stats: { total: 5, valid: 4, duplicates: 1, invalid: 0 } },
+    };
+  }
+  if (
+    m.includes('/backlink-builder/automation/imports/') &&
+    m.includes('/run') &&
+    method === 'POST'
+  ) {
+    return {
+      data: {
+        runId: 'run-demo-new',
+        importId: 'imp-demo-2',
+        opportunitiesCreated: 8,
+        contentGenerated: 16,
+        stepsCompleted: ['import', 'validate', 'analyze', 'classify', 'score', 'generate'],
+      },
+    };
+  }
+  if (m.includes('/backlink-builder/automation/tracking')) return { data: DEMO_TRACKING };
+  if (m.includes('/backlink-builder/automation/submissions')) return { data: DEMO_SUBMISSIONS };
   if (m.includes('/backlink-builder/summary')) return { data: DEMO_BACKLINK_SUMMARY };
   if (m.includes('/backlink-builder/types')) return { data: DEMO_BACKLINK_TYPES };
   if (m.includes('/backlink-builder/ai/suggestions')) return { data: DEMO_AI_BACKLINK_SUGGESTIONS };
-  if (m.includes('/backlink-builder/pipeline')) return { data: DEMO_PROSPECT_PIPELINE };
+  if (m.includes('/backlink-builder/pipeline')) return { data: DEMO_BACKLINK_PIPELINE };
+  if (m.includes('/backlink-builder/relationships')) return { data: DEMO_RELATIONSHIPS };
+
+  if (m.includes('/relationships/summary')) return { data: DEMO_RELATIONSHIP_SUMMARY };
+  if (m.includes('/relationships/organizations/') && !m.endsWith('/organizations')) {
+    return { data: DEMO_RELATIONSHIP_ORG_DETAIL };
+  }
+  if (m.includes('/relationships/organizations')) return { data: DEMO_RELATIONSHIP_ORGANIZATIONS };
+  if (m.includes('/relationships/contacts/recommended'))
+    return { data: DEMO_RELATIONSHIP_CONTACTS.filter((c) => c.is_recommended_outreach) };
+  if (m.includes('/relationships/contacts')) return { data: DEMO_RELATIONSHIP_CONTACTS };
+  if (m.includes('/relationships/timeline')) return { data: DEMO_RELATIONSHIP_TIMELINE };
+  if (m.includes('/relationships/discover') && method === 'POST')
+    return { data: { enriched: 3, results: [] } };
+  if (m.includes('/relationships/enrich') && method === 'POST')
+    return {
+      data: { organizationId: 'org1', contactsDiscovered: 3, scores: { priorityScore: 78 } },
+    };
+
+  if (m.includes('/outreach/summary')) return { data: DEMO_OUTREACH_SUMMARY };
+  if (m.includes('/outreach/threads/') && !m.endsWith('/threads'))
+    return { data: DEMO_OUTREACH_THREAD_DETAIL };
+  if (m.includes('/outreach/threads')) return { data: DEMO_OUTREACH_THREADS };
+  if (m.includes('/outreach/templates/') && m.includes('/apply') && method === 'POST') {
+    return {
+      data: {
+        subject: DEMO_OUTREACH_TEMPLATES[0].subject,
+        bodyHtml: DEMO_OUTREACH_TEMPLATES[0].body_html,
+        tone: 'professional',
+      },
+    };
+  }
+  if (m.includes('/outreach/templates')) return { data: DEMO_OUTREACH_TEMPLATES };
+  if (m.includes('/outreach/sequences/') && !m.endsWith('/sequences'))
+    return { data: DEMO_OUTREACH_SEQUENCE_DETAIL };
+  if (m.includes('/outreach/sequences') && method === 'POST')
+    return { data: DEMO_OUTREACH_SEQUENCE_DETAIL };
+  if (m.includes('/outreach/sequences')) return { data: DEMO_OUTREACH_SEQUENCES };
+  if (m.includes('/outreach/messages/ai-generate') && method === 'POST') {
+    return {
+      data: {
+        messageId: 'msg-demo',
+        subject: 'Collaboration idea for Serious Eats',
+        bodyHtml: '<p>Hi there,</p><p>AI-generated draft for review.</p>',
+        subjectSuggestions: ['Guest post pitch', 'Partnership idea'],
+      },
+    };
+  }
+  if (m.includes('/outreach/messages/') && m.includes('/submit') && method === 'POST')
+    return { data: { messageId: 'msg-demo', status: 'pending_approval' } };
+  if (m.includes('/outreach/messages') && method === 'POST')
+    return { data: { messageId: 'msg-demo', threadId: 'th1' } };
+  if (m.includes('/outreach/accounts'))
+    return {
+      data: [
+        {
+          id: 'acct1',
+          label: 'Demo Sender',
+          provider_type: 'mock',
+          from_email: 'outreach@seoos.demo',
+          is_default: true,
+          status: 'active',
+        },
+      ],
+    };
+  if (m.includes('/outreach/tasks')) return { data: DEMO_OUTREACH_THREAD_DETAIL.tasks };
+
+  if (m.includes('/backlink-builder/campaigns/associations')) {
+    return {
+      data: {
+        campaigns: DEMO_CAMPAIGNS,
+        associations: DEMO_OPPORTUNITIES.filter((o) => o.pipeline_stage === 'campaign_ready').map(
+          (o) => ({
+            ...o,
+            campaign_id: 'camp1',
+          })
+        ),
+      },
+    };
+  }
+  if (
+    m.includes('/backlink-builder/opportunities/') &&
+    m.includes('/stage') &&
+    method === 'PATCH'
+  ) {
+    return { data: { ok: true } };
+  }
+  if (m.includes('/backlink-builder/opportunities/bulk') && method === 'POST') {
+    return { data: [{ status: 'approved' }] };
+  }
+  if (
+    m.includes('/backlink-builder/opportunities/') &&
+    m.includes('/generate') &&
+    method === 'POST'
+  ) {
+    return {
+      data: {
+        id: 'draft-demo',
+        title: 'AI Draft',
+        content: 'Demo generated content...',
+        draft_type: 'email',
+      },
+    };
+  }
   if (m.includes('/backlink-builder/won')) return { data: DEMO_BACKLINKS_WON };
   if (m.includes('/backlink-builder/lost')) return { data: DEMO_BACKLINKS_LOST };
   if (m.includes('/backlink-builder/pending')) return { data: DEMO_BACKLINKS_PENDING };
@@ -271,12 +508,15 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
     };
   }
   if (m.includes('/backlink-builder/opportunities')) {
+    const enriched = DEMO_OPPORTUNITIES.map((o) => ({
+      ...o,
+      logo_url: `https://www.google.com/s2/favicons?domain=${o.domain}&sz=64`,
+      backlink_category: o.opportunity_type === 'guest_post' ? 'content_based' : 'outreach_based',
+      ai_suggestion: o.ai_recommendation,
+    }));
     return {
-      data: DEMO_OPPORTUNITIES.map((o) => ({
-        ...o,
-        backlink_category: o.opportunity_type === 'guest_post' ? 'content_based' : 'outreach_based',
-        ai_suggestion: o.ai_recommendation,
-      })),
+      data: enriched,
+      pagination: { nextCursor: null, prevCursor: null, limit: 50, hasMore: false },
     };
   }
 
@@ -288,7 +528,13 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
   if (m.includes('/chat/conversations/') && m.includes('/messages') && method === 'GET') {
     return {
       data: [
-        { id: 'msg1', role: 'assistant', content: 'Welcome to SEO OS Command Center. I have full context on Chefgaa — competitors, keywords, and 12 pending opportunities. What would you like to do?', agent_type: 'seo_strategist' },
+        {
+          id: 'msg1',
+          role: 'assistant',
+          content:
+            'Welcome to SEO OS Command Center. I have full context on Chefgaa — competitors, keywords, and 12 pending opportunities. What would you like to do?',
+          agent_type: 'seo_strategist',
+        },
       ],
     };
   }

@@ -8,37 +8,43 @@ import { useDemoMode } from '@/hooks/use-demo-mode';
 const TOUR_STEPS = [
   {
     title: 'Welcome to SEO OS',
-    description: 'The AI workforce for SEO teams. Let us show you how AI transforms SEO operations.',
+    description:
+      'The AI workforce for SEO teams. Let us show you how AI transforms SEO operations.',
     path: null as string | null,
     orgPath: null as string | null,
   },
   {
     title: 'Mission Control',
-    description: 'Your AI Operations Center — live workforce, campaigns, approvals, and system health at a glance.',
+    description:
+      'Your AI Operations Center — live workforce, campaigns, approvals, and system health at a glance.',
     path: 'mission-control',
     orgPath: null,
   },
   {
     title: 'Knowledge Engine',
-    description: 'Upload brand docs and strategy. AI learns your business and grounds every decision.',
+    description:
+      'Upload brand docs and strategy. AI learns your business and grounds every decision.',
     path: 'knowledge/library',
     orgPath: null,
   },
   {
     title: 'SEO Intelligence',
-    description: 'Website analysis, competitors, keywords, and scored opportunities — discovered automatically.',
+    description:
+      'Website analysis, competitors, keywords, and scored opportunities — discovered automatically.',
     path: 'intelligence/website',
     orgPath: null,
   },
   {
     title: 'Campaign Engine',
-    description: 'Turn opportunities into structured campaigns with AI planning and approval workflows.',
+    description:
+      'Turn opportunities into structured campaigns with AI planning and approval workflows.',
     path: 'campaigns',
     orgPath: null,
   },
   {
     title: 'AI Command Center',
-    description: 'ChatGPT-like interface. Ask anything — analyze, create campaigns, generate content.',
+    description:
+      'ChatGPT-like interface. Ask anything — analyze, create campaigns, generate content.',
     path: 'command-center',
     orgPath: null,
   },
@@ -50,7 +56,8 @@ const TOUR_STEPS = [
   },
   {
     title: "You're Ready",
-    description: 'Enable Demo Mode anytime for a fully interactive presentation. Press Ctrl+K for quick navigation.',
+    description:
+      'Enable Demo Mode anytime for a fully interactive presentation. Press Ctrl+K for quick navigation.',
     path: null,
     orgPath: null,
   },
@@ -119,7 +126,9 @@ export function ProductTour() {
             ))}
           </div>
 
-          <p className="text-xs text-muted-foreground mb-1">Step {step + 1} of {TOUR_STEPS.length}</p>
+          <p className="text-xs text-muted-foreground mb-1">
+            Step {step + 1} of {TOUR_STEPS.length}
+          </p>
           <h2 className="text-xl font-semibold mb-2">{current.title}</h2>
           <p className="text-sm text-muted-foreground mb-6">{current.description}</p>
 

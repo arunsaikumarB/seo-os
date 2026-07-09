@@ -29,7 +29,8 @@ export function AnimatedCounter({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: duration * 0.5 }}
     >
-      {text}{suffix}
+      {text}
+      {suffix}
     </motion.span>
   );
 }

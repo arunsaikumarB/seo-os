@@ -43,7 +43,8 @@ export function CampaignDetailPage() {
 
   const c = campaign.data?.data;
   const plan = c?.plan as Record<string, unknown> | undefined;
-  const phases = (plan?.phases as Array<{ name: string; durationWeeks: number; actions: string[] }>) ?? [];
+  const phases =
+    (plan?.phases as Array<{ name: string; durationWeeks: number; actions: string[] }>) ?? [];
 
   return (
     <div className="space-y-6">
@@ -109,7 +110,9 @@ export function CampaignDetailPage() {
             <p>{String(plan.summary ?? '')}</p>
             {phases.map((phase) => (
               <div key={phase.name} className="rounded-md border p-3">
-                <p className="font-medium">{phase.name} ({phase.durationWeeks}w)</p>
+                <p className="font-medium">
+                  {phase.name} ({phase.durationWeeks}w)
+                </p>
                 <ul className="list-disc pl-4 text-muted-foreground mt-1">
                   {phase.actions.map((a) => (
                     <li key={a}>{a}</li>

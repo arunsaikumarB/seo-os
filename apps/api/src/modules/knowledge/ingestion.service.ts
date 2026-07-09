@@ -1,9 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { chunkText } from '@seo-os/knowledge-engine';
-import {
-  createGeminiEmbeddingProvider,
-  formatEmbeddingForPg,
-} from '@seo-os/knowledge-engine';
+import { createGeminiEmbeddingProvider, formatEmbeddingForPg } from '@seo-os/knowledge-engine';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { getEnv } from '../../config/env.js';
 import { logger } from '../../lib/logger.js';
@@ -23,10 +20,7 @@ export async function ingestDocument(documentId: string, workspaceId: string): P
     throw new Error('Document not found or has no content');
   }
 
-  await supabase
-    .from('kb_documents')
-    .update({ status: 'processing' })
-    .eq('id', documentId);
+  await supabase.from('kb_documents').update({ status: 'processing' }).eq('id', documentId);
 
   const jobId = randomUUID();
   await supabase.from('kb_ingestion_jobs').insert({
@@ -70,7 +64,10 @@ export async function ingestDocument(documentId: string, workspaceId: string): P
       for (const row of embeddingRows) {
         const { error } = await supabase.from('kb_embeddings').insert(row);
         if (error) {
-          logger.warn({ error, chunkId: row.chunk_id }, 'Embedding insert failed — using text search only');
+          logger.warn(
+            { error, chunkId: row.chunk_id },
+            'Embedding insert failed — using text search only'
+          );
         }
       }
     }

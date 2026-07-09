@@ -20,7 +20,7 @@ export const DEFAULT_FEATURE_FLAGS: Record<FeatureFlag, boolean> = {
   knowledge_base: true,
   ai_memory: true,
   backlink_builder: true,
-  outreach: false,
+  outreach: true,
   technical_seo: false,
   reports: false,
   marketplace: false,

@@ -36,9 +36,7 @@ export function BacklinkWonPage() {
                   {bl.domain}
                 </p>
                 <p className="text-xs text-muted-foreground truncate">{bl.source_url}</p>
-                {bl.anchor_text && (
-                  <p className="text-xs">Anchor: &quot;{bl.anchor_text}&quot;</p>
-                )}
+                {bl.anchor_text && <p className="text-xs">Anchor: &quot;{bl.anchor_text}&quot;</p>}
                 <Badge className="text-[10px] capitalize">{formatType(bl.backlink_type)}</Badge>
               </div>
               <div className="flex flex-col items-end gap-1 shrink-0">

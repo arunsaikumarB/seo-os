@@ -11,15 +11,15 @@
 
 Sprint 4 delivers the SEO Intelligence Engine: lightweight website analysis, AI-assisted competitor and keyword discovery, opportunity classification with scoring, prospect Kanban pipeline, and Mission Control wired to live research progress.
 
-| Area | Status |
-|------|--------|
-| Website Analyzer | ✅ |
-| Competitor Discovery + validation | ✅ |
-| Keyword Intelligence (cluster, intent, priority) | ✅ |
-| Opportunity Discovery (8 types) | ✅ |
-| Prospect Pipeline (Kanban) | ✅ |
-| Mission Control (live SEO intelligence) | ✅ |
-| Build / Lint / Typecheck | ✅ 11/11 packages |
+| Area                                             | Status            |
+| ------------------------------------------------ | ----------------- |
+| Website Analyzer                                 | ✅                |
+| Competitor Discovery + validation                | ✅                |
+| Keyword Intelligence (cluster, intent, priority) | ✅                |
+| Opportunity Discovery (8 types)                  | ✅                |
+| Prospect Pipeline (Kanban)                       | ✅                |
+| Mission Control (live SEO intelligence)          | ✅                |
+| Build / Lint / Typecheck                         | ✅ 11/11 packages |
 
 **Sprint score: 89/100**  
 **Recommendation: Conditional Go for Sprint 5**
@@ -113,15 +113,15 @@ POST /intelligence/website/scans
 
 **Package:** `packages/seo-intelligence/src/opportunity-scoring.ts`
 
-| Factor | Weight |
-|--------|--------|
-| Base score | 50 |
-| Opportunity type | +6 to +15 (guest_post highest) |
-| Domain present | +5 |
-| URL present | +3 |
-| Keyword overlap | up to +15 |
-| Competitor overlap | +8 |
-| Brand topic match in title | +10 |
+| Factor                     | Weight                         |
+| -------------------------- | ------------------------------ |
+| Base score                 | 50                             |
+| Opportunity type           | +6 to +15 (guest_post highest) |
+| Domain present             | +5                             |
+| URL present                | +3                             |
+| Keyword overlap            | up to +15                      |
+| Competitor overlap         | +8                             |
+| Brand topic match in title | +10                            |
 
 **Types:** `guest_post`, `resource_page`, `broken_link`, `directory`, `qa_site`, `forum`, `podcast`, `partnership`
 
@@ -174,21 +174,21 @@ Retains Sprint 2–3 panels (workforce, providers, KB summary).
 
 Base: `/v1/projects/:projectId/intelligence`
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/summary` | Intelligence summary |
-| POST | `/discover` | Full discovery orchestration |
-| GET | `/research/events` | Research timeline |
-| GET/POST | `/website/scans` | List / start scan |
-| GET | `/website/scans/:id` | Scan + pages |
-| GET | `/competitors` | Validated + suggestions |
-| POST | `/competitors/discover` | AI competitor discovery |
-| POST | `/competitors/suggestions/:id/:action` | validate / reject |
-| GET | `/keywords` | Keywords + clusters |
-| POST | `/keywords/discover` | AI keyword discovery |
-| GET | `/opportunities` | Scored opportunities |
-| GET | `/prospects/pipeline` | Kanban columns |
-| PATCH | `/prospects/:id/status` | Move pipeline card |
+| Method   | Path                                   | Description                  |
+| -------- | -------------------------------------- | ---------------------------- |
+| GET      | `/summary`                             | Intelligence summary         |
+| POST     | `/discover`                            | Full discovery orchestration |
+| GET      | `/research/events`                     | Research timeline            |
+| GET/POST | `/website/scans`                       | List / start scan            |
+| GET      | `/website/scans/:id`                   | Scan + pages                 |
+| GET      | `/competitors`                         | Validated + suggestions      |
+| POST     | `/competitors/discover`                | AI competitor discovery      |
+| POST     | `/competitors/suggestions/:id/:action` | validate / reject            |
+| GET      | `/keywords`                            | Keywords + clusters          |
+| POST     | `/keywords/discover`                   | AI keyword discovery         |
+| GET      | `/opportunities`                       | Scored opportunities         |
+| GET      | `/prospects/pipeline`                  | Kanban columns               |
+| PATCH    | `/prospects/:id/status`                | Move pipeline card           |
 
 ---
 
@@ -196,15 +196,15 @@ Base: `/v1/projects/:projectId/intelligence`
 
 **File:** `supabase/migrations/007_seo_intelligence.sql`
 
-| Table | Purpose |
-|-------|---------|
-| `website_scans` | Scan runs with brand profile, tech stack, inventory |
-| `website_pages` | Per-page metadata and schema types |
-| `competitor_suggestions` | Pending AI suggestions |
-| `keyword_clusters` | Topic groups |
-| `opportunities` | Classified link-building opportunities |
-| `prospects` | Pipeline records |
-| `research_events` | AI research timeline |
+| Table                    | Purpose                                             |
+| ------------------------ | --------------------------------------------------- |
+| `website_scans`          | Scan runs with brand profile, tech stack, inventory |
+| `website_pages`          | Per-page metadata and schema types                  |
+| `competitor_suggestions` | Pending AI suggestions                              |
+| `keyword_clusters`       | Topic groups                                        |
+| `opportunities`          | Classified link-building opportunities              |
+| `prospects`              | Pipeline records                                    |
+| `research_events`        | AI research timeline                                |
 
 Extends `keywords` and `competitors` from migration 006.
 
@@ -259,27 +259,27 @@ npm run typecheck  # ✅ 17/17 tasks
 
 ## Sprint Score: 89/100
 
-| Category | Score | Notes |
-|----------|-------|-------|
-| Website Analyzer | 17/20 | Fetch-based; no Playwright deep crawl |
-| Competitor Discovery | 18/20 | AI + validation; not live SERP data |
-| Keyword Intelligence | 17/20 | Clustering heuristic; no volume APIs |
-| Opportunity Discovery | 17/20 | AI-classified templates; not live prospecting |
-| Prospect Pipeline | 19/20 | Full Kanban + transitions |
-| Mission Control | 18/20 | Live intelligence widgets |
-| **Total** | **89/100** | |
+| Category              | Score      | Notes                                         |
+| --------------------- | ---------- | --------------------------------------------- |
+| Website Analyzer      | 17/20      | Fetch-based; no Playwright deep crawl         |
+| Competitor Discovery  | 18/20      | AI + validation; not live SERP data           |
+| Keyword Intelligence  | 17/20      | Clustering heuristic; no volume APIs          |
+| Opportunity Discovery | 17/20      | AI-classified templates; not live prospecting |
+| Prospect Pipeline     | 19/20      | Full Kanban + transitions                     |
+| Mission Control       | 18/20      | Live intelligence widgets                     |
+| **Total**             | **89/100** |                                               |
 
 ---
 
 ## Risks
 
-| Risk | Severity | Mitigation |
-|------|----------|------------|
-| External sites block scanner fetch | Medium | User-Agent header; graceful partial results |
-| AI suggestions are heuristic without API key | Medium | Fallback competitors/keywords still work |
-| Opportunity domains are placeholders | Low | Sprint 5 can wire BacklinkProvider |
-| Migration 007 ALTER on 006 tables | Medium | Apply migrations in order |
-| No rate limiting on scan | Medium | 50-page cap per scan |
+| Risk                                         | Severity | Mitigation                                  |
+| -------------------------------------------- | -------- | ------------------------------------------- |
+| External sites block scanner fetch           | Medium   | User-Agent header; graceful partial results |
+| AI suggestions are heuristic without API key | Medium   | Fallback competitors/keywords still work    |
+| Opportunity domains are placeholders         | Low      | Sprint 5 can wire BacklinkProvider          |
+| Migration 007 ALTER on 006 tables            | Medium   | Apply migrations in order                   |
+| No rate limiting on scan                     | Medium   | 50-page cap per scan                        |
 
 ---
 

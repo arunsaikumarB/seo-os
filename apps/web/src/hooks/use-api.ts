@@ -29,7 +29,11 @@ export function useApi() {
     async <T>(path: string, options: RequestInit & { orgId?: string | null } = {}): Promise<T> => {
       if (demoMode) {
         await new Promise((r) => setTimeout(r, 120 + Math.random() * 180));
-        return resolveDemoApi(path, options.method ?? 'GET', options.body as string | undefined) as T;
+        return resolveDemoApi(
+          path,
+          options.method ?? 'GET',
+          options.body as string | undefined
+        ) as T;
       }
       const token = await getAccessToken();
       if (!token) throw new Error('Not authenticated');

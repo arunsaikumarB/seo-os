@@ -1,15 +1,23 @@
 import { randomUUID } from 'node:crypto';
 import type { PipelineStatus } from '@seo-os/seo-intelligence';
+import {
+  canTransition,
+  normalizePipelineStage,
+  type PipelineStage,
+} from '@seo-os/backlink-builder';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 
-const VALID_TRANSITIONS: Record<PipelineStatus, PipelineStatus[]> = {
-  discovered: ['qualified', 'lost'],
-  qualified: ['approved', 'lost', 'discovered'],
-  approved: ['outreach_ready', 'lost'],
-  outreach_ready: ['won', 'lost'],
-  won: [],
-  lost: [],
-};
+const EPIC_STAGES: PipelineStage[] = [
+  'discovered',
+  'qualified',
+  'approved',
+  'campaign_ready',
+  'outreach',
+  'negotiation',
+  'won',
+  'lost',
+  'verified',
+];
 
 export async function listProspects(workspaceId: string) {
   const { data, error } = await getSupabaseAdmin()
@@ -24,25 +32,19 @@ export async function listProspects(workspaceId: string) {
 
 export async function listProspectsByStatus(workspaceId: string) {
   const prospects = await listProspects(workspaceId);
-  const columns: Record<PipelineStatus, typeof prospects> = {
-    discovered: [],
-    qualified: [],
-    approved: [],
-    outreach_ready: [],
-    won: [],
-    lost: [],
-  };
+  const columns = Object.fromEntries(EPIC_STAGES.map((s) => [s, [] as typeof prospects])) as Record<
+    PipelineStage,
+    typeof prospects
+  >;
+
   for (const p of prospects) {
-    const status = p.pipeline_status as PipelineStatus;
+    const status = normalizePipelineStage(p.pipeline_status as string) as PipelineStage;
     if (columns[status]) columns[status].push(p);
   }
   return columns;
 }
 
-export async function createProspectFromOpportunity(
-  workspaceId: string,
-  opportunityId: string
-) {
+export async function createProspectFromOpportunity(workspaceId: string, opportunityId: string) {
   const { data: opp } = await getSupabaseAdmin()
     .from('opportunities')
     .select('*')
@@ -63,7 +65,7 @@ export async function createProspectFromOpportunity(
         url: opp.url,
         title: opp.title,
         prospect_type: opp.opportunity_type,
-        pipeline_status: 'discovered',
+        pipeline_status: opp.pipeline_stage ?? 'discovered',
         opportunity_id: opportunityId,
         score: opp.score,
         summary: opp.summary,
@@ -91,14 +93,15 @@ export async function updateProspectStatus(
 
   if (!prospect) throw new Error('Prospect not found');
 
-  const current = prospect.pipeline_status as PipelineStatus;
-  if (!VALID_TRANSITIONS[current]?.includes(newStatus)) {
-    throw new Error(`Invalid transition: ${current} → ${newStatus}`);
+  const current = normalizePipelineStage(prospect.pipeline_status as string) as PipelineStage;
+  const next = normalizePipelineStage(newStatus) as PipelineStage;
+  if (!canTransition(current, next)) {
+    throw new Error(`Invalid transition: ${current} → ${next}`);
   }
 
   const { data, error } = await getSupabaseAdmin()
     .from('prospects')
-    .update({ pipeline_status: newStatus })
+    .update({ pipeline_status: next })
     .eq('id', prospectId)
     .select()
     .single();

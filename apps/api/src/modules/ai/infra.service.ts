@@ -8,6 +8,10 @@ import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { getIntelligenceSummary } from '../intelligence/intelligence.service.js';
 import { getCampaignSummary, listCampaigns } from '../campaigns/campaign.service.js';
 import { getBacklinkDashboard } from '../backlinks/backlink-builder.service.js';
+import { getAutomationSummary } from '../backlinks/automation.service.js';
+import { getBrowserIntelligenceSummary } from '../intelligence/browser-intelligence.service.js';
+import { getRelationshipSummary } from '../relationships/relationship-intelligence.service.js';
+import { getOutreachSummary } from '../outreach/outreach.service.js';
 import { getPendingApprovalCount } from '../campaigns/approval.service.js';
 import { listAgentRuns } from './agent.service.js';
 
@@ -58,8 +62,20 @@ export async function getQueueStatus() {
 }
 
 export async function getMissionControlSummary(workspaceId: string) {
-  const [knowledge, memory, runs, conversations, intelligence, campaigns, pendingApprovals, backlinkBuilder] =
-    await Promise.all([
+  const [
+    knowledge,
+    memory,
+    runs,
+    conversations,
+    intelligence,
+    campaigns,
+    pendingApprovals,
+    backlinkBuilder,
+    automation,
+    browserIntelligence,
+    relationshipIntelligence,
+    outreach,
+  ] = await Promise.all([
     getKnowledgeStats(workspaceId),
     listMemory(workspaceId),
     listAgentRuns(workspaceId, 10),
@@ -71,6 +87,10 @@ export async function getMissionControlSummary(workspaceId: string) {
     getCampaignSummary(workspaceId),
     getPendingApprovalCount(workspaceId),
     getBacklinkDashboard(workspaceId),
+    getAutomationSummary(workspaceId),
+    getBrowserIntelligenceSummary(workspaceId),
+    getRelationshipSummary(workspaceId),
+    getOutreachSummary(workspaceId),
   ]);
 
   const activeCampaigns = await listCampaigns(workspaceId);
@@ -107,5 +127,9 @@ export async function getMissionControlSummary(workspaceId: string) {
       timeline: campaignTimeline.data ?? [],
     },
     backlinkBuilder,
+    automation,
+    browserIntelligence,
+    relationshipIntelligence,
+    outreach,
   };
 }

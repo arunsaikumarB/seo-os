@@ -1,9 +1,6 @@
 import { Router } from 'express';
 import { uploadDocumentSchema, AppError } from '@seo-os/shared';
-import {
-  authMiddleware,
-  type AuthenticatedRequest,
-} from '../../middleware/auth.js';
+import { authMiddleware, type AuthenticatedRequest } from '../../middleware/auth.js';
 import { requireRole } from '../../middleware/rbac.js';
 import {
   deleteDocument,
@@ -28,19 +25,14 @@ function param(value: string | string[]): string {
 
 export const knowledgeRouter = Router({ mergeParams: true });
 
-knowledgeRouter.get(
-  '/documents',
-  authMiddleware,
-  requireRole('viewer'),
-  async (req, res, next) => {
-    try {
-      const docs = await listDocuments(param(req.params.projectId));
-      res.json({ data: docs });
-    } catch (err) {
-      next(err);
-    }
+knowledgeRouter.get('/documents', authMiddleware, requireRole('viewer'), async (req, res, next) => {
+  try {
+    const docs = await listDocuments(param(req.params.projectId));
+    res.json({ data: docs });
+  } catch (err) {
+    next(err);
   }
-);
+});
 
 knowledgeRouter.get(
   '/documents/:documentId',
@@ -87,7 +79,10 @@ knowledgeRouter.delete(
   requireRole('member'),
   async (req, res, next) => {
     try {
-      const result = await deleteDocument(param(req.params.documentId), param(req.params.projectId));
+      const result = await deleteDocument(
+        param(req.params.documentId),
+        param(req.params.projectId)
+      );
       res.json({ data: result });
     } catch (err) {
       next(err);
@@ -101,7 +96,10 @@ knowledgeRouter.post(
   requireRole('member'),
   async (req, res, next) => {
     try {
-      const result = await reingestDocument(param(req.params.documentId), param(req.params.projectId));
+      const result = await reingestDocument(
+        param(req.params.documentId),
+        param(req.params.projectId)
+      );
       res.json({ data: result });
     } catch (err) {
       next(err);
@@ -109,49 +107,34 @@ knowledgeRouter.post(
   }
 );
 
-knowledgeRouter.get(
-  '/search',
-  authMiddleware,
-  requireRole('viewer'),
-  async (req, res, next) => {
-    try {
-      const q = String(req.query.q ?? '');
-      if (!q) throw new AppError(400, 'VALIDATION_ERROR', 'Query parameter q required');
-      const results = await searchKnowledge(param(req.params.projectId), q);
-      res.json({ data: results });
-    } catch (err) {
-      next(err);
-    }
+knowledgeRouter.get('/search', authMiddleware, requireRole('viewer'), async (req, res, next) => {
+  try {
+    const q = String(req.query.q ?? '');
+    if (!q) throw new AppError(400, 'VALIDATION_ERROR', 'Query parameter q required');
+    const results = await searchKnowledge(param(req.params.projectId), q);
+    res.json({ data: results });
+  } catch (err) {
+    next(err);
   }
-);
+});
 
-knowledgeRouter.get(
-  '/stats',
-  authMiddleware,
-  requireRole('viewer'),
-  async (req, res, next) => {
-    try {
-      const stats = await getKnowledgeStats(param(req.params.projectId));
-      res.json({ data: stats });
-    } catch (err) {
-      next(err);
-    }
+knowledgeRouter.get('/stats', authMiddleware, requireRole('viewer'), async (req, res, next) => {
+  try {
+    const stats = await getKnowledgeStats(param(req.params.projectId));
+    res.json({ data: stats });
+  } catch (err) {
+    next(err);
   }
-);
+});
 
-knowledgeRouter.get(
-  '/memory',
-  authMiddleware,
-  requireRole('viewer'),
-  async (req, res, next) => {
-    try {
-      const memory = await listMemory(param(req.params.projectId));
-      res.json({ data: memory });
-    } catch (err) {
-      next(err);
-    }
+knowledgeRouter.get('/memory', authMiddleware, requireRole('viewer'), async (req, res, next) => {
+  try {
+    const memory = await listMemory(param(req.params.projectId));
+    res.json({ data: memory });
+  } catch (err) {
+    next(err);
   }
-);
+});
 
 knowledgeRouter.post(
   '/memory/entries',

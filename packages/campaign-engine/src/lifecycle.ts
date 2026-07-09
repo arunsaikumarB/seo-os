@@ -19,10 +19,13 @@ export function assertCampaignTransition(from: CampaignStatus, to: CampaignStatu
   }
 }
 
-export function computeCampaignProgress(status: CampaignStatus, metrics: {
-  opportunitiesTotal?: number;
-  opportunitiesApproved?: number;
-}): number {
+export function computeCampaignProgress(
+  status: CampaignStatus,
+  metrics: {
+    opportunitiesTotal?: number;
+    opportunitiesApproved?: number;
+  }
+): number {
   if (status === 'completed') return 100;
   if (status === 'draft' || status === 'pending_approval') return 0;
   if (status === 'cancelled') return 0;

@@ -10,6 +10,7 @@ import type {
 } from './interfaces/index.js';
 import { createAIProviderRouter } from './ai/router.js';
 import type { AIProviderRouter } from './ai/types.js';
+import { createEmailProvider, createEmailProviderFromAccount } from './email/router.js';
 
 export interface ProviderRegistryConfig {
   mode: ProviderMode;
@@ -31,8 +32,15 @@ export interface ProviderRegistry {
   getAIProvider(): AIProvider;
   getAIProviderRouter(): AIProviderRouter;
   getEmailProvider(): EmailProvider;
+  getEmailProviderForAccount(
+    providerType: string,
+    accountConfig: Record<string, unknown>
+  ): EmailProvider;
   getStatus(): Record<ProviderType, { name: string; label: string; cost: string }>;
-  getAIHealth(): Promise<{ primary: { name: string; status: string }; fallback?: { name: string; status: string } }>;
+  getAIHealth(): Promise<{
+    primary: { name: string; status: string };
+    fallback?: { name: string; status: string };
+  }>;
 }
 
 export function createProviderRegistry(config: ProviderRegistryConfig): ProviderRegistry {
@@ -44,6 +52,16 @@ export function createProviderRegistry(config: ProviderRegistryConfig): Provider
     geminiApiKey: config.geminiApiKey,
     ollamaBaseUrl: config.ollamaBaseUrl,
   });
+
+  const defaultEmailProvider = createEmailProvider(
+    config.email === 'smtp'
+      ? { type: 'smtp', config: { host: '', port: 587 } }
+      : config.email === 'gmail'
+        ? { type: 'gmail', config: {} }
+        : config.email === 'outlook'
+          ? { type: 'outlook', config: {} }
+          : { type: 'mock' }
+  );
 
   const aiName = aiRouter.primary === 'none' ? 'none' : aiRouter.primary;
   const aiLabel =
@@ -60,14 +78,16 @@ export function createProviderRegistry(config: ProviderRegistryConfig): Provider
     getCompetitorProvider: notImplemented('competitor') as () => CompetitorProvider,
     getAIProvider: () => aiRouter,
     getAIProviderRouter: () => aiRouter,
-    getEmailProvider: notImplemented('email') as () => EmailProvider,
+    getEmailProvider: () => defaultEmailProvider,
+    getEmailProviderForAccount: (providerType, accountConfig) =>
+      createEmailProviderFromAccount(providerType, accountConfig),
     getStatus: () => ({
       backlink: { name: 'none', label: 'Not configured', cost: 'free' },
       keyword: { name: 'none', label: 'Not configured', cost: 'free' },
       serp: { name: 'none', label: 'Not configured', cost: 'free' },
       competitor: { name: 'none', label: 'Not configured', cost: 'free' },
       ai: { name: aiName, label: aiLabel, cost: 'free' },
-      email: { name: 'none', label: 'Not configured', cost: 'free' },
+      email: { name: defaultEmailProvider.name, label: defaultEmailProvider.name, cost: 'free' },
     }),
     getAIHealth: async () => {
       const health = await aiRouter.healthCheck();

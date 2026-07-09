@@ -3,7 +3,11 @@ import { Activity } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { DEMO_TIMELINE } from '@/demo/data';
 
-export function LiveTimeline({ events = DEMO_TIMELINE, title = 'Activity Timeline', limit = 8 }: {
+export function LiveTimeline({
+  events = DEMO_TIMELINE,
+  title = 'Activity Timeline',
+  limit = 8,
+}: {
   events?: typeof DEMO_TIMELINE;
   title?: string;
   limit?: number;

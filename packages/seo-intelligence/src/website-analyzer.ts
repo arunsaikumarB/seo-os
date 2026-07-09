@@ -15,9 +15,12 @@ export const PIPELINE_STATUSES = [
   'discovered',
   'qualified',
   'approved',
-  'outreach_ready',
+  'campaign_ready',
+  'outreach',
+  'negotiation',
   'won',
   'lost',
+  'verified',
 ] as const;
 
 export type PipelineStatus = (typeof PIPELINE_STATUSES)[number];
@@ -93,7 +96,10 @@ export function extractMetadataFromHtml(url: string, html: string): PageMetadata
     }
   }
 
-  const textContent = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  const textContent = html
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   return {
     url,
     path,
@@ -114,7 +120,8 @@ export function detectTechStack(html: string, headers: Record<string, string>): 
   if (html.includes('__NEXT_DATA__')) frameworks.push('Next.js');
   if (html.includes('react-root') || html.includes('data-reactroot')) frameworks.push('React');
   if (html.includes('ng-version')) frameworks.push('Angular');
-  if (html.includes('gtag(') || html.includes('googletagmanager')) analytics.push('Google Analytics');
+  if (html.includes('gtag(') || html.includes('googletagmanager'))
+    analytics.push('Google Analytics');
   if (html.includes('plausible.io')) analytics.push('Plausible');
 
   let cms: string | undefined;
@@ -171,7 +178,9 @@ export async function discoverSitemapUrls(baseUrl: string, maxPages = 50): Promi
 }
 
 export function buildBrandProfile(homepage: PageMetadata, html: string): BrandProfile {
-  const ogSiteMatch = html.match(/<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']*)["']/i);
+  const ogSiteMatch = html.match(
+    /<meta[^>]+property=["']og:site_name["'][^>]+content=["']([^"']*)["']/i
+  );
   const topics: string[] = [];
   if (homepage.h1) topics.push(homepage.h1);
   if (homepage.title) topics.push(homepage.title.split('|')[0].trim());

@@ -11,15 +11,15 @@
 
 Sprint 2 delivers the AI infrastructure layer: provider abstraction with Gemini + Ollama failover, agent runtime framework, 8 workforce agent stubs, background queue integration, event/telemetry systems, feature flags, database tables, API endpoints, and a Mission Control layout focused on live AI infrastructure (no placeholder analytics).
 
-| Area | Status |
-|------|--------|
-| AI Provider Layer | ✅ |
-| AI Runtime | ✅ |
-| AI Workforce Foundation (8 agents) | ✅ |
-| AI Infrastructure (queue, events, logging, health) | ✅ |
-| Feature Flags | ✅ |
-| Mission Control (foundation only) | ✅ |
-| Build / Lint / Typecheck | ✅ 9/9 packages |
+| Area                                               | Status          |
+| -------------------------------------------------- | --------------- |
+| AI Provider Layer                                  | ✅              |
+| AI Runtime                                         | ✅              |
+| AI Workforce Foundation (8 agents)                 | ✅              |
+| AI Infrastructure (queue, events, logging, health) | ✅              |
+| Feature Flags                                      | ✅              |
+| Mission Control (foundation only)                  | ✅              |
+| Build / Lint / Typecheck                           | ✅ 9/9 packages |
 
 **Sprint score: 91/100**  
 **Recommendation: Conditional Go for Sprint 3**
@@ -71,26 +71,26 @@ Sprint 2 delivers the AI infrastructure layer: provider abstraction with Gemini 
 **Package:** `packages/ai-runtime/src/agent-registry.ts`  
 **Contracts:** `packages/agent-contracts/src/index.ts`
 
-| Concept | Implementation |
-|---------|----------------|
-| Definition store | `AGENT_DEFINITIONS` — 8 Sprint 2 agents with `outputSchemaId`, `syncMode`, `defaultApproval` |
-| Handler registry | `Map<AgentType, AgentHandler>` — extensible per agent |
-| Registration | `registerSprint2Agents()` wires stub handlers in `agents/sprint2-stubs.ts` |
-| Discovery | `listSprint2Agents()`, `getDefinition()`, `hasHandler()` |
-| Execution context | `{ workspaceId, agentType, input, runId }` |
+| Concept           | Implementation                                                                               |
+| ----------------- | -------------------------------------------------------------------------------------------- |
+| Definition store  | `AGENT_DEFINITIONS` — 8 Sprint 2 agents with `outputSchemaId`, `syncMode`, `defaultApproval` |
+| Handler registry  | `Map<AgentType, AgentHandler>` — extensible per agent                                        |
+| Registration      | `registerSprint2Agents()` wires stub handlers in `agents/sprint2-stubs.ts`                   |
+| Discovery         | `listSprint2Agents()`, `getDefinition()`, `hasHandler()`                                     |
+| Execution context | `{ workspaceId, agentType, input, runId }`                                                   |
 
 **Sprint 2 workforce agents (framework only):**
 
-| Agent | Handler | Output Schema |
-|-------|---------|---------------|
-| CEO Agent | Stub | `ceo_plan_v1` |
-| SEO Strategist | Stub | `seo_strategy_v1` |
-| Research Manager | Stub | `research_plan_v1` |
-| Competitor Intelligence | Stub | `competitor_intel_v1` |
-| Prospect Discovery | Stub | `prospect_discovery_v1` |
-| Content Strategist | Stub | `content_strategy_v1` |
-| Outreach Manager | Stub | `outreach_plan_v1` |
-| QA Agent | Stub (with `passed: true`) | `qa_result_v1` |
+| Agent                   | Handler                    | Output Schema           |
+| ----------------------- | -------------------------- | ----------------------- |
+| CEO Agent               | Stub                       | `ceo_plan_v1`           |
+| SEO Strategist          | Stub                       | `seo_strategy_v1`       |
+| Research Manager        | Stub                       | `research_plan_v1`      |
+| Competitor Intelligence | Stub                       | `competitor_intel_v1`   |
+| Prospect Discovery      | Stub                       | `prospect_discovery_v1` |
+| Content Strategist      | Stub                       | `content_strategy_v1`   |
+| Outreach Manager        | Stub                       | `outreach_plan_v1`      |
+| QA Agent                | Stub (with `passed: true`) | `qa_result_v1`          |
 
 **Lifecycle:** `pending → queued → running → completed | failed | cancelled`  
 Enforced by `packages/ai-runtime/src/lifecycle.ts`.
@@ -113,13 +113,13 @@ createAIProviderRouter(config)
             3. Record provider used on result
 ```
 
-| Component | File | Responsibility |
-|-----------|------|----------------|
-| `AIProvider` interface | `interfaces/index.ts` | `complete(messages, options) → { text, usage }` |
-| Gemini provider | `ai/gemini.ts` | REST `generateContent`, health check |
-| Ollama provider | `ai/ollama.ts` | REST `/api/chat`, `/api/tags` health |
-| Router | `ai/router.ts` | Failover, `healthCheck()` |
-| Registry wiring | `registry.ts` | `getAIProvider()`, `getAIProviderRouter()`, `getAIHealth()` |
+| Component              | File                  | Responsibility                                              |
+| ---------------------- | --------------------- | ----------------------------------------------------------- |
+| `AIProvider` interface | `interfaces/index.ts` | `complete(messages, options) → { text, usage }`             |
+| Gemini provider        | `ai/gemini.ts`        | REST `generateContent`, health check                        |
+| Ollama provider        | `ai/ollama.ts`        | REST `/api/chat`, `/api/tags` health                        |
+| Router                 | `ai/router.ts`        | Failover, `healthCheck()`                                   |
+| Registry wiring        | `registry.ts`         | `getAIProvider()`, `getAIProviderRouter()`, `getAIHealth()` |
 
 **Environment variables:**
 
@@ -196,18 +196,18 @@ executeAgentRun() → AgentRunner → DB persist
 **API:** `GET /v1/feature-flags`  
 **Web:** `useFeatureFlags()` + sidebar filtering in `sidebar.tsx`
 
-| Flag | Sprint 2 Default | Gated Nav |
-|------|------------------|-----------|
-| `ai_workforce` | ✅ true | AI Command Center, AI Agents |
-| `mission_control` | ✅ true | Mission Control |
-| `knowledge_base` | ❌ false | Knowledge Base |
-| `ai_memory` | ❌ false | AI Memory |
-| `backlink_builder` | ❌ false | Prospects, Backlink Builder |
-| `outreach` | ❌ false | Outreach |
-| `technical_seo` | ❌ false | Technical SEO |
-| `reports` | ❌ false | Reports |
-| `marketplace` | ❌ false | (future) |
-| `white_label` | ❌ false | (future) |
+| Flag               | Sprint 2 Default | Gated Nav                    |
+| ------------------ | ---------------- | ---------------------------- |
+| `ai_workforce`     | ✅ true          | AI Command Center, AI Agents |
+| `mission_control`  | ✅ true          | Mission Control              |
+| `knowledge_base`   | ❌ false         | Knowledge Base               |
+| `ai_memory`        | ❌ false         | AI Memory                    |
+| `backlink_builder` | ❌ false         | Prospects, Backlink Builder  |
+| `outreach`         | ❌ false         | Outreach                     |
+| `technical_seo`    | ❌ false         | Technical SEO                |
+| `reports`          | ❌ false         | Reports                      |
+| `marketplace`      | ❌ false         | (future)                     |
+| `white_label`      | ❌ false         | (future)                     |
 
 Overrides via `ai_settings.feature_overrides` JSONB are scaffolded in migration; API wiring deferred to Sprint 3.
 
@@ -215,18 +215,18 @@ Overrides via `ai_settings.feature_overrides` JSONB are scaffolded in migration;
 
 ## API Endpoints (New)
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/v1/feature-flags` | Module feature flags |
-| GET | `/v1/ai/agents` | Sprint 2 agent definitions |
-| GET | `/v1/ai/providers/health` | AI provider health |
-| GET | `/v1/providers/status` | Full provider registry status (live) |
-| POST | `/v1/projects/:id/ai/agents/:type/run` | Run agent (sync or async) |
-| GET | `/v1/projects/:id/ai/runs` | List runs |
-| GET | `/v1/projects/:id/ai/runs/:runId` | Get run |
-| GET | `/v1/projects/:id/ai/health` | Workspace AI health summary |
-| GET | `/v1/projects/:id/ai/events` | Live + persisted events |
-| GET | `/v1/projects/:id/ai/queue` | Queue monitor |
+| Method | Path                                   | Description                          |
+| ------ | -------------------------------------- | ------------------------------------ |
+| GET    | `/v1/feature-flags`                    | Module feature flags                 |
+| GET    | `/v1/ai/agents`                        | Sprint 2 agent definitions           |
+| GET    | `/v1/ai/providers/health`              | AI provider health                   |
+| GET    | `/v1/providers/status`                 | Full provider registry status (live) |
+| POST   | `/v1/projects/:id/ai/agents/:type/run` | Run agent (sync or async)            |
+| GET    | `/v1/projects/:id/ai/runs`             | List runs                            |
+| GET    | `/v1/projects/:id/ai/runs/:runId`      | Get run                              |
+| GET    | `/v1/projects/:id/ai/health`           | Workspace AI health summary          |
+| GET    | `/v1/projects/:id/ai/events`           | Live + persisted events              |
+| GET    | `/v1/projects/:id/ai/queue`            | Queue monitor                        |
 
 **Run agent example:**
 
@@ -241,15 +241,15 @@ POST /v1/projects/{projectId}/ai/agents/ceo/run
 
 **File:** `supabase/migrations/005_ai_foundation.sql`
 
-| Table | Purpose |
-|-------|---------|
-| `agent_definitions` | Seeded 8 Sprint 2 agents |
-| `agent_runs` | Run records with tokens, provider, status |
-| `agent_run_steps` | Multi-step run foundation |
-| `prompt_templates` | Versioned prompts (workspace + global) |
-| `ai_settings` | Per-workspace AI config |
-| `ai_usage_ledger` | Token usage audit |
-| `ai_events` | Persisted event log |
+| Table               | Purpose                                   |
+| ------------------- | ----------------------------------------- |
+| `agent_definitions` | Seeded 8 Sprint 2 agents                  |
+| `agent_runs`        | Run records with tokens, provider, status |
+| `agent_run_steps`   | Multi-step run foundation                 |
+| `prompt_templates`  | Versioned prompts (workspace + global)    |
+| `ai_settings`       | Per-workspace AI config                   |
+| `ai_usage_ledger`   | Token usage audit                         |
+| `ai_events`         | Persisted event log                       |
 
 RLS policies applied using `can_access_workspace()` from migration 004.
 
@@ -338,28 +338,28 @@ npm run typecheck  # ✅ 13/13 tasks
 
 ## Sprint Score: 91/100
 
-| Category | Score | Notes |
-|----------|-------|-------|
-| Provider layer | 18/20 | Gemini + Ollama + failover; no Vercel AI SDK wrapper yet |
-| Agent runtime | 19/20 | Full framework; streaming is foundation-only |
-| Workforce agents | 17/20 | 8 stubs registered; 6 remaining agents in contracts only |
-| Infrastructure | 18/20 | Queue, events, telemetry; worker runs in API process |
-| Feature flags | 9/10 | Defaults + nav gating; no per-org override API |
-| Mission Control | 10/10 | AI-focused layout, no placeholder analytics |
-| **Total** | **91/100** | |
+| Category         | Score      | Notes                                                    |
+| ---------------- | ---------- | -------------------------------------------------------- |
+| Provider layer   | 18/20      | Gemini + Ollama + failover; no Vercel AI SDK wrapper yet |
+| Agent runtime    | 19/20      | Full framework; streaming is foundation-only             |
+| Workforce agents | 17/20      | 8 stubs registered; 6 remaining agents in contracts only |
+| Infrastructure   | 18/20      | Queue, events, telemetry; worker runs in API process     |
+| Feature flags    | 9/10       | Defaults + nav gating; no per-org override API           |
+| Mission Control  | 10/10      | AI-focused layout, no placeholder analytics              |
+| **Total**        | **91/100** |                                                          |
 
 ---
 
 ## Risks
 
-| Risk | Severity | Mitigation |
-|------|----------|------------|
-| Migration 005 not applied in staging | High | Run `db:push` before testing agent runs |
-| No live Gemini/Ollama in CI | Medium | Stub runs work without providers; health shows `disabled` |
-| In-memory EventBus lost on API restart | Medium | `ai_events` table persists; live feed resets |
-| `ENABLE_WORKERS=false` default | Low | Documented; async runs fall back to sync |
-| Minimal JSON Schema validation | Low | Expand with AJV in Sprint 3 |
-| Agent runs fail if DB tables missing | High | Apply migration before API agent endpoints |
+| Risk                                   | Severity | Mitigation                                                |
+| -------------------------------------- | -------- | --------------------------------------------------------- |
+| Migration 005 not applied in staging   | High     | Run `db:push` before testing agent runs                   |
+| No live Gemini/Ollama in CI            | Medium   | Stub runs work without providers; health shows `disabled` |
+| In-memory EventBus lost on API restart | Medium   | `ai_events` table persists; live feed resets              |
+| `ENABLE_WORKERS=false` default         | Low      | Documented; async runs fall back to sync                  |
+| Minimal JSON Schema validation         | Low      | Expand with AJV in Sprint 3                               |
+| Agent runs fail if DB tables missing   | High     | Apply migration before API agent endpoints                |
 
 ---
 

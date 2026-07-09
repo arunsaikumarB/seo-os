@@ -1,7 +1,12 @@
 import type { AIProvider } from '../interfaces/index.js';
 import { createGeminiProvider, checkGeminiHealth } from './gemini.js';
 import { createOllamaProvider, checkOllamaHealth } from './ollama.js';
-import type { AICompleteResult, AIProviderRouter, AIProviderRouterOptions, ProviderHealth } from './types.js';
+import type {
+  AICompleteResult,
+  AIProviderRouter,
+  AIProviderRouterOptions,
+  ProviderHealth,
+} from './types.js';
 
 export function createAIProviderRouter(options: AIProviderRouterOptions): AIProviderRouter {
   const timeoutMs = options.timeoutMs ?? 30_000;
@@ -10,7 +15,11 @@ export function createAIProviderRouter(options: AIProviderRouterOptions): AIProv
 
   const primary = gemini ? 'gemini' : ollama ? 'ollama' : 'none';
 
-  async function tryComplete(provider: AIProvider, messages: Array<{ role: string; content: string }>, opts: Record<string, unknown>): Promise<AICompleteResult> {
+  async function tryComplete(
+    provider: AIProvider,
+    messages: Array<{ role: string; content: string }>,
+    opts: Record<string, unknown>
+  ): Promise<AICompleteResult> {
     const result = await provider.complete(messages, { ...opts, timeoutMs });
     return { ...result, provider: provider.name };
   }
@@ -46,7 +55,11 @@ export function createAIProviderRouter(options: AIProviderRouterOptions): AIProv
       const [primaryHealth, fallbackHealth] = await Promise.all([
         gemini
           ? checkGeminiHealth(options.geminiApiKey).then((h) => ({ name: 'gemini', ...h }))
-          : Promise.resolve({ name: 'gemini', status: 'disabled' as const, message: 'Not configured' }),
+          : Promise.resolve({
+              name: 'gemini',
+              status: 'disabled' as const,
+              message: 'Not configured',
+            }),
         ollama
           ? checkOllamaHealth(options.ollamaBaseUrl).then((h) => ({ name: 'ollama', ...h }))
           : Promise.resolve(undefined),

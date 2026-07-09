@@ -66,56 +66,59 @@ packages/db/tests/
 
 ## Screens Implemented
 
-| Screen | Route | Status |
-|--------|-------|--------|
-| Login | `/login` | ✅ Functional |
-| Sign up | `/signup` | ✅ Functional |
-| Onboarding — Organization | `/onboarding/organization` | ✅ Functional |
-| Onboarding — Project | `/onboarding/project` | ✅ Functional |
-| Projects list | `/projects` | ✅ CRUD UI |
-| Mission Control | `/projects/:id/mission-control` | ✅ Placeholder KPI cards |
-| Universal Search | `/projects/:id/search` | ✅ Placeholder |
-| Org Team | `/org/team` | ✅ Member list |
-| Org Settings | `/org/settings/general` | ✅ Foundation |
-| All future modules | `/projects/:id/*` | ✅ Placeholder routes |
-| Org future modules | `/org/*` | ✅ Placeholder routes |
+| Screen                    | Route                           | Status                   |
+| ------------------------- | ------------------------------- | ------------------------ |
+| Login                     | `/login`                        | ✅ Functional            |
+| Sign up                   | `/signup`                       | ✅ Functional            |
+| Onboarding — Organization | `/onboarding/organization`      | ✅ Functional            |
+| Onboarding — Project      | `/onboarding/project`           | ✅ Functional            |
+| Projects list             | `/projects`                     | ✅ CRUD UI               |
+| Mission Control           | `/projects/:id/mission-control` | ✅ Placeholder KPI cards |
+| Universal Search          | `/projects/:id/search`          | ✅ Placeholder           |
+| Org Team                  | `/org/team`                     | ✅ Member list           |
+| Org Settings              | `/org/settings/general`         | ✅ Foundation            |
+| All future modules        | `/projects/:id/*`               | ✅ Placeholder routes    |
+| Org future modules        | `/org/*`                        | ✅ Placeholder routes    |
 
 ---
 
 ## Components Created
 
-| Component | Purpose |
-|-----------|---------|
-| `AuthProvider` / `useAuth` | Session + sign in/out/OAuth |
-| `ProtectedRoute` | Route guard |
-| `OrgBootstrap` | Default org from `/me` |
-| `OrgSwitcher` | Header org context |
-| `ProjectSwitcher` | Header project context |
-| `UserMenu` | Profile + logout |
-| `NotificationsMenu` | Notifications foundation |
-| `CommandPalette` | Ctrl+K navigation |
-| `Breadcrumbs` | Page context trail |
-| `MobileNav` | Bottom nav (mobile) |
-| `AppLayout` | Org-level pages layout |
-| `OrgShell` | Org section layout |
-| `ProjectFormDialog` | Create/edit project |
-| UI: `Dialog`, `DropdownMenu`, `Avatar`, `Command`, `Label`, `Skeleton` | Design system |
+| Component                                                              | Purpose                     |
+| ---------------------------------------------------------------------- | --------------------------- |
+| `AuthProvider` / `useAuth`                                             | Session + sign in/out/OAuth |
+| `ProtectedRoute`                                                       | Route guard                 |
+| `OrgBootstrap`                                                         | Default org from `/me`      |
+| `OrgSwitcher`                                                          | Header org context          |
+| `ProjectSwitcher`                                                      | Header project context      |
+| `UserMenu`                                                             | Profile + logout            |
+| `NotificationsMenu`                                                    | Notifications foundation    |
+| `CommandPalette`                                                       | Ctrl+K navigation           |
+| `Breadcrumbs`                                                          | Page context trail          |
+| `MobileNav`                                                            | Bottom nav (mobile)         |
+| `AppLayout`                                                            | Org-level pages layout      |
+| `OrgShell`                                                             | Org section layout          |
+| `ProjectFormDialog`                                                    | Create/edit project         |
+| UI: `Dialog`, `DropdownMenu`, `Avatar`, `Command`, `Label`, `Skeleton` | Design system               |
 
 ---
 
 ## Routes Created
 
 ### Auth
+
 - `/login`, `/signup`
 - `/onboarding/organization`, `/onboarding/project`
 
 ### Organization
+
 - `/org/team`
 - `/org/settings/general`
 - `/org/settings/notifications`, `/org/settings/security` (placeholder)
 - `/org/executive`, `/org/audit-log`, `/org/integrations`, `/org/billing` (placeholder)
 
 ### Projects (full tree — placeholders except Mission Control + Search shell)
+
 - `/projects`
 - `/projects/:projectId/mission-control`
 - `/projects/:projectId/command-center`
@@ -137,20 +140,20 @@ packages/db/tests/
 
 ## API Endpoints Added/Updated
 
-| Method | Path | Description |
-|--------|------|-------------|
-| PATCH | `/v1/me` | Update profile |
-| PATCH | `/v1/organizations/:orgId` | Update org (admin+) |
-| GET | `/v1/organizations/:orgId/members` | List members |
-| PATCH | `/v1/projects/:projectId` | Update project |
-| POST | `/v1/projects/:projectId/archive` | Archive project (manager+) |
+| Method | Path                               | Description                |
+| ------ | ---------------------------------- | -------------------------- |
+| PATCH  | `/v1/me`                           | Update profile             |
+| PATCH  | `/v1/organizations/:orgId`         | Update org (admin+)        |
+| GET    | `/v1/organizations/:orgId/members` | List members               |
+| PATCH  | `/v1/projects/:projectId`          | Update project             |
+| POST   | `/v1/projects/:projectId/archive`  | Archive project (manager+) |
 
 ---
 
 ## Database Changes
 
-| Migration | Contents |
-|-----------|----------|
+| Migration             | Contents                                                                                                                                    |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `004_rls_tenancy.sql` | RLS helper functions + policies for organizations, profiles, org_members, org_invites, workspaces, workspace_settings, domain_verifications |
 
 Apply: `npm run db:push`
@@ -169,40 +172,40 @@ npm run typecheck ✅ 10/10 tasks
 
 ## Remaining Technical Debt
 
-| Item | Priority | Sprint |
-|------|----------|--------|
-| RLS integration test (live Supabase) | High | 1.1 |
-| Org settings full form UI | Medium | 2 |
-| Invite members flow | Medium | 2 |
-| Command palette search (not just nav) | Medium | 3 |
-| Collapsible sidebar / tablet sheet | Medium | 2 |
-| Bundle size (730KB JS) — code split | Low | 2 |
-| Google OAuth redirect URL config in Supabase dashboard | Ops | Now |
+| Item                                                   | Priority | Sprint |
+| ------------------------------------------------------ | -------- | ------ |
+| RLS integration test (live Supabase)                   | High     | 1.1    |
+| Org settings full form UI                              | Medium   | 2      |
+| Invite members flow                                    | Medium   | 2      |
+| Command palette search (not just nav)                  | Medium   | 3      |
+| Collapsible sidebar / tablet sheet                     | Medium   | 2      |
+| Bundle size (730KB JS) — code split                    | Low      | 2      |
+| Google OAuth redirect URL config in Supabase dashboard | Ops      | Now    |
 
 ---
 
 ## Risks
 
-| Risk | Severity | Mitigation |
-|------|----------|------------|
-| RLS not tested against live Supabase in CI | High | Run `SUPABASE_TEST=1 npm run test --workspace=@seo-os/db` locally |
-| Email confirmation may block signup in prod | Medium | Configure Supabase auth settings for dev |
-| `X-Org-Id` must match JWT user membership | Medium | OrgBootstrap + switcher set context |
-| No invite flow yet | Low | Sprint 2 |
+| Risk                                        | Severity | Mitigation                                                        |
+| ------------------------------------------- | -------- | ----------------------------------------------------------------- |
+| RLS not tested against live Supabase in CI  | High     | Run `SUPABASE_TEST=1 npm run test --workspace=@seo-os/db` locally |
+| Email confirmation may block signup in prod | Medium   | Configure Supabase auth settings for dev                          |
+| `X-Org-Id` must match JWT user membership   | Medium   | OrgBootstrap + switcher set context                               |
+| No invite flow yet                          | Low      | Sprint 2                                                          |
 
 ---
 
 ## Sprint 1 Score: **92 / 100**
 
-| Area | Score |
-|------|-------|
-| Authentication | 94% |
-| Organizations | 88% |
-| Projects | 93% |
-| Application shell | 91% |
-| Routing | 96% |
-| Database / RLS | 85% |
-| Design system | 90% |
+| Area              | Score |
+| ----------------- | ----- |
+| Authentication    | 94%   |
+| Organizations     | 88%   |
+| Projects          | 93%   |
+| Application shell | 91%   |
+| Routing           | 96%   |
+| Database / RLS    | 85%   |
+| Design system     | 90%   |
 
 **Gaps:** RLS live test skipped without Supabase; org settings UI minimal; invite flow deferred.
 
@@ -213,6 +216,7 @@ npm run typecheck ✅ 10/10 tasks
 ### Recommendation: **Conditional Go**
 
 Sprint 1 meets the sprint plan Definition of Done for core flows:
+
 - ✅ Sign up → create org → create project path exists
 - ✅ Project switcher changes URL context
 - ✅ RBAC on API routes (5 roles via `requireRole`)
@@ -238,4 +242,4 @@ Sprint 1 meets the sprint plan Definition of Done for core flows:
 
 ---
 
-*Sprint 1 complete — awaiting review.*
+_Sprint 1 complete — awaiting review._

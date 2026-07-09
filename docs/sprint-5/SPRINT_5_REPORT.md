@@ -11,15 +11,15 @@
 
 Sprint 5 delivers the AI Campaign Engine: extensible campaign types, lifecycle management, opportunity queue with bulk actions and AI recommendations, centralized approval workflows, AI campaign planning from project context, and Mission Control extended with campaign progress and pending approvals.
 
-| Area | Status |
-|------|--------|
-| Campaign Management (create, templates, goals, lifecycle, status, timeline) | ✅ |
-| Campaign Types (11 types, DB registry, extensible) | ✅ |
-| Opportunity Queue (review, approve/reject, bulk, priority, AI recs) | ✅ |
-| AI Campaign Planner (KB + intelligence context) | ✅ |
-| Approval Center (opportunities, email/content drafts, campaign launch) | ✅ |
-| Mission Control (active campaigns, approvals, progress, timeline) | ✅ |
-| Build / Lint / Typecheck | ✅ 12/12 packages |
+| Area                                                                        | Status            |
+| --------------------------------------------------------------------------- | ----------------- |
+| Campaign Management (create, templates, goals, lifecycle, status, timeline) | ✅                |
+| Campaign Types (11 types, DB registry, extensible)                          | ✅                |
+| Opportunity Queue (review, approve/reject, bulk, priority, AI recs)         | ✅                |
+| AI Campaign Planner (KB + intelligence context)                             | ✅                |
+| Approval Center (opportunities, email/content drafts, campaign launch)      | ✅                |
+| Mission Control (active campaigns, approvals, progress, timeline)           | ✅                |
+| Build / Lint / Typecheck                                                    | ✅ 12/12 packages |
 
 **Sprint score: 88/100**  
 **Recommendation: Conditional Go for Sprint 6**
@@ -83,14 +83,14 @@ stateDiagram-v2
     cancelled --> [*]
 ```
 
-| Status | Meaning |
-|--------|---------|
-| `draft` | Campaign created; plan and opportunities can be attached |
-| `pending_approval` | Launch approval requested; appears in Approval Center |
-| `active` | Approved and running |
-| `paused` | Temporarily halted |
-| `completed` | Finished successfully |
-| `cancelled` | Abandoned |
+| Status             | Meaning                                                  |
+| ------------------ | -------------------------------------------------------- |
+| `draft`            | Campaign created; plan and opportunities can be attached |
+| `pending_approval` | Launch approval requested; appears in Approval Center    |
+| `active`           | Approved and running                                     |
+| `paused`           | Temporarily halted                                       |
+| `completed`        | Finished successfully                                    |
+| `cancelled`        | Abandoned                                                |
 
 **Progress calculation** (`computeCampaignProgress`):
 
@@ -106,11 +106,11 @@ stateDiagram-v2
 
 Centralized in `approvals` table with types:
 
-| Type | Trigger | Resolution |
-|------|---------|------------|
+| Type              | Trigger                           | Resolution                                          |
+| ----------------- | --------------------------------- | --------------------------------------------------- |
 | `campaign_launch` | PATCH status → `pending_approval` | Approve → campaign `active`; Reject → stays pending |
-| `email_draft` | POST submit draft | Approve/reject → updates `email_drafts.status` |
-| `content_draft` | POST submit draft | Approve/reject → updates `content_drafts.status` |
+| `email_draft`     | POST submit draft                 | Approve/reject → updates `email_drafts.status`      |
+| `content_draft`   | POST submit draft                 | Approve/reject → updates `content_drafts.status`    |
 
 **Opportunity queue** uses direct approve/reject on `opportunities.queue_status` (not duplicated into approvals table) to avoid noise. The Approval Center focuses on launch, email, and content draft gates.
 
@@ -133,12 +133,12 @@ opportunities (queue_status: pending_review)
         └─► Attach approved → campaign_opportunities
 ```
 
-| Field | Purpose |
-|-------|---------|
-| `priority` | Manual ordering (desc) alongside score |
-| `queue_status` | `pending_review` \| `approved` \| `rejected` \| `archived` |
-| `ai_recommendation` | Human-readable AI suggestion |
-| `campaign_id` | Link when added to a campaign |
+| Field               | Purpose                                                    |
+| ------------------- | ---------------------------------------------------------- |
+| `priority`          | Manual ordering (desc) alongside score                     |
+| `queue_status`      | `pending_review` \| `approved` \| `rejected` \| `archived` |
+| `ai_recommendation` | Human-readable AI suggestion                               |
+| `campaign_id`       | Link when added to a campaign                              |
 
 **AI recommendations** (`recommendOpportunities` + `enrichOpportunityRecommendations`):
 
@@ -170,12 +170,12 @@ Falls back to `buildDefaultPlan` when AI providers unavailable.
 
 `GET /v1/projects/:id/mission-control/summary` now includes `campaigns`:
 
-| Panel | Data |
-|-------|------|
-| Active Campaigns | active count, total, avg progress |
+| Panel             | Data                                            |
+| ----------------- | ----------------------------------------------- |
+| Active Campaigns  | active count, total, avg progress               |
 | Pending Approvals | approval queue count, campaigns awaiting launch |
-| Recent Campaigns | top 5 with progress links |
-| Campaign Timeline | last 8 lifecycle events |
+| Recent Campaigns  | top 5 with progress links                       |
+| Campaign Timeline | last 8 lifecycle events                         |
 
 Web UI adds campaign cards and quick links to Campaigns and Approval Center.
 
@@ -183,51 +183,51 @@ Web UI adds campaign cards and quick links to Campaigns and Approval Center.
 
 ## API Surface
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/campaigns/types` | List campaign types |
-| GET | `/campaigns/templates` | List templates |
-| GET | `/campaigns/summary` | Aggregate stats |
-| GET/POST | `/campaigns` | List / create |
-| POST | `/campaigns/plan` | AI campaign plan |
-| GET | `/campaigns/:id` | Campaign detail |
-| GET | `/campaigns/:id/timeline` | Timeline events |
-| PATCH | `/campaigns/:id/status` | Lifecycle transition |
-| POST | `/campaigns/:id/opportunities` | Attach opportunities |
-| GET | `/campaigns/queue/opportunities` | Opportunity queue |
-| GET | `/campaigns/queue/recommendations` | AI-ranked opportunities |
-| POST | `/campaigns/queue/enrich` | Batch AI recommendations |
-| POST | `/campaigns/queue/bulk-review` | Bulk approve/reject |
-| PATCH | `/campaigns/queue/opportunities/:id` | Single review |
-| GET | `/campaigns/approvals` | Approval list |
-| PATCH | `/campaigns/approvals/:id` | Resolve approval |
-| GET/POST | `/campaigns/drafts/*` | Email/content draft stubs |
+| Method   | Path                                 | Description               |
+| -------- | ------------------------------------ | ------------------------- |
+| GET      | `/campaigns/types`                   | List campaign types       |
+| GET      | `/campaigns/templates`               | List templates            |
+| GET      | `/campaigns/summary`                 | Aggregate stats           |
+| GET/POST | `/campaigns`                         | List / create             |
+| POST     | `/campaigns/plan`                    | AI campaign plan          |
+| GET      | `/campaigns/:id`                     | Campaign detail           |
+| GET      | `/campaigns/:id/timeline`            | Timeline events           |
+| PATCH    | `/campaigns/:id/status`              | Lifecycle transition      |
+| POST     | `/campaigns/:id/opportunities`       | Attach opportunities      |
+| GET      | `/campaigns/queue/opportunities`     | Opportunity queue         |
+| GET      | `/campaigns/queue/recommendations`   | AI-ranked opportunities   |
+| POST     | `/campaigns/queue/enrich`            | Batch AI recommendations  |
+| POST     | `/campaigns/queue/bulk-review`       | Bulk approve/reject       |
+| PATCH    | `/campaigns/queue/opportunities/:id` | Single review             |
+| GET      | `/campaigns/approvals`               | Approval list             |
+| PATCH    | `/campaigns/approvals/:id`           | Resolve approval          |
+| GET/POST | `/campaigns/drafts/*`                | Email/content draft stubs |
 
 ---
 
 ## Explicitly Excluded (per roadmap)
 
-| Feature | Sprint |
-|---------|--------|
-| Email delivery | Sprint 7+ |
-| CRM inbox | Sprint 7+ |
-| Follow-up automation | Sprint 7+ |
-| Reports | Sprint 8 |
-| Analytics | Sprint 7+ |
-| Live backlink verification | Future |
+| Feature                    | Sprint    |
+| -------------------------- | --------- |
+| Email delivery             | Sprint 7+ |
+| CRM inbox                  | Sprint 7+ |
+| Follow-up automation       | Sprint 7+ |
+| Reports                    | Sprint 8  |
+| Analytics                  | Sprint 7+ |
+| Live backlink verification | Future    |
 
 ---
 
 ## Sprint Score: 88/100
 
-| Category | Score | Notes |
-|----------|-------|-------|
-| Scope completion | 92 | All in-scope items delivered |
-| Architecture quality | 90 | Extensible type registry, clean package split |
-| UI completeness | 82 | Functional pages; draft creation UI minimal |
-| Integration | 88 | MC + intelligence + KB wired |
-| Test coverage | 70 | No dedicated campaign tests yet |
-| Production readiness | 85 | Migration 008 must be applied |
+| Category             | Score | Notes                                         |
+| -------------------- | ----- | --------------------------------------------- |
+| Scope completion     | 92    | All in-scope items delivered                  |
+| Architecture quality | 90    | Extensible type registry, clean package split |
+| UI completeness      | 82    | Functional pages; draft creation UI minimal   |
+| Integration          | 88    | MC + intelligence + KB wired                  |
+| Test coverage        | 70    | No dedicated campaign tests yet               |
+| Production readiness | 85    | Migration 008 must be applied                 |
 
 **Deductions:** No E2E tests for approval flows; opportunity→campaign attach not exposed in web UI yet; planner uses lightweight prompt vs full RAG context.
 
@@ -235,13 +235,13 @@ Web UI adds campaign cards and quick links to Campaigns and Approval Center.
 
 ## Risks
 
-| Risk | Severity | Mitigation |
-|------|----------|------------|
-| Migration 008 not applied in staging | High | Run `npm run db:push` before QA |
-| Opportunity status constraint change breaks existing data | Medium | Migration widens status; existing rows default `pending_review` |
-| Approval + status dual-write for launch | Medium | Documented flow; reject leaves campaign in `pending_approval` |
-| AI planner quality without full RAG | Low | Fallback plan always available |
-| No attach-opportunities UI | Medium | API ready; Sprint 6 outreach can add UX |
+| Risk                                                      | Severity | Mitigation                                                      |
+| --------------------------------------------------------- | -------- | --------------------------------------------------------------- |
+| Migration 008 not applied in staging                      | High     | Run `npm run db:push` before QA                                 |
+| Opportunity status constraint change breaks existing data | Medium   | Migration widens status; existing rows default `pending_review` |
+| Approval + status dual-write for launch                   | Medium   | Documented flow; reject leaves campaign in `pending_approval`   |
+| AI planner quality without full RAG                       | Low      | Fallback plan always available                                  |
+| No attach-opportunities UI                                | Medium   | API ready; Sprint 6 outreach can add UX                         |
 
 ---
 
@@ -285,4 +285,4 @@ Web UI adds campaign cards and quick links to Campaigns and Approval Center.
 
 ---
 
-*Awaiting your approval before beginning Sprint 6.*
+_Awaiting your approval before beginning Sprint 6._

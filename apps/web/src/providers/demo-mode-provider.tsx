@@ -21,7 +21,8 @@ export function DemoModeProvider({ children }: { children: ReactNode }) {
     setCurrentProjectId(DEMO_PROJECT_CHEFGAA);
     if (wasOff) {
       toast.success('Demo Mode enabled', {
-        description: 'All data is simulated for executive presentations. Start the Product Tour from your profile menu.',
+        description:
+          'All data is simulated for executive presentations. Start the Product Tour from your profile menu.',
       });
     }
   }, [setDemoMode, setCurrentOrgId, setCurrentProjectId]);
@@ -50,7 +51,16 @@ export function DemoModeProvider({ children }: { children: ReactNode }) {
       showTour,
       setShowTour,
     }),
-    [isDemoMode, toggleDemoMode, enableDemoMode, tourCompleted, setTourCompleted, restartTour, showTour, setShowTour]
+    [
+      isDemoMode,
+      toggleDemoMode,
+      enableDemoMode,
+      tourCompleted,
+      setTourCompleted,
+      restartTour,
+      showTour,
+      setShowTour,
+    ]
   );
 
   return <DemoModeContext.Provider value={value}>{children}</DemoModeContext.Provider>;

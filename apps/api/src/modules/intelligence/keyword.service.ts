@@ -31,11 +31,14 @@ export async function listKeywordClusters(workspaceId: string) {
   return data ?? [];
 }
 
-export async function discoverKeywords(workspaceId: string, context: {
-  domain: string;
-  industry?: string;
-  brandTopics?: string[];
-}) {
+export async function discoverKeywords(
+  workspaceId: string,
+  context: {
+    domain: string;
+    industry?: string;
+    brandTopics?: string[];
+  }
+) {
   let candidates = defaultKeywordDiscovery(context);
 
   if (getEnv().GEMINI_API_KEY || getEnv().OLLAMA_BASE_URL) {
@@ -78,19 +81,21 @@ export async function discoverKeywords(workspaceId: string, context: {
   }
 
   for (const c of candidates) {
-    await getSupabaseAdmin().from('keywords').upsert(
-      {
-        id: randomUUID(),
-        workspace_id: workspaceId,
-        keyword: c.keyword,
-        search_intent: c.intent,
-        topic_group: c.topicGroup,
-        cluster_id: clusterIdMap.get(c.topicGroup),
-        priority_score: c.priorityScore,
-        discovery_source: 'ai',
-      },
-      { onConflict: 'workspace_id,keyword' }
-    );
+    await getSupabaseAdmin()
+      .from('keywords')
+      .upsert(
+        {
+          id: randomUUID(),
+          workspace_id: workspaceId,
+          keyword: c.keyword,
+          search_intent: c.intent,
+          topic_group: c.topicGroup,
+          cluster_id: clusterIdMap.get(c.topicGroup),
+          priority_score: c.priorityScore,
+          discovery_source: 'ai',
+        },
+        { onConflict: 'workspace_id,keyword' }
+      );
   }
 
   await logResearchEvent(workspaceId, {

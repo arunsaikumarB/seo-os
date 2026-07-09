@@ -76,7 +76,9 @@ export function BacklinkPendingPage() {
           </Card>
         ))}
         {(pending.data?.data ?? []).length === 0 && (
-          <p className="text-sm text-muted-foreground text-center py-8">No pending verifications.</p>
+          <p className="text-sm text-muted-foreground text-center py-8">
+            No pending verifications.
+          </p>
         )}
       </div>
     </div>

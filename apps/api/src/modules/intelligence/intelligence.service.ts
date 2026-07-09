@@ -9,11 +9,7 @@ import { getOpportunityCounts } from './opportunity.service.js';
 import { logResearchEvent } from './research.service.js';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 
-export async function runFullDiscovery(
-  workspaceId: string,
-  orgId: string,
-  userId: string
-) {
+export async function runFullDiscovery(workspaceId: string, orgId: string, userId: string) {
   const project = await getProjectById(workspaceId, orgId);
   if (!project) throw new Error('Project not found');
 

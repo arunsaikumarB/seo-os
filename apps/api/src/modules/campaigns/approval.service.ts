@@ -105,6 +105,21 @@ export async function resolveApproval(
       .eq('id', approval.subject_id);
   }
 
+  if (approval.approval_type === 'outreach_send') {
+    await getSupabaseAdmin()
+      .from('outreach_messages')
+      .update({ status: action === 'approve' ? 'approved' : 'cancelled' })
+      .eq('id', approval.subject_id);
+    if (action === 'approve') {
+      const { enqueueSendMessage, executeSendMessage } =
+        await import('../outreach/outreach.service.js');
+      const jobId = await enqueueSendMessage(String(approval.subject_id), workspaceId);
+      if (!jobId) {
+        await executeSendMessage(String(approval.subject_id), workspaceId);
+      }
+    }
+  }
+
   return data;
 }
 

@@ -31,20 +31,23 @@ export async function listCompetitors(workspaceId: string) {
   return data ?? [];
 }
 
-export async function discoverCompetitors(workspaceId: string, context: {
-  domain: string;
-  industry?: string;
-  brandTopics?: string[];
-}) {
+export async function discoverCompetitors(
+  workspaceId: string,
+  context: {
+    domain: string;
+    industry?: string;
+    brandTopics?: string[];
+  }
+) {
   let suggestions = defaultCompetitorSuggestions(context);
 
   if (getEnv().GEMINI_API_KEY || getEnv().OLLAMA_BASE_URL) {
     try {
       const rt = getAIRuntime();
       const prompt = `List 5 SEO competitors for the website ${context.domain} in industry ${context.industry ?? 'general'}. Topics: ${context.brandTopics?.join(', ') ?? 'N/A'}. One per line with domain.`;
-      const result = await rt.providers.getAIProviderRouter().completeWithFailover([
-        { role: 'user', content: prompt },
-      ]);
+      const result = await rt.providers
+        .getAIProviderRouter()
+        .completeWithFailover([{ role: 'user', content: prompt }]);
       const parsed = parseCompetitorsFromAiResponse(result.text);
       if (parsed.length > 0) suggestions = parsed;
     } catch {

@@ -39,8 +39,7 @@ export function validateRetrieval(chunks: RetrievalChunk[]): {
 export function buildRetrievalContext(chunks: RetrievalChunk[]): string {
   return chunks
     .map(
-      (c, i) =>
-        `[Source ${i + 1}: ${c.documentTitle} (score: ${c.score.toFixed(2)})]\n${c.content}`
+      (c, i) => `[Source ${i + 1}: ${c.documentTitle} (score: ${c.score.toFixed(2)})]\n${c.content}`
     )
     .join('\n\n---\n\n');
 }

@@ -51,14 +51,16 @@ export async function createAgentRun(params: {
 
   const status = params.async && getEnv().ENABLE_WORKERS ? 'queued' : 'pending';
 
-  const { error: insertError } = await getSupabaseAdmin().from('agent_runs').insert({
-    id: runId,
-    workspace_id: params.workspaceId,
-    agent_type: params.agentType,
-    status,
-    input: params.input ?? {},
-    triggered_by: params.userId ?? null,
-  });
+  const { error: insertError } = await getSupabaseAdmin()
+    .from('agent_runs')
+    .insert({
+      id: runId,
+      workspace_id: params.workspaceId,
+      agent_type: params.agentType,
+      status,
+      input: params.input ?? {},
+      triggered_by: params.userId ?? null,
+    });
 
   if (insertError) throw insertError;
 
@@ -159,9 +161,9 @@ export async function getAIHealth(workspaceId: string) {
     telemetry: usage,
     recentFailures: failed,
     agentsRegistered: rt.registry.listSprint2Agents().length,
-    handlersReady: rt.registry.listSprint2Agents().filter((a) =>
-      rt.registry.hasHandler(a.agentType)
-    ).length,
+    handlersReady: rt.registry
+      .listSprint2Agents()
+      .filter((a) => rt.registry.hasHandler(a.agentType)).length,
   };
 }
 

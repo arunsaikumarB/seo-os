@@ -46,9 +46,7 @@ export const uploadDocumentSchema = z.object({
   title: z.string().min(1).max(200),
   content: z.string().min(1).max(25_000_000),
   filename: z.string().max(255).optional(),
-  mimeType: z
-    .enum(['text/plain', 'text/markdown', 'application/json'])
-    .default('text/plain'),
+  mimeType: z.enum(['text/plain', 'text/markdown', 'application/json']).default('text/plain'),
 });
 
 export const createMemoryEntrySchema = z.object({

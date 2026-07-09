@@ -47,7 +47,10 @@ export function NotificationsMenu() {
             </DropdownMenuItem>
           ) : (
             notifications.map((n, i) => (
-              <DropdownMenuItem key={n.id} className="flex flex-col items-start gap-0.5 py-2.5 cursor-pointer">
+              <DropdownMenuItem
+                key={n.id}
+                className="flex flex-col items-start gap-0.5 py-2.5 cursor-pointer"
+              >
                 <motion.div
                   initial={{ opacity: 0, x: 8 }}
                   animate={{ opacity: 1, x: 0 }}
@@ -56,7 +59,9 @@ export function NotificationsMenu() {
                 >
                   <div className="flex items-center gap-2">
                     {n.unread && <span className="h-1.5 w-1.5 rounded-full bg-primary shrink-0" />}
-                    <span className={`text-sm ${n.unread ? 'font-medium' : 'text-muted-foreground'}`}>
+                    <span
+                      className={`text-sm ${n.unread ? 'font-medium' : 'text-muted-foreground'}`}
+                    >
                       {n.title}
                     </span>
                   </div>

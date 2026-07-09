@@ -39,7 +39,11 @@ export function AIWorkforcePanel() {
               )}
             </div>
             <p className="text-xs text-muted-foreground">{t.task}</p>
-            <ProgressBarLabel label="" value={t.progress} showPulse={isDemoMode && t.progress < 100} />
+            <ProgressBarLabel
+              label=""
+              value={t.progress}
+              showPulse={isDemoMode && t.progress < 100}
+            />
           </motion.div>
         ))}
       </CardContent>

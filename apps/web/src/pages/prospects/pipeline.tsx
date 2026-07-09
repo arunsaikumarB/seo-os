@@ -10,16 +10,21 @@ const COLUMNS = [
   'discovered',
   'qualified',
   'approved',
-  'outreach_ready',
+  'campaign_ready',
+  'outreach',
+  'negotiation',
   'won',
   'lost',
+  'verified',
 ] as const;
 
 const NEXT_STATUS: Partial<Record<(typeof COLUMNS)[number], string>> = {
   discovered: 'qualified',
   qualified: 'approved',
-  approved: 'outreach_ready',
-  outreach_ready: 'won',
+  approved: 'campaign_ready',
+  campaign_ready: 'outreach',
+  outreach: 'negotiation',
+  negotiation: 'won',
 };
 
 export function ProspectPipelinePage() {
@@ -51,7 +56,7 @@ export function ProspectPipelinePage() {
         <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
           <Target className="h-6 w-6" /> Prospect Pipeline
         </h1>
-        <p className="text-muted-foreground">Kanban workflow from discovery to outreach-ready</p>
+        <p className="text-muted-foreground">Kanban workflow from discovery through verification</p>
       </div>
 
       <div className="flex gap-3 overflow-x-auto pb-4">

@@ -15,6 +15,7 @@ import {
   type AuthenticatedRequest,
 } from '../../middleware/auth.js';
 import { requireRole } from '../../middleware/rbac.js';
+import { requireProjectAccess } from '../../middleware/project-access.js';
 import { createOrganization, getOrganization } from '../../modules/organizations/org.service.js';
 import {
   getProfile,
@@ -49,6 +50,9 @@ import { chatRouter } from './chat.routes.js';
 import { intelligenceRouter } from './intelligence.routes.js';
 import { campaignsRouter } from './campaigns.routes.js';
 import { backlinkBuilderRouter } from './backlink-builder.routes.js';
+import { relationshipRouter } from './relationship.routes.js';
+import { outreachRouter } from './outreach.routes.js';
+import { getExecutiveSummary } from '../../modules/executive/executive.service.js';
 
 function param(value: string | string[]): string {
   return Array.isArray(value) ? value[0] : value;
@@ -56,8 +60,12 @@ function param(value: string | string[]): string {
 
 export const v1Router = Router();
 
+const projectScopeRouter = Router({ mergeParams: true });
+projectScopeRouter.use(authMiddleware);
+projectScopeRouter.use(requireProjectAccess);
+
 v1Router.get('/version', (_req, res) => {
-  res.json({ data: { version: '0.5.5-sprint5.5', api: 'v1' } });
+  res.json({ data: { version: '1.0.0-epic1', api: 'v1' } });
 });
 
 v1Router.get('/me', jwtOnlyMiddleware, async (req, res, next) => {
@@ -209,59 +217,59 @@ v1Router.post(
 );
 
 v1Router.get(
-  '/projects/:projectId',
+  '/executive/summary',
   authMiddleware,
   requireRole('viewer'),
   async (req, res, next) => {
     try {
-      const { orgId } = (req as AuthenticatedRequest).auth;
-      const project = await getProjectById(param(req.params.projectId), orgId);
-      if (!project) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Project not found');
-      res.json({ data: project });
+      const { orgId, userId } = (req as AuthenticatedRequest).auth;
+      const summary = await getExecutiveSummary(orgId, userId);
+      res.json({ data: summary });
     } catch (err) {
       next(err);
     }
   }
 );
 
-v1Router.patch(
-  '/projects/:projectId',
-  authMiddleware,
-  requireRole('member'),
-  async (req, res, next) => {
-    try {
-      const parsed = updateProjectSchema.safeParse(req.body);
-      if (!parsed.success) {
-        throw new AppError(
-          400,
-          'VALIDATION_ERROR',
-          'Invalid project',
-          parsed.error.flatten().fieldErrors as never
-        );
-      }
-      const { orgId } = (req as AuthenticatedRequest).auth;
-      const project = await updateProject(param(req.params.projectId), orgId, parsed.data);
-      res.json({ data: project });
-    } catch (err) {
-      next(err);
-    }
+projectScopeRouter.get('/', requireRole('viewer'), async (req, res, next) => {
+  try {
+    const { orgId } = (req as AuthenticatedRequest).auth;
+    const project = await getProjectById(param(req.params.projectId), orgId);
+    if (!project) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Project not found');
+    res.json({ data: project });
+  } catch (err) {
+    next(err);
   }
-);
+});
 
-v1Router.post(
-  '/projects/:projectId/archive',
-  authMiddleware,
-  requireRole('manager'),
-  async (req, res, next) => {
-    try {
-      const { orgId } = (req as AuthenticatedRequest).auth;
-      const project = await archiveProject(param(req.params.projectId), orgId);
-      res.json({ data: project });
-    } catch (err) {
-      next(err);
+projectScopeRouter.patch('/', requireRole('member'), async (req, res, next) => {
+  try {
+    const parsed = updateProjectSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw new AppError(
+        400,
+        'VALIDATION_ERROR',
+        'Invalid project',
+        parsed.error.flatten().fieldErrors as never
+      );
     }
+    const { orgId } = (req as AuthenticatedRequest).auth;
+    const project = await updateProject(param(req.params.projectId), orgId, parsed.data);
+    res.json({ data: project });
+  } catch (err) {
+    next(err);
   }
-);
+});
+
+projectScopeRouter.post('/archive', requireRole('manager'), async (req, res, next) => {
+  try {
+    const { orgId } = (req as AuthenticatedRequest).auth;
+    const project = await archiveProject(param(req.params.projectId), orgId);
+    res.json({ data: project });
+  } catch (err) {
+    next(err);
+  }
+});
 
 v1Router.get('/providers/status', jwtOnlyMiddleware, async (_req, res, next) => {
   try {
@@ -300,9 +308,8 @@ const runAgentSchema = z.object({
   useAI: z.boolean().optional(),
 });
 
-v1Router.post(
-  '/projects/:projectId/ai/agents/:agentType/run',
-  authMiddleware,
+projectScopeRouter.post(
+  '/ai/agents/:agentType/run',
   requireRole('member'),
   async (req, res, next) => {
     try {
@@ -330,80 +337,54 @@ v1Router.post(
   }
 );
 
-v1Router.get(
-  '/projects/:projectId/ai/runs',
-  authMiddleware,
-  requireRole('viewer'),
-  async (req, res, next) => {
-    try {
-      const runs = await listAgentRuns(param(req.params.projectId));
-      res.json({ data: runs });
-    } catch (err) {
-      next(err);
-    }
+projectScopeRouter.get('/ai/runs', requireRole('viewer'), async (req, res, next) => {
+  try {
+    const runs = await listAgentRuns(param(req.params.projectId));
+    res.json({ data: runs });
+  } catch (err) {
+    next(err);
   }
-);
+});
 
-v1Router.get(
-  '/projects/:projectId/ai/runs/:runId',
-  authMiddleware,
-  requireRole('viewer'),
-  async (req, res, next) => {
-    try {
-      const run = await getAgentRun(param(req.params.runId), param(req.params.projectId));
-      if (!run) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Agent run not found');
-      res.json({ data: run });
-    } catch (err) {
-      next(err);
-    }
+projectScopeRouter.get('/ai/runs/:runId', requireRole('viewer'), async (req, res, next) => {
+  try {
+    const run = await getAgentRun(param(req.params.runId), param(req.params.projectId));
+    if (!run) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Agent run not found');
+    res.json({ data: run });
+  } catch (err) {
+    next(err);
   }
-);
+});
 
-v1Router.get(
-  '/projects/:projectId/ai/health',
-  authMiddleware,
-  requireRole('viewer'),
-  async (req, res, next) => {
-    try {
-      const health = await getAIHealth(param(req.params.projectId));
-      res.json({ data: health });
-    } catch (err) {
-      next(err);
-    }
+projectScopeRouter.get('/ai/health', requireRole('viewer'), async (req, res, next) => {
+  try {
+    const health = await getAIHealth(param(req.params.projectId));
+    res.json({ data: health });
+  } catch (err) {
+    next(err);
   }
-);
+});
 
-v1Router.get(
-  '/projects/:projectId/ai/events',
-  authMiddleware,
-  requireRole('viewer'),
-  async (req, res, next) => {
-    try {
-      const events = await getAIEvents(param(req.params.projectId));
-      res.json({ data: events });
-    } catch (err) {
-      next(err);
-    }
+projectScopeRouter.get('/ai/events', requireRole('viewer'), async (req, res, next) => {
+  try {
+    const events = await getAIEvents(param(req.params.projectId));
+    res.json({ data: events });
+  } catch (err) {
+    next(err);
   }
-);
+});
 
-v1Router.get(
-  '/projects/:projectId/ai/queue',
-  authMiddleware,
-  requireRole('viewer'),
-  async (_req, res, next) => {
-    try {
-      const queue = await getQueueStatus();
-      res.json({ data: queue });
-    } catch (err) {
-      next(err);
-    }
+projectScopeRouter.get('/ai/queue', requireRole('viewer'), async (_req, res, next) => {
+  try {
+    const queue = await getQueueStatus();
+    res.json({ data: queue });
+  } catch (err) {
+    next(err);
   }
-);
+});
 
-v1Router.get(
-  '/projects/:projectId/mission-control/summary',
-  authMiddleware,
+projectScopeRouter.get(
+  '/mission-control/summary',
   requireRole('viewer'),
   async (req, res, next) => {
     try {
@@ -415,8 +396,12 @@ v1Router.get(
   }
 );
 
-v1Router.use('/projects/:projectId/knowledge', knowledgeRouter);
-v1Router.use('/projects/:projectId/chat', chatRouter);
-v1Router.use('/projects/:projectId/intelligence', intelligenceRouter);
-v1Router.use('/projects/:projectId/campaigns', campaignsRouter);
-v1Router.use('/projects/:projectId/backlink-builder', backlinkBuilderRouter);
+projectScopeRouter.use('/knowledge', knowledgeRouter);
+projectScopeRouter.use('/chat', chatRouter);
+projectScopeRouter.use('/intelligence', intelligenceRouter);
+projectScopeRouter.use('/campaigns', campaignsRouter);
+projectScopeRouter.use('/backlink-builder', backlinkBuilderRouter);
+projectScopeRouter.use('/relationships', relationshipRouter);
+projectScopeRouter.use('/outreach', outreachRouter);
+
+v1Router.use('/projects/:projectId', projectScopeRouter);

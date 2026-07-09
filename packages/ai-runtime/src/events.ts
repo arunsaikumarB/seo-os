@@ -34,10 +34,7 @@ export class AIEventBus {
     this.history.unshift(event);
     if (this.history.length > this.maxHistory) this.history.pop();
 
-    const targets = [
-      ...(this.handlers.get(type) ?? []),
-      ...(this.handlers.get('*') ?? []),
-    ];
+    const targets = [...(this.handlers.get(type) ?? []), ...(this.handlers.get('*') ?? [])];
     await Promise.all([...targets].map((h) => h(event)));
     return event;
   }

@@ -43,7 +43,10 @@ export function scoreKeywordPriority(keyword: string, intent: SearchIntent): num
 }
 
 export function parseKeywordsFromAiResponse(text: string): KeywordCandidate[] {
-  const lines = text.split('\n').map((l) => l.replace(/^[-*\d.]+\s*/, '').trim()).filter(Boolean);
+  const lines = text
+    .split('\n')
+    .map((l) => l.replace(/^[-*\d.]+\s*/, '').trim())
+    .filter(Boolean);
   return lines.slice(0, 30).map((keyword) => {
     const intent = classifyIntent(keyword);
     const topicGroup = keyword.toLowerCase().split(/\s+/).slice(0, 2).join(' ');

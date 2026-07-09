@@ -48,9 +48,12 @@ export function useMissionControl(projectId: string) {
   const providers = useQuery({
     queryKey: ['ai-providers-health'],
     queryFn: () =>
-      request<{ data: { primary: { name: string; status: string }; fallback?: { name: string; status: string } } }>(
-        '/v1/ai/providers/health'
-      ),
+      request<{
+        data: {
+          primary: { name: string; status: string };
+          fallback?: { name: string; status: string };
+        };
+      }>('/v1/ai/providers/health'),
     refetchInterval: 60_000,
   });
 

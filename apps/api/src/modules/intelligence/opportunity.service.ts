@@ -39,7 +39,10 @@ export async function discoverOpportunities(
     { type: 'resource_page', title: `Resource pages linking to ${context.domain} competitors` },
     { type: 'broken_link', title: `Broken link reclamation for ${context.domain}` },
     { type: 'directory', title: `Industry directories for ${context.domain}` },
-    { type: 'qa_site', title: `Q&A discussions about ${context.brandTopics?.[0] ?? context.domain}` },
+    {
+      type: 'qa_site',
+      title: `Q&A discussions about ${context.brandTopics?.[0] ?? context.domain}`,
+    },
     { type: 'forum', title: `Forum threads — ${context.domain} topics` },
     { type: 'podcast', title: `Podcast guest opportunities — ${context.domain}` },
     { type: 'partnership', title: `Partnership opportunities — ${context.domain}` },

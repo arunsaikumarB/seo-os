@@ -23,7 +23,10 @@ export interface OrchestrationResult {
 export class AgentOrchestrator {
   constructor(private runner: AgentRunner) {}
 
-  async execute(plan: OrchestrationPlan, options?: { useAI?: boolean }): Promise<OrchestrationResult> {
+  async execute(
+    plan: OrchestrationPlan,
+    options?: { useAI?: boolean }
+  ): Promise<OrchestrationResult> {
     const runIds: string[] = [];
     const results: Awaited<ReturnType<AgentRunner['run']>>[] = [];
 

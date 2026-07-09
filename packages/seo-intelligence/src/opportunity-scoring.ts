@@ -10,11 +10,14 @@ export interface OpportunityInput {
 }
 
 /** Opportunity scoring model — Sprint 4 foundation */
-export function scoreOpportunity(input: OpportunityInput, context: {
-  brandTopics?: string[];
-  keywordOverlap?: number;
-  competitorOverlap?: boolean;
-}): number {
+export function scoreOpportunity(
+  input: OpportunityInput,
+  context: {
+    brandTopics?: string[];
+    keywordOverlap?: number;
+    competitorOverlap?: boolean;
+  }
+): number {
   let score = 50;
 
   const typeWeights: Record<OpportunityType, number> = {

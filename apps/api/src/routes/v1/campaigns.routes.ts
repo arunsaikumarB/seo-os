@@ -1,10 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { AppError } from '@seo-os/shared';
-import {
-  authMiddleware,
-  type AuthenticatedRequest,
-} from '../../middleware/auth.js';
+import { authMiddleware, type AuthenticatedRequest } from '../../middleware/auth.js';
 import { requireRole } from '../../middleware/rbac.js';
 import {
   attachOpportunitiesToCampaign,
@@ -46,7 +43,9 @@ const createCampaignSchema = z.object({
   name: z.string().min(1).max(200),
   campaignType: z.enum(CAMPAIGN_TYPES),
   templateId: z.string().uuid().optional(),
-  goals: z.array(z.object({ id: z.string(), label: z.string(), target: z.number().optional() })).optional(),
+  goals: z
+    .array(z.object({ id: z.string(), label: z.string(), target: z.number().optional() }))
+    .optional(),
   plan: z.record(z.unknown()).optional(),
 });
 
@@ -120,85 +119,121 @@ campaignsRouter.get('/summary', authMiddleware, requireRole('viewer'), async (re
   }
 });
 
-campaignsRouter.get('/queue/opportunities', authMiddleware, requireRole('viewer'), async (req, res, next) => {
-  try {
-    const queueStatus = typeof req.query.queueStatus === 'string' ? req.query.queueStatus : undefined;
-    const campaignType = typeof req.query.campaignType === 'string' ? req.query.campaignType : undefined;
-    const queue = await listOpportunityQueue(param(req.params.projectId), { queueStatus, campaignType });
-    res.json({ data: queue });
-  } catch (err) {
-    next(err);
+campaignsRouter.get(
+  '/queue/opportunities',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const queueStatus =
+        typeof req.query.queueStatus === 'string' ? req.query.queueStatus : undefined;
+      const campaignType =
+        typeof req.query.campaignType === 'string' ? req.query.campaignType : undefined;
+      const queue = await listOpportunityQueue(param(req.params.projectId), {
+        queueStatus,
+        campaignType,
+      });
+      res.json({ data: queue });
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
-campaignsRouter.get('/queue/recommendations', authMiddleware, requireRole('viewer'), async (req, res, next) => {
-  try {
-    const campaignType = typeof req.query.campaignType === 'string' ? req.query.campaignType : undefined;
-    const recs = await getOpportunityRecommendations(
-      param(req.params.projectId),
-      campaignType as (typeof CAMPAIGN_TYPES)[number] | undefined
-    );
-    res.json({ data: recs });
-  } catch (err) {
-    next(err);
+campaignsRouter.get(
+  '/queue/recommendations',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const campaignType =
+        typeof req.query.campaignType === 'string' ? req.query.campaignType : undefined;
+      const recs = await getOpportunityRecommendations(
+        param(req.params.projectId),
+        campaignType as (typeof CAMPAIGN_TYPES)[number] | undefined
+      );
+      res.json({ data: recs });
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
-campaignsRouter.post('/queue/enrich', authMiddleware, requireRole('member'), async (req, res, next) => {
-  try {
-    await enrichOpportunityRecommendations(param(req.params.projectId));
-    res.json({ data: { enriched: true } });
-  } catch (err) {
-    next(err);
+campaignsRouter.post(
+  '/queue/enrich',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      await enrichOpportunityRecommendations(param(req.params.projectId));
+      res.json({ data: { enriched: true } });
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
-campaignsRouter.post('/queue/bulk-review', authMiddleware, requireRole('member'), async (req, res, next) => {
-  try {
-    const { userId } = (req as AuthenticatedRequest).auth;
-    const { opportunityIds, action } = bulkReviewSchema.parse(req.body);
-    const results = await bulkReviewOpportunities(
-      param(req.params.projectId),
-      userId,
-      opportunityIds,
-      action
-    );
-    res.json({ data: results });
-  } catch (err) {
-    next(err);
+campaignsRouter.post(
+  '/queue/bulk-review',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const { userId } = (req as AuthenticatedRequest).auth;
+      const { opportunityIds, action } = bulkReviewSchema.parse(req.body);
+      const results = await bulkReviewOpportunities(
+        param(req.params.projectId),
+        userId,
+        opportunityIds,
+        action
+      );
+      res.json({ data: results });
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
-campaignsRouter.patch('/queue/opportunities/:opportunityId', authMiddleware, requireRole('member'), async (req, res, next) => {
-  try {
-    const { userId } = (req as AuthenticatedRequest).auth;
-    const { action, notes } = reviewSchema.parse(req.body);
-    const opp = await reviewOpportunity(
-      param(req.params.opportunityId),
-      param(req.params.projectId),
-      userId,
-      action,
-      notes
-    );
-    res.json({ data: opp });
-  } catch (err) {
-    next(err);
+campaignsRouter.patch(
+  '/queue/opportunities/:opportunityId',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const { userId } = (req as AuthenticatedRequest).auth;
+      const { action, notes } = reviewSchema.parse(req.body);
+      const opp = await reviewOpportunity(
+        param(req.params.opportunityId),
+        param(req.params.projectId),
+        userId,
+        action,
+        notes
+      );
+      res.json({ data: opp });
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
-campaignsRouter.patch('/queue/opportunities/:opportunityId/priority', authMiddleware, requireRole('member'), async (req, res, next) => {
-  try {
-    const { priority } = prioritySchema.parse(req.body);
-    const opp = await updateOpportunityPriority(
-      param(req.params.opportunityId),
-      param(req.params.projectId),
-      priority
-    );
-    res.json({ data: opp });
-  } catch (err) {
-    next(err);
+campaignsRouter.patch(
+  '/queue/opportunities/:opportunityId/priority',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const { priority } = prioritySchema.parse(req.body);
+      const opp = await updateOpportunityPriority(
+        param(req.params.opportunityId),
+        param(req.params.projectId),
+        priority
+      );
+      res.json({ data: opp });
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
 campaignsRouter.get('/approvals', authMiddleware, requireRole('viewer'), async (req, res, next) => {
   try {
@@ -210,22 +245,27 @@ campaignsRouter.get('/approvals', authMiddleware, requireRole('viewer'), async (
   }
 });
 
-campaignsRouter.patch('/approvals/:approvalId', authMiddleware, requireRole('member'), async (req, res, next) => {
-  try {
-    const { userId } = (req as AuthenticatedRequest).auth;
-    const { action, notes } = reviewSchema.parse(req.body);
-    const approval = await resolveApproval(
-      param(req.params.approvalId),
-      param(req.params.projectId),
-      userId,
-      action,
-      notes
-    );
-    res.json({ data: approval });
-  } catch (err) {
-    next(err);
+campaignsRouter.patch(
+  '/approvals/:approvalId',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const { userId } = (req as AuthenticatedRequest).auth;
+      const { action, notes } = reviewSchema.parse(req.body);
+      const approval = await resolveApproval(
+        param(req.params.approvalId),
+        param(req.params.projectId),
+        userId,
+        action,
+        notes
+      );
+      res.json({ data: approval });
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
 campaignsRouter.get('/drafts', authMiddleware, requireRole('viewer'), async (req, res, next) => {
   try {
@@ -236,55 +276,75 @@ campaignsRouter.get('/drafts', authMiddleware, requireRole('viewer'), async (req
   }
 });
 
-campaignsRouter.post('/drafts/email', authMiddleware, requireRole('member'), async (req, res, next) => {
-  try {
-    const { userId } = (req as AuthenticatedRequest).auth;
-    const body = emailDraftSchema.parse(req.body);
-    const draft = await createEmailDraft(param(req.params.projectId), userId, body);
-    res.status(201).json({ data: draft });
-  } catch (err) {
-    next(err);
+campaignsRouter.post(
+  '/drafts/email',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const { userId } = (req as AuthenticatedRequest).auth;
+      const body = emailDraftSchema.parse(req.body);
+      const draft = await createEmailDraft(param(req.params.projectId), userId, body);
+      res.status(201).json({ data: draft });
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
-campaignsRouter.post('/drafts/email/:draftId/submit', authMiddleware, requireRole('member'), async (req, res, next) => {
-  try {
-    const { userId } = (req as AuthenticatedRequest).auth;
-    const approval = await submitEmailDraftForApproval(
-      param(req.params.draftId),
-      param(req.params.projectId),
-      userId
-    );
-    res.json({ data: approval });
-  } catch (err) {
-    next(err);
+campaignsRouter.post(
+  '/drafts/email/:draftId/submit',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const { userId } = (req as AuthenticatedRequest).auth;
+      const approval = await submitEmailDraftForApproval(
+        param(req.params.draftId),
+        param(req.params.projectId),
+        userId
+      );
+      res.json({ data: approval });
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
-campaignsRouter.post('/drafts/content', authMiddleware, requireRole('member'), async (req, res, next) => {
-  try {
-    const { userId } = (req as AuthenticatedRequest).auth;
-    const body = contentDraftSchema.parse(req.body);
-    const draft = await createContentDraft(param(req.params.projectId), userId, body);
-    res.status(201).json({ data: draft });
-  } catch (err) {
-    next(err);
+campaignsRouter.post(
+  '/drafts/content',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const { userId } = (req as AuthenticatedRequest).auth;
+      const body = contentDraftSchema.parse(req.body);
+      const draft = await createContentDraft(param(req.params.projectId), userId, body);
+      res.status(201).json({ data: draft });
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
-campaignsRouter.post('/drafts/content/:draftId/submit', authMiddleware, requireRole('member'), async (req, res, next) => {
-  try {
-    const { userId } = (req as AuthenticatedRequest).auth;
-    const approval = await submitContentDraftForApproval(
-      param(req.params.draftId),
-      param(req.params.projectId),
-      userId
-    );
-    res.json({ data: approval });
-  } catch (err) {
-    next(err);
+campaignsRouter.post(
+  '/drafts/content/:draftId/submit',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const { userId } = (req as AuthenticatedRequest).auth;
+      const approval = await submitContentDraftForApproval(
+        param(req.params.draftId),
+        param(req.params.projectId),
+        userId
+      );
+      res.json({ data: approval });
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
 campaignsRouter.get('/', authMiddleware, requireRole('viewer'), async (req, res, next) => {
   try {
@@ -318,59 +378,79 @@ campaignsRouter.post('/plan', authMiddleware, requireRole('member'), async (req,
 });
 
 // Parameterized campaign routes last
-campaignsRouter.get('/:campaignId', authMiddleware, requireRole('viewer'), async (req, res, next) => {
-  try {
-    const campaign = await getCampaign(param(req.params.campaignId), param(req.params.projectId));
-    if (!campaign) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Campaign not found');
-    res.json({ data: campaign });
-  } catch (err) {
-    next(err);
+campaignsRouter.get(
+  '/:campaignId',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const campaign = await getCampaign(param(req.params.campaignId), param(req.params.projectId));
+      if (!campaign) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Campaign not found');
+      res.json({ data: campaign });
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
-campaignsRouter.get('/:campaignId/timeline', authMiddleware, requireRole('viewer'), async (req, res, next) => {
-  try {
-    const timeline = await getCampaignTimeline(
-      param(req.params.campaignId),
-      param(req.params.projectId)
-    );
-    res.json({ data: timeline });
-  } catch (err) {
-    next(err);
+campaignsRouter.get(
+  '/:campaignId/timeline',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const timeline = await getCampaignTimeline(
+        param(req.params.campaignId),
+        param(req.params.projectId)
+      );
+      res.json({ data: timeline });
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
-campaignsRouter.patch('/:campaignId/status', authMiddleware, requireRole('member'), async (req, res, next) => {
-  try {
-    const { userId } = (req as AuthenticatedRequest).auth;
-    const { status } = statusSchema.parse(req.body);
-    const campaign = await updateCampaignStatus(
-      param(req.params.campaignId),
-      param(req.params.projectId),
-      userId,
-      status
-    );
-    await refreshCampaignProgress(param(req.params.campaignId), param(req.params.projectId));
-    res.json({ data: campaign });
-  } catch (err) {
-    next(err);
+campaignsRouter.patch(
+  '/:campaignId/status',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const { userId } = (req as AuthenticatedRequest).auth;
+      const { status } = statusSchema.parse(req.body);
+      const campaign = await updateCampaignStatus(
+        param(req.params.campaignId),
+        param(req.params.projectId),
+        userId,
+        status
+      );
+      await refreshCampaignProgress(param(req.params.campaignId), param(req.params.projectId));
+      res.json({ data: campaign });
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
-campaignsRouter.post('/:campaignId/opportunities', authMiddleware, requireRole('member'), async (req, res, next) => {
-  try {
-    const { opportunityIds } = attachSchema.parse(req.body);
-    await attachOpportunitiesToCampaign(
-      param(req.params.campaignId),
-      param(req.params.projectId),
-      opportunityIds
-    );
-    const progress = await refreshCampaignProgress(
-      param(req.params.campaignId),
-      param(req.params.projectId)
-    );
-    res.json({ data: { attached: opportunityIds.length, progress } });
-  } catch (err) {
-    next(err);
+campaignsRouter.post(
+  '/:campaignId/opportunities',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const { opportunityIds } = attachSchema.parse(req.body);
+      await attachOpportunitiesToCampaign(
+        param(req.params.campaignId),
+        param(req.params.projectId),
+        opportunityIds
+      );
+      const progress = await refreshCampaignProgress(
+        param(req.params.campaignId),
+        param(req.params.projectId)
+      );
+      res.json({ data: { attached: opportunityIds.length, progress } });
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);

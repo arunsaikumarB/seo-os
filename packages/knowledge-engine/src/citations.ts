@@ -22,7 +22,5 @@ export function chunksToCitations(chunks: RetrievalChunk[]): Citation[] {
 
 export function formatCitationsForPrompt(citations: Citation[]): string {
   if (citations.length === 0) return 'No sources cited.';
-  return citations
-    .map((c) => `[${c.index}] ${c.documentTitle} — "${c.excerpt}..."`)
-    .join('\n');
+  return citations.map((c) => `[${c.index}] ${c.documentTitle} — "${c.excerpt}..."`).join('\n');
 }

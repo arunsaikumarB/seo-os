@@ -36,7 +36,9 @@ export function BacklinkLostPage() {
                   {bl.domain}
                 </p>
                 <p className="text-xs text-muted-foreground truncate">{bl.source_url}</p>
-                <Badge className="text-[10px] capitalize mt-1">{formatType(bl.backlink_type)}</Badge>
+                <Badge className="text-[10px] capitalize mt-1">
+                  {formatType(bl.backlink_type)}
+                </Badge>
               </div>
               <Badge className="border-destructive/30 text-destructive">lost</Badge>
             </CardContent>

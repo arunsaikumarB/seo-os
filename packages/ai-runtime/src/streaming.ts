@@ -8,10 +8,7 @@ export interface StreamChunk {
 export type StreamEmitter = (chunk: StreamChunk) => void;
 
 /** Sprint 2 streaming foundation — wraps provider text into chunks */
-export async function* streamFromText(
-  text: string,
-  chunkSize = 64
-): AsyncGenerator<StreamChunk> {
+export async function* streamFromText(text: string, chunkSize = 64): AsyncGenerator<StreamChunk> {
   for (let i = 0; i < text.length; i += chunkSize) {
     yield { type: 'text', content: text.slice(i, i + chunkSize) };
   }
@@ -30,7 +27,10 @@ export function createStreamCollector(): {
       chunks.push(chunk);
     },
     getText() {
-      return chunks.filter((c) => c.type === 'text').map((c) => c.content ?? '').join('');
+      return chunks
+        .filter((c) => c.type === 'text')
+        .map((c) => c.content ?? '')
+        .join('');
     },
   };
 }

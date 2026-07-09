@@ -10,7 +10,9 @@ const MAX_DOCS_PER_PROJECT = 100;
 export async function listDocuments(workspaceId: string) {
   const { data, error } = await getSupabaseAdmin()
     .from('kb_documents')
-    .select('id, title, filename, mime_type, status, byte_size, chunk_count, created_at, updated_at')
+    .select(
+      'id, title, filename, mime_type, status, byte_size, chunk_count, created_at, updated_at'
+    )
     .eq('workspace_id', workspaceId)
     .neq('status', 'archived')
     .order('created_at', { ascending: false });

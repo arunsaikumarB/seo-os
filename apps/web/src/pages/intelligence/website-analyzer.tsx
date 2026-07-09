@@ -52,7 +52,10 @@ export function WebsiteAnalyzerPage() {
         setScanning(true);
         return { data: { id: 'scan-new' } };
       }
-      return request(`/v1/projects/${projectId}/intelligence/website/scans`, { method: 'POST', body: '{}' });
+      return request(`/v1/projects/${projectId}/intelligence/website/scans`, {
+        method: 'POST',
+        body: '{}',
+      });
     },
     onSuccess: () => {
       if (!isDemoMode) {
@@ -69,10 +72,16 @@ export function WebsiteAnalyzerPage() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Website Analyzer</h1>
-          <p className="text-muted-foreground">Sitemap discovery, metadata, schema, and brand profile</p>
+          <p className="text-muted-foreground">
+            Sitemap discovery, metadata, schema, and brand profile
+          </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => scan.mutate()} disabled={scan.isPending || scanning}>
+          <Button
+            variant="outline"
+            onClick={() => scan.mutate()}
+            disabled={scan.isPending || scanning}
+          >
             <Globe className="h-4 w-4 mr-1" /> Scan website
           </Button>
           <Button onClick={() => discover.mutate()} disabled={discover.isPending || scanning}>
@@ -104,14 +113,17 @@ export function WebsiteAnalyzerPage() {
             <div className="space-y-3 text-sm">
               <div className="flex items-center gap-2">
                 <Badge>{String(latest?.status ?? 'completed')}</Badge>
-                <span className="text-muted-foreground">Phase: {String(latest?.phase ?? 'completed')}</span>
+                <span className="text-muted-foreground">
+                  Phase: {String(latest?.phase ?? 'completed')}
+                </span>
               </div>
               <p>
-                <span className="text-muted-foreground">URL:</span> {String(latest?.target_url ?? 'https://chefgaa.com')}
+                <span className="text-muted-foreground">URL:</span>{' '}
+                {String(latest?.target_url ?? 'https://chefgaa.com')}
               </p>
               <p>
-                Pages: {String(latest?.pages_analyzed ?? 47)} analyzed / {String(latest?.pages_discovered ?? 52)}{' '}
-                discovered
+                Pages: {String(latest?.pages_analyzed ?? 47)} analyzed /{' '}
+                {String(latest?.pages_discovered ?? 52)} discovered
               </p>
               {latest?.brand_profile != null && (
                 <pre className="rounded-md bg-muted p-3 text-xs overflow-auto max-h-40">

@@ -46,7 +46,10 @@ export function CampaignsPage() {
           method: 'POST',
           body: JSON.stringify({
             campaignType,
-            goals: goals.split(',').map((g) => g.trim()).filter(Boolean),
+            goals: goals
+              .split(',')
+              .map((g) => g.trim())
+              .filter(Boolean),
           }),
         }
       );
@@ -56,7 +59,10 @@ export function CampaignsPage() {
           name,
           campaignType,
           plan: planRes.data,
-          goals: goals.split(',').map((g, i) => ({ id: String(i), label: g.trim() })).filter((g) => g.label),
+          goals: goals
+            .split(',')
+            .map((g, i) => ({ id: String(i), label: g.trim() }))
+            .filter((g) => g.label),
         }),
       });
     },
@@ -68,9 +74,11 @@ export function CampaignsPage() {
 
   const statusBadge = (status: string) => {
     const variant =
-      status === 'active' ? 'border-primary/30 text-primary' :
-      status === 'pending_approval' ? 'border-amber-500/30 text-amber-600' :
-      'border-muted-foreground/30 text-muted-foreground';
+      status === 'active'
+        ? 'border-primary/30 text-primary'
+        : status === 'pending_approval'
+          ? 'border-amber-500/30 text-amber-600'
+          : 'border-muted-foreground/30 text-muted-foreground';
     return <Badge className={variant}>{status.replace(/_/g, ' ')}</Badge>;
   };
 
@@ -81,7 +89,9 @@ export function CampaignsPage() {
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
             <Link2 className="h-6 w-6" /> Campaigns
           </h1>
-          <p className="text-muted-foreground">Turn discovered opportunities into structured campaigns</p>
+          <p className="text-muted-foreground">
+            Turn discovered opportunities into structured campaigns
+          </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" asChild>
@@ -98,17 +108,25 @@ export function CampaignsPage() {
           <CardTitle className="text-base flex items-center gap-2">
             <Sparkles className="h-4 w-4" /> Create Campaign
           </CardTitle>
-          <CardDescription>AI planner generates a plan from project goals and SEO intelligence</CardDescription>
+          <CardDescription>
+            AI planner generates a plan from project goals and SEO intelligence
+          </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 sm:grid-cols-2">
-          <Input placeholder="Campaign name" value={name} onChange={(e) => setName(e.target.value)} />
+          <Input
+            placeholder="Campaign name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
           <select
             className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
             value={campaignType}
             onChange={(e) => setCampaignType(e.target.value)}
           >
             {(types.data?.data ?? []).map((t) => (
-              <option key={t.id} value={t.id}>{t.display_name}</option>
+              <option key={t.id} value={t.id}>
+                {t.display_name}
+              </option>
             ))}
           </select>
           <Input
@@ -147,7 +165,9 @@ export function CampaignsPage() {
           </Card>
         ))}
         {(campaigns.data?.data ?? []).length === 0 && (
-          <p className="text-sm text-muted-foreground">No campaigns yet. Create one to get started.</p>
+          <p className="text-sm text-muted-foreground">
+            No campaigns yet. Create one to get started.
+          </p>
         )}
       </div>
     </div>

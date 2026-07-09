@@ -59,7 +59,9 @@ export function CommandCenterPage() {
       );
       if (!cancelled) setConversationId(res.data.id);
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [projectId, conversationId, request]);
 
   useEffect(() => {
@@ -68,7 +70,8 @@ export function CommandCenterPage() {
         {
           id: 'welcome',
           role: 'assistant',
-          content: 'Welcome to SEO OS Command Center. I have full context on Chefgaa — competitors, keywords, and 12 pending opportunities. Try: "Analyze Chefgaa" or "Find opportunities."',
+          content:
+            'Welcome to SEO OS Command Center. I have full context on Chefgaa — competitors, keywords, and 12 pending opportunities. Try: "Analyze Chefgaa" or "Find opportunities."',
           agent_type: 'seo_strategist',
         },
       ]);
@@ -100,7 +103,12 @@ export function CommandCenterPage() {
       setStreaming('');
       setLocalMessages((prev) => [
         ...prev,
-        { id: `a-${Date.now()}`, role: 'assistant', content: accumulated, agent_type: 'seo_strategist' },
+        {
+          id: `a-${Date.now()}`,
+          role: 'assistant',
+          content: accumulated,
+          agent_type: 'seo_strategist',
+        },
       ]);
       setIsSending(false);
       return;
@@ -124,7 +132,9 @@ export function CommandCenterPage() {
           <h1 className="text-2xl font-semibold tracking-tight">AI Command Center</h1>
           {isDemoMode && <Badge className="text-[10px]">Streaming Demo</Badge>}
         </div>
-        <p className="text-muted-foreground">ChatGPT-like interface with RAG, memory, and agent delegation</p>
+        <p className="text-muted-foreground">
+          ChatGPT-like interface with RAG, memory, and agent delegation
+        </p>
       </div>
 
       {thinking.isThinking && (
@@ -162,9 +172,7 @@ export function CommandCenterPage() {
                 m.role === 'user' ? 'ml-auto bg-primary text-primary-foreground' : 'bg-muted'
               }`}
             >
-              {m.agent_type && (
-                <p className="text-[10px] opacity-70 mb-1">via {m.agent_type}</p>
-              )}
+              {m.agent_type && <p className="text-[10px] opacity-70 mb-1">via {m.agent_type}</p>}
               <p className="whitespace-pre-wrap">{m.content}</p>
             </motion.div>
           ))}

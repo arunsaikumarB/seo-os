@@ -73,10 +73,18 @@ export function CompetitorsPage() {
                     <Badge className="text-[10px]">{String(s.confidence_score)}%</Badge>
                   </div>
                   <div className="flex gap-1 mt-2">
-                    <Button size="sm" variant="outline" onClick={() => validate.mutate({ id: String(s.id), action: 'validate' })}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => validate.mutate({ id: String(s.id), action: 'validate' })}
+                    >
                       <Check className="h-3 w-3" />
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => validate.mutate({ id: String(s.id), action: 'reject' })}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => validate.mutate({ id: String(s.id), action: 'reject' })}
+                    >
                       <X className="h-3 w-3" />
                     </Button>
                   </div>
@@ -91,7 +99,10 @@ export function CompetitorsPage() {
           </CardHeader>
           <CardContent className="space-y-2">
             {(data.data?.data.validated ?? []).map((c) => (
-              <div key={String(c.id)} className="rounded-md border px-3 py-2 text-sm flex justify-between">
+              <div
+                key={String(c.id)}
+                className="rounded-md border px-3 py-2 text-sm flex justify-between"
+              >
                 <span className="font-medium">{String(c.domain)}</span>
                 <Badge className="text-[10px]">{String(c.confidence_score ?? '—')}</Badge>
               </div>

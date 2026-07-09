@@ -15,14 +15,25 @@ import {
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { AnimatedCounter } from '@/components/demo/animated-counter';
 import { PageTransition, StaggerGrid, StaggerItem } from '@/components/demo/page-transition';
 import { useApi } from '@/hooks/use-api';
-import { useDemoMode } from '@/hooks/use-demo-mode';
-import { DEMO_EXECUTIVE_METRICS, DEMO_ORGANIZATIONS } from '@/demo/data';
 
 import type { LucideIcon } from 'lucide-react';
+
+type ExecutiveMetrics = {
+  organizations: number;
+  projects: number;
+  aiRuns: number;
+  campaigns: number;
+  opportunities: number;
+  knowledgeDocuments: number;
+  relationships: number;
+  timeSavedHours: number;
+  campaignSuccessRate: number;
+  productivityScore: number;
+  orgBreakdown: Array<{ id: string; name: string; projectCount: number }>;
+};
 
 function MetricCard({
   icon: Icon,
@@ -38,7 +49,9 @@ function MetricCard({
   highlight?: boolean;
 }) {
   return (
-    <Card className={`transition-all hover:shadow-lg hover:-translate-y-0.5 ${highlight ? 'border-primary/30 bg-primary/5' : ''}`}>
+    <Card
+      className={`transition-all hover:shadow-lg hover:-translate-y-0.5 ${highlight ? 'border-primary/30 bg-primary/5' : ''}`}
+    >
       <CardContent className="pt-5">
         <div className="flex items-start justify-between">
           <div>
@@ -58,23 +71,37 @@ function MetricCard({
 
 export function ExecutiveDashboardPage() {
   const { request } = useApi();
-  const { isDemoMode } = useDemoMode();
 
   const summary = useQuery({
     queryKey: ['executive-summary'],
-    queryFn: () => request<{ data: typeof DEMO_EXECUTIVE_METRICS }>('/v1/executive/summary'),
+    queryFn: () => request<{ data: ExecutiveMetrics }>('/v1/executive/summary'),
   });
 
-  const metrics = summary.data?.data ?? DEMO_EXECUTIVE_METRICS;
+  if (summary.isLoading) {
+    return (
+      <PageTransition className="space-y-8">
+        <p className="text-muted-foreground">Loading executive summary…</p>
+      </PageTransition>
+    );
+  }
+
+  if (summary.isError || !summary.data?.data) {
+    return (
+      <PageTransition className="space-y-8">
+        <p className="text-destructive">
+          Unable to load executive summary. Check your organization access.
+        </p>
+      </PageTransition>
+    );
+  }
+
+  const metrics = summary.data.data;
 
   return (
     <PageTransition className="space-y-8">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <h1 className="text-3xl font-bold tracking-tight">Executive Dashboard</h1>
-            {isDemoMode && <Badge className="text-[10px]">Demo Data</Badge>}
-          </div>
+          <h1 className="text-3xl font-bold tracking-tight mb-1">Executive Dashboard</h1>
           <p className="text-muted-foreground">
             Organization-wide AI operations, productivity, and campaign performance
           </p>
@@ -87,15 +114,35 @@ export function ExecutiveDashboardPage() {
       </div>
 
       <StaggerGrid className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StaggerItem><MetricCard icon={Building2} label="Organizations" value={metrics.organizations} /></StaggerItem>
-        <StaggerItem><MetricCard icon={FolderKanban} label="Projects" value={metrics.projects} /></StaggerItem>
-        <StaggerItem><MetricCard icon={Bot} label="AI Runs" value={metrics.aiRuns} /></StaggerItem>
-        <StaggerItem><MetricCard icon={Target} label="Campaigns" value={metrics.campaigns} /></StaggerItem>
-        <StaggerItem><MetricCard icon={Sparkles} label="Opportunities" value={metrics.opportunities} /></StaggerItem>
-        <StaggerItem><MetricCard icon={BookOpen} label="KB Documents" value={metrics.knowledgeDocuments} /></StaggerItem>
-        <StaggerItem><MetricCard icon={Users} label="Relationships" value={metrics.relationships} /></StaggerItem>
         <StaggerItem>
-          <MetricCard icon={Clock} label="Time Saved" value={metrics.timeSavedHours} suffix="h" highlight />
+          <MetricCard icon={Building2} label="Organizations" value={metrics.organizations} />
+        </StaggerItem>
+        <StaggerItem>
+          <MetricCard icon={FolderKanban} label="Projects" value={metrics.projects} />
+        </StaggerItem>
+        <StaggerItem>
+          <MetricCard icon={Bot} label="AI Runs" value={metrics.aiRuns} />
+        </StaggerItem>
+        <StaggerItem>
+          <MetricCard icon={Target} label="Campaigns" value={metrics.campaigns} />
+        </StaggerItem>
+        <StaggerItem>
+          <MetricCard icon={Sparkles} label="Opportunities" value={metrics.opportunities} />
+        </StaggerItem>
+        <StaggerItem>
+          <MetricCard icon={BookOpen} label="KB Documents" value={metrics.knowledgeDocuments} />
+        </StaggerItem>
+        <StaggerItem>
+          <MetricCard icon={Users} label="Relationships" value={metrics.relationships} />
+        </StaggerItem>
+        <StaggerItem>
+          <MetricCard
+            icon={Clock}
+            label="Time Saved"
+            value={metrics.timeSavedHours}
+            suffix="h"
+            highlight
+          />
         </StaggerItem>
       </StaggerGrid>
 
@@ -131,9 +178,7 @@ export function ExecutiveDashboardPage() {
             <p className="text-4xl font-bold">
               <AnimatedCounter value={metrics.campaignSuccessRate} suffix="%" />
             </p>
-            <p className="text-sm text-muted-foreground mt-2">
-              Campaigns reaching placement goals
-            </p>
+            <p className="text-sm text-muted-foreground mt-2">Campaigns reaching placement goals</p>
           </CardContent>
         </Card>
 
@@ -143,18 +188,22 @@ export function ExecutiveDashboardPage() {
             <CardDescription>Managed in this workspace</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
-            {DEMO_ORGANIZATIONS.map((org, i) => (
-              <motion.div
-                key={org.id}
-                initial={{ opacity: 0, x: -8 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.06 }}
-                className="flex justify-between text-sm rounded-md border px-3 py-2"
-              >
-                <span className="font-medium">{org.name}</span>
-                <span className="text-muted-foreground">{org.projectCount} projects</span>
-              </motion.div>
-            ))}
+            {metrics.orgBreakdown.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No organizations found.</p>
+            ) : (
+              metrics.orgBreakdown.map((org, i) => (
+                <motion.div
+                  key={org.id}
+                  initial={{ opacity: 0, x: -8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.06 }}
+                  className="flex justify-between text-sm rounded-md border px-3 py-2"
+                >
+                  <span className="font-medium">{org.name}</span>
+                  <span className="text-muted-foreground">{org.projectCount} projects</span>
+                </motion.div>
+              ))
+            )}
           </CardContent>
         </Card>
       </div>

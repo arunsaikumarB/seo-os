@@ -27,11 +27,7 @@ export async function listConversations(workspaceId: string, userId: string) {
   return data ?? [];
 }
 
-export async function createConversation(
-  workspaceId: string,
-  userId: string,
-  title?: string
-) {
+export async function createConversation(workspaceId: string, userId: string, title?: string) {
   const id = randomUUID();
   const { data, error } = await getSupabaseAdmin()
     .from('ai_conversations')
@@ -160,7 +156,8 @@ export async function sendMessage(params: {
   }
 
   if (!validation.valid && retrievalChunks.length === 0) {
-    responseText += '\n\n_Note: No high-confidence knowledge base matches were found for this query._';
+    responseText +=
+      '\n\n_Note: No high-confidence knowledge base matches were found for this query._';
   }
 
   await supabase.from('ai_messages').insert({
@@ -189,11 +186,7 @@ export async function sendMessage(params: {
   };
 }
 
-function streamText(
-  res: Response,
-  text: string,
-  meta?: { done?: Record<string, unknown> }
-): void {
+function streamText(res: Response, text: string, meta?: { done?: Record<string, unknown> }): void {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
