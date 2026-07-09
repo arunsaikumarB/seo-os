@@ -5,7 +5,7 @@ import { Plus, MoreHorizontal, Pencil, Archive } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Project } from '@seo-os/shared';
 import { useApi } from '@/hooks/use-api';
-import { useAppStore } from '@/stores/app-store';
+import { useActiveOrg } from '@/hooks/use-active-org';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -19,15 +19,15 @@ import {
 
 function ProjectsContent() {
   const queryClient = useQueryClient();
-  const { currentOrgId } = useAppStore();
+  const { activeOrgId, hasOrganizations, isReady } = useActiveOrg();
   const { fetchProjects, archiveProject } = useApi();
   const [createOpen, setCreateOpen] = useState(false);
   const [editProject, setEditProject] = useState<Project | null>(null);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['projects', currentOrgId],
-    queryFn: () => fetchProjects(currentOrgId!),
-    enabled: !!currentOrgId,
+    queryKey: ['projects', activeOrgId],
+    queryFn: () => fetchProjects(activeOrgId!),
+    enabled: !!activeOrgId,
   });
 
   const projects = data?.data ?? [];
@@ -36,13 +36,13 @@ function ProjectsContent() {
     try {
       await archiveProject(project.id);
       toast.success('Project archived');
-      queryClient.invalidateQueries({ queryKey: ['projects', currentOrgId] });
+      queryClient.invalidateQueries({ queryKey: ['projects', activeOrgId] });
     } catch {
       toast.error('Failed to archive project');
     }
   };
 
-  if (!currentOrgId) {
+  if (isReady && !hasOrganizations) {
     return (
       <Card>
         <CardHeader>

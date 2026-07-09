@@ -11,15 +11,8 @@ import {
 import { toast } from 'sonner';
 import type { Project } from '@seo-os/shared';
 import { useApi } from '@/hooks/use-api';
-import { useAppStore } from '@/stores/app-store';
-
-function apiErrorMessage(err: unknown, fallback: string): string {
-  if (typeof err === 'object' && err !== null && 'detail' in err) {
-    const detail = (err as { detail?: string }).detail;
-    if (detail) return detail;
-  }
-  return fallback;
-}
+import { useActiveOrg } from '@/hooks/use-active-org';
+import { getApiErrorMessage } from '@/lib/api';
 import {
   Dialog,
   DialogContent,
@@ -40,7 +33,7 @@ interface ProjectFormDialogProps {
 
 export function ProjectFormDialog({ open, onOpenChange, mode, project }: ProjectFormDialogProps) {
   const queryClient = useQueryClient();
-  const { currentOrgId } = useAppStore();
+  const { activeOrgId, hasOrganizations } = useActiveOrg();
   const { createProject, updateProject } = useApi();
 
   const schema = mode === 'create' ? createProjectSchema : updateProjectSchema;
@@ -77,24 +70,24 @@ export function ProjectFormDialog({ open, onOpenChange, mode, project }: Project
   const onSubmit = async (data: CreateProjectInput | UpdateProjectInput) => {
     try {
       if (mode === 'create') {
-        if (!currentOrgId) {
+        if (!hasOrganizations || !activeOrgId) {
           toast.error('No organization selected', {
             description: 'Create or select an organization first.',
           });
           return;
         }
-        await createProject(currentOrgId, data as CreateProjectInput);
+        await createProject(activeOrgId, data as CreateProjectInput);
         toast.success('Project created');
       } else if (project) {
         await updateProject(project.id, data);
         toast.success('Project updated');
       }
-      queryClient.invalidateQueries({ queryKey: ['projects', currentOrgId] });
+      queryClient.invalidateQueries({ queryKey: ['projects', activeOrgId] });
       onOpenChange(false);
       reset();
     } catch (err) {
       toast.error(mode === 'create' ? 'Failed to create project' : 'Failed to update project', {
-        description: apiErrorMessage(err, 'Check organization access and domain format.'),
+        description: getApiErrorMessage(err, 'Check organization access and domain format.'),
       });
     }
   };
