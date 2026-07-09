@@ -69,8 +69,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const getAccessToken = useCallback(async () => {
-    const { data } = await supabase.auth.getSession();
-    return data.session?.access_token ?? null;
+    const { data: sessionData } = await supabase.auth.getSession();
+    let session = sessionData.session;
+    if (!session) return null;
+
+    const expiresAt = session.expires_at ?? 0;
+    const expiresSoon = expiresAt * 1000 < Date.now() + 60_000;
+    if (expiresSoon) {
+      const { data: refreshed, error } = await supabase.auth.refreshSession();
+      if (!error && refreshed.session) {
+        session = refreshed.session;
+        setSession(session);
+      }
+    }
+
+    return session.access_token ?? null;
   }, []);
 
   const value = useMemo(

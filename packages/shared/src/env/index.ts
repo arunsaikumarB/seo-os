@@ -22,13 +22,22 @@ export const apiEnvSchema = z.object({
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;
 
+/** Supabase project URL only — strips accidental `/rest` suffix from dashboard copy-paste. */
+export function normalizeSupabaseUrl(url: string): string {
+  return url.replace(/\/rest\/?$/i, '').replace(/\/$/, '');
+}
+
 export function parseApiEnv(env: NodeJS.ProcessEnv): ApiEnv {
   const parsed = apiEnvSchema.parse(env);
   const enableWorkers =
     env.ENABLE_WORKERS !== undefined
       ? env.ENABLE_WORKERS === 'true'
       : parsed.NODE_ENV === 'production';
-  return { ...parsed, ENABLE_WORKERS: enableWorkers };
+  return {
+    ...parsed,
+    SUPABASE_URL: normalizeSupabaseUrl(parsed.SUPABASE_URL),
+    ENABLE_WORKERS: enableWorkers,
+  };
 }
 
 export const webEnvSchema = z.object({
