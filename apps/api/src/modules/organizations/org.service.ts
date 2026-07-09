@@ -1,5 +1,6 @@
 import type { Organization } from '@seo-os/shared';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
+import { logger } from '../../lib/logger.js';
 import { ensureProfile } from './member.service.js';
 
 function mapOrg(row: Record<string, unknown>): Organization {
@@ -31,7 +32,10 @@ export async function createOrganization(
     .select()
     .single();
 
-  if (orgError) throw orgError;
+  if (orgError) {
+    logger.error({ userId, input, supabaseError: orgError }, 'Organization insert failed');
+    throw orgError;
+  }
 
   const { error: memberError } = await getSupabaseAdmin().from('org_members').insert({
     org_id: org.id,

@@ -59,6 +59,7 @@ export function useApi() {
       request<ApiData<Organization>>('/v1/organizations', {
         method: 'POST',
         body: JSON.stringify(body),
+        orgId: null,
       }),
     [request]
   );

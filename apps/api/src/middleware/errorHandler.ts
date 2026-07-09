@@ -23,7 +23,14 @@ function mapDatabaseError(err: PostgrestErrorLike): AppError {
   logger.error({ supabaseError: err }, 'Database error');
 
   if (err.code === '23505') {
-    return new AppError(409, 'VALIDATION_ERROR', 'A project with this domain already exists');
+    const target = `${err.details ?? ''} ${err.message ?? ''}`.toLowerCase();
+    if (target.includes('slug') || target.includes('organizations')) {
+      return new AppError(409, 'VALIDATION_ERROR', 'That organization URL slug is already taken');
+    }
+    if (target.includes('domain') || target.includes('workspaces')) {
+      return new AppError(409, 'VALIDATION_ERROR', 'A project with this domain already exists');
+    }
+    return new AppError(409, 'VALIDATION_ERROR', 'A record with this value already exists');
   }
   if (err.code === '23503') {
     return new AppError(400, 'VALIDATION_ERROR', 'Invalid organization or user reference');
