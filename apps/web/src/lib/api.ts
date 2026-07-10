@@ -7,6 +7,15 @@ function resolveApiUrl(): string {
         'VITE_API_URL is misconfigured (points at Supabase). Set it to your Railway API URL in Netlify and redeploy.'
       );
     }
+    // Never call localhost from a deployed (non-dev) build — causes "Failed to fetch" in production.
+    if (
+      !import.meta.env.DEV &&
+      (normalized.includes('localhost') || normalized.includes('127.0.0.1'))
+    ) {
+      throw new Error(
+        'VITE_API_URL points at localhost in a production build. Set VITE_API_URL to your Railway API URL and redeploy.'
+      );
+    }
     return normalized;
   }
   if (import.meta.env.DEV) return 'http://localhost:3001';
@@ -23,6 +32,9 @@ export function getApiErrorMessage(err: unknown, fallback: string): string {
     if (problem.title) return problem.title;
   }
   if (err instanceof Error && err.message) return err.message;
+  if (err instanceof TypeError && /fetch/i.test(err.message)) {
+    return 'Cannot reach the API (network/CORS). Confirm VITE_API_URL is your Railway URL, not localhost.';
+  }
   return fallback;
 }
 
@@ -32,15 +44,25 @@ export async function apiFetch<T>(
 ): Promise<T> {
   const { orgId, token, headers, ...rest } = options;
   const baseUrl = resolveApiUrl();
-  const res = await fetch(`${baseUrl}${path}`, {
-    ...rest,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(orgId ? { 'X-Org-Id': orgId } : {}),
-      ...headers,
-    },
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}${path}`, {
+      ...rest,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(orgId ? { 'X-Org-Id': orgId } : {}),
+        ...headers,
+      },
+    });
+  } catch (err) {
+    throw {
+      detail: getApiErrorMessage(
+        err,
+        `Cannot reach API at ${baseUrl}. Check VITE_API_URL and that the Railway API is online.`
+      ),
+    };
+  }
 
   const raw = await res.text();
   let body: unknown = {};

@@ -1,6 +1,12 @@
+# When Netlify Base directory = repo root:
+#   Build command: npm ci && npm run build --workspace=@seo-os/shared && npm run build --workspace=@seo-os/web
+#   Publish directory: apps/web/dist
+#   Env: VITE_API_URL=https://api-production-48c9e.up.railway.app (required — never localhost)
+#
+# When Base directory = apps/web, set Publish directory to "dist" in the Netlify UI.
 [build]
   command = "npm run build --workspace=@seo-os/web"
-  publish = "apps/web/dist"
+  publish = "dist"
 
 [build.environment]
   NODE_VERSION = "20"

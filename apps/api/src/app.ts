@@ -13,8 +13,13 @@ export function createApp() {
   const env = getEnv();
   const app = express();
 
-  app.use(helmet());
-  app.use(cors({ origin: env.CORS_ORIGIN.split(','), credentials: true }));
+  // cross-origin so the Netlify SPA can read API responses (default helmet CORP is same-origin).
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    })
+  );
+  app.use(cors({ origin: env.CORS_ORIGIN.split(',').map((o) => o.trim()), credentials: true }));
   app.use(express.json({ limit: '10mb' }));
   app.use(traceIdMiddleware);
   app.use(
