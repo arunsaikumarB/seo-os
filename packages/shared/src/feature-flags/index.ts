@@ -25,7 +25,7 @@ export const DEFAULT_FEATURE_FLAGS: Record<FeatureFlag, boolean> = {
   outreach: true,
   workflows: true,
   analytics: true,
-  technical_seo: false,
+  technical_seo: true,
   reports: true,
   marketplace: false,
   white_label: true,

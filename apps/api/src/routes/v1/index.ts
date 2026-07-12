@@ -60,6 +60,7 @@ import {
 } from './platform.routes.js';
 import { analyticsRouter } from './analytics.routes.js';
 import { reportsRouter } from './reports.routes.js';
+import { technicalSeoRouter } from './technical-seo.routes.js';
 import { getExecutiveSummary } from '../../modules/executive/executive.service.js';
 import { logger } from '../../lib/logger.js';
 
@@ -74,7 +75,7 @@ projectScopeRouter.use(authMiddleware);
 projectScopeRouter.use(requireProjectAccess);
 
 v1Router.get('/version', (_req, res) => {
-  res.json({ data: { version: '8.0.0-reports', api: 'v1' } });
+  res.json({ data: { version: '9.0.0-technical-seo', api: 'v1' } });
 });
 
 v1Router.use('/notifications', notificationsRouter);
@@ -437,5 +438,6 @@ projectScopeRouter.use('/workflows', workflowsRouter);
 projectScopeRouter.use('/platform', platformRouter);
 projectScopeRouter.use('/analytics', analyticsRouter);
 projectScopeRouter.use('/reports', reportsRouter);
+projectScopeRouter.use('/technical-seo', technicalSeoRouter);
 
 v1Router.use('/projects/:projectId', projectScopeRouter);

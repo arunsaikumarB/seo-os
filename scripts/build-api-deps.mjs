@@ -20,6 +20,7 @@ const dependencyPackages = [
   '@seo-os/workflow-engine',
   '@seo-os/analytics-engine',
   '@seo-os/reports-engine',
+  '@seo-os/technical-seo',
 ];
 
 const filters = dependencyPackages.map((pkg) => `--filter=${pkg}`).join(' ');

@@ -87,13 +87,7 @@ export async function publishPlatformEvent(input: PublishPlatformEventInput) {
       const { triggerMatchingWorkflows } = await import('../workflows/workflow.service.js');
       await triggerMatchingWorkflows(
         input.workspaceId,
-        input.eventType as
-          | 'website_scan_completed'
-          | 'opportunity_discovered'
-          | 'campaign_created'
-          | 'approval_granted'
-          | 'reply_received'
-          | 'backlink_verified',
+        input.eventType as import('@seo-os/workflow-engine').WorkflowTriggerType,
         {
           ...payload,
           platformEventId: event.id,

@@ -58,7 +58,7 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
 
   // Version
   if (m === '/v1/version')
-    return { data: { version: '8.0.0-reports-demo', api: 'v1', mode: 'demo' } };
+    return { data: { version: '9.0.0-technical-seo-demo', api: 'v1', mode: 'demo' } };
 
   if (m.startsWith('/v1/notifications')) {
     return {
@@ -283,6 +283,160 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
         queue: [],
       },
     };
+  }
+
+  if (m.includes('/technical-seo/summary')) {
+    return {
+      data: {
+        healthScore: 78,
+        criticalIssues: 2,
+        warnings: 7,
+        passedChecks: 15,
+        crawlQueue: 3,
+        fixProgress: 42,
+        scores: {
+          overall: 78,
+          performance: 72,
+          seo: 81,
+          accessibility: 76,
+          content: 74,
+          security: 88,
+          technical: 79,
+        },
+        healthTrend: Array.from({ length: 8 }, (_, i) => ({
+          date: `2026-07-${String(i + 2).padStart(2, '0')}`,
+          value: 68 + i * 1.4,
+        })),
+        issueBreakdown: [
+          { name: 'critical', value: 2 },
+          { name: 'high', value: 4 },
+          { name: 'medium', value: 3 },
+          { name: 'low', value: 2 },
+          { name: 'info', value: 1 },
+        ],
+        agents: [
+          { id: 'technical_seo', displayName: 'Technical SEO Agent', description: 'Site-wide issues' },
+          { id: 'performance', displayName: 'Performance Agent', description: 'CWV & speed' },
+          { id: 'accessibility', displayName: 'Accessibility Agent', description: 'A11y + SEO' },
+          { id: 'schema', displayName: 'Schema Agent', description: 'JSON-LD' },
+          { id: 'security', displayName: 'Security Agent', description: 'HTTPS & headers' },
+          { id: 'crawl', displayName: 'Crawl Agent', description: 'Robots & sitemap' },
+        ],
+        latestAudit: {
+          id: 'audit-demo-1',
+          status: 'completed',
+          health_score: 78,
+          created_at: new Date().toISOString(),
+        },
+        recentAudits: [
+          {
+            id: 'audit-demo-1',
+            status: 'completed',
+            health_score: 78,
+            created_at: new Date().toISOString(),
+            target_url: project?.url ?? 'https://chefgaa.com',
+          },
+        ],
+      },
+    };
+  }
+
+  if (m.includes('/technical-seo/modules')) {
+    return {
+      data: [
+        'website_health',
+        'site_audit',
+        'core_web_vitals',
+        'indexability',
+        'crawlability',
+        'broken_links',
+        'canonical_tags',
+        'structured_data',
+        'meta_data',
+        'xml_sitemap',
+        'robots_txt',
+        'accessibility',
+        'security_headers',
+        'https',
+      ].map((id) => ({ id, label: id.replace(/_/g, ' ') })),
+    };
+  }
+
+  if (m.includes('/technical-seo/agents')) {
+    return {
+      data: [
+        { id: 'technical_seo', displayName: 'Technical SEO Agent', description: 'Detects issues' },
+        { id: 'performance', displayName: 'Performance Agent', description: 'CWV' },
+        { id: 'crawl', displayName: 'Crawl Agent', description: 'Queue & robots' },
+      ],
+    };
+  }
+
+  if (m.includes('/technical-seo/issues')) {
+    return {
+      data: [
+        {
+          id: 'ti-1',
+          title: 'Broken internal links detected',
+          module: 'broken_links',
+          severity: 'critical',
+          status: 'open',
+          business_impact: 'Users hit dead ends; bounce rate rises.',
+          seo_impact: 'Crawl waste and diluted equity.',
+          explanation: 'Browser Intelligence reported broken link findings.',
+          recommended_fix: 'Replace or 301 broken URLs.',
+          estimated_fix_minutes: 45,
+          confidence_score: 0.86,
+          suggested_fix: { type: 'redirect_rules', note: 'Map each broken URL to a replacement.' },
+        },
+        {
+          id: 'ti-2',
+          title: 'Missing Open Graph tags on key pages',
+          module: 'open_graph',
+          severity: 'medium',
+          status: 'open',
+          business_impact: 'Weak social share previews.',
+          seo_impact: 'Lower CTR from social referrals.',
+          explanation: 'og:title / description / image incomplete.',
+          recommended_fix: 'Add OG + Twitter Card tags.',
+          estimated_fix_minutes: 30,
+          confidence_score: 0.75,
+          suggested_fix: {
+            type: 'meta_tags',
+            html: '<meta property="og:title" content="Page Title" />',
+          },
+        },
+      ],
+    };
+  }
+
+  if (m.includes('/technical-seo/audits') && method === 'POST') {
+    return {
+      data: {
+        id: 'audit-demo-queued',
+        status: 'queued',
+        target_url: 'https://example.com',
+        audit_mode: 'full',
+      },
+    };
+  }
+
+  if (m.includes('/technical-seo/audits')) {
+    return {
+      data: [
+        {
+          id: 'audit-demo-1',
+          status: 'completed',
+          health_score: 78,
+          target_url: project?.url ?? 'https://chefgaa.com',
+          created_at: new Date().toISOString(),
+        },
+      ],
+    };
+  }
+
+  if (m.includes('/technical-seo/export')) {
+    return { exportedAt: new Date().toISOString(), issues: [] };
   }
 
   if (m.includes('/reports/runs')) {

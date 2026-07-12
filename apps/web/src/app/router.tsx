@@ -188,6 +188,9 @@ const AnalyticsSectionPage = lazy(() =>
 const ReportsLibraryPage = lazy(() =>
   import('@/pages/reports/library').then((m) => ({ default: m.ReportsLibraryPage }))
 );
+const TechnicalSeoOverviewPage = lazy(() =>
+  import('@/pages/technical/overview').then((m) => ({ default: m.TechnicalSeoOverviewPage }))
+);
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -271,6 +274,7 @@ const IMPLEMENTED_ROUTES = new Set([
   'analytics/team',
   'analytics/system',
   'reports/library',
+  'technical/overview',
   'settings/general',
 ]);
 
@@ -464,6 +468,7 @@ export function AppRouter() {
                     <Route path="analytics/overview" element={lazyEl(AnalyticsOverviewPage)} />
                     <Route path="analytics/:section" element={lazyEl(AnalyticsSectionPage)} />
                     <Route path="reports/library" element={lazyEl(ReportsLibraryPage)} />
+                    <Route path="technical/overview" element={lazyEl(TechnicalSeoOverviewPage)} />
                     <Route path="search" element={lazyEl(SearchPage)} />
                     {projectPlaceholderRoutes()}
                     <Route

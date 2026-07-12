@@ -25,6 +25,8 @@ export const WORKFLOW_TRIGGER_TYPES = [
   'approval_granted',
   'reply_received',
   'backlink_verified',
+  'critical_seo_issue_detected',
+  'technical_audit_completed',
 ] as const;
 
 export type WorkflowTriggerType = (typeof WORKFLOW_TRIGGER_TYPES)[number];

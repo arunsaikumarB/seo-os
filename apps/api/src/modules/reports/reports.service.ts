@@ -46,6 +46,21 @@ function hexToRgb(hex: string) {
 async function metricsFromAnalytics(workspaceId: string) {
   const overview = await getAnalyticsOverview(workspaceId, { persistInsights: false });
   const kpi = (key: string) => overview.kpis.find((k) => k.key === key)?.value ?? 0;
+  let technical: Record<string, number> = {};
+  try {
+    const { getTechnicalAnalytics } = await import('../technical-seo/technical-seo.service.js');
+    const t = await getTechnicalAnalytics(workspaceId);
+    technical = {
+      technicalHealthScore: t.healthScore,
+      pagesAudited: t.pagesAudited,
+      issueResolutionRate: t.issueResolutionRate,
+      averageFixMinutes: t.averageFixMinutes,
+      criticalSeoIssues: t.issuesBySeverity.find((i) => i.name === 'critical')?.value ?? 0,
+      highSeoIssues: t.issuesBySeverity.find((i) => i.name === 'high')?.value ?? 0,
+    };
+  } catch {
+    /* optional until audits exist */
+  }
   return {
     metrics: {
       backlinksWon: kpi('backlinks_won'),
@@ -59,6 +74,7 @@ async function metricsFromAnalytics(workspaceId: string) {
       emailsSent: overview.growth.today.emailsSent ?? 0,
       workflowsExecuted: overview.growth.today.workflowsRun ?? 0,
       aiTasksCompleted: overview.growth.today.aiTasks ?? 0,
+      ...technical,
     } as Record<string, number>,
     insights: overview.insights,
     forecasts: overview.forecasts.map((f) => ({

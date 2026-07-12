@@ -199,6 +199,18 @@ function buildSections(
       break;
     case 'client_seo':
       addPerf('SEO Performance', ['keywords', 'opportunities', 'prospects', 'pagesAnalyzed'], 'area');
+      addPerf(
+        'Technical SEO Health',
+        [
+          'technicalHealthScore',
+          'pagesAudited',
+          'criticalSeoIssues',
+          'highSeoIssues',
+          'issueResolutionRate',
+          'averageFixMinutes',
+        ],
+        'donut'
+      );
       break;
     default:
       addPerf(
@@ -212,6 +224,11 @@ function buildSections(
           'roiIndex',
         ],
         'bar'
+      );
+      addPerf(
+        'Technical SEO Health',
+        ['technicalHealthScore', 'pagesAudited', 'criticalSeoIssues', 'issueResolutionRate'],
+        'area'
       );
   }
 

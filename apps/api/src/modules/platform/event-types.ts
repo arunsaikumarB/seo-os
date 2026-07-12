@@ -23,6 +23,8 @@ export const PLATFORM_EVENT_TYPES = [
   'agent_run_failed',
   'knowledge_document_ready',
   'memory_fact_approved',
+  'technical_audit_completed',
+  'critical_seo_issue_detected',
 ] as const;
 
 export type PlatformEventType = (typeof PLATFORM_EVENT_TYPES)[number];
@@ -49,6 +51,7 @@ export type PlatformSourceModule =
   | 'memory'
   | 'ai'
   | 'mission_control'
+  | 'technical_seo'
   | 'system';
 
 /** Workflow trigger types that can be auto-started from platform events */
@@ -59,6 +62,8 @@ export const WORKFLOW_TRIGGERABLE_EVENTS = new Set([
   'approval_granted',
   'reply_received',
   'backlink_verified',
+  'critical_seo_issue_detected',
+  'technical_audit_completed',
 ]);
 
 export interface PublishPlatformEventInput {

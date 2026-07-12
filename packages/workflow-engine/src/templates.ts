@@ -171,6 +171,37 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     'Community',
     'forum'
   ),
+  {
+    key: 'critical_seo_issue_workflow',
+    name: 'Critical SEO Issue Response',
+    description:
+      'When a critical technical SEO issue is detected: notify, generate a fix, request approval, then export the recommendation.',
+    category: 'Technical SEO',
+    triggerType: 'critical_seo_issue_detected',
+    estimatedMinutes: 10,
+    definition: chain([
+      node('trigger', 'Critical SEO issue detected', 40, 120, {
+        triggerType: 'critical_seo_issue_detected',
+        description: 'Fires when Technical SEO Engine finds a critical issue',
+      }),
+      node('notification', 'Notify user', 220, 120, {
+        action: 'notify_user',
+      }),
+      node('ai_task', 'Generate fix', 400, 120, {
+        action: 'generate_ai_content',
+        actionConfig: { opportunityType: 'technical_seo_fix' },
+      }),
+      node('approval', 'Approval', 580, 120, {
+        action: 'request_approval',
+        requiresApproval: true,
+      }),
+      node('notification', 'Export recommendation', 760, 120, {
+        action: 'notify_user',
+        actionConfig: { message: 'Export Technical SEO recommendation (CSV/JSON/PDF)' },
+      }),
+      node('end', 'End', 940, 120, {}),
+    ]),
+  },
 ];
 
 export function getWorkflowTemplate(key: string): WorkflowTemplate | undefined {
