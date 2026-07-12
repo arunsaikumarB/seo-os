@@ -19,6 +19,7 @@ import { BrowserIntelligenceWidget } from '@/components/intelligence/browser-int
 import { RelationshipIntelligenceWidget } from '@/components/relationships/relationship-intelligence-widget';
 import { OutreachWidget } from '@/components/outreach/outreach-widget';
 import { WorkflowWidget } from '@/components/workflows/workflow-widget';
+import { AnalyticsMissionWidget } from '@/components/analytics/analytics-mission-widget';
 import type { WorkflowSummary } from '@/components/workflows/workflow-widget';
 import type { BrowserIntelligenceSummary } from '@/components/intelligence/browser-intelligence-widget';
 import type { RelationshipIntelligenceSummary } from '@/components/relationships/relationship-intelligence-widget';
@@ -376,6 +377,8 @@ export function MissionControlPage() {
       {summaryData?.workflows && (
         <WorkflowWidget summary={summaryData.workflows} projectId={projectId} />
       )}
+
+      <AnalyticsMissionWidget projectId={projectId} />
 
       {summaryData?.intelligence && (
         <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">

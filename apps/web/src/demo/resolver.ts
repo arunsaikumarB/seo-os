@@ -58,7 +58,7 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
 
   // Version
   if (m === '/v1/version')
-    return { data: { version: '6.1.0-epic61-rc-demo', api: 'v1', mode: 'demo' } };
+    return { data: { version: '7.0.0-epic7-demo', api: 'v1', mode: 'demo' } };
 
   if (m.startsWith('/v1/notifications')) {
     return {
@@ -93,6 +93,172 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
     };
   }
 
+  if (m.includes('/analytics/overview') || m.includes('/analytics/mission-control')) {
+    const weekly = Array.from({ length: 7 }).map((_, i) => ({
+      date: new Date(Date.now() - (6 - i) * 86400000).toISOString().slice(0, 10),
+      value: 12 + i * 3,
+    }));
+    const monthly = Array.from({ length: 30 }).map((_, i) => ({
+      date: new Date(Date.now() - (29 - i) * 86400000).toISOString().slice(0, 10),
+      value: 20 + Math.round(Math.sin(i / 3) * 8) + i,
+    }));
+    return {
+      data: {
+        kpis: [
+          { key: 'backlinks_won', label: 'Backlinks Won', value: 18, deltaPct: 12, trend: 'up' },
+          {
+            key: 'campaign_success',
+            label: 'Campaign Success',
+            value: 72,
+            unit: '%',
+            deltaPct: 8,
+            trend: 'up',
+          },
+          {
+            key: 'workflow_success',
+            label: 'Workflow Success',
+            value: 91,
+            unit: '%',
+            deltaPct: 5,
+            trend: 'up',
+          },
+          {
+            key: 'ai_productivity',
+            label: 'AI Hours Saved',
+            value: 42,
+            unit: 'h',
+            deltaPct: 15,
+            trend: 'up',
+          },
+          { key: 'reply_rate', label: 'Reply Rate', value: 24, unit: '%', deltaPct: 18, trend: 'up' },
+          {
+            key: 'relationship_health',
+            label: 'Relationship Health',
+            value: 68,
+            unit: '/100',
+            trend: 'up',
+          },
+          { key: 'opportunities', label: 'Opportunities', value: 84, trend: 'up' },
+          { key: 'roi_index', label: 'Projected ROI Index', value: 126, trend: 'up' },
+        ],
+        growth: {
+          today: { backlinksWon: 2, emailsSent: 11, workflowsRun: 4, aiTasks: 9 },
+          weekly,
+          monthly,
+        },
+        insights: [
+          {
+            id: 'd1',
+            category: 'campaigns',
+            severity: 'positive',
+            title: 'Campaign A is outperforming Campaign B by 28%',
+            body: 'Progress gap detected between top campaigns.',
+            recommendation: 'Replicate the winning campaign template.',
+            metricDeltaPct: 28,
+          },
+          {
+            id: 'd2',
+            category: 'backlinks',
+            severity: 'positive',
+            title: 'Guest posts have a 76% higher success rate than Directories',
+            body: 'Guest post success dominates directory submissions.',
+            recommendation: 'Prioritize guest-post campaigns next sprint.',
+            metricDeltaPct: 76,
+          },
+          {
+            id: 'd3',
+            category: 'outreach',
+            severity: 'positive',
+            title: 'Reply rates increased 18% this week',
+            body: 'Current reply rate improved versus prior period.',
+            recommendation: 'Double down on this week’s subject lines.',
+            metricDeltaPct: 18,
+          },
+        ],
+        forecasts: [
+          {
+            metric: 'expected_backlinks',
+            current: 18,
+            projected30d: 26,
+            projected90d: 42,
+            confidence: 0.62,
+            unit: 'links',
+          },
+          {
+            metric: 'expected_replies',
+            current: 14,
+            projected30d: 22,
+            projected90d: 38,
+            confidence: 0.58,
+            unit: 'replies',
+          },
+          {
+            metric: 'ai_productivity_hours',
+            current: 42,
+            projected30d: 57,
+            projected90d: 88,
+            confidence: 0.5,
+            unit: 'hours',
+          },
+          {
+            metric: 'projected_roi_index',
+            current: 126,
+            projected30d: 148,
+            projected90d: 190,
+            confidence: 0.45,
+            unit: 'index',
+          },
+        ],
+        dashboards: [
+          'executive',
+          'seo',
+          'backlinks',
+          'campaigns',
+          'workflows',
+          'relationships',
+          'outreach',
+          'ai',
+          'team',
+          'system',
+        ],
+        todaysPerformance: { backlinksWon: 2, emailsSent: 11, workflowsRun: 4, aiTasks: 9 },
+        weeklyGrowth: weekly,
+        monthlyGrowth: monthly,
+      },
+    };
+  }
+
+  if (m.includes('/analytics/dashboards/') || m.includes('/analytics/export')) {
+    return {
+      data: {
+        totalBacklinks: 42,
+        won: 18,
+        lost: 6,
+        pending: 9,
+        verified: 14,
+        successRate: 72,
+        emailsSent: 64,
+        openRate: 41,
+        replyRate: 24,
+        byType: [
+          { name: 'guest_post', value: 22 },
+          { name: 'directory', value: 10 },
+          { name: 'resource_page', value: 8 },
+        ],
+        growthTrend: Array.from({ length: 14 }).map((_, i) => ({
+          date: new Date(Date.now() - (13 - i) * 86400000).toISOString().slice(0, 10),
+          value: 5 + i,
+        })),
+        funnel: [
+          { name: 'Discovered', value: 80 },
+          { name: 'Qualified', value: 48 },
+          { name: 'Outreach', value: 30 },
+          { name: 'Won', value: 18 },
+        ],
+      },
+    };
+  }
+
   // Feature flags — all enabled in demo
   if (m === '/v1/feature-flags') {
     return {
@@ -104,6 +270,7 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
         backlink_builder: true,
         outreach: true,
         workflows: true,
+        analytics: true,
         technical_seo: true,
         reports: true,
       },

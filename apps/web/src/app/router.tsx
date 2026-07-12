@@ -179,6 +179,12 @@ const WorkflowBuilderPage = lazy(() =>
 const WorkflowRunsPage = lazy(() =>
   import('@/pages/workflows/runs').then((m) => ({ default: m.WorkflowRunsPage }))
 );
+const AnalyticsOverviewPage = lazy(() =>
+  import('@/pages/analytics/overview').then((m) => ({ default: m.AnalyticsOverviewPage }))
+);
+const AnalyticsSectionPage = lazy(() =>
+  import('@/pages/analytics/section').then((m) => ({ default: m.AnalyticsSectionPage }))
+);
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -251,6 +257,16 @@ const IMPLEMENTED_ROUTES = new Set([
   'workflows',
   'workflows/templates',
   'workflows/runs',
+  'analytics/overview',
+  'analytics/seo',
+  'analytics/backlinks',
+  'analytics/campaigns',
+  'analytics/workflows',
+  'analytics/relationships',
+  'analytics/outreach',
+  'analytics/ai',
+  'analytics/team',
+  'analytics/system',
   'settings/general',
 ]);
 
@@ -441,6 +457,8 @@ export function AppRouter() {
                     <Route path="workflows/templates" element={lazyEl(WorkflowTemplatesPage)} />
                     <Route path="workflows/runs" element={lazyEl(WorkflowRunsPage)} />
                     <Route path="workflows/:workflowId" element={lazyEl(WorkflowBuilderPage)} />
+                    <Route path="analytics/overview" element={lazyEl(AnalyticsOverviewPage)} />
+                    <Route path="analytics/:section" element={lazyEl(AnalyticsSectionPage)} />
                     <Route path="search" element={lazyEl(SearchPage)} />
                     {projectPlaceholderRoutes()}
                     <Route

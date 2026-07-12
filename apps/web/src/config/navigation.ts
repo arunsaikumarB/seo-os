@@ -117,7 +117,7 @@ export const projectNav: NavItem[] = [
     sprint: 'Sprint 7',
     featureFlag: 'technical_seo',
   },
-  { label: 'Analytics', href: 'analytics/overview', icon: BarChart3, sprint: 'Sprint 7' },
+  { label: 'Analytics', href: 'analytics/overview', icon: BarChart3, featureFlag: 'analytics' },
   {
     label: 'Reports',
     href: 'reports/library',

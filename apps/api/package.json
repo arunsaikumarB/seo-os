@@ -21,6 +21,7 @@
     "@seo-os/seo-intelligence": "*",
     "@seo-os/outreach-engine": "*",
     "@seo-os/workflow-engine": "*",
+    "@seo-os/analytics-engine": "*",
     "@seo-os/providers": "*",
     "@seo-os/shared": "*",
     "@supabase/supabase-js": "^2.47.10",

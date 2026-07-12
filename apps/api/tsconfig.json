@@ -18,6 +18,7 @@
     { "path": "../../packages/campaign-engine" },
     { "path": "../../packages/backlink-builder" },
     { "path": "../../packages/outreach-engine" },
-    { "path": "../../packages/workflow-engine" }
+    { "path": "../../packages/workflow-engine" },
+    { "path": "../../packages/analytics-engine" }
   ]
 }
