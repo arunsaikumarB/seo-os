@@ -197,6 +197,12 @@ const IntegrationsHubPage = lazy(() =>
 const HelpCenterPage = lazy(() =>
   import('@/pages/help/center').then((m) => ({ default: m.HelpCenterPage }))
 );
+const FeedbackCenterPage = lazy(() =>
+  import('@/pages/beta/feedback').then((m) => ({ default: m.FeedbackCenterPage }))
+);
+const BetaDashboardPage = lazy(() =>
+  import('@/pages/beta/dashboard').then((m) => ({ default: m.BetaDashboardPage }))
+);
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -313,6 +319,8 @@ function orgPlaceholderRoutes() {
           '/org/executive',
           '/org/integrations',
           '/org/help',
+          '/org/feedback',
+          '/org/beta',
         ].includes(n.href)
     )
     .map((item) => {
@@ -395,6 +403,8 @@ export function AppRouter() {
                     <Route path="executive" element={lazyEl(ExecutiveDashboardPage)} />
                     <Route path="integrations" element={lazyEl(IntegrationsHubPage)} />
                     <Route path="help" element={lazyEl(HelpCenterPage)} />
+                    <Route path="feedback" element={lazyEl(FeedbackCenterPage)} />
+                    <Route path="beta" element={lazyEl(BetaDashboardPage)} />
                     <Route path="settings/general" element={lazyEl(OrgSettingsGeneralPage)} />
                     {orgPlaceholderRoutes()}
                   </Route>

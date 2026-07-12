@@ -49,6 +49,20 @@ const TOUR_STEPS = [
     orgPath: null,
   },
   {
+    title: 'Integrations & Technical SEO',
+    description:
+      'Connect Search Console, Analytics, Slack, and run technical site audits from one hub.',
+    path: 'integrations/hub',
+    orgPath: null,
+  },
+  {
+    title: 'Closed Beta Feedback',
+    description:
+      'Report bugs and ideas in Feedback Center. Your input shapes Version 1.0.',
+    path: null,
+    orgPath: '/org/feedback',
+  },
+  {
     title: 'Executive Dashboard',
     description: 'Organization-wide metrics, time saved, and productivity scores for leadership.',
     path: null,
@@ -57,9 +71,9 @@ const TOUR_STEPS = [
   {
     title: "You're Ready",
     description:
-      'Enable Demo Mode anytime for a fully interactive presentation. Press Ctrl+K for quick navigation.',
+      'Enable Demo Mode anytime for a fully interactive presentation. Press Ctrl+K for quick navigation. Visit Help for shortcuts.',
     path: null,
-    orgPath: null,
+    orgPath: '/org/help',
   },
 ];
 

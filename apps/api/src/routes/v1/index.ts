@@ -62,6 +62,7 @@ import { analyticsRouter } from './analytics.routes.js';
 import { reportsRouter } from './reports.routes.js';
 import { technicalSeoRouter } from './technical-seo.routes.js';
 import { integrationsRouter } from './integrations.routes.js';
+import { betaOrgRouter, betaGlobalRouter } from './beta.routes.js';
 import { getExecutiveSummary } from '../../modules/executive/executive.service.js';
 import { logger } from '../../lib/logger.js';
 
@@ -76,11 +77,12 @@ projectScopeRouter.use(authMiddleware);
 projectScopeRouter.use(requireProjectAccess);
 
 v1Router.get('/version', (_req, res) => {
-  res.json({ data: { version: '11.0.0-production-ready', api: 'v1' } });
+  res.json({ data: { version: '11.0.5-closed-beta', api: 'v1' } });
 });
 
 v1Router.use('/notifications', notificationsRouter);
 v1Router.use('/organizations', auditRouter);
+v1Router.use('/beta', betaGlobalRouter);
 
 v1Router.get('/me', jwtOnlyMiddleware, async (req, res, next) => {
   try {
@@ -151,6 +153,8 @@ v1Router.get('/organizations/:orgId', authMiddleware, async (req, res, next) => 
     next(err);
   }
 });
+
+v1Router.use('/organizations/:orgId/beta', betaOrgRouter);
 
 v1Router.patch(
   '/organizations/:orgId',

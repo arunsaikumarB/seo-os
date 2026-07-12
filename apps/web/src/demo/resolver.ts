@@ -58,7 +58,7 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
 
   // Version
   if (m === '/v1/version')
-    return { data: { version: '11.0.0-production-ready-demo', api: 'v1', mode: 'demo' } };
+    return { data: { version: '11.0.5-closed-beta-demo', api: 'v1', mode: 'demo' } };
 
   if (m.startsWith('/v1/notifications')) {
     return {
@@ -559,6 +559,75 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
     };
   }
 
+  if (m.includes('/beta/announcements') || m.match(/\/organizations\/[^/]+\/beta\/dashboard/)) {
+    if (m.includes('/dashboard')) {
+      return {
+        data: {
+          status: { betaMode: true, cohort: 'closed-beta-0995', flags: { closed_beta: true } },
+          activeUsers7d: 12,
+          dailyUsage: 84,
+          errors: 1,
+          crashRate: 0.4,
+          apiAvgMs: 48,
+          feedbackCount: 3,
+          openBugs: 1,
+          featureUsage: [
+            { name: 'mission_control', value: 40 },
+            { name: 'feedback', value: 12 },
+          ],
+          recentFeedback: [
+            { id: 'f1', title: 'Tour skipped on mobile', type: 'bug', severity: 'medium' },
+          ],
+          invitations: [{ id: 'i1', code: 'BETA-DEMO01', status: 'pending' }],
+          announcements: [
+            {
+              id: 'a1',
+              title: 'Welcome to SEO OS Closed Beta',
+              body: 'Submit feedback anytime.',
+              severity: 'info',
+            },
+          ],
+        },
+      };
+    }
+    return {
+      data: [
+        {
+          id: 'a1',
+          title: 'Welcome to SEO OS Closed Beta',
+          body: 'You are helping validate SEO OS before Version 1.0.',
+          severity: 'info',
+          href: '/org/feedback',
+        },
+      ],
+    };
+  }
+
+  if (m.includes('/beta/feedback') && method === 'POST') {
+    return { data: { id: 'fb-demo', status: 'open', title: 'Demo feedback' } };
+  }
+
+  if (m.includes('/beta/feedback')) {
+    return {
+      data: [
+        {
+          id: 'fb1',
+          type: 'bug',
+          title: 'Tour skipped on mobile',
+          body: 'Tour closes when rotating device.',
+          severity: 'medium',
+          category: 'onboarding',
+          status: 'open',
+          created_at: new Date().toISOString(),
+        },
+      ],
+    };
+  }
+
+  if (m.includes('/beta/enable') || m.includes('/beta/invitations')) {
+    return { data: { code: 'BETA-DEMO01', status: 'pending', beta_mode: true } };
+  }
+
   if (m.includes('/reports/runs')) {
     return {
       data: [
@@ -633,6 +702,8 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
         technical_seo: true,
         reports: true,
         integrations: true,
+        closed_beta: true,
+        feedback_center: true,
         white_label: true,
       },
     };

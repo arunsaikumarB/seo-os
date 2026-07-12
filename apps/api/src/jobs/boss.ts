@@ -49,7 +49,7 @@ export async function enqueueJob<T extends Record<string, unknown>>(
   queue: string,
   name: string,
   data: T,
-  options?: { singletonKey?: string; startAfter?: number }
+  options?: { singletonKey?: string; startAfter?: number; retryLimit?: number; retryDelay?: number }
 ): Promise<string | null> {
   const boss = await getBoss();
   if (!boss) {
@@ -59,5 +59,8 @@ export async function enqueueJob<T extends Record<string, unknown>>(
   return boss.send(queue, { ...data, __jobName: name }, {
     singletonKey: options?.singletonKey,
     startAfter: options?.startAfter,
+    retryLimit: options?.retryLimit ?? 3,
+    retryDelay: options?.retryDelay ?? 30,
+    retryBackoff: true,
   });
 }

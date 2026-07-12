@@ -27,6 +27,7 @@ import {
   ListChecks,
   ShieldCheck,
   Workflow,
+  FlaskConical,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -48,6 +49,8 @@ export const orgNav: NavItem[] = [
   { label: 'Audit Log', href: '/org/audit-log', icon: ScrollText, sprint: 'Sprint 6' },
   { label: 'Integrations', href: '/org/integrations', icon: Plug, featureFlag: 'integrations' },
   { label: 'Help', href: '/org/help', icon: BookOpen },
+  { label: 'Feedback', href: '/org/feedback', icon: MessageSquare, featureFlag: 'feedback_center' },
+  { label: 'Closed Beta', href: '/org/beta', icon: FlaskConical, featureFlag: 'closed_beta' },
   { label: 'Billing', href: '/org/billing', icon: CreditCard, sprint: 'Future' },
 ];
 

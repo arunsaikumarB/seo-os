@@ -30,6 +30,8 @@ export const PLATFORM_EVENT_TYPES = [
   'integration_sync_completed',
   'integration_sync_failed',
   'integration_token_refreshed',
+  'beta_org_enabled',
+  'beta_feedback_submitted',
 ] as const;
 
 export type PlatformEventType = (typeof PLATFORM_EVENT_TYPES)[number];

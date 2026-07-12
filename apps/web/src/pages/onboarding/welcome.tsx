@@ -32,14 +32,14 @@ export function OnboardingWelcomePage() {
                 Let&apos;s optimize your website together
               </h1>
               <p className="text-muted-foreground text-sm">
-                Your AI mentor will guide you through {TOTAL_WORKFLOW_STEPS} steps — from first
-                scan to verified backlinks.
+                Your AI mentor guides you from first scan to verified backlinks — most teams
+                understand the full loop in under 15 minutes.
               </p>
             </div>
 
             <div className="flex flex-wrap justify-center gap-2">
               <Badge className="gap-1 border-border bg-muted/50">
-                <Clock className="h-3 w-3" />~25 min total
+                <Clock className="h-3 w-3" />~15 min to first value
               </Badge>
               <Badge className="gap-1 border-border bg-muted/50">
                 <GraduationCap className="h-3 w-3" />

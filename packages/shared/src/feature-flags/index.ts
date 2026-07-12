@@ -10,13 +10,15 @@ export const FEATURE_FLAGS = [
   'technical_seo',
   'reports',
   'integrations',
+  'closed_beta',
+  'feedback_center',
   'marketplace',
   'white_label',
 ] as const;
 
 export type FeatureFlag = (typeof FEATURE_FLAGS)[number];
 
-/** Sprint 3 defaults — Knowledge Engine enabled */
+/** Defaults — closed beta program enabled for v0.99.5 */
 export const DEFAULT_FEATURE_FLAGS: Record<FeatureFlag, boolean> = {
   ai_workforce: true,
   mission_control: true,
@@ -29,6 +31,8 @@ export const DEFAULT_FEATURE_FLAGS: Record<FeatureFlag, boolean> = {
   technical_seo: true,
   reports: true,
   integrations: true,
+  closed_beta: true,
+  feedback_center: true,
   marketplace: false,
   white_label: true,
 };

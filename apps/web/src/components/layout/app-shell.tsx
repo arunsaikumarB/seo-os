@@ -11,6 +11,8 @@ import { HelpDrawer } from '@/components/workflow/help-drawer';
 import { AiCoachPanel } from '@/components/workflow/ai-coach-panel';
 import { LearningModeBanner } from '@/components/workflow/learning-mode-banner';
 import { NextActionStrip } from '@/components/workflow/next-action-strip';
+import { OfflineBanner } from '@/components/beta/offline-banner';
+import { BetaAnnouncementBar } from '@/components/beta/beta-announcement-bar';
 import { useAppStore } from '@/stores/app-store';
 
 interface AppShellProps {
@@ -37,6 +39,8 @@ export function AppShell({ projectId }: AppShellProps) {
       </a>
       <Sidebar projectId={projectId} className="hidden md:flex" />
       <div className="flex flex-1 flex-col overflow-hidden">
+        <OfflineBanner />
+        <BetaAnnouncementBar />
         <Topbar projectId={projectId} showProjectSwitcher />
         <LearningModeBanner projectId={projectId} />
         {!expertMode && (
