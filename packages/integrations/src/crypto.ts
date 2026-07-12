@@ -10,7 +10,11 @@ export function encryptSecret(
   plaintext: string,
   encryptionKey?: string
 ): { ciphertext: string; iv: string; authTag: string; keyVersion: number } {
-  const key = deriveKey(encryptionKey || process.env.ENCRYPTION_KEY || 'seo-os-dev-integrations-key');
+  const secret = encryptionKey || process.env.ENCRYPTION_KEY;
+  if (!secret && (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging')) {
+    throw new Error('ENCRYPTION_KEY is required to store integration credentials in production');
+  }
+  const key = deriveKey(secret || 'seo-os-dev-integrations-key');
   const iv = randomBytes(12);
   const cipher = createCipheriv(ALGO, key, iv);
   const enc = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
@@ -27,7 +31,11 @@ export function decryptSecret(
   payload: { ciphertext: string; iv: string; authTag?: string | null },
   encryptionKey?: string
 ): string {
-  const key = deriveKey(encryptionKey || process.env.ENCRYPTION_KEY || 'seo-os-dev-integrations-key');
+  const secret = encryptionKey || process.env.ENCRYPTION_KEY;
+  if (!secret && (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging')) {
+    throw new Error('ENCRYPTION_KEY is required to read integration credentials in production');
+  }
+  const key = deriveKey(secret || 'seo-os-dev-integrations-key');
   const decipher = createDecipheriv(ALGO, key, Buffer.from(payload.iv, 'base64'));
   if (payload.authTag) {
     decipher.setAuthTag(Buffer.from(payload.authTag, 'base64'));

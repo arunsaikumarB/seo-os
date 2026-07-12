@@ -26,10 +26,13 @@ export function rateLimit(opts: {
     res.setHeader('X-RateLimit-Remaining', String(Math.max(0, max - bucket.count)));
     res.setHeader('X-RateLimit-Reset', String(Math.ceil(bucket.resetAt / 1000)));
     if (bucket.count > max) {
+      const retryAfter = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
+      res.setHeader('Retry-After', String(retryAfter));
       res.status(429).json({
         error: {
           code: 'RATE_LIMITED',
           message: 'Too many requests. Please retry shortly.',
+          retryAfter,
         },
       });
       return;

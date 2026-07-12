@@ -76,7 +76,7 @@ projectScopeRouter.use(authMiddleware);
 projectScopeRouter.use(requireProjectAccess);
 
 v1Router.get('/version', (_req, res) => {
-  res.json({ data: { version: '10.0.0-integrations', api: 'v1' } });
+  res.json({ data: { version: '11.0.0-production-ready', api: 'v1' } });
 });
 
 v1Router.use('/notifications', notificationsRouter);

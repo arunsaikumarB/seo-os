@@ -58,7 +58,7 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
 
   // Version
   if (m === '/v1/version')
-    return { data: { version: '10.0.0-integrations-demo', api: 'v1', mode: 'demo' } };
+    return { data: { version: '11.0.0-production-ready-demo', api: 'v1', mode: 'demo' } };
 
   if (m.startsWith('/v1/notifications')) {
     return {

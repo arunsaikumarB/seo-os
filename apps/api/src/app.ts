@@ -6,9 +6,10 @@ import { getEnv } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { traceIdMiddleware } from './middleware/traceId.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
-import { healthHandler, readyHandler, versionHandler } from './routes/health.js';
+import { healthHandler, readyHandler, versionHandler, metricsHandler, opsHealthHandler } from './routes/health.js';
 import { v1Router } from './routes/v1/index.js';
 import { rateLimit } from './middleware/rateLimit.js';
+import { metricsMiddleware } from './middleware/metrics.js';
 
 export function createApp() {
   const env = getEnv();
@@ -18,11 +19,13 @@ export function createApp() {
   app.use(
     helmet({
       crossOriginResourcePolicy: { policy: 'cross-origin' },
+      contentSecurityPolicy: false,
     })
   );
   app.use(cors({ origin: env.CORS_ORIGIN.split(',').map((o) => o.trim()), credentials: true }));
   app.use(express.json({ limit: '10mb' }));
   app.use(traceIdMiddleware);
+  app.use(metricsMiddleware);
   app.use('/v1', rateLimit({ windowMs: 60_000, max: 180, keyPrefix: 'v1' }));
   app.use(
     pinoHttp({
@@ -32,6 +35,8 @@ export function createApp() {
 
   app.get('/health', healthHandler);
   app.get('/ready', readyHandler);
+  app.get('/metrics', metricsHandler);
+  app.get('/ops/health', opsHealthHandler);
   app.get('/v1/version', versionHandler);
 
   app.use('/v1', v1Router);

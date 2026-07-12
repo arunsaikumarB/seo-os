@@ -33,6 +33,15 @@ export function parseApiEnv(env: NodeJS.ProcessEnv): ApiEnv {
     env.ENABLE_WORKERS !== undefined
       ? env.ENABLE_WORKERS === 'true'
       : parsed.NODE_ENV === 'production';
+  if (
+    (parsed.NODE_ENV === 'production' || parsed.NODE_ENV === 'staging') &&
+    !parsed.ENCRYPTION_KEY
+  ) {
+    // Soft-fail: allow boot but /ready reports degraded (see health.readyHandler)
+    console.warn(
+      '[seo-os] ENCRYPTION_KEY is not set — integration credentials fall back to a dev key. Set ENCRYPTION_KEY in production.'
+    );
+  }
   return {
     ...parsed,
     SUPABASE_URL: normalizeSupabaseUrl(parsed.SUPABASE_URL),

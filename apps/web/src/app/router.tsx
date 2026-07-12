@@ -194,6 +194,9 @@ const TechnicalSeoOverviewPage = lazy(() =>
 const IntegrationsHubPage = lazy(() =>
   import('@/pages/integrations/hub').then((m) => ({ default: m.IntegrationsHubPage }))
 );
+const HelpCenterPage = lazy(() =>
+  import('@/pages/help/center').then((m) => ({ default: m.HelpCenterPage }))
+);
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -304,9 +307,13 @@ function orgPlaceholderRoutes() {
   return orgNav
     .filter(
       (n) =>
-        !['/org/team', '/org/settings/general', '/org/executive', '/org/integrations'].includes(
-          n.href
-        )
+        ![
+          '/org/team',
+          '/org/settings/general',
+          '/org/executive',
+          '/org/integrations',
+          '/org/help',
+        ].includes(n.href)
     )
     .map((item) => {
       const path = item.href.replace('/org/', '');
@@ -387,6 +394,7 @@ export function AppRouter() {
                     <Route path="team" element={lazyEl(OrgTeamPage)} />
                     <Route path="executive" element={lazyEl(ExecutiveDashboardPage)} />
                     <Route path="integrations" element={lazyEl(IntegrationsHubPage)} />
+                    <Route path="help" element={lazyEl(HelpCenterPage)} />
                     <Route path="settings/general" element={lazyEl(OrgSettingsGeneralPage)} />
                     {orgPlaceholderRoutes()}
                   </Route>

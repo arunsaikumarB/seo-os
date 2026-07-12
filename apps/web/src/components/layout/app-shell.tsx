@@ -29,6 +29,12 @@ export function AppShell({ projectId }: AppShellProps) {
 
   return (
     <div className="flex h-screen overflow-hidden">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:m-2 focus:rounded-md focus:bg-background focus:px-3 focus:py-2 focus:shadow"
+      >
+        Skip to main content
+      </a>
       <Sidebar projectId={projectId} className="hidden md:flex" />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Topbar projectId={projectId} showProjectSwitcher />
@@ -45,7 +51,7 @@ export function AppShell({ projectId }: AppShellProps) {
             <AiCoachPanel />
           </div>
         </div>
-        <main className="flex-1 overflow-y-auto p-4 pb-20 md:p-6 md:pb-6">
+        <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto p-4 pb-20 md:p-6 md:pb-6">
           <NextActionStrip projectId={projectId} />
           <Outlet />
         </main>

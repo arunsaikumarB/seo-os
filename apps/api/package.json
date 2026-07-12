@@ -9,6 +9,7 @@
     "build": "tsc -b --force",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "clean": "rimraf dist",
     "lint": "eslint src --max-warnings 0"
   },
@@ -48,6 +49,7 @@
     "pino-pretty": "^13.0.0",
     "rimraf": "^6.0.1",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
   }
 }

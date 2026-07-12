@@ -47,6 +47,7 @@ export const orgNav: NavItem[] = [
   { label: 'Executive', href: '/org/executive', icon: Building2 },
   { label: 'Audit Log', href: '/org/audit-log', icon: ScrollText, sprint: 'Sprint 6' },
   { label: 'Integrations', href: '/org/integrations', icon: Plug, featureFlag: 'integrations' },
+  { label: 'Help', href: '/org/help', icon: BookOpen },
   { label: 'Billing', href: '/org/billing', icon: CreditCard, sprint: 'Future' },
 ];
 
