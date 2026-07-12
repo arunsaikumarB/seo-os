@@ -14,7 +14,10 @@ export function useActiveOrg() {
     enabled: !demoMode,
   });
 
-  const memberships = data?.data.organizations ?? [];
+  const memberships = useMemo(
+    () => data?.data.organizations ?? [],
+    [data?.data.organizations]
+  );
   const validOrgIds = useMemo(() => new Set(memberships.map((m) => m.org_id)), [memberships]);
 
   const activeOrgId =

@@ -21,6 +21,11 @@ import {
   DEMO_OUTREACH_TEMPLATES,
   DEMO_OUTREACH_SEQUENCES,
   DEMO_OUTREACH_SEQUENCE_DETAIL,
+  DEMO_WORKFLOW_SUMMARY,
+  DEMO_WORKFLOW_TEMPLATES,
+  DEMO_WORKFLOWS,
+  DEMO_WORKFLOW_RUNS,
+  DEMO_WORKFLOW_APPROVALS,
   DEMO_AUTOMATION_SUMMARY,
   DEMO_IMPORTS,
   DEMO_TRACKING,
@@ -51,7 +56,7 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
   const project = getDemoProject(projectId);
 
   // Version
-  if (m === '/v1/version') return { data: { version: '0.5.5-demo', api: 'v1', mode: 'demo' } };
+  if (m === '/v1/version') return { data: { version: '6.0.0-epic6-demo', api: 'v1', mode: 'demo' } };
 
   // Feature flags — all enabled in demo
   if (m === '/v1/feature-flags') {
@@ -63,6 +68,7 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
         ai_memory: true,
         backlink_builder: true,
         outreach: true,
+        workflows: true,
         technical_seo: true,
         reports: true,
       },
@@ -152,6 +158,7 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
         browserIntelligence: DEMO_BROWSER_INTELLIGENCE,
         relationshipIntelligence: DEMO_RELATIONSHIP_SUMMARY,
         outreach: DEMO_OUTREACH_SUMMARY,
+        workflows: DEMO_WORKFLOW_SUMMARY,
       },
     };
   }
@@ -452,6 +459,31 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
       ],
     };
   if (m.includes('/outreach/tasks')) return { data: DEMO_OUTREACH_THREAD_DETAIL.tasks };
+
+  if (m.includes('/workflows/summary')) return { data: DEMO_WORKFLOW_SUMMARY };
+  if (m.includes('/workflows/templates')) return { data: DEMO_WORKFLOW_TEMPLATES };
+  if (m.includes('/workflows/approvals') && m.includes('/decide') && method === 'POST')
+    return { data: { decision: 'approved' } };
+  if (m.includes('/workflows/approvals')) return { data: DEMO_WORKFLOW_APPROVALS };
+  if (m.includes('/workflows/runs/'))
+    return {
+      data: {
+        ...DEMO_WORKFLOW_RUNS[0],
+        steps: [],
+        approvals: DEMO_WORKFLOW_APPROVALS,
+      },
+    };
+  if (m.includes('/workflows/runs')) return { data: DEMO_WORKFLOW_RUNS };
+  if (m.match(/\/workflows\/[^/]+\/run$/) && method === 'POST')
+    return { data: DEMO_WORKFLOW_RUNS[0] };
+  if (m.match(/\/workflows\/[^/]+$/) && method === 'PATCH')
+    return { data: { ...DEMO_WORKFLOWS[0], ...(body ? JSON.parse(body) : {}) } };
+  if (m.match(/\/workflows\/[^/]+$/) && !m.endsWith('/workflows'))
+    return { data: DEMO_WORKFLOWS[0] };
+  if (m.includes('/workflows') && method === 'POST')
+    return { data: { ...DEMO_WORKFLOWS[0], id: 'wf-new', name: 'New workflow' } };
+  if (m.includes('/workflows')) return { data: DEMO_WORKFLOWS };
+
 
   if (m.includes('/backlink-builder/campaigns/associations')) {
     return {

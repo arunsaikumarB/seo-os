@@ -52,6 +52,7 @@ import { campaignsRouter } from './campaigns.routes.js';
 import { backlinkBuilderRouter } from './backlink-builder.routes.js';
 import { relationshipRouter } from './relationship.routes.js';
 import { outreachRouter } from './outreach.routes.js';
+import { workflowsRouter } from './workflows.routes.js';
 import { getExecutiveSummary } from '../../modules/executive/executive.service.js';
 import { logger } from '../../lib/logger.js';
 
@@ -66,7 +67,7 @@ projectScopeRouter.use(authMiddleware);
 projectScopeRouter.use(requireProjectAccess);
 
 v1Router.get('/version', (_req, res) => {
-  res.json({ data: { version: '1.0.0-epic1', api: 'v1' } });
+  res.json({ data: { version: '6.0.0-epic6', api: 'v1' } });
 });
 
 v1Router.get('/me', jwtOnlyMiddleware, async (req, res, next) => {
@@ -422,5 +423,6 @@ projectScopeRouter.use('/campaigns', campaignsRouter);
 projectScopeRouter.use('/backlink-builder', backlinkBuilderRouter);
 projectScopeRouter.use('/relationships', relationshipRouter);
 projectScopeRouter.use('/outreach', outreachRouter);
+projectScopeRouter.use('/workflows', workflowsRouter);
 
 v1Router.use('/projects/:projectId', projectScopeRouter);

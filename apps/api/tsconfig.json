@@ -17,6 +17,7 @@
     { "path": "../../packages/seo-intelligence" },
     { "path": "../../packages/campaign-engine" },
     { "path": "../../packages/backlink-builder" },
-    { "path": "../../packages/outreach-engine" }
+    { "path": "../../packages/outreach-engine" },
+    { "path": "../../packages/workflow-engine" }
   ]
 }

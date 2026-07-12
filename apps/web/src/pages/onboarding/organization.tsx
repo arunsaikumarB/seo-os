@@ -36,14 +36,13 @@ export function OnboardingOrganizationPage() {
     enabled: !demoMode,
   });
 
-  const existingOrgs = meData?.data.organizations ?? [];
-
   useEffect(() => {
+    const existingOrgs = meData?.data.organizations ?? [];
     if (!isFetched || demoMode || existingOrgs.length === 0) return;
     const orgId = existingOrgs[0].org_id;
     setCurrentOrgId(orgId);
     navigate('/projects', { replace: true });
-  }, [demoMode, existingOrgs, isFetched, navigate, setCurrentOrgId]);
+  }, [demoMode, meData?.data.organizations, isFetched, navigate, setCurrentOrgId]);
 
   const {
     register,

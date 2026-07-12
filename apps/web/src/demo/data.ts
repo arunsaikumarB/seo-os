@@ -924,6 +924,115 @@ export const DEMO_OUTREACH_SUMMARY = {
   disclaimer: 'Every outbound email requires human approval before sending.',
 };
 
+export const DEMO_WORKFLOW_SUMMARY = {
+  runningWorkflows: 2,
+  queuedJobs: 3,
+  completedToday: 8,
+  failedJobs: 1,
+  pendingApprovals: 2,
+  workflowHealth: 'healthy',
+  automationSuccessRate: 92,
+  activeDefinitions: 4,
+  agent: 'Workflow Orchestrator Agent',
+  disclaimer: 'Workflows orchestrate existing modules; external actions require approval.',
+};
+
+export const DEMO_WORKFLOW_TEMPLATES = [
+  {
+    key: 'guest_post_campaign',
+    name: 'Guest Post Campaign',
+    description: 'Discover guest post opportunities, generate pitches, and prepare approved outreach.',
+    category: 'Backlink Acquisition',
+    triggerType: 'opportunity_discovered',
+    estimatedMinutes: 15,
+  },
+  {
+    key: 'broken_link_campaign',
+    name: 'Broken Link Campaign',
+    description: 'Find broken links, draft replacement suggestions, and request approval before outreach.',
+    category: 'Backlink Acquisition',
+    triggerType: 'opportunity_discovered',
+    estimatedMinutes: 15,
+  },
+  {
+    key: 'directory_submission_campaign',
+    name: 'Directory Submission Campaign',
+    description: 'Qualify directories, generate listings copy, and route through approval.',
+    category: 'Citations',
+    triggerType: 'opportunity_discovered',
+    estimatedMinutes: 12,
+  },
+];
+
+export const DEMO_WORKFLOWS = [
+  {
+    id: 'wf-demo-1',
+    name: 'Guest Post Campaign',
+    description: 'Template-based guest post automation',
+    status: 'active',
+    trigger_type: 'opportunity_discovered',
+    template_key: 'guest_post_campaign',
+    updated_at: new Date().toISOString(),
+    definition: {
+      nodes: [
+        {
+          id: 'n1',
+          type: 'trigger',
+          data: { label: 'Opportunity discovered', triggerType: 'opportunity_discovered' },
+          position: { x: 40, y: 120 },
+        },
+        {
+          id: 'n2',
+          type: 'ai_task',
+          data: { label: 'Generate AI content', action: 'generate_ai_content' },
+          position: { x: 220, y: 120 },
+        },
+        {
+          id: 'n3',
+          type: 'approval',
+          data: { label: 'Request approval', requiresApproval: true },
+          position: { x: 400, y: 120 },
+        },
+        {
+          id: 'n4',
+          type: 'end',
+          data: { label: 'End' },
+          position: { x: 580, y: 120 },
+        },
+      ],
+      edges: [
+        { id: 'e1', source: 'n1', target: 'n2', label: 'default' },
+        { id: 'e2', source: 'n2', target: 'n3', label: 'default' },
+        { id: 'e3', source: 'n3', target: 'n4', label: 'default' },
+      ],
+    },
+  },
+];
+
+export const DEMO_WORKFLOW_RUNS = [
+  {
+    id: 'wfr1',
+    status: 'waiting_approval',
+    created_at: new Date().toISOString(),
+    workflows: { name: 'Guest Post Campaign' },
+  },
+  {
+    id: 'wfr2',
+    status: 'completed',
+    created_at: new Date(Date.now() - 3600_000).toISOString(),
+    workflows: { name: 'Broken Link Campaign' },
+  },
+];
+
+export const DEMO_WORKFLOW_APPROVALS = [
+  {
+    id: 'wfa1',
+    summary: 'Prepare outreach draft: external action requires approval',
+    created_at: new Date().toISOString(),
+    run_id: 'wfr1',
+  },
+];
+
 export const DEMO_OUTREACH_THREADS = [
   {
     id: 'th1',

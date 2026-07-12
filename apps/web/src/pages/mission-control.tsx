@@ -18,6 +18,8 @@ import { AutomationWidget } from '@/components/backlink-builder/automation-widge
 import { BrowserIntelligenceWidget } from '@/components/intelligence/browser-intelligence-widget';
 import { RelationshipIntelligenceWidget } from '@/components/relationships/relationship-intelligence-widget';
 import { OutreachWidget } from '@/components/outreach/outreach-widget';
+import { WorkflowWidget } from '@/components/workflows/workflow-widget';
+import type { WorkflowSummary } from '@/components/workflows/workflow-widget';
 import type { BrowserIntelligenceSummary } from '@/components/intelligence/browser-intelligence-widget';
 import type { RelationshipIntelligenceSummary } from '@/components/relationships/relationship-intelligence-widget';
 import type { OutreachSummary } from '@/components/outreach/outreach-widget';
@@ -93,6 +95,7 @@ export function MissionControlPage() {
           browserIntelligence?: BrowserIntelligenceSummary;
           relationshipIntelligence?: RelationshipIntelligenceSummary;
           outreach?: OutreachSummary;
+          workflows?: WorkflowSummary;
         };
       }>(`/v1/projects/${projectId}/mission-control/summary`),
     enabled: !!projectId,
@@ -315,6 +318,9 @@ export function MissionControlPage() {
 
       {summaryData?.outreach && (
         <OutreachWidget summary={summaryData.outreach} projectId={projectId} />
+      )}
+      {summaryData?.workflows && (
+        <WorkflowWidget summary={summaryData.workflows} projectId={projectId} />
       )}
 
       {summaryData?.intelligence && (

@@ -30,6 +30,7 @@ import {
   CheckCircle2,
   TrendingUp,
   TrendingDown,
+  Workflow,
 } from 'lucide-react';
 import type { NavItem } from './navigation';
 
@@ -131,6 +132,32 @@ export const workflowNavSections: WorkflowNavSection[] = [
       { label: 'Email Drafts', href: 'outreach/studio', icon: PenLine, featureFlag: 'outreach' },
       { label: 'Outreach', href: 'outreach/inbox', icon: Mail, featureFlag: 'outreach' },
       { label: 'Sequences', href: 'outreach/sequences', icon: Send, featureFlag: 'outreach' },
+    ],
+  },
+  {
+    id: 'automation',
+    label: 'Automation',
+    emoji: '⚡',
+    items: [
+      {
+        label: 'Workflows',
+        href: 'workflows',
+        icon: Workflow,
+        featureFlag: 'workflows',
+        badge: 'Epic 6',
+      },
+      {
+        label: 'Templates',
+        href: 'workflows/templates',
+        icon: LayoutDashboard,
+        featureFlag: 'workflows',
+      },
+      {
+        label: 'Runs & Approvals',
+        href: 'workflows/runs',
+        icon: ShieldCheck,
+        featureFlag: 'workflows',
+      },
     ],
   },
   {

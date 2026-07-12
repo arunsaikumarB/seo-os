@@ -26,6 +26,7 @@ import {
   Hash,
   ListChecks,
   ShieldCheck,
+  Workflow,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -102,6 +103,13 @@ export const projectNav: NavItem[] = [
   },
   { label: 'Content Studio', href: 'content/library', icon: FileText, sprint: 'Sprint 7' },
   { label: 'Outreach', href: 'outreach/inbox', icon: Mail, featureFlag: 'outreach' },
+  {
+    label: 'Workflows',
+    href: 'workflows',
+    icon: Workflow,
+    featureFlag: 'workflows',
+    badge: 'Epic 6',
+  },
   {
     label: 'Technical SEO',
     href: 'technical/overview',

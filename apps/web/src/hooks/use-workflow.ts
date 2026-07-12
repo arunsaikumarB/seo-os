@@ -26,15 +26,14 @@ export function useWorkflow(projectId: string) {
   } = useAppStore();
   const { hasOrganizations } = useActiveOrg();
 
-  const projectCompleted = workflowProgress[projectId] ?? [];
-  const globalCompleted = workflowProgress[WORKFLOW_GLOBAL_KEY] ?? [];
-
   const completedSteps = useMemo(() => {
+    const projectCompleted = workflowProgress[projectId] ?? [];
+    const globalCompleted = workflowProgress[WORKFLOW_GLOBAL_KEY] ?? [];
     const set = new Set([...projectCompleted, ...globalCompleted]);
     if (hasOrganizations) set.add('create-org');
     if (projectId) set.add('create-project');
     return set;
-  }, [projectCompleted, globalCompleted, hasOrganizations, projectId]);
+  }, [workflowProgress, hasOrganizations, projectId]);
 
   useEffect(() => {
     const path = location.pathname;

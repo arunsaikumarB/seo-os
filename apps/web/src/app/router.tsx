@@ -53,6 +53,10 @@ import { OnboardingProjectPage } from '@/pages/onboarding/project';
 import { OrgTeamPage } from '@/pages/org/team';
 import { OrgSettingsGeneralPage } from '@/pages/org/settings/general';
 import { ExecutiveDashboardPage } from '@/pages/org/executive';
+import { WorkflowsPage } from '@/pages/workflows/index';
+import { WorkflowTemplatesPage } from '@/pages/workflows/templates';
+import { WorkflowBuilderPage } from '@/pages/workflows/builder';
+import { WorkflowRunsPage } from '@/pages/workflows/runs';
 import { PlaceholderPage } from '@/components/placeholder-page';
 import { projectNav, orgNav } from '@/config/navigation';
 
@@ -95,6 +99,9 @@ const IMPLEMENTED_ROUTES = new Set([
   'campaigns',
   'campaigns/queue',
   'campaigns/approvals',
+  'workflows',
+  'workflows/templates',
+  'workflows/runs',
   'settings/general',
 ]);
 
@@ -263,6 +270,10 @@ export function AppRouter() {
                     <Route path="campaigns/queue" element={<OpportunityQueuePage />} />
                     <Route path="campaigns/approvals" element={<ApprovalCenterPage />} />
                     <Route path="campaigns/:campaignId" element={<CampaignDetailPage />} />
+                    <Route path="workflows" element={<WorkflowsPage />} />
+                    <Route path="workflows/templates" element={<WorkflowTemplatesPage />} />
+                    <Route path="workflows/runs" element={<WorkflowRunsPage />} />
+                    <Route path="workflows/:workflowId" element={<WorkflowBuilderPage />} />
                     <Route path="search" element={<SearchPage />} />
                     {projectPlaceholderRoutes()}
                     <Route

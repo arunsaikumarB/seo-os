@@ -17,6 +17,7 @@ const dependencyPackages = [
   '@seo-os/campaign-engine',
   '@seo-os/backlink-builder',
   '@seo-os/outreach-engine',
+  '@seo-os/workflow-engine',
 ];
 
 const filters = dependencyPackages.map((pkg) => `--filter=${pkg}`).join(' ');

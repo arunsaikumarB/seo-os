@@ -1,4 +1,6 @@
-import { NavLink } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
+import { ChevronDown } from 'lucide-react';
 import { APP_NAME, APP_TAGLINE } from '@seo-os/shared';
 import { projectNav } from '@/config/navigation';
 import { workflowNavSections } from '@/config/workflow-navigation';
@@ -15,8 +17,22 @@ interface SidebarProps {
   className?: string;
 }
 
+function sectionContainsPath(
+  items: WorkflowNavItem[],
+  base: string,
+  pathname: string
+): boolean {
+  return items.some((item) => {
+    const to = item.absolute ? item.href : `${base}/${item.href}`;
+    if (pathname === to) return true;
+    if (pathname.startsWith(`${to}/`)) return true;
+    return false;
+  });
+}
+
 export function Sidebar({ projectId, className }: SidebarProps) {
   const base = `/projects/${projectId}`;
+  const location = useLocation();
   const { isEnabled } = useFeatureFlags();
   const expertMode = useAppStore((s) => s.expertMode);
 
@@ -29,6 +45,44 @@ export function Sidebar({ projectId, className }: SidebarProps) {
     if (!item.featureFlag) return true;
     return isEnabled(item.featureFlag);
   };
+
+  const visibleSections = useMemo(
+    () =>
+      workflowNavSections
+        .map((section) => ({
+          ...section,
+          items: section.items.filter(isItemVisible),
+        }))
+        .filter((section) => section.items.length > 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- isEnabled is stable enough via isItemVisible
+    [isEnabled]
+  );
+
+  const activeSectionId = useMemo(() => {
+    const match = visibleSections.find((section) =>
+      sectionContainsPath(section.items, base, location.pathname)
+    );
+    return match?.id ?? visibleSections[0]?.id ?? null;
+  }, [visibleSections, base, location.pathname]);
+
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (!activeSectionId) return;
+    setOpenSections((prev) => {
+      if (prev[activeSectionId]) return prev;
+      return { ...prev, [activeSectionId]: true };
+    });
+  }, [activeSectionId]);
+
+  const toggleSection = (id: string) => {
+    setOpenSections((prev) => ({
+      ...prev,
+      [id]: !(prev[id] ?? id === activeSectionId),
+    }));
+  };
+
+  const isSectionOpen = (id: string) => openSections[id] ?? id === activeSectionId;
 
   return (
     <aside className={cn('flex h-full w-64 flex-col border-r bg-card', className)}>
@@ -62,20 +116,54 @@ export function Sidebar({ projectId, className }: SidebarProps) {
             })}
           </div>
         ) : (
-          <div className="space-y-4">
-            {workflowNavSections.map((section) => {
-              const items = section.items.filter(isItemVisible);
-              if (items.length === 0) return null;
+          <div className="space-y-1">
+            {visibleSections.map((section) => {
+              const open = isSectionOpen(section.id);
+              const isActiveSection = section.id === activeSectionId;
+
               return (
-                <div key={section.id}>
-                  <p className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    {section.emoji} {section.label}
-                  </p>
-                  <div className="space-y-0.5">
-                    {items.map((item) => {
-                      const to = item.absolute ? item.href : `${base}/${item.href}`;
-                      return <NavItemLink key={`${section.id}-${item.label}`} item={item} to={to} />;
-                    })}
+                <div key={section.id} className="rounded-md">
+                  <button
+                    type="button"
+                    onClick={() => toggleSection(section.id)}
+                    aria-expanded={open}
+                    className={cn(
+                      'flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors',
+                      isActiveSection
+                        ? 'bg-accent/60 text-foreground font-medium'
+                        : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                    )}
+                  >
+                    <span className="text-sm leading-none">{section.emoji}</span>
+                    <span className="flex-1 truncate font-medium">{section.label}</span>
+                    <ChevronDown
+                      className={cn(
+                        'h-4 w-4 shrink-0 transition-transform duration-200',
+                        open && 'rotate-180'
+                      )}
+                    />
+                  </button>
+
+                  <div
+                    className={cn(
+                      'grid transition-[grid-template-rows] duration-200 ease-out',
+                      open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+                    )}
+                  >
+                    <div className="overflow-hidden">
+                      <div className="mt-0.5 space-y-0.5 border-l border-border/60 ml-3 pl-2 pb-1">
+                        {section.items.map((item) => {
+                          const to = item.absolute ? item.href : `${base}/${item.href}`;
+                          return (
+                            <NavItemLink
+                              key={`${section.id}-${item.label}`}
+                              item={item}
+                              to={to}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
                 </div>
               );

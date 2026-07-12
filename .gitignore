@@ -46,3 +46,7 @@ playwright-report/
 
 # Misc
 *.pem
+
+# Netlify CLI local state
+.netlify/
+apps/web/.netlify/

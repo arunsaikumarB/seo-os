@@ -49,14 +49,15 @@ export async function enqueueJob<T extends Record<string, unknown>>(
   queue: string,
   name: string,
   data: T,
-  options?: { singletonKey?: string }
+  options?: { singletonKey?: string; startAfter?: number }
 ): Promise<string | null> {
   const boss = await getBoss();
   if (!boss) {
     logger.debug({ queue, name }, 'Job enqueue skipped — workers disabled');
     return null;
   }
-  return boss.send(queue, data, {
+  return boss.send(queue, { ...data, __jobName: name }, {
     singletonKey: options?.singletonKey,
+    startAfter: options?.startAfter,
   });
 }

@@ -12,6 +12,7 @@ import { getAutomationSummary } from '../backlinks/automation.service.js';
 import { getBrowserIntelligenceSummary } from '../intelligence/browser-intelligence.service.js';
 import { getRelationshipSummary } from '../relationships/relationship-intelligence.service.js';
 import { getOutreachSummary } from '../outreach/outreach.service.js';
+import { getWorkflowSummary } from '../workflows/workflow.service.js';
 import { getPendingApprovalCount } from '../campaigns/approval.service.js';
 import { listAgentRuns } from './agent.service.js';
 
@@ -75,6 +76,7 @@ export async function getMissionControlSummary(workspaceId: string) {
     browserIntelligence,
     relationshipIntelligence,
     outreach,
+    workflows,
   ] = await Promise.all([
     getKnowledgeStats(workspaceId),
     listMemory(workspaceId),
@@ -91,6 +93,7 @@ export async function getMissionControlSummary(workspaceId: string) {
     getBrowserIntelligenceSummary(workspaceId),
     getRelationshipSummary(workspaceId),
     getOutreachSummary(workspaceId),
+    getWorkflowSummary(workspaceId),
   ]);
 
   const activeCampaigns = await listCampaigns(workspaceId);
@@ -131,5 +134,6 @@ export async function getMissionControlSummary(workspaceId: string) {
     browserIntelligence,
     relationshipIntelligence,
     outreach,
+    workflows,
   };
 }
