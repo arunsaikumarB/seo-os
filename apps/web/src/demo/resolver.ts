@@ -58,7 +58,7 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
 
   // Version
   if (m === '/v1/version')
-    return { data: { version: '7.0.0-epic7-demo', api: 'v1', mode: 'demo' } };
+    return { data: { version: '8.0.0-reports-demo', api: 'v1', mode: 'demo' } };
 
   if (m.startsWith('/v1/notifications')) {
     return {
@@ -259,6 +259,91 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
     };
   }
 
+  if (m.includes('/reports/types')) {
+    return {
+      data: [
+        { type: 'executive', label: 'Executive Report', description: 'Board-ready overview' },
+        { type: 'campaign', label: 'Campaign Report', description: 'Campaign success' },
+        { type: 'backlink', label: 'Backlink Report', description: 'Link growth' },
+        { type: 'outreach', label: 'Outreach Report', description: 'Reply performance' },
+        { type: 'monthly', label: 'Monthly Report', description: 'Monthly rollup' },
+      ],
+    };
+  }
+
+  if (m.includes('/reports/summary')) {
+    return {
+      data: {
+        totalReports: 3,
+        scheduled: 1,
+        readyCount: 2,
+        failedCount: 0,
+        recentReady: [{ id: 'run-demo-1', status: 'ready', created_at: new Date().toISOString() }],
+        failed: [],
+        queue: [],
+      },
+    };
+  }
+
+  if (m.includes('/reports/runs')) {
+    return {
+      data: [
+        {
+          id: 'run-demo-1',
+          report_id: 'rep-1',
+          status: 'ready',
+          progress: 100,
+          created_at: new Date().toISOString(),
+          executive_summary: {
+            narrative:
+              'Executive Report: 18 backlinks won; 72% campaign success. AI workforce saved approximately 42 hours.',
+            highlights: ['18 backlinks won', '72% campaign success'],
+            recommendations: ['Scale winning campaign templates'],
+            risks: [],
+            nextActions: ['Approve pending outreach drafts'],
+          },
+        },
+      ],
+    };
+  }
+
+  if (m.includes('/reports/brands') || (m.includes('/reports') && method === 'POST')) {
+    return {
+      data: {
+        id: 'rep-1',
+        title: 'Executive Report',
+        report_type: 'executive',
+        status: 'draft',
+        schedule: 'weekly',
+        updated_at: new Date().toISOString(),
+      },
+    };
+  }
+
+  if (m.includes('/reports')) {
+    return {
+      data: [
+        {
+          id: 'rep-1',
+          title: 'Executive Report',
+          report_type: 'executive',
+          status: 'ready',
+          schedule: 'weekly',
+          updated_at: new Date().toISOString(),
+          next_run_at: new Date(Date.now() + 7 * 86400000).toISOString(),
+        },
+        {
+          id: 'rep-2',
+          title: 'Backlink Report',
+          report_type: 'backlink',
+          status: 'draft',
+          schedule: 'monthly',
+          updated_at: new Date().toISOString(),
+        },
+      ],
+    };
+  }
+
   // Feature flags — all enabled in demo
   if (m === '/v1/feature-flags') {
     return {
@@ -273,6 +358,7 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
         analytics: true,
         technical_seo: true,
         reports: true,
+        white_label: true,
       },
     };
   }

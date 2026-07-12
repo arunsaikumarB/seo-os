@@ -26,9 +26,9 @@ export const DEFAULT_FEATURE_FLAGS: Record<FeatureFlag, boolean> = {
   workflows: true,
   analytics: true,
   technical_seo: false,
-  reports: false,
+  reports: true,
   marketplace: false,
-  white_label: false,
+  white_label: true,
 };
 
 export type AIEventType =

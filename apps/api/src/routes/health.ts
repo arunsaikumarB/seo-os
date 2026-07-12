@@ -36,8 +36,8 @@ export async function readyHandler(_req: Request, res: Response): Promise<void> 
 
 export function versionHandler(_req: Request, res: Response): void {
   res.json({
-    version: '7.0.0-epic7',
+    version: '8.0.0-reports',
     api: 'v1',
-    release: 'Analytics & Insights Engine',
+    release: 'Reports & Executive Intelligence',
   });
 }

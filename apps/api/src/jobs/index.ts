@@ -5,6 +5,7 @@ import { handleIngestJobs } from './handlers/ingest.js';
 import { handleIntelligenceScanJobs } from './handlers/intelligence.js';
 import { handleOutreachJobs } from './handlers/outreach.js';
 import { handleWorkflowJobs } from './handlers/workflow.js';
+import { handleReportJobs } from './handlers/reports.js';
 
 export async function startJobInfrastructure(): Promise<void> {
   const boss = await getBoss();
@@ -31,9 +32,12 @@ export async function startJobInfrastructure(): Promise<void> {
     const workflowJobs = jobs.filter(
       (j) => (j.data as Record<string, unknown>)?.type === 'workflow_advance'
     );
+    const reportJobs = jobs.filter(
+      (j) => (j.data as Record<string, unknown>)?.type === 'report_generate'
+    );
     const otherJobs = jobs.filter((j) => {
       const d = j.data as Record<string, unknown>;
-      return !d?.messageId && d?.type !== 'workflow_advance';
+      return !d?.messageId && d?.type !== 'workflow_advance' && d?.type !== 'report_generate';
     });
     if (outreachJobs.length) {
       await handleOutreachJobs(
@@ -45,12 +49,17 @@ export async function startJobInfrastructure(): Promise<void> {
         workflowJobs.map((j) => ({ id: j.id, data: j.data as Record<string, unknown> }))
       );
     }
+    if (reportJobs.length) {
+      await handleReportJobs(
+        reportJobs.map((j) => ({ id: j.id, data: j.data as Record<string, unknown> }))
+      );
+    }
     for (const job of otherJobs) {
       logger.debug({ jobId: job.id }, 'Low-priority job received');
     }
   });
 
   logger.info(
-    'Job infrastructure ready (agents, ingest, crawl, outreach, workflow handlers registered)'
+    'Job infrastructure ready (agents, ingest, crawl, outreach, workflow, report handlers registered)'
   );
 }

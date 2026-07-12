@@ -59,6 +59,7 @@ import {
   platformRouter,
 } from './platform.routes.js';
 import { analyticsRouter } from './analytics.routes.js';
+import { reportsRouter } from './reports.routes.js';
 import { getExecutiveSummary } from '../../modules/executive/executive.service.js';
 import { logger } from '../../lib/logger.js';
 
@@ -73,7 +74,7 @@ projectScopeRouter.use(authMiddleware);
 projectScopeRouter.use(requireProjectAccess);
 
 v1Router.get('/version', (_req, res) => {
-  res.json({ data: { version: '7.0.0-epic7', api: 'v1' } });
+  res.json({ data: { version: '8.0.0-reports', api: 'v1' } });
 });
 
 v1Router.use('/notifications', notificationsRouter);
@@ -435,5 +436,6 @@ projectScopeRouter.use('/outreach', outreachRouter);
 projectScopeRouter.use('/workflows', workflowsRouter);
 projectScopeRouter.use('/platform', platformRouter);
 projectScopeRouter.use('/analytics', analyticsRouter);
+projectScopeRouter.use('/reports', reportsRouter);
 
 v1Router.use('/projects/:projectId', projectScopeRouter);
