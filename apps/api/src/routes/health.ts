@@ -35,5 +35,5 @@ export async function readyHandler(_req: Request, res: Response): Promise<void> 
 }
 
 export function versionHandler(_req: Request, res: Response): void {
-  res.json({ version: '0.0.0-sprint0', api: 'v1' });
+  res.json({ version: '6.0.0-epic6', api: 'v1', release: 'Workflow Automation Engine' });
 }
