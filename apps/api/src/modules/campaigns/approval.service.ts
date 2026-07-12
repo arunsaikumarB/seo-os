@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { approvalTitle, type ApprovalRequest } from '@seo-os/campaign-engine';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
+import { fireAndForget, publishPlatformEvent } from '../platform/event-bus.service.js';
 
 export { approvalTitle };
 
@@ -119,6 +120,35 @@ export async function resolveApproval(
       }
     }
   }
+
+  fireAndForget(
+    publishPlatformEvent({
+      workspaceId,
+      sourceModule: 'campaigns',
+      eventType: action === 'approve' ? 'approval_granted' : 'approval_rejected',
+      title:
+        action === 'approve'
+          ? `Approval granted: ${approval.title}`
+          : `Approval rejected: ${approval.title}`,
+      summary: notes ?? approval.summary ?? undefined,
+      severity: action === 'approve' ? 'approval' : 'warning',
+      entityType: 'approval',
+      entityId: approvalId,
+      actorId: userId,
+      payload: {
+        approvalType: approval.approval_type,
+        subjectId: approval.subject_id,
+        action,
+      },
+      href: `/projects/${workspaceId}/campaigns/approvals`,
+      notifyUserId: userId,
+      audit: {
+        action: `approval.${action}`,
+        resourceType: 'approval',
+        resourceId: approvalId,
+      },
+    })
+  );
 
   return data;
 }

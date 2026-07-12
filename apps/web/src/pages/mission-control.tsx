@@ -24,6 +24,9 @@ import type { BrowserIntelligenceSummary } from '@/components/intelligence/brows
 import type { RelationshipIntelligenceSummary } from '@/components/relationships/relationship-intelligence-widget';
 import type { OutreachSummary } from '@/components/outreach/outreach-widget';
 import type { BacklinkSummary, AutomationSummary } from '@/components/backlink-builder/types';
+import { usePlatformActivity } from '@/hooks/use-platform';
+import { usePlatformRealtime } from '@/hooks/use-platform-realtime';
+import { useAuth } from '@/providers/auth-provider';
 import {
   Bot,
   Activity,
@@ -40,6 +43,7 @@ import {
   Users,
   CheckSquare,
   Zap,
+  Radio,
 } from 'lucide-react';
 
 function StatusBadge({ status }: { status: string }) {
@@ -56,7 +60,15 @@ export function MissionControlPage() {
   const { projectId = '' } = useParams();
   const { request } = useApi();
   const { isDemoMode } = useDemoMode();
+  const { user } = useAuth();
   const { agents, health, runs, events, queue, providers } = useMissionControl(projectId);
+  const platformActivity = usePlatformActivity(projectId);
+
+  usePlatformRealtime({
+    workspaceId: projectId,
+    userId: user?.id,
+    enabled: !isDemoMode && !!projectId,
+  });
 
   const summary = useQuery({
     queryKey: ['mission-control-summary', projectId],
@@ -99,7 +111,7 @@ export function MissionControlPage() {
         };
       }>(`/v1/projects/${projectId}/mission-control/summary`),
     enabled: !!projectId,
-    refetchInterval: 20_000,
+    refetchInterval: isDemoMode ? 20_000 : false,
   });
 
   const agentList = (agents.data?.data ?? []) as Array<{
@@ -128,10 +140,15 @@ export function MissionControlPage() {
             )}
           </div>
           <p className="text-muted-foreground">
-            AI Operations Center — workforce, intelligence, campaigns
+            AI Operations Center — live event bus · workforce · campaigns
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          {!isDemoMode && (
+            <Badge className="text-[10px] border-emerald-500/30 text-emerald-600 gap-1">
+              <Radio className="h-3 w-3" /> Live
+            </Badge>
+          )}
           <Button variant="outline" size="sm" asChild>
             <Link to={`/projects/${projectId}/command-center`}>
               <MessageSquare className="h-3 w-3 mr-1" /> Chat
@@ -293,6 +310,43 @@ export function MissionControlPage() {
       </div>
 
       <LiveTimeline title="Recent AI Decisions" limit={6} />
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Activity className="h-4 w-4" /> Unified Activity Stream
+          </CardTitle>
+          <CardDescription>
+            Platform events across scan → campaign → workflow → outreach → verification
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {platformActivity.isLoading ? (
+            <Skeleton className="h-24 w-full" />
+          ) : (platformActivity.data?.data?.items ?? []).length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4">
+              No platform events yet. Complete a website scan or create a campaign to start the
+              stream.
+            </p>
+          ) : (
+            (platformActivity.data?.data?.items ?? []).slice(0, 12).map((evt) => (
+              <div
+                key={evt.id}
+                className="flex items-start justify-between gap-3 border-b border-border/40 py-2 last:border-0"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate">{evt.title}</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {evt.source_module.replace(/_/g, ' ')} · {evt.event_type.replace(/_/g, ' ')}
+                    {evt.summary ? ` — ${evt.summary}` : ''}
+                  </p>
+                </div>
+                <Badge className="shrink-0 text-[10px]">{evt.severity}</Badge>
+              </div>
+            ))
+          )}
+        </CardContent>
+      </Card>
 
       {summaryData?.backlinkBuilder && (
         <BacklinkBuilderWidget summary={summaryData.backlinkBuilder} projectId={projectId} />

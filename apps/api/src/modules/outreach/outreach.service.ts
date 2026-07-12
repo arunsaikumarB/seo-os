@@ -14,6 +14,7 @@ import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { createApproval } from '../campaigns/approval.service.js';
 import { logRelationshipTimeline } from '../relationships/relationship-intelligence.service.js';
 import { enqueueJob, QUEUES } from '../../jobs/boss.js';
+import { fireAndForget, publishPlatformEvent } from '../platform/event-bus.service.js';
 
 export async function getOutreachSummary(workspaceId: string) {
   const [messages, events, tasks, drafts] = await Promise.all([
@@ -517,6 +518,21 @@ export async function executeSendMessage(messageId: string, workspaceId: string)
     contactId: msg.contact_id ? String(msg.contact_id) : undefined,
     metadata: { messageId },
   });
+
+  fireAndForget(
+    publishPlatformEvent({
+      workspaceId,
+      sourceModule: 'outreach',
+      eventType: 'email_sent',
+      title: `Email sent: ${msg.subject}`,
+      summary: `To ${msg.to_email}`,
+      severity: 'success',
+      entityType: 'outreach_message',
+      entityId: messageId,
+      payload: { messageId, to: msg.to_email, providerMessageId: result.messageId },
+      href: `/projects/${workspaceId}/outreach/inbox`,
+    })
+  );
 
   return { messageId, providerMessageId: result.messageId, status: 'sent' };
 }

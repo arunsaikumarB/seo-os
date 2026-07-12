@@ -8,6 +8,7 @@ import {
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { logRelationshipTimeline } from '../relationships/relationship-intelligence.service.js';
 import { createApproval } from './approval.service.js';
+import { fireAndForget, publishPlatformEvent } from '../platform/event-bus.service.js';
 
 export async function listCampaignTypes() {
   const { data, error } = await getSupabaseAdmin()
@@ -118,6 +119,28 @@ export async function createCampaign(
     {
       metadata: { campaignId: id, campaignType: input.campaignType },
     }
+  );
+  fireAndForget(
+    publishPlatformEvent({
+      workspaceId,
+      sourceModule: 'campaigns',
+      eventType: 'campaign_created',
+      title: `Campaign created: ${input.name}`,
+      summary: `${input.campaignType} campaign ready for planning`,
+      severity: 'success',
+      entityType: 'campaign',
+      entityId: id,
+      actorId: userId,
+      payload: { campaignId: id, campaignType: input.campaignType },
+      href: `/projects/${workspaceId}/campaigns/${id}`,
+      notifyUserId: userId,
+      audit: {
+        action: 'campaign.created',
+        resourceType: 'campaign',
+        resourceId: id,
+        after: { name: input.name, campaignType: input.campaignType },
+      },
+    })
   );
   return data;
 }

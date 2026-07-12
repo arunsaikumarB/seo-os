@@ -35,5 +35,9 @@ export async function readyHandler(_req: Request, res: Response): Promise<void> 
 }
 
 export function versionHandler(_req: Request, res: Response): void {
-  res.json({ version: '6.0.0-epic6', api: 'v1', release: 'Workflow Automation Engine' });
+  res.json({
+    version: '6.1.0-epic61-rc',
+    api: 'v1',
+    release: 'Production Integration & Platform Hardening (RC)',
+  });
 }

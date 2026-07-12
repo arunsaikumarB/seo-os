@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { fireAndForget, publishPlatformEvent } from '../platform/event-bus.service.js';
 import {
   AI_WORKFORCE_AGENTS,
   BACKLINK_TYPES,
@@ -628,6 +629,23 @@ export async function verifyBacklink(
         .update({ backlinks_won: Number(org.backlinks_won ?? 0) + 1 })
         .eq('id', org.id);
     }
+  }
+
+  if (status === 'verified') {
+    fireAndForget(
+      publishPlatformEvent({
+        workspaceId,
+        sourceModule: 'backlink_builder',
+        eventType: 'backlink_verified',
+        title: `Backlink verified${data?.domain ? ` on ${data.domain}` : ''}`,
+        summary: notes ?? data?.source_url ?? undefined,
+        severity: 'success',
+        entityType: 'backlink',
+        entityId: backlinkId,
+        payload: { backlinkId, status, domain: data?.domain },
+        href: `/projects/${workspaceId}/backlink-builder/won`,
+      })
+    );
   }
 
   return data;

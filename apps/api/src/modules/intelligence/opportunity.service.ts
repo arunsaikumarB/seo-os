@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { OPPORTUNITY_TYPES, scoreOpportunity } from '@seo-os/seo-intelligence';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { logResearchEvent } from './research.service.js';
+import { fireAndForget, publishPlatformEvent } from '../platform/event-bus.service.js';
 
 export async function listOpportunities(workspaceId: string) {
   const { data, error } = await getSupabaseAdmin()
@@ -76,6 +77,31 @@ export async function discoverOpportunities(
     title: `Discovered ${rows.length} opportunity types`,
     payload: { count: rows.length },
   });
+
+  fireAndForget(
+    publishPlatformEvent({
+      workspaceId,
+      sourceModule: 'seo_intelligence',
+      eventType: 'opportunity_discovery_started',
+      title: 'Opportunity discovery started',
+      summary: `Scanning niche signals for ${context.domain}`,
+      severity: 'info',
+      payload: { domain: context.domain },
+    }).then(() =>
+      publishPlatformEvent({
+        workspaceId,
+        sourceModule: 'seo_intelligence',
+        eventType: 'opportunity_discovered',
+        title: `Discovered ${rows.length} opportunities`,
+        summary: rows.map((r) => r.opportunity_type).join(', '),
+        severity: 'success',
+        entityType: 'opportunity',
+        entityId: rows[0]?.id,
+        payload: { count: rows.length, types: rows.map((r) => r.opportunity_type) },
+        href: `/projects/${workspaceId}/campaigns/queue`,
+      })
+    )
+  );
 
   return rows;
 }

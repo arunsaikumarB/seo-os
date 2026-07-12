@@ -53,6 +53,11 @@ import { backlinkBuilderRouter } from './backlink-builder.routes.js';
 import { relationshipRouter } from './relationship.routes.js';
 import { outreachRouter } from './outreach.routes.js';
 import { workflowsRouter } from './workflows.routes.js';
+import {
+  auditRouter,
+  notificationsRouter,
+  platformRouter,
+} from './platform.routes.js';
 import { getExecutiveSummary } from '../../modules/executive/executive.service.js';
 import { logger } from '../../lib/logger.js';
 
@@ -67,8 +72,11 @@ projectScopeRouter.use(authMiddleware);
 projectScopeRouter.use(requireProjectAccess);
 
 v1Router.get('/version', (_req, res) => {
-  res.json({ data: { version: '6.0.0-epic6', api: 'v1' } });
+  res.json({ data: { version: '6.1.0-epic61-rc', api: 'v1' } });
 });
+
+v1Router.use('/notifications', notificationsRouter);
+v1Router.use('/organizations', auditRouter);
 
 v1Router.get('/me', jwtOnlyMiddleware, async (req, res, next) => {
   try {
@@ -424,5 +432,6 @@ projectScopeRouter.use('/backlink-builder', backlinkBuilderRouter);
 projectScopeRouter.use('/relationships', relationshipRouter);
 projectScopeRouter.use('/outreach', outreachRouter);
 projectScopeRouter.use('/workflows', workflowsRouter);
+projectScopeRouter.use('/platform', platformRouter);
 
 v1Router.use('/projects/:projectId', projectScopeRouter);

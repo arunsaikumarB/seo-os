@@ -8,6 +8,7 @@ import { traceIdMiddleware } from './middleware/traceId.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { healthHandler, readyHandler, versionHandler } from './routes/health.js';
 import { v1Router } from './routes/v1/index.js';
+import { rateLimit } from './middleware/rateLimit.js';
 
 export function createApp() {
   const env = getEnv();
@@ -22,6 +23,7 @@ export function createApp() {
   app.use(cors({ origin: env.CORS_ORIGIN.split(',').map((o) => o.trim()), credentials: true }));
   app.use(express.json({ limit: '10mb' }));
   app.use(traceIdMiddleware);
+  app.use('/v1', rateLimit({ windowMs: 60_000, max: 180, keyPrefix: 'v1' }));
   app.use(
     pinoHttp({
       logger,

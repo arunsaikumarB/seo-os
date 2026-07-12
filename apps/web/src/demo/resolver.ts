@@ -40,6 +40,7 @@ import {
   DEMO_KB_DOCUMENTS,
   DEMO_KEYWORDS,
   DEMO_MEMORY,
+  DEMO_NOTIFICATIONS,
   DEMO_OPPORTUNITIES,
   DEMO_ORGANIZATIONS,
   DEMO_PROJECT_CHEFGAA,
@@ -56,7 +57,41 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
   const project = getDemoProject(projectId);
 
   // Version
-  if (m === '/v1/version') return { data: { version: '6.0.0-epic6-demo', api: 'v1', mode: 'demo' } };
+  if (m === '/v1/version')
+    return { data: { version: '6.1.0-epic61-rc-demo', api: 'v1', mode: 'demo' } };
+
+  if (m.startsWith('/v1/notifications')) {
+    return {
+      data: {
+        items: DEMO_NOTIFICATIONS.map((n) => ({
+          id: n.id,
+          title: n.title,
+          body: null,
+          category: n.type,
+          href: null,
+          read_at: n.unread ? null : new Date().toISOString(),
+          created_at: new Date().toISOString(),
+        })),
+        unreadCount: DEMO_NOTIFICATIONS.filter((n) => n.unread).length,
+      },
+    };
+  }
+
+  if (m.includes('/platform/activity')) {
+    return {
+      data: {
+        items: DEMO_TIMELINE.slice(0, 12).map((t, i) => ({
+          id: `pe-${i}`,
+          event_type: String(t.event_type ?? 'timeline_updated'),
+          title: String(t.title ?? 'Activity'),
+          summary: null,
+          severity: 'info',
+          source_module: 'system',
+          created_at: String(t.created_at ?? new Date().toISOString()),
+        })),
+      },
+    };
+  }
 
   // Feature flags — all enabled in demo
   if (m === '/v1/feature-flags') {

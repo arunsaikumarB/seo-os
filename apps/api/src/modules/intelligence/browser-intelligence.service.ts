@@ -22,6 +22,7 @@ import { logResearchEvent } from './research.service.js';
 import { uploadDocument } from '../knowledge/document.service.js';
 import { getProjectById } from '../projects/project.service.js';
 import { enrichFromWebsiteProfile } from '../relationships/relationship-intelligence.service.js';
+import { fireAndForget, publishPlatformEvent } from '../platform/event-bus.service.js';
 
 function extractDomain(url: string): string {
   return new URL(url).hostname.replace(/^www\./, '').toLowerCase();
@@ -227,6 +228,20 @@ export async function executeBrowserIntelligenceScan(
           title: `Browser Intelligence complete (cached) — ${domain}`,
           payload: { scanId, profileId: existingProfile.id },
         });
+        fireAndForget(
+          publishPlatformEvent({
+            workspaceId,
+            sourceModule: 'browser_intelligence',
+            eventType: 'website_scan_completed',
+            title: `Website scan completed — ${domain}`,
+            summary: 'Used cached profile (scanned within 24h)',
+            severity: 'success',
+            entityType: 'website_scan',
+            entityId: scanId,
+            payload: { scanId, profileId: existingProfile.id, cached: true, domain },
+            href: `/projects/${workspaceId}/intelligence/browser`,
+          })
+        );
         try {
           await enrichFromWebsiteProfile(workspaceId, String(existingProfile.id));
         } catch {
@@ -503,6 +518,33 @@ export async function executeBrowserIntelligenceScan(
       title: `Browser Intelligence complete — ${domain}`,
       payload: { scanId, profileId, discoveries: discoveries.length },
     });
+
+    fireAndForget(
+      publishPlatformEvent({
+        workspaceId,
+        sourceModule: 'browser_intelligence',
+        eventType: 'website_scan_completed',
+        title: `Website scan completed — ${domain}`,
+        summary: `${discoveries.length} discoveries · ${analyzedPages.length} pages analyzed`,
+        severity: 'success',
+        entityType: 'website_scan',
+        entityId: scanId,
+        payload: {
+          scanId,
+          profileId,
+          discoveries: discoveries.length,
+          domain,
+          cached: false,
+        },
+        href: `/projects/${workspaceId}/intelligence/browser`,
+        audit: {
+          action: 'website_scan.completed',
+          resourceType: 'website_scan',
+          resourceId: scanId,
+          after: { domain, discoveries: discoveries.length },
+        },
+      })
+    );
 
     try {
       await enrichFromWebsiteProfile(workspaceId, profileId);

@@ -1,3 +1,4 @@
+import { Suspense, lazy, type ComponentType, type ReactNode } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
@@ -10,61 +11,209 @@ import { OrgBootstrap } from '@/components/layout/org-bootstrap';
 import { AppShell } from '@/components/layout/app-shell';
 import { AppLayout } from '@/components/layout/app-layout';
 import { OrgShell } from '@/components/layout/org-shell';
-import { LoginPage } from '@/pages/login';
-import { SignupPage } from '@/pages/signup';
-import { ProjectsPage } from '@/pages/projects';
-import { MissionControlPage } from '@/pages/mission-control';
-import { ProjectHomePage } from '@/pages/project-home';
-import { CommandCenterPage } from '@/pages/command-center';
-import { KnowledgeLibraryPage } from '@/pages/knowledge/library';
-import { WebsiteAnalyzerPage } from '@/pages/intelligence/website-analyzer';
-import { BrowserScannerPage, BrowserScanDetailPage } from '@/pages/intelligence/browser-scanner';
-import { RelationshipHubPage } from '@/pages/relationships/hub';
-import { OrganizationDetailPage } from '@/pages/relationships/organization-detail';
-import { OutreachInboxPage } from '@/pages/outreach/inbox';
-import { EmailStudioPage } from '@/pages/outreach/studio';
-import { SequenceBuilderPage } from '@/pages/outreach/sequences';
-import { KeywordsPage } from '@/pages/intelligence/keywords';
-import { CompetitorsPage } from '@/pages/competitors';
-import { ProspectPipelinePage } from '@/pages/prospects/pipeline';
-import { CampaignsPage } from '@/pages/campaigns/index';
-import { CampaignDetailPage } from '@/pages/campaigns/detail';
-import { OpportunityQueuePage } from '@/pages/campaigns/opportunity-queue';
-import { BacklinkBuilderDashboardPage } from '@/pages/backlink-builder/dashboard';
-import { BacklinkExplorerPage } from '@/pages/backlink-builder/explorer';
-import { BacklinkOpportunityDetailPage } from '@/pages/backlink-builder/detail';
-import { BacklinkPipelinePage } from '@/pages/backlink-builder/pipeline';
-import { BacklinkWonPage } from '@/pages/backlink-builder/won';
-import { BacklinkLostPage } from '@/pages/backlink-builder/lost';
-import { BacklinkPendingPage } from '@/pages/backlink-builder/pending';
-import { BacklinkAuditPage } from '@/pages/backlink-builder/audit';
-import { BacklinkRelationshipsPage } from '@/pages/backlink-builder/relationships';
-import { BacklinkCampaignsPage } from '@/pages/backlink-builder/campaigns';
-import { BacklinkRecommendationsPage } from '@/pages/backlink-builder/recommendations';
-import { BacklinkImportPage } from '@/pages/backlink-builder/import';
-import { BacklinkAutomationPage } from '@/pages/backlink-builder/automation';
-import { BacklinkTrackingPage } from '@/pages/backlink-builder/tracking';
-import { ApprovalCenterPage } from '@/pages/campaigns/approval-center';
-import { MemoryTimelinePage } from '@/pages/memory/timeline';
-import { SearchPage } from '@/pages/search';
-import { OnboardingWelcomePage } from '@/pages/onboarding/welcome';
-import { OnboardingOrganizationPage } from '@/pages/onboarding/organization';
-import { OnboardingProjectPage } from '@/pages/onboarding/project';
-import { OrgTeamPage } from '@/pages/org/team';
-import { OrgSettingsGeneralPage } from '@/pages/org/settings/general';
-import { ExecutiveDashboardPage } from '@/pages/org/executive';
-import { WorkflowsPage } from '@/pages/workflows/index';
-import { WorkflowTemplatesPage } from '@/pages/workflows/templates';
-import { WorkflowBuilderPage } from '@/pages/workflows/builder';
-import { WorkflowRunsPage } from '@/pages/workflows/runs';
 import { PlaceholderPage } from '@/components/placeholder-page';
+import { Skeleton } from '@/components/ui/skeleton';
 import { projectNav, orgNav } from '@/config/navigation';
 
-const queryClient = new QueryClient();
+const LoginPage = lazy(() =>
+  import('@/pages/login').then((m) => ({ default: m.LoginPage }))
+);
+const SignupPage = lazy(() =>
+  import('@/pages/signup').then((m) => ({ default: m.SignupPage }))
+);
+const ProjectsPage = lazy(() =>
+  import('@/pages/projects').then((m) => ({ default: m.ProjectsPage }))
+);
+const MissionControlPage = lazy(() =>
+  import('@/pages/mission-control').then((m) => ({ default: m.MissionControlPage }))
+);
+const ProjectHomePage = lazy(() =>
+  import('@/pages/project-home').then((m) => ({ default: m.ProjectHomePage }))
+);
+const CommandCenterPage = lazy(() =>
+  import('@/pages/command-center').then((m) => ({ default: m.CommandCenterPage }))
+);
+const KnowledgeLibraryPage = lazy(() =>
+  import('@/pages/knowledge/library').then((m) => ({ default: m.KnowledgeLibraryPage }))
+);
+const WebsiteAnalyzerPage = lazy(() =>
+  import('@/pages/intelligence/website-analyzer').then((m) => ({
+    default: m.WebsiteAnalyzerPage,
+  }))
+);
+const BrowserScannerPage = lazy(() =>
+  import('@/pages/intelligence/browser-scanner').then((m) => ({ default: m.BrowserScannerPage }))
+);
+const BrowserScanDetailPage = lazy(() =>
+  import('@/pages/intelligence/browser-scanner').then((m) => ({
+    default: m.BrowserScanDetailPage,
+  }))
+);
+const RelationshipHubPage = lazy(() =>
+  import('@/pages/relationships/hub').then((m) => ({ default: m.RelationshipHubPage }))
+);
+const OrganizationDetailPage = lazy(() =>
+  import('@/pages/relationships/organization-detail').then((m) => ({
+    default: m.OrganizationDetailPage,
+  }))
+);
+const OutreachInboxPage = lazy(() =>
+  import('@/pages/outreach/inbox').then((m) => ({ default: m.OutreachInboxPage }))
+);
+const EmailStudioPage = lazy(() =>
+  import('@/pages/outreach/studio').then((m) => ({ default: m.EmailStudioPage }))
+);
+const SequenceBuilderPage = lazy(() =>
+  import('@/pages/outreach/sequences').then((m) => ({ default: m.SequenceBuilderPage }))
+);
+const KeywordsPage = lazy(() =>
+  import('@/pages/intelligence/keywords').then((m) => ({ default: m.KeywordsPage }))
+);
+const CompetitorsPage = lazy(() =>
+  import('@/pages/competitors').then((m) => ({ default: m.CompetitorsPage }))
+);
+const ProspectPipelinePage = lazy(() =>
+  import('@/pages/prospects/pipeline').then((m) => ({ default: m.ProspectPipelinePage }))
+);
+const CampaignsPage = lazy(() =>
+  import('@/pages/campaigns/index').then((m) => ({ default: m.CampaignsPage }))
+);
+const CampaignDetailPage = lazy(() =>
+  import('@/pages/campaigns/detail').then((m) => ({ default: m.CampaignDetailPage }))
+);
+const OpportunityQueuePage = lazy(() =>
+  import('@/pages/campaigns/opportunity-queue').then((m) => ({
+    default: m.OpportunityQueuePage,
+  }))
+);
+const BacklinkBuilderDashboardPage = lazy(() =>
+  import('@/pages/backlink-builder/dashboard').then((m) => ({
+    default: m.BacklinkBuilderDashboardPage,
+  }))
+);
+const BacklinkExplorerPage = lazy(() =>
+  import('@/pages/backlink-builder/explorer').then((m) => ({ default: m.BacklinkExplorerPage }))
+);
+const BacklinkOpportunityDetailPage = lazy(() =>
+  import('@/pages/backlink-builder/detail').then((m) => ({
+    default: m.BacklinkOpportunityDetailPage,
+  }))
+);
+const BacklinkPipelinePage = lazy(() =>
+  import('@/pages/backlink-builder/pipeline').then((m) => ({ default: m.BacklinkPipelinePage }))
+);
+const BacklinkWonPage = lazy(() =>
+  import('@/pages/backlink-builder/won').then((m) => ({ default: m.BacklinkWonPage }))
+);
+const BacklinkLostPage = lazy(() =>
+  import('@/pages/backlink-builder/lost').then((m) => ({ default: m.BacklinkLostPage }))
+);
+const BacklinkPendingPage = lazy(() =>
+  import('@/pages/backlink-builder/pending').then((m) => ({ default: m.BacklinkPendingPage }))
+);
+const BacklinkAuditPage = lazy(() =>
+  import('@/pages/backlink-builder/audit').then((m) => ({ default: m.BacklinkAuditPage }))
+);
+const BacklinkRelationshipsPage = lazy(() =>
+  import('@/pages/backlink-builder/relationships').then((m) => ({
+    default: m.BacklinkRelationshipsPage,
+  }))
+);
+const BacklinkCampaignsPage = lazy(() =>
+  import('@/pages/backlink-builder/campaigns').then((m) => ({
+    default: m.BacklinkCampaignsPage,
+  }))
+);
+const BacklinkRecommendationsPage = lazy(() =>
+  import('@/pages/backlink-builder/recommendations').then((m) => ({
+    default: m.BacklinkRecommendationsPage,
+  }))
+);
+const BacklinkImportPage = lazy(() =>
+  import('@/pages/backlink-builder/import').then((m) => ({ default: m.BacklinkImportPage }))
+);
+const BacklinkAutomationPage = lazy(() =>
+  import('@/pages/backlink-builder/automation').then((m) => ({
+    default: m.BacklinkAutomationPage,
+  }))
+);
+const BacklinkTrackingPage = lazy(() =>
+  import('@/pages/backlink-builder/tracking').then((m) => ({ default: m.BacklinkTrackingPage }))
+);
+const ApprovalCenterPage = lazy(() =>
+  import('@/pages/campaigns/approval-center').then((m) => ({ default: m.ApprovalCenterPage }))
+);
+const MemoryTimelinePage = lazy(() =>
+  import('@/pages/memory/timeline').then((m) => ({ default: m.MemoryTimelinePage }))
+);
+const SearchPage = lazy(() => import('@/pages/search').then((m) => ({ default: m.SearchPage })));
+const OnboardingWelcomePage = lazy(() =>
+  import('@/pages/onboarding/welcome').then((m) => ({ default: m.OnboardingWelcomePage }))
+);
+const OnboardingOrganizationPage = lazy(() =>
+  import('@/pages/onboarding/organization').then((m) => ({
+    default: m.OnboardingOrganizationPage,
+  }))
+);
+const OnboardingProjectPage = lazy(() =>
+  import('@/pages/onboarding/project').then((m) => ({ default: m.OnboardingProjectPage }))
+);
+const OrgTeamPage = lazy(() =>
+  import('@/pages/org/team').then((m) => ({ default: m.OrgTeamPage }))
+);
+const OrgSettingsGeneralPage = lazy(() =>
+  import('@/pages/org/settings/general').then((m) => ({ default: m.OrgSettingsGeneralPage }))
+);
+const ExecutiveDashboardPage = lazy(() =>
+  import('@/pages/org/executive').then((m) => ({ default: m.ExecutiveDashboardPage }))
+);
+const WorkflowsPage = lazy(() =>
+  import('@/pages/workflows/index').then((m) => ({ default: m.WorkflowsPage }))
+);
+const WorkflowTemplatesPage = lazy(() =>
+  import('@/pages/workflows/templates').then((m) => ({ default: m.WorkflowTemplatesPage }))
+);
+const WorkflowBuilderPage = lazy(() =>
+  import('@/pages/workflows/builder').then((m) => ({ default: m.WorkflowBuilderPage }))
+);
+const WorkflowRunsPage = lazy(() =>
+  import('@/pages/workflows/runs').then((m) => ({ default: m.WorkflowRunsPage }))
+);
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 15_000,
+      refetchOnWindowFocus: true,
+    },
+  },
+});
 
 function ProjectLayout() {
   const { projectId = '' } = useParams();
   return <AppShell projectId={projectId} />;
+}
+
+function RouteFallback() {
+  return (
+    <div className="p-6 space-y-3">
+      <Skeleton className="h-8 w-48" />
+      <Skeleton className="h-32 w-full" />
+      <Skeleton className="h-32 w-full" />
+    </div>
+  );
+}
+
+function Lazy({ children }: { children: ReactNode }) {
+  return <Suspense fallback={<RouteFallback />}>{children}</Suspense>;
+}
+
+function lazyEl(Comp: ComponentType) {
+  return (
+    <Lazy>
+      <Comp />
+    </Lazy>
+  );
 }
 
 const IMPLEMENTED_ROUTES = new Set([
@@ -154,14 +303,14 @@ export function AppRouter() {
               <OrgBootstrap>
                 <ProductTour />
                 <Routes>
-                  <Route path="/login" element={<LoginPage />} />
-                  <Route path="/signup" element={<SignupPage />} />
+                  <Route path="/login" element={lazyEl(LoginPage)} />
+                  <Route path="/signup" element={lazyEl(SignupPage)} />
 
                   <Route
                     path="/onboarding"
                     element={
                       <ProtectedRoute>
-                        <OnboardingWelcomePage />
+                        {lazyEl(OnboardingWelcomePage)}
                       </ProtectedRoute>
                     }
                   />
@@ -169,7 +318,7 @@ export function AppRouter() {
                     path="/onboarding/organization"
                     element={
                       <ProtectedRoute>
-                        <OnboardingOrganizationPage />
+                        {lazyEl(OnboardingOrganizationPage)}
                       </ProtectedRoute>
                     }
                   />
@@ -177,7 +326,7 @@ export function AppRouter() {
                     path="/onboarding/project"
                     element={
                       <ProtectedRoute>
-                        <OnboardingProjectPage />
+                        {lazyEl(OnboardingProjectPage)}
                       </ProtectedRoute>
                     }
                   />
@@ -190,7 +339,7 @@ export function AppRouter() {
                       </ProtectedRoute>
                     }
                   >
-                    <Route index element={<ProjectsPage />} />
+                    <Route index element={lazyEl(ProjectsPage)} />
                   </Route>
 
                   <Route
@@ -202,9 +351,9 @@ export function AppRouter() {
                     }
                   >
                     <Route index element={<Navigate to="team" replace />} />
-                    <Route path="team" element={<OrgTeamPage />} />
-                    <Route path="executive" element={<ExecutiveDashboardPage />} />
-                    <Route path="settings/general" element={<OrgSettingsGeneralPage />} />
+                    <Route path="team" element={lazyEl(OrgTeamPage)} />
+                    <Route path="executive" element={lazyEl(ExecutiveDashboardPage)} />
+                    <Route path="settings/general" element={lazyEl(OrgSettingsGeneralPage)} />
                     {orgPlaceholderRoutes()}
                   </Route>
 
@@ -217,64 +366,82 @@ export function AppRouter() {
                     }
                   >
                     <Route index element={<Navigate to="home" replace />} />
-                    <Route path="home" element={<ProjectHomePage />} />
-                    <Route path="mission-control" element={<MissionControlPage />} />
-                    <Route path="backlink-builder" element={<BacklinkBuilderDashboardPage />} />
-                    <Route path="backlink-builder/explorer" element={<BacklinkExplorerPage />} />
+                    <Route path="home" element={lazyEl(ProjectHomePage)} />
+                    <Route path="mission-control" element={lazyEl(MissionControlPage)} />
+                    <Route
+                      path="backlink-builder"
+                      element={lazyEl(BacklinkBuilderDashboardPage)}
+                    />
+                    <Route
+                      path="backlink-builder/explorer"
+                      element={lazyEl(BacklinkExplorerPage)}
+                    />
                     <Route
                       path="backlink-builder/opportunities/:opportunityId"
-                      element={<BacklinkOpportunityDetailPage />}
+                      element={lazyEl(BacklinkOpportunityDetailPage)}
                     />
-                    <Route path="backlink-builder/pipeline" element={<BacklinkPipelinePage />} />
-                    <Route path="backlink-builder/won" element={<BacklinkWonPage />} />
-                    <Route path="backlink-builder/lost" element={<BacklinkLostPage />} />
-                    <Route path="backlink-builder/pending" element={<BacklinkPendingPage />} />
-                    <Route path="backlink-builder/verification" element={<BacklinkPendingPage />} />
+                    <Route
+                      path="backlink-builder/pipeline"
+                      element={lazyEl(BacklinkPipelinePage)}
+                    />
+                    <Route path="backlink-builder/won" element={lazyEl(BacklinkWonPage)} />
+                    <Route path="backlink-builder/lost" element={lazyEl(BacklinkLostPage)} />
+                    <Route path="backlink-builder/pending" element={lazyEl(BacklinkPendingPage)} />
+                    <Route
+                      path="backlink-builder/verification"
+                      element={lazyEl(BacklinkPendingPage)}
+                    />
                     <Route
                       path="backlink-builder/recommendations"
-                      element={<BacklinkRecommendationsPage />}
+                      element={lazyEl(BacklinkRecommendationsPage)}
                     />
                     <Route
                       path="backlink-builder/relationships"
-                      element={<BacklinkRelationshipsPage />}
+                      element={lazyEl(BacklinkRelationshipsPage)}
                     />
-                    <Route path="backlink-builder/campaigns" element={<BacklinkCampaignsPage />} />
-                    <Route path="backlink-builder/audit" element={<BacklinkAuditPage />} />
-                    <Route path="backlink-builder/import" element={<BacklinkImportPage />} />
+                    <Route
+                      path="backlink-builder/campaigns"
+                      element={lazyEl(BacklinkCampaignsPage)}
+                    />
+                    <Route path="backlink-builder/audit" element={lazyEl(BacklinkAuditPage)} />
+                    <Route path="backlink-builder/import" element={lazyEl(BacklinkImportPage)} />
                     <Route
                       path="backlink-builder/automation"
-                      element={<BacklinkAutomationPage />}
+                      element={lazyEl(BacklinkAutomationPage)}
                     />
-                    <Route path="backlink-builder/tracking" element={<BacklinkTrackingPage />} />
-                    <Route path="command-center" element={<CommandCenterPage />} />
-                    <Route path="knowledge/library" element={<KnowledgeLibraryPage />} />
-                    <Route path="memory/timeline" element={<MemoryTimelinePage />} />
-                    <Route path="intelligence/website" element={<WebsiteAnalyzerPage />} />
-                    <Route path="intelligence/browser" element={<BrowserScannerPage />} />
+                    <Route
+                      path="backlink-builder/tracking"
+                      element={lazyEl(BacklinkTrackingPage)}
+                    />
+                    <Route path="command-center" element={lazyEl(CommandCenterPage)} />
+                    <Route path="knowledge/library" element={lazyEl(KnowledgeLibraryPage)} />
+                    <Route path="memory/timeline" element={lazyEl(MemoryTimelinePage)} />
+                    <Route path="intelligence/website" element={lazyEl(WebsiteAnalyzerPage)} />
+                    <Route path="intelligence/browser" element={lazyEl(BrowserScannerPage)} />
                     <Route
                       path="intelligence/browser/scans/:scanId"
-                      element={<BrowserScanDetailPage />}
+                      element={lazyEl(BrowserScanDetailPage)}
                     />
-                    <Route path="relationships" element={<RelationshipHubPage />} />
+                    <Route path="relationships" element={lazyEl(RelationshipHubPage)} />
                     <Route
                       path="relationships/organizations/:orgId"
-                      element={<OrganizationDetailPage />}
+                      element={lazyEl(OrganizationDetailPage)}
                     />
-                    <Route path="outreach/inbox" element={<OutreachInboxPage />} />
-                    <Route path="outreach/studio" element={<EmailStudioPage />} />
-                    <Route path="outreach/sequences" element={<SequenceBuilderPage />} />
-                    <Route path="intelligence/keywords" element={<KeywordsPage />} />
-                    <Route path="competitors" element={<CompetitorsPage />} />
-                    <Route path="prospects/pipeline" element={<ProspectPipelinePage />} />
-                    <Route path="campaigns" element={<CampaignsPage />} />
-                    <Route path="campaigns/queue" element={<OpportunityQueuePage />} />
-                    <Route path="campaigns/approvals" element={<ApprovalCenterPage />} />
-                    <Route path="campaigns/:campaignId" element={<CampaignDetailPage />} />
-                    <Route path="workflows" element={<WorkflowsPage />} />
-                    <Route path="workflows/templates" element={<WorkflowTemplatesPage />} />
-                    <Route path="workflows/runs" element={<WorkflowRunsPage />} />
-                    <Route path="workflows/:workflowId" element={<WorkflowBuilderPage />} />
-                    <Route path="search" element={<SearchPage />} />
+                    <Route path="outreach/inbox" element={lazyEl(OutreachInboxPage)} />
+                    <Route path="outreach/studio" element={lazyEl(EmailStudioPage)} />
+                    <Route path="outreach/sequences" element={lazyEl(SequenceBuilderPage)} />
+                    <Route path="intelligence/keywords" element={lazyEl(KeywordsPage)} />
+                    <Route path="competitors" element={lazyEl(CompetitorsPage)} />
+                    <Route path="prospects/pipeline" element={lazyEl(ProspectPipelinePage)} />
+                    <Route path="campaigns" element={lazyEl(CampaignsPage)} />
+                    <Route path="campaigns/queue" element={lazyEl(OpportunityQueuePage)} />
+                    <Route path="campaigns/approvals" element={lazyEl(ApprovalCenterPage)} />
+                    <Route path="campaigns/:campaignId" element={lazyEl(CampaignDetailPage)} />
+                    <Route path="workflows" element={lazyEl(WorkflowsPage)} />
+                    <Route path="workflows/templates" element={lazyEl(WorkflowTemplatesPage)} />
+                    <Route path="workflows/runs" element={lazyEl(WorkflowRunsPage)} />
+                    <Route path="workflows/:workflowId" element={lazyEl(WorkflowBuilderPage)} />
+                    <Route path="search" element={lazyEl(SearchPage)} />
                     {projectPlaceholderRoutes()}
                     <Route
                       path="settings/*"

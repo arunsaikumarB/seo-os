@@ -14,6 +14,7 @@ import {
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { enqueueJob, QUEUES } from '../../jobs/boss.js';
 import { logger } from '../../lib/logger.js';
+import { fireAndForget, publishPlatformEvent } from '../platform/event-bus.service.js';
 
 type WorkflowRow = {
   id: string;
@@ -147,6 +148,22 @@ export async function createWorkflow(
     .select('*')
     .single();
   if (error) throw error;
+
+  fireAndForget(
+    publishPlatformEvent({
+      workspaceId,
+      sourceModule: 'workflows',
+      eventType: 'workflow_created',
+      title: `Workflow created: ${data.name}`,
+      summary: `Trigger: ${data.trigger_type}`,
+      severity: 'info',
+      entityType: 'workflow',
+      entityId: data.id,
+      payload: { workflowId: data.id, triggerType: data.trigger_type },
+      href: `/projects/${workspaceId}/workflows/${data.id}`,
+    })
+  );
+
   return { ...data, definition: asDefinition(data.definition) };
 }
 
@@ -260,6 +277,21 @@ export async function startWorkflowRun(
     .select('*')
     .single();
   if (error) throw error;
+
+  fireAndForget(
+    publishPlatformEvent({
+      workspaceId,
+      sourceModule: 'workflows',
+      eventType: 'workflow_started',
+      title: 'Workflow run started',
+      summary: `Workflow ${workflowId}`,
+      severity: 'info',
+      entityType: 'workflow_run',
+      entityId: run.id,
+      payload: { runId: run.id, workflowId, triggerEvent },
+      href: `/projects/${workspaceId}/workflows/runs`,
+    })
+  );
 
   const jobId = await enqueueJob(QUEUES.LOW, 'workflow.advance', {
     type: 'workflow_advance',
@@ -472,6 +504,19 @@ export async function advanceWorkflowRun(runId: string, workspaceId: string) {
           updated_at: new Date().toISOString(),
         })
         .eq('id', runId);
+      fireAndForget(
+        publishPlatformEvent({
+          workspaceId,
+          sourceModule: 'workflows',
+          eventType: 'workflow_completed',
+          title: 'Workflow completed',
+          severity: 'success',
+          entityType: 'workflow_run',
+          entityId: runId,
+          payload: { runId },
+          href: `/projects/${workspaceId}/workflows/runs`,
+        })
+      );
       return getRun(runId, workspaceId);
     }
 
@@ -493,6 +538,19 @@ export async function advanceWorkflowRun(runId: string, workspaceId: string) {
           completed_at: new Date().toISOString(),
         })
         .eq('id', runId);
+      fireAndForget(
+        publishPlatformEvent({
+          workspaceId,
+          sourceModule: 'workflows',
+          eventType: 'workflow_completed',
+          title: 'Workflow completed',
+          severity: 'success',
+          entityType: 'workflow_run',
+          entityId: runId,
+          payload: { runId },
+          href: `/projects/${workspaceId}/workflows/runs`,
+        })
+      );
       break;
     }
   }
