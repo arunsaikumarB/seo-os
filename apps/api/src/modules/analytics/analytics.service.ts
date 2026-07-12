@@ -1,7 +1,7 @@
 import {
   ANALYTICS_DASHBOARD_KEYS,
   buildForecasts,
-  buildTrendSeries,
+  bucketDailyTrend,
   estimateAutomationHoursSaved,
   generateInsights,
   toNamedPercents,
@@ -106,7 +106,10 @@ export async function getBacklinkAnalytics(workspaceId: string) {
     .slice(0, 6)
     .map(([name, value]) => ({ name, value }));
 
-  const growthTrend = buildTrendSeries(30, Math.max(1, dashboard.won || bl.length || 3));
+  const growthTrend = bucketDailyTrend(
+    bl.map((b) => b.created_at as string | undefined),
+    30
+  );
 
   return {
     totalBacklinks: bl.length,
@@ -185,8 +188,8 @@ export async function getCampaignAnalytics(workspaceId: string) {
       : 0;
 
   const sorted = [...campaigns].sort((a, b) => Number(b.progress ?? 0) - Number(a.progress ?? 0));
-  const campaignAProgress = Number(sorted[0]?.progress ?? summary.avgProgress);
-  const campaignBProgress = Number(sorted[1]?.progress ?? Math.max(0, summary.avgProgress - 12));
+  const campaignAProgress = Number(sorted[0]?.progress ?? 0);
+  const campaignBProgress = Number(sorted[1]?.progress ?? 0);
 
   const estimatedRoi =
     Math.round(successRate * 0.6 + converted * 2 + summary.avgProgress * 0.3);
@@ -217,7 +220,10 @@ export async function getCampaignAnalytics(workspaceId: string) {
         )
       ).map(([name, value]) => ({ name, value: Number(value) }))
     ),
-    progressTrend: buildTrendSeries(14, Math.max(5, summary.avgProgress)),
+    progressTrend: bucketDailyTrend(
+      campaigns.map((c) => (c.created_at ?? c.started_at) as string | undefined),
+      14
+    ),
   };
 }
 
@@ -241,12 +247,16 @@ export async function getOutreachAnalytics(workspaceId: string) {
   const rej = outreachApprovals.filter((a) => a.status === 'rejected').length;
   const approvalRate = appr + rej > 0 ? Math.round((appr / (appr + rej)) * 100) : 0;
 
-  const positiveReplies = Math.round(summary.replies * 0.55);
-  const guestPostsAccepted = Math.round(summary.replies * 0.2);
-  const negotiations = Math.round(summary.replies * 0.25);
+  const positiveReplies = msgs.filter(
+    (m) => m.direction === 'inbound' && ['replied', 'positive', 'interested'].includes(String(m.status))
+  ).length;
+  const guestPostsAccepted = 0;
+  const negotiations = msgs.filter(
+    (m) => m.direction === 'inbound' && String(m.status) === 'negotiating'
+  ).length;
   const conversionRate =
     summary.emailsSent > 0
-      ? Math.round((guestPostsAccepted / summary.emailsSent) * 1000) / 10
+      ? Math.round((positiveReplies / summary.emailsSent) * 1000) / 10
       : 0;
 
   const responseTimes: number[] = [];
@@ -273,9 +283,12 @@ export async function getOutreachAnalytics(workspaceId: string) {
     negotiations,
     conversionRate,
     avgResponseTimeHours,
-    priorReplyRate: Math.max(0, summary.replyRate - 3),
+    priorReplyRate: undefined,
     deliverability: summary.deliverability,
-    sendTrend: buildTrendSeries(21, Math.max(1, summary.emailsSent || 4)),
+    sendTrend: bucketDailyTrend(
+      msgs.map((m) => (m.sent_at ?? m.created_at) as string | undefined),
+      21
+    ),
   };
 }
 
@@ -307,11 +320,14 @@ export async function getWorkflowAnalytics(workspaceId: string) {
     avgRuntimeSec,
     successRate: summary.automationSuccessRate ?? 0,
     failures: failed,
-    retries: Math.round(failed * 0.4),
+    retries: failed,
     approvals: summary.pendingApprovals ?? 0,
     automationTimeSavedHours: timeSavedHours,
     activeWorkflows: summary.activeDefinitions ?? 0,
-    runTrend: buildTrendSeries(14, Math.max(1, runRows.length || 2)),
+    runTrend: bucketDailyTrend(
+      runRows.map((r) => r.created_at as string | undefined),
+      14
+    ),
   };
 }
 
@@ -372,8 +388,14 @@ export async function getAiAnalytics(workspaceId: string) {
     tokensUsed: tokens,
     estimatedHoursSaved: hoursSaved,
     topAgents,
-    recommendationAccuracy: Math.min(95, 55 + Math.round(completed.length * 1.5)),
-    runTrend: buildTrendSeries(21, Math.max(1, completed.length || 3)),
+    recommendationAccuracy:
+      completed.length > 0
+        ? Math.round((completed.length / Math.max(1, completed.length + failed.length)) * 100)
+        : 0,
+    runTrend: bucketDailyTrend(
+      completed.map((r) => (r as { created_at?: string }).created_at),
+      21
+    ),
   };
 }
 
@@ -411,16 +433,23 @@ export async function getRelationshipAnalytics(workspaceId: string) {
         )
       ).map(([name, value]) => ({ name, value }))
     ),
-    growthTrend: buildTrendSeries(30, Math.max(1, rows.length || 5)),
+    growthTrend: bucketDailyTrend(
+      rows.map((o) => o.created_at as string | undefined),
+      30
+    ),
   };
 }
 
 export async function getSeoAnalytics(workspaceId: string) {
-  const [intel, browser, knowledge, memory] = await Promise.all([
+  const [intel, browser, knowledge, memory, opps] = await Promise.all([
     getIntelligenceSummary(workspaceId),
     getBrowserIntelligenceSummary(workspaceId),
     getKnowledgeStats(workspaceId),
     listMemory(workspaceId),
+    getSupabaseAdmin()
+      .from('opportunities')
+      .select('created_at')
+      .eq('workspace_id', workspaceId),
   ]);
 
   return {
@@ -434,9 +463,9 @@ export async function getSeoAnalytics(workspaceId: string) {
     pagesAnalyzed: browser?.pagesRead ?? 0,
     knowledgeDocuments: knowledge.readyDocuments ?? 0,
     memoryFacts: memory.facts?.length ?? 0,
-    opportunityTrend: buildTrendSeries(
-      21,
-      Math.max(2, Object.values(intel?.discovery?.opportunityCounts ?? {}).length || 4)
+    opportunityTrend: bucketDailyTrend(
+      (opps.data ?? []).map((o) => o.created_at as string | undefined),
+      21
     ),
   };
 }
@@ -463,7 +492,10 @@ export async function getTeamAnalytics(workspaceId: string) {
     actionsByActor: toNamedPercents(
       [...byActor.entries()].map(([name, value]) => ({ name, value }))
     ),
-    activityTrend: buildTrendSeries(14, Math.max(1, rows.length || 3)),
+    activityTrend: bucketDailyTrend(
+      rows.map((a) => a.created_at as string | undefined),
+      14
+    ),
   };
 }
 
@@ -488,7 +520,10 @@ export async function getSystemAnalytics(workspaceId: string) {
     recentEvents: ev.length,
     failureEvents: failures,
     knowledgeChunks: knowledge.totalChunks ?? 0,
-    eventTrend: buildTrendSeries(14, Math.max(1, ev.length || 4)),
+    eventTrend: bucketDailyTrend(
+      ev.map((e) => e.created_at as string | undefined),
+      14
+    ),
   };
 }
 
@@ -564,59 +599,54 @@ export async function getAnalyticsOverview(
       key: 'backlinks_won',
       label: 'Backlinks Won',
       value: backlinks.won,
-      deltaPct: 12,
-      trend: 'up',
+      trend: backlinks.won > 0 ? 'up' : 'flat',
     },
     {
       key: 'campaign_success',
       label: 'Campaign Success',
       value: campaigns.successRate,
       unit: '%',
-      deltaPct: 8,
-      trend: 'up',
+      trend: campaigns.successRate >= 50 ? 'up' : 'flat',
     },
     {
       key: 'workflow_success',
       label: 'Workflow Success',
       value: workflows.successRate,
       unit: '%',
-      deltaPct: 5,
-      trend: workflows.successRate >= 70 ? 'up' : 'down',
+      trend: workflows.successRate >= 70 ? 'up' : workflows.successRate > 0 ? 'down' : 'flat',
     },
     {
       key: 'ai_productivity',
-      label: 'AI Hours Saved',
+      label: 'Est. AI Hours Saved',
       value: hoursSaved,
       unit: 'h',
-      deltaPct: 15,
-      trend: 'up',
+      trend: hoursSaved > 0 ? 'up' : 'flat',
     },
     {
       key: 'reply_rate',
       label: 'Reply Rate',
       value: outreach.replyRate,
       unit: '%',
-      deltaPct: outreach.replyRate - (outreach.priorReplyRate ?? outreach.replyRate),
-      trend: 'up',
+      trend: outreach.replyRate > 0 ? 'up' : 'flat',
     },
     {
       key: 'relationship_health',
       label: 'Relationship Health',
       value: relationships.avgHealth,
       unit: '/100',
-      trend: 'up',
+      trend: relationships.avgHealth >= 50 ? 'up' : 'flat',
     },
     {
       key: 'opportunities',
       label: 'Opportunities',
       value: Number(seo.opportunities),
-      trend: 'up',
+      trend: Number(seo.opportunities) > 0 ? 'up' : 'flat',
     },
     {
       key: 'roi_index',
       label: 'Projected ROI Index',
       value: forecasts.find((f) => f.metric === 'projected_roi_index')?.current ?? 0,
-      trend: 'up',
+      trend: 'flat',
     },
   ];
 
@@ -629,8 +659,8 @@ export async function getAnalyticsOverview(
         workflowsRun: workflows.executed,
         aiTasks: ai.tasksCompleted,
       },
-      weekly: buildTrendSeries(7, Math.max(3, backlinks.won + outreach.emailsSent)),
-      monthly: buildTrendSeries(30, Math.max(5, backlinks.won * 2 + campaigns.active * 3)),
+      weekly: backlinks.growthTrend.slice(-7),
+      monthly: backlinks.growthTrend,
     },
     insights,
     forecasts,

@@ -226,10 +226,29 @@ export function buildTrendSeries(
   for (let i = points - 1; i >= 0; i--) {
     const d = new Date(now - i * 24 * 60 * 60 * 1000);
     const wobble = 1 + (Math.sin(i * 1.7) * volatility) / 2;
-    v = Math.max(0, Math.round(v * wobble + (base * 0.02)));
+    v = Math.max(0, Math.round(v * wobble + base * 0.02));
     out.push({ date: d.toISOString().slice(0, 10), value: v });
   }
   return out;
+}
+
+/** Bucket ISO timestamps into a fixed trailing day window (zeros when empty). */
+export function bucketDailyTrend(
+  timestamps: Array<string | null | undefined>,
+  days: number
+): { date: string; value: number }[] {
+  const counts = new Map<string, number>();
+  const now = Date.now();
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(now - i * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    counts.set(d, 0);
+  }
+  for (const ts of timestamps) {
+    if (!ts) continue;
+    const day = String(ts).slice(0, 10);
+    if (counts.has(day)) counts.set(day, (counts.get(day) ?? 0) + 1);
+  }
+  return [...counts.entries()].map(([date, value]) => ({ date, value }));
 }
 
 export function estimateAutomationHoursSaved(opts: {

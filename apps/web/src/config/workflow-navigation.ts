@@ -165,8 +165,8 @@ export const workflowNavSections: WorkflowNavSection[] = [
     label: 'Results',
     emoji: '📊',
     items: [
-      { label: 'Reports', href: 'reports/library', icon: FileBarChart, featureFlag: 'reports', sprint: 'Sprint 8' },
-      { label: 'Analytics', href: 'analytics/overview', icon: LineChart, sprint: 'Sprint 7' },
+      { label: 'Reports', href: 'reports/library', icon: FileBarChart, featureFlag: 'reports' },
+      { label: 'Analytics', href: 'analytics/overview', icon: LineChart, featureFlag: 'analytics' },
       { label: 'Executive Dashboard', href: '/org/executive', icon: BarChart3, absolute: true },
     ],
   },
@@ -176,7 +176,7 @@ export const workflowNavSections: WorkflowNavSection[] = [
     emoji: '🤖',
     items: [
       { label: 'AI Chat', href: 'command-center', icon: MessageSquare, featureFlag: 'ai_workforce' },
-      { label: 'AI Workforce', href: 'agents/catalog', icon: Bot, featureFlag: 'ai_workforce', sprint: 'Sprint 4' },
+      { label: 'AI Workforce', href: 'agents/catalog', icon: Bot, featureFlag: 'ai_workforce' },
     ],
   },
   {

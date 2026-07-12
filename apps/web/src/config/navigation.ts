@@ -16,10 +16,8 @@ import {
   Settings,
   MessageSquare,
   UsersRound,
-  Shield,
   Bell,
   Plug,
-  CreditCard,
   ScrollText,
   Building2,
   Globe,
@@ -43,15 +41,13 @@ export interface NavItem {
 export const orgNav: NavItem[] = [
   { label: 'Team', href: '/org/team', icon: UsersRound },
   { label: 'Settings', href: '/org/settings/general', icon: Settings },
-  { label: 'Notifications', href: '/org/settings/notifications', icon: Bell, sprint: 'Sprint 2' },
-  { label: 'Security', href: '/org/settings/security', icon: Shield, sprint: 'Sprint 2' },
+  { label: 'Notifications', href: '/org/settings/notifications', icon: Bell },
   { label: 'Executive', href: '/org/executive', icon: Building2 },
-  { label: 'Audit Log', href: '/org/audit-log', icon: ScrollText, sprint: 'Sprint 6' },
+  { label: 'Audit Log', href: '/org/audit-log', icon: ScrollText },
   { label: 'Integrations', href: '/org/integrations', icon: Plug, featureFlag: 'integrations' },
   { label: 'Help', href: '/org/help', icon: BookOpen },
   { label: 'Feedback', href: '/org/feedback', icon: MessageSquare, featureFlag: 'feedback_center' },
   { label: 'Closed Beta', href: '/org/beta', icon: FlaskConical, featureFlag: 'closed_beta' },
-  { label: 'Billing', href: '/org/billing', icon: CreditCard, sprint: 'Future' },
 ];
 
 export const projectNav: NavItem[] = [
@@ -78,7 +74,6 @@ export const projectNav: NavItem[] = [
     label: 'AI Agents',
     href: 'agents/catalog',
     icon: Bot,
-    sprint: 'Sprint 4',
     featureFlag: 'ai_workforce',
   },
   {
@@ -105,20 +100,18 @@ export const projectNav: NavItem[] = [
     icon: ShieldCheck,
     featureFlag: 'backlink_builder',
   },
-  { label: 'Content Studio', href: 'content/library', icon: FileText, sprint: 'Sprint 7' },
+  { label: 'Content Studio', href: 'content/library', icon: FileText },
   { label: 'Outreach', href: 'outreach/inbox', icon: Mail, featureFlag: 'outreach' },
   {
     label: 'Workflows',
     href: 'workflows',
     icon: Workflow,
     featureFlag: 'workflows',
-    badge: 'Epic 6',
   },
   {
     label: 'Technical SEO',
     href: 'technical/overview',
     icon: Wrench,
-    sprint: 'Sprint 7',
     featureFlag: 'technical_seo',
   },
   {
@@ -132,7 +125,6 @@ export const projectNav: NavItem[] = [
     label: 'Reports',
     href: 'reports/library',
     icon: FileBarChart,
-    sprint: 'Sprint 8',
     featureFlag: 'reports',
   },
   { label: 'Settings', href: 'settings/general', icon: Settings },

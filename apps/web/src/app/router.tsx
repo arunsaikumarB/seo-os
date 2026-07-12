@@ -11,9 +11,7 @@ import { OrgBootstrap } from '@/components/layout/org-bootstrap';
 import { AppShell } from '@/components/layout/app-shell';
 import { AppLayout } from '@/components/layout/app-layout';
 import { OrgShell } from '@/components/layout/org-shell';
-import { PlaceholderPage } from '@/components/placeholder-page';
 import { Skeleton } from '@/components/ui/skeleton';
-import { projectNav, orgNav } from '@/config/navigation';
 
 const LoginPage = lazy(() =>
   import('@/pages/login').then((m) => ({ default: m.LoginPage }))
@@ -203,6 +201,23 @@ const FeedbackCenterPage = lazy(() =>
 const BetaDashboardPage = lazy(() =>
   import('@/pages/beta/dashboard').then((m) => ({ default: m.BetaDashboardPage }))
 );
+const OrgNotificationsPage = lazy(() =>
+  import('@/pages/org/settings/notifications').then((m) => ({
+    default: m.OrgNotificationsPage,
+  }))
+);
+const OrgAuditLogPage = lazy(() =>
+  import('@/pages/org/audit-log').then((m) => ({ default: m.OrgAuditLogPage }))
+);
+const AgentsCatalogPage = lazy(() =>
+  import('@/pages/agents/catalog').then((m) => ({ default: m.AgentsCatalogPage }))
+);
+const ContentLibraryPage = lazy(() =>
+  import('@/pages/content/library').then((m) => ({ default: m.ContentLibraryPage }))
+);
+const ProjectSettingsPage = lazy(() =>
+  import('@/pages/settings/general').then((m) => ({ default: m.ProjectSettingsPage }))
+);
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -238,107 +253,6 @@ function lazyEl(Comp: ComponentType) {
       <Comp />
     </Lazy>
   );
-}
-
-const IMPLEMENTED_ROUTES = new Set([
-  'home',
-  'mission-control',
-  'backlink-builder',
-  'backlink-builder/explorer',
-  'backlink-builder/pipeline',
-  'backlink-builder/won',
-  'backlink-builder/lost',
-  'backlink-builder/pending',
-  'backlink-builder/audit',
-  'backlink-builder/recommendations',
-  'backlink-builder/relationships',
-  'backlink-builder/campaigns',
-  'backlink-builder/import',
-  'backlink-builder/automation',
-  'backlink-builder/tracking',
-  'command-center',
-  'knowledge/library',
-  'memory/timeline',
-  'intelligence/website',
-  'intelligence/browser',
-  'relationships',
-  'relationships/organizations',
-  'outreach/inbox',
-  'outreach/studio',
-  'outreach/sequences',
-  'intelligence/keywords',
-  'competitors',
-  'prospects/pipeline',
-  'campaigns',
-  'campaigns/queue',
-  'campaigns/approvals',
-  'workflows',
-  'workflows/templates',
-  'workflows/runs',
-  'analytics/overview',
-  'analytics/seo',
-  'analytics/backlinks',
-  'analytics/campaigns',
-  'analytics/workflows',
-  'analytics/relationships',
-  'analytics/outreach',
-  'analytics/ai',
-  'analytics/team',
-  'analytics/system',
-  'reports/library',
-  'technical/overview',
-  'integrations/hub',
-  'settings/general',
-]);
-
-function projectPlaceholderRoutes() {
-  return projectNav
-    .filter((n) => !IMPLEMENTED_ROUTES.has(n.href))
-    .map((item) => (
-      <Route
-        key={item.href}
-        path={`${item.href}/*`}
-        element={
-          <PlaceholderPage
-            title={item.label}
-            description={`${item.label} module`}
-            sprint={item.sprint}
-          />
-        }
-      />
-    ));
-}
-
-function orgPlaceholderRoutes() {
-  return orgNav
-    .filter(
-      (n) =>
-        ![
-          '/org/team',
-          '/org/settings/general',
-          '/org/executive',
-          '/org/integrations',
-          '/org/help',
-          '/org/feedback',
-          '/org/beta',
-        ].includes(n.href)
-    )
-    .map((item) => {
-      const path = item.href.replace('/org/', '');
-      return (
-        <Route
-          key={item.href}
-          path={path}
-          element={
-            <PlaceholderPage
-              title={item.label}
-              description={`${item.label} — organization`}
-              sprint={item.sprint}
-            />
-          }
-        />
-      );
-    });
 }
 
 export function AppRouter() {
@@ -406,7 +320,11 @@ export function AppRouter() {
                     <Route path="feedback" element={lazyEl(FeedbackCenterPage)} />
                     <Route path="beta" element={lazyEl(BetaDashboardPage)} />
                     <Route path="settings/general" element={lazyEl(OrgSettingsGeneralPage)} />
-                    {orgPlaceholderRoutes()}
+                    <Route
+                      path="settings/notifications"
+                      element={lazyEl(OrgNotificationsPage)}
+                    />
+                    <Route path="audit-log" element={lazyEl(OrgAuditLogPage)} />
                   </Route>
 
                   <Route
@@ -498,12 +416,10 @@ export function AppRouter() {
                     <Route path="reports/library" element={lazyEl(ReportsLibraryPage)} />
                     <Route path="technical/overview" element={lazyEl(TechnicalSeoOverviewPage)} />
                     <Route path="integrations/hub" element={lazyEl(IntegrationsHubPage)} />
+                    <Route path="agents/catalog" element={lazyEl(AgentsCatalogPage)} />
+                    <Route path="content/library" element={lazyEl(ContentLibraryPage)} />
+                    <Route path="settings/general" element={lazyEl(ProjectSettingsPage)} />
                     <Route path="search" element={lazyEl(SearchPage)} />
-                    {projectPlaceholderRoutes()}
-                    <Route
-                      path="settings/*"
-                      element={<PlaceholderPage title="Settings" description="Project settings" />}
-                    />
                   </Route>
 
                   <Route path="/" element={<Navigate to="/projects" replace />} />

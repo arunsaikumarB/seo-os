@@ -138,7 +138,7 @@ export function ExecutiveDashboardPage() {
         <StaggerItem>
           <MetricCard
             icon={Clock}
-            label="Time Saved"
+            label="Est. time saved"
             value={metrics.timeSavedHours}
             suffix="h"
             highlight
