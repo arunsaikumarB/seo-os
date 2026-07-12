@@ -61,6 +61,22 @@ async function metricsFromAnalytics(workspaceId: string) {
   } catch {
     /* optional until audits exist */
   }
+  let integrations: Record<string, number> = {};
+  try {
+    const { getSyncedMetrics } = await import('../integrations/integrations.service.js');
+    const m = await getSyncedMetrics(workspaceId);
+    integrations = {
+      gscClicks: m.searchConsole.clicks,
+      gscImpressions: m.searchConsole.impressions,
+      gscCtr: Math.round(m.searchConsole.ctr * 10000) / 100,
+      gscPosition: m.searchConsole.position,
+      ga4Sessions: m.analytics.sessions,
+      ga4Users: m.analytics.users,
+      ga4Conversions: m.analytics.conversions,
+    };
+  } catch {
+    /* optional until integrations synced */
+  }
   return {
     metrics: {
       backlinksWon: kpi('backlinks_won'),
@@ -75,6 +91,7 @@ async function metricsFromAnalytics(workspaceId: string) {
       workflowsExecuted: overview.growth.today.workflowsRun ?? 0,
       aiTasksCompleted: overview.growth.today.aiTasks ?? 0,
       ...technical,
+      ...integrations,
     } as Record<string, number>,
     insights: overview.insights,
     forecasts: overview.forecasts.map((f) => ({

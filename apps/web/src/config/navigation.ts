@@ -46,7 +46,7 @@ export const orgNav: NavItem[] = [
   { label: 'Security', href: '/org/settings/security', icon: Shield, sprint: 'Sprint 2' },
   { label: 'Executive', href: '/org/executive', icon: Building2 },
   { label: 'Audit Log', href: '/org/audit-log', icon: ScrollText, sprint: 'Sprint 6' },
-  { label: 'Integrations', href: '/org/integrations', icon: Plug, sprint: 'Sprint 6' },
+  { label: 'Integrations', href: '/org/integrations', icon: Plug, featureFlag: 'integrations' },
   { label: 'Billing', href: '/org/billing', icon: CreditCard, sprint: 'Future' },
 ];
 
@@ -116,6 +116,12 @@ export const projectNav: NavItem[] = [
     icon: Wrench,
     sprint: 'Sprint 7',
     featureFlag: 'technical_seo',
+  },
+  {
+    label: 'Integrations',
+    href: 'integrations/hub',
+    icon: Plug,
+    featureFlag: 'integrations',
   },
   { label: 'Analytics', href: 'analytics/overview', icon: BarChart3, featureFlag: 'analytics' },
   {

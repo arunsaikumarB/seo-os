@@ -211,6 +211,12 @@ function buildSections(
         ],
         'donut'
       );
+      addPerf(
+        'Search Console',
+        ['gscClicks', 'gscImpressions', 'gscCtr', 'gscPosition'],
+        'line'
+      );
+      addPerf('Google Analytics', ['ga4Sessions', 'ga4Users', 'ga4Conversions'], 'bar');
       break;
     default:
       addPerf(
@@ -230,6 +236,7 @@ function buildSections(
         ['technicalHealthScore', 'pagesAudited', 'criticalSeoIssues', 'issueResolutionRate'],
         'area'
       );
+      addPerf('Search Console & Analytics', ['gscClicks', 'gscImpressions', 'ga4Sessions', 'ga4Users'], 'line');
   }
 
   sections.push({

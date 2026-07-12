@@ -15,6 +15,7 @@ import { getOutreachSummary } from '../outreach/outreach.service.js';
 import { getWorkflowSummary } from '../workflows/workflow.service.js';
 import { getPendingApprovalCount } from '../campaigns/approval.service.js';
 import { getTechnicalSummary } from '../technical-seo/technical-seo.service.js';
+import { getIntegrationsSummary } from '../integrations/integrations.service.js';
 import { listAgentRuns } from './agent.service.js';
 
 export function getFeatureFlags(overrides?: Partial<Record<FeatureFlag, boolean>>) {
@@ -79,6 +80,7 @@ export async function getMissionControlSummary(workspaceId: string) {
     outreach,
     workflows,
     technicalSeo,
+    integrations,
   ] = await Promise.all([
     getKnowledgeStats(workspaceId),
     listMemory(workspaceId),
@@ -97,6 +99,7 @@ export async function getMissionControlSummary(workspaceId: string) {
     getOutreachSummary(workspaceId),
     getWorkflowSummary(workspaceId),
     getTechnicalSummary(workspaceId).catch(() => null),
+    getIntegrationsSummary(workspaceId).catch(() => null),
   ]);
 
   const activeCampaigns = await listCampaigns(workspaceId);
@@ -139,5 +142,6 @@ export async function getMissionControlSummary(workspaceId: string) {
     outreach,
     workflows,
     technicalSeo,
+    integrations,
   };
 }

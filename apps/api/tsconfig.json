@@ -21,6 +21,7 @@
     { "path": "../../packages/workflow-engine" },
     { "path": "../../packages/analytics-engine" },
     { "path": "../../packages/reports-engine" },
-    { "path": "../../packages/technical-seo" }
+    { "path": "../../packages/technical-seo" },
+    { "path": "../../packages/integrations" }
   ]
 }

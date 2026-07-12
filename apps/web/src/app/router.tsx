@@ -191,6 +191,9 @@ const ReportsLibraryPage = lazy(() =>
 const TechnicalSeoOverviewPage = lazy(() =>
   import('@/pages/technical/overview').then((m) => ({ default: m.TechnicalSeoOverviewPage }))
 );
+const IntegrationsHubPage = lazy(() =>
+  import('@/pages/integrations/hub').then((m) => ({ default: m.IntegrationsHubPage }))
+);
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -275,6 +278,7 @@ const IMPLEMENTED_ROUTES = new Set([
   'analytics/system',
   'reports/library',
   'technical/overview',
+  'integrations/hub',
   'settings/general',
 ]);
 
@@ -298,7 +302,12 @@ function projectPlaceholderRoutes() {
 
 function orgPlaceholderRoutes() {
   return orgNav
-    .filter((n) => !['/org/team', '/org/settings/general', '/org/executive'].includes(n.href))
+    .filter(
+      (n) =>
+        !['/org/team', '/org/settings/general', '/org/executive', '/org/integrations'].includes(
+          n.href
+        )
+    )
     .map((item) => {
       const path = item.href.replace('/org/', '');
       return (
@@ -377,6 +386,7 @@ export function AppRouter() {
                     <Route index element={<Navigate to="team" replace />} />
                     <Route path="team" element={lazyEl(OrgTeamPage)} />
                     <Route path="executive" element={lazyEl(ExecutiveDashboardPage)} />
+                    <Route path="integrations" element={lazyEl(IntegrationsHubPage)} />
                     <Route path="settings/general" element={lazyEl(OrgSettingsGeneralPage)} />
                     {orgPlaceholderRoutes()}
                   </Route>
@@ -469,6 +479,7 @@ export function AppRouter() {
                     <Route path="analytics/:section" element={lazyEl(AnalyticsSectionPage)} />
                     <Route path="reports/library" element={lazyEl(ReportsLibraryPage)} />
                     <Route path="technical/overview" element={lazyEl(TechnicalSeoOverviewPage)} />
+                    <Route path="integrations/hub" element={lazyEl(IntegrationsHubPage)} />
                     <Route path="search" element={lazyEl(SearchPage)} />
                     {projectPlaceholderRoutes()}
                     <Route

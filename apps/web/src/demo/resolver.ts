@@ -58,7 +58,7 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
 
   // Version
   if (m === '/v1/version')
-    return { data: { version: '9.0.0-technical-seo-demo', api: 'v1', mode: 'demo' } };
+    return { data: { version: '10.0.0-integrations-demo', api: 'v1', mode: 'demo' } };
 
   if (m.startsWith('/v1/notifications')) {
     return {
@@ -439,6 +439,126 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
     return { exportedAt: new Date().toISOString(), issues: [] };
   }
 
+  if (m.includes('/integrations/summary')) {
+    return {
+      data: {
+        connectedCount: 3,
+        availableCount: 7,
+        syncQueue: 1,
+        lastSyncAt: new Date().toISOString(),
+        failedSyncs: 0,
+        apiHealth: { healthy: 3, degraded: 0, down: 0, status: 'healthy' },
+        connections: [],
+        recentJobs: [],
+        providers: [
+          {
+            key: 'google_search_console',
+            name: 'Google Search Console',
+            description: 'Search performance',
+            category: 'search',
+            authType: 'oauth',
+            scopes: ['webmasters.readonly'],
+            capabilities: [{ id: 'queries', label: 'Queries' }],
+          },
+          {
+            key: 'google_analytics_4',
+            name: 'Google Analytics 4',
+            description: 'Sessions & conversions',
+            category: 'analytics',
+            authType: 'oauth',
+            scopes: ['analytics.readonly'],
+            capabilities: [{ id: 'sessions', label: 'Sessions' }],
+          },
+          {
+            key: 'slack',
+            name: 'Slack',
+            description: 'Notifications',
+            category: 'notifications',
+            authType: 'webhook',
+            scopes: ['chat:write'],
+            capabilities: [{ id: 'notifications', label: 'Notifications' }],
+          },
+        ],
+      },
+    };
+  }
+
+  if (m.includes('/integrations/connections') && method === 'POST') {
+    return {
+      data: {
+        id: 'conn-demo',
+        provider_key: 'google_search_console',
+        display_name: 'Google Search Console',
+        status: 'connected',
+        health_status: 'healthy',
+      },
+    };
+  }
+
+  if (m.includes('/integrations/connections')) {
+    return {
+      data: [
+        {
+          id: 'conn-gsc',
+          provider_key: 'google_search_console',
+          display_name: 'Google Search Console',
+          status: 'connected',
+          health_status: 'healthy',
+          health_message: 'OK',
+          last_sync_at: new Date().toISOString(),
+          scopes: ['webmasters.readonly'],
+          external_account_label: 'sc-domain:example.com',
+        },
+        {
+          id: 'conn-ga4',
+          provider_key: 'google_analytics_4',
+          display_name: 'Google Analytics 4',
+          status: 'connected',
+          health_status: 'healthy',
+          last_sync_at: new Date().toISOString(),
+          scopes: ['analytics.readonly'],
+        },
+        {
+          id: 'conn-slack',
+          provider_key: 'slack',
+          display_name: 'Slack',
+          status: 'connected',
+          health_status: 'healthy',
+          scopes: ['chat:write'],
+        },
+      ],
+    };
+  }
+
+  if (m.includes('/integrations/sync-jobs')) {
+    return {
+      data: [
+        {
+          id: 'sync-1',
+          connection_id: 'conn-gsc',
+          status: 'completed',
+          mode: 'manual',
+          created_at: new Date().toISOString(),
+          completed_at: new Date().toISOString(),
+        },
+      ],
+    };
+  }
+
+  if (m.includes('/integrations/usage')) {
+    return { data: [{ metric_key: 'api_calls', metric_value: 42, period_start: '2026-07-12' }] };
+  }
+
+  if (m.includes('/integrations/metrics')) {
+    return {
+      data: {
+        searchConsole: { clicks: 1240, impressions: 48200, ctr: 0.0257, position: 18.4 },
+        analytics: { sessions: 8200, users: 6400, conversions: 214, engagementRate: 0.61 },
+        snapshots: [],
+      },
+    };
+  }
+
   if (m.includes('/reports/runs')) {
     return {
       data: [
@@ -512,6 +632,7 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
         analytics: true,
         technical_seo: true,
         reports: true,
+        integrations: true,
         white_label: true,
       },
     };

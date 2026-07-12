@@ -36,7 +36,7 @@ export async function readyHandler(_req: Request, res: Response): Promise<void> 
 
 export function versionHandler(_req: Request, res: Response): void {
   res.json({
-    version: '9.0.0-technical-seo',
+    version: '10.0.0-integrations',
     api: 'v1',
     release: 'Reports & Executive Intelligence',
   });

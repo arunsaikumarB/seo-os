@@ -9,6 +9,7 @@ export const FEATURE_FLAGS = [
   'analytics',
   'technical_seo',
   'reports',
+  'integrations',
   'marketplace',
   'white_label',
 ] as const;
@@ -27,6 +28,7 @@ export const DEFAULT_FEATURE_FLAGS: Record<FeatureFlag, boolean> = {
   analytics: true,
   technical_seo: true,
   reports: true,
+  integrations: true,
   marketplace: false,
   white_label: true,
 };

@@ -25,6 +25,11 @@ export const PLATFORM_EVENT_TYPES = [
   'memory_fact_approved',
   'technical_audit_completed',
   'critical_seo_issue_detected',
+  'integration_connected',
+  'integration_disconnected',
+  'integration_sync_completed',
+  'integration_sync_failed',
+  'integration_token_refreshed',
 ] as const;
 
 export type PlatformEventType = (typeof PLATFORM_EVENT_TYPES)[number];
@@ -52,6 +57,7 @@ export type PlatformSourceModule =
   | 'ai'
   | 'mission_control'
   | 'technical_seo'
+  | 'integrations'
   | 'system';
 
 /** Workflow trigger types that can be auto-started from platform events */
