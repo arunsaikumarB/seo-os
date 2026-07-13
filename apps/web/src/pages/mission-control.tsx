@@ -16,6 +16,8 @@ import {
   ArrowRight,
   Heart,
   Activity,
+  Image as ImageIcon,
+  Plug,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -41,6 +43,42 @@ type MissionSummary = {
     };
   };
   campaigns?: { timeline?: Array<{ title: string; event_type: string; created_at: string }> };
+  browserExecution?: {
+    running?: number;
+    queued?: number;
+    paused?: number;
+    needs_approval?: number;
+    completed?: number;
+    failed?: number;
+    blocked?: number;
+    successRate?: number | null;
+    avgRuntimeMs?: number | null;
+    etaSeconds?: number;
+    current?: { website?: string; step?: string };
+  };
+  imageIntelligence?: {
+    generated?: number;
+    queued?: number;
+    approved?: number;
+    submitted?: number;
+    verified?: number;
+    rejected?: number;
+    bestProvider?: string;
+    bestStyle?: string;
+    todaysImages?: number;
+    providerHealth?: Array<{ key: string; status: string }>;
+  };
+  providerFramework?: {
+    connected?: number;
+    healthy?: number;
+    offline?: number;
+    warning?: number;
+    quota?: number;
+    averageLatencyMs?: number | null;
+    todaysCalls?: number;
+    errors?: number;
+    failoverEvents?: number;
+  };
 };
 
 function KpiCard({
@@ -216,6 +254,148 @@ export function MissionControlPage() {
           ))}
         </StaggerGrid>
       )}
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Activity className="h-4 w-4" /> Browser Execution
+          </CardTitle>
+          <CardDescription>
+            Running · Queued · Paused · Needs Approval · Blocked · Success rate · ETA
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 sm:grid-cols-4 text-sm">
+          <div>
+            <p className="text-xs text-muted-foreground">Running / Queued</p>
+            <p className="font-medium">
+              {data?.browserExecution?.running ?? 0} / {data?.browserExecution?.queued ?? 0}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Paused / Needs approval</p>
+            <p className="font-medium">
+              {data?.browserExecution?.paused ?? 0} / {data?.browserExecution?.needs_approval ?? 0}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Blocked / Failed</p>
+            <p className="font-medium">
+              {data?.browserExecution?.blocked ?? 0} / {data?.browserExecution?.failed ?? 0}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Success · ETA</p>
+            <p className="font-medium">
+              {data?.browserExecution?.successRate != null
+                ? `${data.browserExecution.successRate}%`
+                : '—'}{' '}
+              · {Math.round((data?.browserExecution?.etaSeconds ?? 0) / 60)}m
+            </p>
+          </div>
+          <div className="sm:col-span-4 flex justify-between items-center">
+            <p className="text-xs text-muted-foreground">
+              Current: {data?.browserExecution?.current?.website || '—'} ·{' '}
+              {data?.browserExecution?.current?.step || 'idle'}
+            </p>
+            <Button variant="outline" size="sm" asChild>
+              <Link to={`/projects/${projectId}/backlink-builder/execution`}>Execution Center</Link>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <ImageIcon className="h-4 w-4" /> Image Intelligence
+          </CardTitle>
+          <CardDescription>
+            Generated · Queued · Approved · Submitted · Verified · Rejected · Provider health
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 sm:grid-cols-4 text-sm">
+          <div>
+            <p className="text-xs text-muted-foreground">Generated / Queued</p>
+            <p className="font-medium">
+              {data?.imageIntelligence?.generated ?? 0} / {data?.imageIntelligence?.queued ?? 0}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Approved / Submitted</p>
+            <p className="font-medium">
+              {data?.imageIntelligence?.approved ?? 0} / {data?.imageIntelligence?.submitted ?? 0}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Verified / Rejected</p>
+            <p className="font-medium">
+              {data?.imageIntelligence?.verified ?? 0} / {data?.imageIntelligence?.rejected ?? 0}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Best provider · style</p>
+            <p className="font-medium capitalize">
+              {data?.imageIntelligence?.bestProvider ?? 'flux'} ·{' '}
+              {data?.imageIntelligence?.bestStyle ?? 'editorial'}
+            </p>
+          </div>
+          <div className="sm:col-span-4 flex justify-between items-center">
+            <p className="text-xs text-muted-foreground">
+              Today: {data?.imageIntelligence?.todaysImages ?? 0} · Providers:{' '}
+              {(data?.imageIntelligence?.providerHealth ?? [])
+                .slice(0, 3)
+                .map((p) => `${p.key}:${p.status}`)
+                .join(' · ') || 'unconfigured'}
+            </p>
+            <Button variant="outline" size="sm" asChild>
+              <Link to={`/projects/${projectId}/content/library`}>Content Studio · Images</Link>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Plug className="h-4 w-4" /> Provider Health
+          </CardTitle>
+          <CardDescription>
+            Connected · Healthy · Offline · Quota · Latency · Calls · Errors · Failovers
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 sm:grid-cols-4 text-sm">
+          <div>
+            <p className="text-xs text-muted-foreground">Connected / Healthy</p>
+            <p className="font-medium">
+              {data?.providerFramework?.connected ?? 0} / {data?.providerFramework?.healthy ?? 0}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Offline / Quota</p>
+            <p className="font-medium">
+              {data?.providerFramework?.offline ?? 0} / {data?.providerFramework?.quota ?? 0}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Avg latency · Calls</p>
+            <p className="font-medium">
+              {data?.providerFramework?.averageLatencyMs ?? '—'} ms ·{' '}
+              {data?.providerFramework?.todaysCalls ?? 0}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Errors · Failovers</p>
+            <p className="font-medium">
+              {data?.providerFramework?.errors ?? 0} / {data?.providerFramework?.failoverEvents ?? 0}
+            </p>
+          </div>
+          <div className="sm:col-span-4 flex justify-end">
+            <Button variant="outline" size="sm" asChild>
+              <Link to={`/projects/${projectId}/providers`}>Provider Dashboard</Link>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="pb-2">

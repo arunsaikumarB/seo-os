@@ -149,6 +149,11 @@ const BrowserAssistantPage = lazy(() =>
     default: m.BrowserAssistantPage,
   }))
 );
+const BrowserExecutionCenterPage = lazy(() =>
+  import('@/pages/backlink-builder/execution-center').then((m) => ({
+    default: m.BrowserExecutionCenterPage,
+  }))
+);
 const ImageStudioPage = lazy(() =>
   import('@/pages/backlink-builder/media-studios').then((m) => ({ default: m.ImageStudioPage }))
 );
@@ -208,6 +213,9 @@ const TechnicalSeoOverviewPage = lazy(() =>
 );
 const IntegrationsHubPage = lazy(() =>
   import('@/pages/integrations/hub').then((m) => ({ default: m.IntegrationsHubPage }))
+);
+const ProviderDashboardPage = lazy(() =>
+  import('@/pages/providers/dashboard').then((m) => ({ default: m.ProviderDashboardPage }))
 );
 const HelpCenterPage = lazy(() =>
   import('@/pages/help/center').then((m) => ({ default: m.HelpCenterPage }))
@@ -410,6 +418,10 @@ export function AppRouter() {
                       element={lazyEl(BrowserAssistantPage)}
                     />
                     <Route
+                      path="backlink-builder/execution"
+                      element={lazyEl(BrowserExecutionCenterPage)}
+                    />
+                    <Route
                       path="backlink-builder/image-studio"
                       element={lazyEl(ImageStudioPage)}
                     />
@@ -450,6 +462,7 @@ export function AppRouter() {
                     <Route path="reports/library" element={lazyEl(ReportsLibraryPage)} />
                     <Route path="technical/overview" element={lazyEl(TechnicalSeoOverviewPage)} />
                     <Route path="integrations/hub" element={lazyEl(IntegrationsHubPage)} />
+                    <Route path="providers" element={lazyEl(ProviderDashboardPage)} />
                     <Route path="agents/catalog" element={lazyEl(AgentsCatalogPage)} />
                     <Route path="content/library" element={lazyEl(ContentLibraryPage)} />
                     <Route path="settings/general" element={lazyEl(ProjectSettingsPage)} />

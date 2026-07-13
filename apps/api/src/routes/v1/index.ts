@@ -50,6 +50,9 @@ import { chatRouter } from './chat.routes.js';
 import { intelligenceRouter } from './intelligence.routes.js';
 import { campaignsRouter } from './campaigns.routes.js';
 import { backlinkBuilderRouter } from './backlink-builder.routes.js';
+import { browserExecutionRouter } from './browser-execution.routes.js';
+import { imageIntelligenceRouter } from './image-intelligence.routes.js';
+import { providerFrameworkRouter } from './provider-framework.routes.js';
 import { relationshipRouter } from './relationship.routes.js';
 import { outreachRouter } from './outreach.routes.js';
 import { workflowsRouter } from './workflows.routes.js';
@@ -77,7 +80,7 @@ projectScopeRouter.use(authMiddleware);
 projectScopeRouter.use(requireProjectAccess);
 
 v1Router.get('/version', (_req, res) => {
-  res.json({ data: { version: '11.0.5-closed-beta', api: 'v1' } });
+  res.json({ data: { version: '1.2.3-pif', api: 'v1' } });
 });
 
 v1Router.use('/notifications', notificationsRouter);
@@ -437,6 +440,9 @@ projectScopeRouter.use('/chat', chatRouter);
 projectScopeRouter.use('/intelligence', intelligenceRouter);
 projectScopeRouter.use('/campaigns', campaignsRouter);
 projectScopeRouter.use('/backlink-builder', backlinkBuilderRouter);
+projectScopeRouter.use(browserExecutionRouter);
+projectScopeRouter.use(imageIntelligenceRouter);
+projectScopeRouter.use(providerFrameworkRouter);
 projectScopeRouter.use('/relationships', relationshipRouter);
 projectScopeRouter.use('/outreach', outreachRouter);
 projectScopeRouter.use('/workflows', workflowsRouter);

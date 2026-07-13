@@ -11,6 +11,7 @@ import type {
 import { createAIProviderRouter } from './ai/router.js';
 import type { AIProviderRouter } from './ai/types.js';
 import { createEmailProvider, createEmailProviderFromAccount } from './email/router.js';
+import { getProviderManager } from './framework/manager.js';
 
 export interface ProviderRegistryConfig {
   mode: ProviderMode;
@@ -41,6 +42,7 @@ export interface ProviderRegistry {
     primary: { name: string; status: string };
     fallback?: { name: string; status: string };
   }>;
+  getProviderManager(): ReturnType<typeof getProviderManager>;
 }
 
 export function createProviderRegistry(config: ProviderRegistryConfig): ProviderRegistry {
@@ -63,6 +65,20 @@ export function createProviderRegistry(config: ProviderRegistryConfig): Provider
           : { type: 'mock' }
   );
 
+  const manager = getProviderManager({
+    preferred: {
+      keyword: config.keyword ? `keyword.${config.keyword}` : 'keyword.estimated',
+      llm: config.ai === 'ollama' ? 'llm.ollama' : 'llm.gemini',
+      email:
+        config.email === 'gmail'
+          ? 'email.gmail'
+          : config.email === 'outlook'
+            ? 'email.outlook'
+            : 'email.smtp',
+    },
+  });
+
+  const keywordProvider = manager.getKeywordProvider();
   const aiName = aiRouter.primary === 'none' ? 'none' : aiRouter.primary;
   const aiLabel =
     aiRouter.primary === 'none'
@@ -73,7 +89,7 @@ export function createProviderRegistry(config: ProviderRegistryConfig): Provider
 
   return {
     getBacklinkProvider: notImplemented('backlink') as () => BacklinkProvider,
-    getKeywordProvider: notImplemented('keyword') as () => KeywordProvider,
+    getKeywordProvider: () => keywordProvider,
     getSERPProvider: notImplemented('serp') as () => SERPProvider,
     getCompetitorProvider: notImplemented('competitor') as () => CompetitorProvider,
     getAIProvider: () => aiRouter,
@@ -81,10 +97,11 @@ export function createProviderRegistry(config: ProviderRegistryConfig): Provider
     getEmailProvider: () => defaultEmailProvider,
     getEmailProviderForAccount: (providerType, accountConfig) =>
       createEmailProviderFromAccount(providerType, accountConfig),
+    getProviderManager: () => manager,
     getStatus: () => ({
-      backlink: { name: 'none', label: 'Not configured', cost: 'free' },
-      keyword: { name: 'none', label: 'Not configured', cost: 'free' },
-      serp: { name: 'none', label: 'Not configured', cost: 'free' },
+      backlink: { name: 'authority.estimated', label: 'Estimated Authority', cost: 'free' },
+      keyword: { name: keywordProvider.key, label: keywordProvider.displayName, cost: 'free' },
+      serp: { name: 'keyword.estimated', label: 'Estimated SERP', cost: 'free' },
       competitor: { name: 'none', label: 'Not configured', cost: 'free' },
       ai: { name: aiName, label: aiLabel, cost: 'free' },
       email: { name: defaultEmailProvider.name, label: defaultEmailProvider.name, cost: 'free' },

@@ -9,6 +9,9 @@ import { handleReportJobs } from './handlers/reports.js';
 import { handleIntegrationJobs } from './handlers/integrations.js';
 import { handleBacklinkJobs } from './handlers/backlinks.js';
 import { handlePlaywrightJobs } from './handlers/playwright.js';
+import { handleBeeCleanupJobs, handleBeeLearningJobs } from './handlers/bee-learning.js';
+import { handleImageJobs } from '../modules/image-intelligence/iie-worker.js';
+import { handleProviderJobs } from '../modules/providers/pif-worker.js';
 
 export async function startJobInfrastructure(): Promise<void> {
   const boss = await getBoss();
@@ -51,13 +54,29 @@ export async function startJobInfrastructure(): Promise<void> {
     const integrationJobs = jobs.filter(
       (j) => (j.data as Record<string, unknown>)?.type === 'integration_sync'
     );
+    const beeLearning = jobs.filter(
+      (j) => (j.data as Record<string, unknown>)?.type === 'bee_learning'
+    );
+    const beeCleanup = jobs.filter(
+      (j) => (j.data as Record<string, unknown>)?.type === 'bee_cleanup'
+    );
+    const imageJobs = jobs.filter((j) =>
+      String((j.data as Record<string, unknown>)?.type ?? '').startsWith('image_')
+    );
+    const providerJobs = jobs.filter((j) =>
+      String((j.data as Record<string, unknown>)?.type ?? '').startsWith('provider_')
+    );
     const otherJobs = jobs.filter((j) => {
       const d = j.data as Record<string, unknown>;
       return (
         !d?.messageId &&
         d?.type !== 'workflow_advance' &&
         d?.type !== 'report_generate' &&
-        d?.type !== 'integration_sync'
+        d?.type !== 'integration_sync' &&
+        d?.type !== 'bee_learning' &&
+        d?.type !== 'bee_cleanup' &&
+        !String(d?.type ?? '').startsWith('image_') &&
+        !String(d?.type ?? '').startsWith('provider_')
       );
     });
     if (outreachJobs.length) {
@@ -80,12 +99,32 @@ export async function startJobInfrastructure(): Promise<void> {
         integrationJobs.map((j) => ({ id: j.id, data: j.data as Record<string, unknown> }))
       );
     }
+    if (beeLearning.length) {
+      await handleBeeLearningJobs(
+        beeLearning.map((j) => ({ id: j.id, data: j.data as Record<string, unknown> }))
+      );
+    }
+    if (beeCleanup.length) {
+      await handleBeeCleanupJobs(
+        beeCleanup.map((j) => ({ id: j.id, data: j.data as Record<string, unknown> }))
+      );
+    }
+    if (imageJobs.length) {
+      await handleImageJobs(
+        imageJobs.map((j) => ({ id: j.id, data: j.data as Record<string, unknown> }))
+      );
+    }
+    if (providerJobs.length) {
+      await handleProviderJobs(
+        providerJobs.map((j) => ({ id: j.id, data: j.data as Record<string, unknown> }))
+      );
+    }
     for (const job of otherJobs) {
       logger.debug({ jobId: job.id }, 'Low-priority job received');
     }
   });
 
   logger.info(
-    'Job infrastructure ready (agents, ingest, crawl, playwright, outreach, workflow, report, integration handlers registered)'
+    'Job infrastructure ready (agents, ingest, crawl, playwright/BEE, outreach, workflow, report, integration, bee-learning, image-intelligence, provider-framework handlers registered)'
   );
 }

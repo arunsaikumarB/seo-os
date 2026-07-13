@@ -36,6 +36,7 @@ export const AGENT_TYPES = [
   'verification_agent',
   'campaign_agent',
   'reporting_agent',
+  'image_intelligence_agent',
 ] as const;
 
 export type AgentType = (typeof AGENT_TYPES)[number];
@@ -188,6 +189,14 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
     syncMode: 'async',
     defaultApproval: 'none',
     outputSchemaId: 'reporting_v11',
+  },
+  {
+    agentType: 'image_intelligence_agent',
+    displayName: 'Image Intelligence Agent',
+    description: 'Studies brand and opportunities to generate SEO image prompts and packages',
+    syncMode: 'async',
+    defaultApproval: 'review',
+    outputSchemaId: 'image_intelligence_v13',
   },
 ];
 

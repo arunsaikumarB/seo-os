@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { FileText, Plus, Send } from 'lucide-react';
+import { FileText, Image as ImageIcon, Plus, Send, Video } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/demo/empty-state';
 import { useApi } from '@/hooks/use-api';
+import { ImageIntelligencePanel } from '@/pages/content/image-intelligence';
 
 type DraftRow = {
   id: string;
@@ -42,10 +43,13 @@ const PACK_TYPES = [
   'broken_link',
 ];
 
+type StudioTab = 'articles' | 'images' | 'videos' | 'metadata' | 'templates';
+
 export function ContentLibraryPage() {
   const { projectId = '' } = useParams();
   const { request } = useApi();
   const queryClient = useQueryClient();
+  const [tab, setTab] = useState<StudioTab>('articles');
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [showCreate, setShowCreate] = useState(false);
@@ -136,6 +140,14 @@ export function ContentLibraryPage() {
     [packList, editingPackId]
   );
 
+  const tabs: { id: StudioTab; label: string; icon: typeof FileText }[] = [
+    { id: 'articles', label: 'Articles', icon: FileText },
+    { id: 'images', label: 'Images', icon: ImageIcon },
+    { id: 'videos', label: 'Videos', icon: Video },
+    { id: 'metadata', label: 'Metadata', icon: FileText },
+    { id: 'templates', label: 'Templates', icon: FileText },
+  ];
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
@@ -144,26 +156,114 @@ export function ContentLibraryPage() {
             <FileText className="h-6 w-6" /> Content Studio 2.0
           </h1>
           <p className="text-muted-foreground">
-            Generate editable packs by backlink type — SEO fields, FAQs, links, and media metadata.
-            Pixel/video render stays provider-gated.
+            Articles, Image Intelligence, video metadata, and reusable templates for backlink campaigns.
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" disabled title="Provider required — metadata studios only in V1.1">
-            Generate images
+          <Button variant="outline" onClick={() => setTab('images')}>
+            <ImageIcon className="h-4 w-4 mr-1" /> Images
           </Button>
-          <Button variant="outline" disabled title="Provider required — metadata studios only in V1.1">
-            Generate video
+          <Button variant="outline" asChild>
+            <Link to={`/projects/${projectId}/backlink-builder/video-studio`}>Video Studio</Link>
           </Button>
           <Button variant="outline" asChild>
             <Link to={`/projects/${projectId}/campaigns/approvals`}>Approvals</Link>
           </Button>
-          <Button onClick={() => setShowCreate((v) => !v)}>
-            <Plus className="h-4 w-4 mr-1" /> New draft
-          </Button>
+          {tab === 'articles' && (
+            <Button onClick={() => setShowCreate((v) => !v)}>
+              <Plus className="h-4 w-4 mr-1" /> New draft
+            </Button>
+          )}
         </div>
       </div>
 
+      <div className="flex flex-wrap gap-1 border-b pb-2">
+        {tabs.map((t) => {
+          const Icon = t.icon;
+          return (
+            <Button
+              key={t.id}
+              size="sm"
+              variant={tab === t.id ? 'default' : 'ghost'}
+              onClick={() => setTab(t.id)}
+            >
+              <Icon className="h-3.5 w-3.5 mr-1" />
+              {t.label}
+            </Button>
+          );
+        })}
+      </div>
+
+      {tab === 'images' && <ImageIntelligencePanel embedded />}
+
+      {tab === 'videos' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Videos</CardTitle>
+            <CardDescription>
+              Video briefs and metadata live in Video Studio — pixel render stays provider-gated.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild>
+              <Link to={`/projects/${projectId}/backlink-builder/video-studio`}>Open Video Studio</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {tab === 'metadata' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Metadata</CardTitle>
+            <CardDescription>
+              SEO filenames, alt text, Open Graph, and structured data are generated with every Image
+              Intelligence asset. Use the Images tab to review packages.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex gap-2">
+            <Button variant="outline" onClick={() => setTab('images')}>
+              Review image metadata
+            </Button>
+            <Button variant="outline" asChild>
+              <Link to={`/projects/${projectId}/backlink-builder/image-studio`}>Media Studio briefs</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {tab === 'templates' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Templates</CardTitle>
+            <CardDescription>
+              Content pack types and image types reused across campaigns.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <div>
+              <p className="font-medium mb-1">Article pack types</p>
+              <div className="flex flex-wrap gap-1">
+                {PACK_TYPES.map((t) => (
+                  <Badge key={t} className="text-[10px] capitalize">
+                    {t.replace(/_/g, ' ')}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="font-medium mb-1">Image types</p>
+              <p className="text-muted-foreground text-xs">
+                Blog hero, featured, Open Graph, social covers, directory logos, infographics, and more —
+                powered by Image Intelligence.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {tab === 'articles' && (
+        <>
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Generate content pack</CardTitle>
@@ -393,6 +493,8 @@ export function ContentLibraryPage() {
           )}
         </CardContent>
       </Card>
+        </>
+      )}
     </div>
   );
 }

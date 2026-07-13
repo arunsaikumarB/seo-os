@@ -82,6 +82,12 @@ export const workflowNavSections: WorkflowNavSection[] = [
         featureFlag: 'v11_browser_assistant',
       },
       {
+        label: 'Execution Center',
+        href: 'backlink-builder/execution',
+        icon: Kanban,
+        featureFlag: 'bee_enabled',
+      },
+      {
         label: 'Recommendations',
         href: 'backlink-builder/recommendations',
         icon: Lightbulb,

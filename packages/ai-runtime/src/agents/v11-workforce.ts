@@ -4,6 +4,9 @@ import {
   discoverKeywordCandidates,
   generateContentPack,
   recommendBacklinkTypes,
+  buildDomainStyleProfile,
+  buildImagePrompt,
+  buildImageMetadata,
   type OpportunityAiContext,
 } from '@seo-os/backlink-builder';
 import type { AgentHandler } from '../agent-registry.js';
@@ -174,6 +177,41 @@ export function registerV11WorkforceAgents(
         verificationRate: submitted > 0 ? Math.round((verified / submitted) * 100) : 0,
       },
       metricsSource: 'user',
+    };
+  });
+
+  register('image_intelligence_agent', async ({ workspaceId, input }) => {
+    const brandName = asString(input.brandName, 'Brand');
+    const style = buildDomainStyleProfile({
+      domain: asString(input.domain, 'example.com'),
+      brandName,
+      industry: asString(input.industry, 'general'),
+      keywords: asStringArray(input.keywords),
+    });
+    const imageType = asString(input.imageType, 'blog_hero');
+    const prompt = buildImagePrompt({
+      imageType,
+      style,
+      topic: asString(input.topic),
+      backlinkType: asString(input.backlinkType),
+      brandName,
+    });
+    const metadata = buildImageMetadata({
+      brandName,
+      imageType,
+      topic: asString(input.topic),
+      width: prompt.width,
+      height: prompt.height,
+    });
+    return {
+      agentType: 'image_intelligence_agent',
+      status: 'ok',
+      summary: `Image Intelligence prepared ${imageType} for workspace ${workspaceId}`,
+      style,
+      prompt,
+      metadata,
+      recommendedProvider: prompt.recommendedProvider,
+      metricsSource: 'estimated',
     };
   });
 }

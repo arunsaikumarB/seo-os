@@ -105,3 +105,25 @@ describe('content pack', () => {
     expect(pack.generationStatus.images).toBe('v1.1_provider_required');
   });
 });
+
+describe('browser execution planner', () => {
+  it('detects gates and never marks captcha as auto-solvable', async () => {
+    const { detectFormIntelligence, buildExecutionPlan, gateStatusFromBlocker, redactFormValues } =
+      await import('../src/browser-execution.js');
+    const form = detectFormIntelligence(
+      '<form><input name="title" required /><div class="g-recaptcha"></div><input type="password" /></form>'
+    );
+    expect(form.gates.captcha).toBe(true);
+    expect(form.gates.login).toBe(true);
+    const plan = buildExecutionPlan({
+      url: 'https://example.com/submit',
+      opportunityType: 'directory',
+      form,
+      requireApproval: true,
+    });
+    expect(plan.some((s) => s.blocker === 'captcha')).toBe(true);
+    expect(plan.some((s) => s.blocker === 'human_approval')).toBe(true);
+    expect(gateStatusFromBlocker('captcha')).toBe('blocked_captcha');
+    expect(redactFormValues({ password: 'secret', title: 'ok' }).password).toBe('[REDACTED]');
+  });
+});

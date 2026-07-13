@@ -98,6 +98,7 @@ export const projectNav: NavItem[] = [
     featureFlag: 'backlink_builder',
   },
   { label: 'Content Studio', href: 'content/library', icon: FileText },
+  { label: 'Providers', href: 'providers', icon: Plug, featureFlag: 'integrations' },
   {
     label: 'Submission Center',
     href: 'backlink-builder/tracking',

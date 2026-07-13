@@ -15,4 +15,6 @@ export * from './queue-stages.js';
 export * from './submission-requirements.js';
 export * from './content-packs.js';
 export * from './browser-plans.js';
+export * from './browser-execution.js';
+export * from './image-intelligence.js';
 export * from './recommendations.js';

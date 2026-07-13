@@ -1,0 +1,279 @@
+/**
+ * BrowserExecutionService — Playwright runtime for BEE.
+ * Never bypasses CAPTCHA/MFA/email/phone/login. Pauses and returns gate reason.
+ */
+import { logger } from '../../lib/logger.js';
+
+export type BrowserMode = 'headless' | 'headed';
+
+export interface RuntimeHealth {
+  status: 'healthy' | 'degraded' | 'down' | 'unavailable';
+  message: string;
+  playwrightAvailable: boolean;
+}
+
+export interface LaunchOptions {
+  mode: BrowserMode;
+  timeoutMs?: number;
+  storageState?: unknown;
+  userDataDir?: string;
+}
+
+export interface PageCapture {
+  screenshotBase64?: string;
+  htmlSnippet?: string;
+  consoleLogs: string[];
+  url: string;
+  title: string;
+  detectedGates: Array<'captcha' | 'mfa' | 'email_verify' | 'phone_verify' | 'login'>;
+}
+
+type PlaywrightModule = typeof import('playwright');
+
+let playwrightMod: PlaywrightModule | null | undefined;
+
+async function loadPlaywright(): Promise<PlaywrightModule | null> {
+  if (playwrightMod !== undefined) return playwrightMod;
+  try {
+    playwrightMod = await import('playwright');
+    return playwrightMod;
+  } catch {
+    playwrightMod = null;
+    return null;
+  }
+}
+
+export class BrowserExecutionService {
+  private browser: import('playwright').Browser | null = null;
+  private context: import('playwright').BrowserContext | null = null;
+  private page: import('playwright').Page | null = null;
+  private consoleLogs: string[] = [];
+  private mode: BrowserMode = 'headless';
+
+  async health(): Promise<RuntimeHealth> {
+    const pw = await loadPlaywright();
+    if (!pw) {
+      return {
+        status: 'unavailable',
+        message: 'Playwright package not installed in this runtime',
+        playwrightAvailable: false,
+      };
+    }
+    try {
+      if (this.browser?.isConnected()) {
+        return { status: 'healthy', message: 'Browser connected', playwrightAvailable: true };
+      }
+      return { status: 'healthy', message: 'Playwright ready (no active browser)', playwrightAvailable: true };
+    } catch (err) {
+      return {
+        status: 'degraded',
+        message: err instanceof Error ? err.message : 'Health check failed',
+        playwrightAvailable: true,
+      };
+    }
+  }
+
+  async launch(opts: LaunchOptions): Promise<void> {
+    const pw = await loadPlaywright();
+    if (!pw) {
+      throw Object.assign(new Error('Playwright unavailable — install playwright browsers to execute'), {
+        code: 'PLAYWRIGHT_UNAVAILABLE',
+      });
+    }
+    await this.close();
+    this.mode = opts.mode;
+    this.consoleLogs = [];
+    this.browser = await pw.chromium.launch({
+      headless: opts.mode === 'headless',
+      timeout: opts.timeoutMs ?? 60_000,
+    });
+    this.context = await this.browser.newContext({
+      storageState: opts.storageState as never,
+      acceptDownloads: true,
+    });
+    this.page = await this.context.newPage();
+    this.page.on('console', (msg) => {
+      const line = `[${msg.type()}] ${msg.text()}`;
+      this.consoleLogs.push(line.slice(0, 500));
+      if (this.consoleLogs.length > 200) this.consoleLogs.shift();
+    });
+    logger.info({ mode: opts.mode }, 'BEE browser launched');
+  }
+
+  async restoreStorageState(state: unknown): Promise<void> {
+    if (!this.context) throw new Error('No browser context');
+    // Re-create context with storage state
+    const pw = await loadPlaywright();
+    if (!pw || !this.browser) throw new Error('Playwright unavailable');
+    await this.context.close();
+    this.context = await this.browser.newContext({ storageState: state as never, acceptDownloads: true });
+    this.page = await this.context.newPage();
+  }
+
+  async exportStorageState(): Promise<unknown> {
+    if (!this.context) return null;
+    return this.context.storageState();
+  }
+
+  async navigate(url: string, timeoutMs = 45_000): Promise<PageCapture> {
+    if (!this.page) throw new Error('No page — call launch() first');
+    await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+    return this.capture('navigated');
+  }
+
+  async capture(_label: string): Promise<PageCapture> {
+    if (!this.page) throw new Error('No page');
+    const html = await this.page.content();
+    const htmlLower = html.toLowerCase();
+    const detectedGates: PageCapture['detectedGates'] = [];
+    if (/captcha|recaptcha|hcaptcha|turnstile/.test(htmlLower)) detectedGates.push('captcha');
+    if (/mfa|2fa|two-factor|authenticator|otp/.test(htmlLower)) detectedGates.push('mfa');
+    if (/verify your email|email verification/.test(htmlLower)) detectedGates.push('email_verify');
+    if (/phone verification|sms code|verify.*phone/.test(htmlLower)) detectedGates.push('phone_verify');
+    if (/type=["']password["']|sign in|log in/.test(htmlLower)) detectedGates.push('login');
+
+    let screenshotBase64: string | undefined;
+    try {
+      const buf = await this.page.screenshot({ type: 'jpeg', quality: 60, fullPage: false });
+      screenshotBase64 = buf.toString('base64');
+    } catch {
+      // ignore screenshot failures
+    }
+
+    return {
+      screenshotBase64,
+      htmlSnippet: html.slice(0, 50_000),
+      consoleLogs: [...this.consoleLogs],
+      url: this.page.url(),
+      title: await this.page.title(),
+      detectedGates,
+    };
+  }
+
+  async fillFields(mapping: Record<string, unknown>): Promise<{ filled: string[]; missing: string[] }> {
+    if (!this.page) throw new Error('No page');
+    const filled: string[] = [];
+    const missing: string[] = [];
+    const canonical = (mapping.__canonical as Record<string, unknown> | undefined) ?? mapping;
+
+    for (const [name, value] of Object.entries(mapping)) {
+      if (name.startsWith('__') || value == null) continue;
+      if (typeof value === 'object') continue;
+      const str = String(value);
+      try {
+        const locator = this.page.locator(
+          `input[name="${name}"], textarea[name="${name}"], select[name="${name}"]`
+        );
+        if ((await locator.count()) > 0) {
+          await locator.first().fill(str);
+          filled.push(name);
+        } else {
+          missing.push(name);
+        }
+      } catch {
+        missing.push(name);
+      }
+    }
+
+    // Heuristic fills for common labels when name mapping missed
+    const heuristics: Array<[string, string]> = [
+      ['input[type="email"]', String(canonical.email ?? '')],
+      ['input[name*="phone" i], input[type="tel"]', String(canonical.phone ?? '')],
+      ['textarea', String(canonical.description ?? '')],
+    ];
+    for (const [sel, val] of heuristics) {
+      if (!val) continue;
+      try {
+        const loc = this.page.locator(sel);
+        if ((await loc.count()) > 0) {
+          await loc.first().fill(val);
+          filled.push(sel);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    return { filled, missing };
+  }
+
+  async uploadFile(selector: string, filePath: string): Promise<void> {
+    if (!this.page) throw new Error('No page');
+    await this.page.setInputFiles(selector, filePath);
+  }
+
+  /**
+   * Submit is only called after approval. Still pauses if gate detected on page.
+   */
+  async attemptSubmit(submitSelector = 'button[type="submit"], input[type="submit"]'): Promise<{
+    submitted: boolean;
+    gate?: PageCapture['detectedGates'][number];
+    capture: PageCapture;
+  }> {
+    if (!this.page) throw new Error('No page');
+    const before = await this.capture('before_submit_check');
+    if (before.detectedGates.includes('captcha')) {
+      return { submitted: false, gate: 'captcha', capture: before };
+    }
+    if (before.detectedGates.includes('mfa')) {
+      return { submitted: false, gate: 'mfa', capture: before };
+    }
+    if (before.detectedGates.includes('email_verify')) {
+      return { submitted: false, gate: 'email_verify', capture: before };
+    }
+    if (before.detectedGates.includes('phone_verify')) {
+      return { submitted: false, gate: 'phone_verify', capture: before };
+    }
+
+    try {
+      const btn = this.page.locator(submitSelector).first();
+      if ((await btn.count()) === 0) {
+        return { submitted: false, capture: await this.capture('submit_missing') };
+      }
+      await btn.click({ timeout: 10_000 });
+      await this.page.waitForTimeout(1500);
+      return { submitted: true, capture: await this.capture('after_submit') };
+    } catch (err) {
+      logger.warn({ err }, 'Submit click failed');
+      return { submitted: false, capture: await this.capture('submit_error') };
+    }
+  }
+
+  async restart(): Promise<void> {
+    const mode = this.mode;
+    await this.close();
+    await this.launch({ mode });
+  }
+
+  async close(): Promise<void> {
+    try {
+      await this.page?.close().catch(() => undefined);
+      await this.context?.close().catch(() => undefined);
+      await this.browser?.close().catch(() => undefined);
+    } finally {
+      this.page = null;
+      this.context = null;
+      this.browser = null;
+    }
+  }
+}
+
+/** Process-local session registry (single API instance). Multi-instance: store state in DB only. */
+const sessionRuntimes = new Map<string, BrowserExecutionService>();
+
+export function getSessionRuntime(sessionId: string): BrowserExecutionService {
+  let svc = sessionRuntimes.get(sessionId);
+  if (!svc) {
+    svc = new BrowserExecutionService();
+    sessionRuntimes.set(sessionId, svc);
+  }
+  return svc;
+}
+
+export async function disposeSessionRuntime(sessionId: string): Promise<void> {
+  const svc = sessionRuntimes.get(sessionId);
+  if (svc) {
+    await svc.close();
+    sessionRuntimes.delete(sessionId);
+  }
+}
