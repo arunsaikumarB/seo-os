@@ -278,10 +278,24 @@ export function IntegrationsHubPage({ projectIdOverride }: { projectIdOverride?:
                 </div>
                 <Button
                   size="sm"
-                  disabled={connectedKeys.has(p.key) || connect.isPending}
+                  disabled={
+                    connectedKeys.has(p.key) ||
+                    connect.isPending ||
+                    p.key === 'gmail' ||
+                    p.key === 'outlook'
+                  }
+                  title={
+                    p.key === 'gmail' || p.key === 'outlook'
+                      ? 'OAuth credentials required (V1.1)'
+                      : undefined
+                  }
                   onClick={() => connect.mutate(p.key)}
                 >
-                  {connectedKeys.has(p.key) ? 'Connected' : 'Connect'}
+                  {connectedKeys.has(p.key)
+                    ? 'Connected'
+                    : p.key === 'gmail' || p.key === 'outlook'
+                      ? 'V1.1 OAuth'
+                      : 'Connect'}
                 </Button>
               </div>
             ))}

@@ -1,5 +1,6 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import pptxgen from 'pptxgenjs';
+import ExcelJS from 'exceljs';
 
 type PptxSlide = {
   addShape: (...args: unknown[]) => void;
@@ -507,7 +508,18 @@ export async function exportReportRun(
     body = JSON.stringify(doc, null, 2);
     contentType = 'application/json';
     filename = `${slug(doc.title)}.json`;
-  } else if (format === 'csv' || format === 'xlsx') {
+  } else if (format === 'xlsx') {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Report');
+    const rows = flattenReportForCsv(doc);
+    rows.forEach((r, i) => {
+      if (i === 0) sheet.addRow(r).font = { bold: true };
+      else sheet.addRow(r);
+    });
+    body = Buffer.from(await workbook.xlsx.writeBuffer());
+    contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    filename = `${slug(doc.title)}.xlsx`;
+  } else if (format === 'csv') {
     body = flattenReportForCsv(doc)
       .map((r) => r.map(csvEscape).join(','))
       .join('\n');
@@ -525,14 +537,19 @@ export async function exportReportRun(
   }
 
   const contentStr =
-    typeof body === 'string' ? body : body.toString(format === 'pdf' || format === 'pptx' ? 'base64' : 'utf8');
+    typeof body === 'string'
+      ? body
+      : body.toString(format === 'pdf' || format === 'pptx' || format === 'xlsx' ? 'base64' : 'utf8');
 
   await getSupabaseAdmin().from('report_exports').insert({
     run_id: runId,
     workspace_id: workspaceId,
     format,
     status: 'ready',
-    content: format === 'pdf' || format === 'pptx' ? contentStr : contentStr.slice(0, 200_000),
+    content:
+      format === 'pdf' || format === 'pptx' || format === 'xlsx'
+        ? contentStr
+        : contentStr.slice(0, 200_000),
     byte_size: typeof body === 'string' ? Buffer.byteLength(body) : body.byteLength,
   });
 
@@ -829,6 +846,65 @@ function csvEscape(v: string) {
 
 function slug(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'report';
+}
+
+/** V1.0 Backlink Operations Excel export */
+export async function exportBacklinkOpsWorkbook(workspaceId: string) {
+  const { data: submissions } = await getSupabaseAdmin()
+    .from('backlink_submissions')
+    .select(
+      'status, tracking_status, submitted_at, verified_at, estimated_review_hours, estimated_approval_hours, notes, opportunities:opportunity_id(title, domain, opportunity_type, priority, automation_status)'
+    )
+    .eq('workspace_id', workspaceId)
+    .order('created_at', { ascending: false })
+    .limit(500);
+
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'SEO OS Backlink Builder';
+  const sheet = workbook.addWorksheet('Backlink Ops');
+  sheet.addRow([
+    'Website',
+    'Opportunity Type',
+    'Status',
+    'Submitted',
+    'Verified',
+    'Priority',
+    'Est. Review Time (hrs)',
+    'Est. Approval Time (hrs)',
+    'Notes',
+  ]).font = { bold: true };
+
+  for (const row of submissions ?? []) {
+    const opp = row.opportunities as {
+      title?: string;
+      domain?: string;
+      opportunity_type?: string;
+      priority?: string;
+      automation_status?: string;
+    } | null;
+    sheet.addRow([
+      opp?.domain ?? opp?.title ?? '',
+      opp?.opportunity_type ?? '',
+      row.tracking_status ?? row.status ?? '',
+      row.submitted_at ?? '',
+      row.verified_at ?? '',
+      opp?.priority ?? '',
+      row.estimated_review_hours ?? '',
+      row.estimated_approval_hours ?? '',
+      row.notes ?? '',
+    ]);
+  }
+
+  sheet.getRow(1).eachCell((cell) => {
+    cell.note = 'Est. Review/Approval times are Estimated heuristics';
+  });
+
+  const body = Buffer.from(await workbook.xlsx.writeBuffer());
+  return {
+    body,
+    contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    filename: 'backlink-operations.xlsx',
+  };
 }
 
 export { reportToPlainText };

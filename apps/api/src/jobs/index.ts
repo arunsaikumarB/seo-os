@@ -7,6 +7,7 @@ import { handleOutreachJobs } from './handlers/outreach.js';
 import { handleWorkflowJobs } from './handlers/workflow.js';
 import { handleReportJobs } from './handlers/reports.js';
 import { handleIntegrationJobs } from './handlers/integrations.js';
+import { handleBacklinkJobs } from './handlers/backlinks.js';
 
 export async function startJobInfrastructure(): Promise<void> {
   const boss = await getBoss();
@@ -23,9 +24,13 @@ export async function startJobInfrastructure(): Promise<void> {
   });
 
   await registerJobHandler(QUEUES.CRAWL, async (jobs) => {
-    await handleIntelligenceScanJobs(
-      jobs.map((j) => ({ id: j.id, data: j.data as Record<string, unknown> }))
+    const all = jobs.map((j) => ({ id: j.id, data: j.data as Record<string, unknown> }));
+    const backlinkJobs = all.filter((j) =>
+      String(j.data.type ?? '').startsWith('backlink_')
     );
+    const scanJobs = all.filter((j) => !String(j.data.type ?? '').startsWith('backlink_'));
+    if (backlinkJobs.length) await handleBacklinkJobs(backlinkJobs);
+    if (scanJobs.length) await handleIntelligenceScanJobs(scanJobs);
   });
 
   await registerJobHandler(QUEUES.LOW, async (jobs) => {

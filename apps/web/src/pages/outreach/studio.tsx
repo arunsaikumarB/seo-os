@@ -257,6 +257,18 @@ export function EmailStudioPage() {
 
           <Card>
             <CardHeader className="pb-2">
+              <CardTitle className="text-base">Send path</CardTitle>
+            </CardHeader>
+            <CardContent className="text-xs text-muted-foreground space-y-2">
+              <p>
+                Gmail / Outlook OAuth send is deferred to V1.1. SMTP remains the live send path when
+                configured. Drafts still require human approval before send.
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
               <CardTitle className="text-base">Templates</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">

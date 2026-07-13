@@ -79,10 +79,17 @@ export function ContentLibraryPage() {
             <FileText className="h-6 w-6" /> Content Studio
           </h1>
           <p className="text-muted-foreground">
-            Create content drafts and submit them for approval before publishing or outreach
+            Generate by backlink type, prepare guest-post packs, and submit for approval. Image/video
+            generation is deferred to V1.1.
           </p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" disabled title="V1.1 — provider required">
+            Generate images
+          </Button>
+          <Button variant="outline" disabled title="V1.1 — provider required">
+            Generate video
+          </Button>
           <Button variant="outline" asChild>
             <Link to={`/projects/${projectId}/campaigns/approvals`}>Approvals</Link>
           </Button>
@@ -91,6 +98,23 @@ export function ContentLibraryPage() {
           </Button>
         </div>
       </div>
+
+      <Card className="border-dashed">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Guest post / blog pack (V1)</CardTitle>
+          <CardDescription>
+            SEO title, meta, H1/H2, schema, links, FAQ, and suggested image briefs are produced by the
+            automation pipeline. Asset generation buttons stay disabled until V1.1 providers.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button variant="outline" size="sm" asChild>
+            <Link to={`/projects/${projectId}/backlink-builder/automation`}>
+              Open AI Analysis / drafts
+            </Link>
+          </Button>
+        </CardContent>
+      </Card>
 
       {showCreate && (
         <Card>

@@ -8,7 +8,7 @@ import { useApi } from '@/hooks/use-api';
 import { toast } from 'sonner';
 import { BacklinkBuilderNav } from '@/components/backlink-builder/backlink-builder-widget';
 import { PageTransition } from '@/components/demo/page-transition';
-import { Upload, FileSpreadsheet, FileText, Link2, Play, ArrowRight } from 'lucide-react';
+import { Upload, FileSpreadsheet, FileText, Link2, Play, ArrowRight, Sheet } from 'lucide-react';
 
 type ImportResult = {
   importId: string;
@@ -29,6 +29,7 @@ type ImportRecord = {
 const SOURCE_TYPES = [
   { id: 'url_list', label: 'Paste URLs', icon: Link2 },
   { id: 'csv', label: 'CSV', icon: FileSpreadsheet },
+  { id: 'excel', label: 'Excel', icon: FileSpreadsheet },
   { id: 'txt', label: 'TXT', icon: FileText },
   { id: 'manual', label: 'Manual', icon: Upload },
 ] as const;
@@ -39,6 +40,7 @@ export function BacklinkImportPage() {
   const queryClient = useQueryClient();
   const [sourceType, setSourceType] = useState<string>('url_list');
   const [content, setContent] = useState('');
+  const [fileName, setFileName] = useState<string | undefined>();
   const [lastImportId, setLastImportId] = useState<string | null>(null);
 
   const history = useQuery({
@@ -56,7 +58,7 @@ export function BacklinkImportPage() {
         `/v1/projects/${projectId}/backlink-builder/automation/import`,
         {
           method: 'POST',
-          body: JSON.stringify({ sourceType, content }),
+          body: JSON.stringify({ sourceType, content, fileName }),
         }
       ),
     onSuccess: (res) => {
@@ -82,6 +84,23 @@ export function BacklinkImportPage() {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setFileName(file.name);
+    const isExcel = /\.xlsx?$/i.test(file.name);
+    if (isExcel) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result;
+        if (result instanceof ArrayBuffer) {
+          const bytes = new Uint8Array(result);
+          let binary = '';
+          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
+          setContent(btoa(binary));
+          setSourceType('excel');
+        }
+      };
+      reader.readAsArrayBuffer(file);
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       setContent(String(reader.result ?? ''));
@@ -100,11 +119,11 @@ export function BacklinkImportPage() {
 
       <div>
         <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <Upload className="h-6 w-6" /> Import Opportunities
+          <Upload className="h-6 w-6" /> Import Websites
         </h1>
         <p className="text-muted-foreground mt-1">
-          Import websites via CSV, Excel, TXT, or pasted URL list. URLs are validated, deduplicated,
-          and queued for analysis.
+          Import via CSV, Excel (.xlsx), TXT, or pasted URLs. Domains are validated, deduplicated, then
+          analyzed.
         </p>
       </div>
 
@@ -130,9 +149,16 @@ export function BacklinkImportPage() {
 
             <textarea
               className="flex min-h-[200px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm font-mono"
-              placeholder={`https://example.com\nhttps://another-site.org\n...`}
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
+              placeholder={
+                sourceType === 'excel'
+                  ? 'Upload an .xlsx file (URL column preferred) — binary is sent securely to the API'
+                  : `https://example.com\nhttps://another-site.org\n...`
+              }
+              value={sourceType === 'excel' && content.length > 200 ? `[Excel file loaded: ${fileName ?? 'workbook.xlsx'}]` : content}
+              onChange={(e) => {
+                if (sourceType !== 'excel') setContent(e.target.value);
+              }}
+              readOnly={sourceType === 'excel' && content.length > 200}
             />
 
             <div className="flex flex-wrap gap-2">
@@ -170,21 +196,36 @@ export function BacklinkImportPage() {
           </CardContent>
         </Card>
 
-        <Card className="border-amber-500/20 bg-amber-500/5">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">What happens next</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm space-y-2 text-muted-foreground">
-            <p>1. URLs validated & deduplicated</p>
-            <p>2. Each domain analyzed (niche, DR, pages)</p>
-            <p>3. AI classifies backlink type & scores</p>
-            <p>4. Content generated with brand voice</p>
-            <p>5. Queued for human approval</p>
-            <p className="text-xs italic pt-2 border-t">
-              The platform assists execution — it does not guarantee backlinks on third-party sites.
-            </p>
-          </CardContent>
-        </Card>
+        <div className="space-y-4">
+          <Card className="border-amber-500/20 bg-amber-500/5">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">What happens next</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm space-y-2 text-muted-foreground">
+              <p>1. URLs validated & deduplicated</p>
+              <p>2. Live fetch of homepage/robots when available</p>
+              <p>3. AI classifies type & scores (Estimated metrics labeled)</p>
+              <p>4. Content prepared for Content Studio</p>
+              <p>5. Queued for human approval in Submission Center</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Sheet className="h-4 w-4" /> Google Sheets
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm space-y-2">
+              <p className="text-muted-foreground">
+                Requires Google OAuth (V1.1). Live Sheets import is unavailable until credentials are
+                configured.
+              </p>
+              <Button size="sm" variant="outline" disabled>
+                Connect Google Sheets
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
       <Card>

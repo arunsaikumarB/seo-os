@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useApi } from '@/hooks/use-api';
-import { useDemoMode } from '@/hooks/use-demo-mode';
 import { AnimatedCounter } from '@/components/demo/animated-counter';
 import { StaggerGrid, StaggerItem } from '@/components/demo/page-transition';
 import {
@@ -19,7 +18,6 @@ import { Sparkles, ArrowRight, Target, ShieldCheck, Link2 } from 'lucide-react';
 export function BacklinkBuilderDashboardPage() {
   const { projectId = '' } = useParams();
   const { request } = useApi();
-  const { isDemoMode } = useDemoMode();
 
   const summary = useQuery({
     queryKey: ['backlink-summary', projectId],
@@ -59,10 +57,6 @@ export function BacklinkBuilderDashboardPage() {
         title="Backlink Builder"
         subtitle="The central workspace for discovering, scoring, approving, and verifying every backlink opportunity."
       />
-
-      {isDemoMode && (
-        <Badge className="border-primary/30 text-primary">Live Demo — AI workforce active</Badge>
-      )}
 
       {summary.isLoading ? (
         <Skeleton className="h-48 w-full" />

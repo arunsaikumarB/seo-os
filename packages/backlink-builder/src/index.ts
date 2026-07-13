@@ -8,3 +8,6 @@ export * from './domain-analyzer.js';
 export * from './automation-pipeline.js';
 export * from './classification.js';
 export * from './content-generator.js';
+export * from './discovery.js';
+export * from './keyword-engine.js';
+export * from './submission-estimates.js';

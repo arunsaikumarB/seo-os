@@ -1,7 +1,6 @@
 import { useAuth } from '@/providers/auth-provider';
 import { useAppStore } from '@/stores/app-store';
 import { apiFetch } from '@/lib/api';
-import { resolveDemoApi } from '@/demo/resolver';
 import { useCallback } from 'react';
 import type { Organization, Profile, Project } from '@seo-os/shared';
 
@@ -23,18 +22,9 @@ interface ApiData<T> {
 export function useApi() {
   const { getAccessToken } = useAuth();
   const currentOrgId = useAppStore((s) => s.currentOrgId);
-  const demoMode = useAppStore((s) => s.demoMode);
 
   const request = useCallback(
     async <T>(path: string, options: RequestInit & { orgId?: string | null } = {}): Promise<T> => {
-      if (demoMode) {
-        await new Promise((r) => setTimeout(r, 120 + Math.random() * 180));
-        return resolveDemoApi(
-          path,
-          options.method ?? 'GET',
-          options.body as string | undefined
-        ) as T;
-      }
       const token = await getAccessToken();
       if (!token) throw new Error('Not authenticated');
       return apiFetch<T>(path, {
@@ -43,7 +33,7 @@ export function useApi() {
         orgId: options.orgId ?? currentOrgId ?? undefined,
       });
     },
-    [getAccessToken, currentOrgId, demoMode]
+    [getAccessToken, currentOrgId]
   );
 
   const fetchMe = useCallback(() => request<MeResponse>('/v1/me'), [request]);

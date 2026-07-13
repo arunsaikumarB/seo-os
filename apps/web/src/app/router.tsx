@@ -130,6 +130,9 @@ const BacklinkRecommendationsPage = lazy(() =>
 const BacklinkImportPage = lazy(() =>
   import('@/pages/backlink-builder/import').then((m) => ({ default: m.BacklinkImportPage }))
 );
+const BacklinkDiscoverPage = lazy(() =>
+  import('@/pages/backlink-builder/discover').then((m) => ({ default: m.BacklinkDiscoverPage }))
+);
 const BacklinkAutomationPage = lazy(() =>
   import('@/pages/backlink-builder/automation').then((m) => ({
     default: m.BacklinkAutomationPage,
@@ -375,6 +378,10 @@ export function AppRouter() {
                     />
                     <Route path="backlink-builder/audit" element={lazyEl(BacklinkAuditPage)} />
                     <Route path="backlink-builder/import" element={lazyEl(BacklinkImportPage)} />
+                    <Route
+                      path="backlink-builder/discover"
+                      element={lazyEl(BacklinkDiscoverPage)}
+                    />
                     <Route
                       path="backlink-builder/automation"
                       element={lazyEl(BacklinkAutomationPage)}

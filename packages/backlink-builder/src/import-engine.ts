@@ -67,12 +67,46 @@ export function extractUrlsFromText(text: string): string[] {
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
-    // CSV: take first column
+    // CSV: prefer a column named url/website/domain when header present
     const firstCol = trimmed
       .split(/[,;\t]/)[0]
       ?.trim()
       .replace(/^["']|["']$/g, '');
     if (firstCol) urls.push(firstCol);
+  }
+  return urls;
+}
+
+const URL_HEADER = /^(url|website|domain|site|link|homepage)$/i;
+
+/** Parse CSV/TSV rows, preferring a URL-like header column when present */
+export function extractUrlsFromCsv(text: string): string[] {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim());
+  if (!lines.length) return [];
+  const delim = lines[0].includes('\t') ? '\t' : lines[0].includes(';') ? ';' : ',';
+  const headerCells = lines[0].split(delim).map((c) => c.trim().replace(/^["']|["']$/g, ''));
+  const urlIdx = headerCells.findIndex((h) => URL_HEADER.test(h));
+  if (urlIdx >= 0) {
+    return lines.slice(1).map((line) => {
+      const cells = line.split(delim).map((c) => c.trim().replace(/^["']|["']$/g, ''));
+      return cells[urlIdx] ?? '';
+    }).filter(Boolean);
+  }
+  return extractUrlsFromText(text);
+}
+
+/** Flatten worksheet cell values into candidate URL strings (ExcelJS / SheetJS compatible) */
+export function extractUrlsFromSheetRows(rows: unknown[][]): string[] {
+  if (!rows.length) return [];
+  const header = rows[0].map((c) => String(c ?? '').trim());
+  const urlIdx = header.findIndex((h) => URL_HEADER.test(h));
+  const start = urlIdx >= 0 ? 1 : 0;
+  const col = urlIdx >= 0 ? urlIdx : 0;
+  const urls: string[] = [];
+  for (let i = start; i < rows.length; i++) {
+    const cell = rows[i]?.[col];
+    if (cell == null || cell === '') continue;
+    urls.push(String(cell).trim());
   }
   return urls;
 }

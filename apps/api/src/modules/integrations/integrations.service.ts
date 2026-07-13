@@ -169,12 +169,28 @@ export async function connectProvider(
   const catalog = PROVIDER_CATALOG.find((p) => p.key === input.providerKey);
   if (!catalog) throw new Error('Unknown provider');
 
+  if (input.providerKey === 'gmail' || input.providerKey === 'outlook') {
+    const creds = input.credentials ?? {};
+    const hasOAuth =
+      Boolean(creds.accessToken) ||
+      Boolean(creds.refreshToken) ||
+      (Boolean(creds.oauthCode) && String(creds.oauthCode) !== 'demo-connect');
+    if (!hasOAuth) {
+      throw Object.assign(
+        new Error(
+          `OAuth credentials required (V1.1) for ${catalog.name}. SMTP remains the live send path if configured.`
+        ),
+        { status: 400, code: 'OAUTH_REQUIRED_V1_1' }
+      );
+    }
+  }
+
   const provider = getIntegrationProvider(input.providerKey);
   const result = await provider.connect({
     orgId,
     workspaceId,
     displayName: input.displayName ?? catalog.name,
-    credentials: input.credentials ?? { oauthCode: 'demo-connect' },
+    credentials: input.credentials ?? {},
     config: input.config ?? {},
     scopes: input.scopes ?? catalog.scopes,
   });

@@ -1,14 +1,21 @@
 import { randomUUID } from 'node:crypto';
+import ExcelJS from 'exceljs';
 import {
   BACKLINK_TYPES,
-  analyzeDomain,
+  analyzeDomainLive,
   AUTOMATION_PIPELINE_STEPS,
   classifyOpportunity,
   contentTypesForOpportunity,
   deduplicateAndValidate,
+  extractUrlsFromCsv,
+  extractUrlsFromSheetRows,
   extractUrlsFromText,
   generateContent,
+  inspectBacklinkHtml,
   stepProgress,
+  buildPrefillPayload,
+  estimateApprovalHours,
+  estimateReviewHours,
   type BrandContext,
   type ContentDraftType,
   type ImportSourceType,
@@ -21,6 +28,7 @@ import { startBrowserIntelligenceScan, executeBrowserIntelligenceScan } from '..
 import { uploadDocument } from '../knowledge/document.service.js';
 import { fireAndForget } from '../platform/event-bus.service.js';
 import { logger } from '../../lib/logger.js';
+import { enqueueJob, QUEUES } from '../../jobs/boss.js';
 
 async function getBrandContext(workspaceId: string, orgId?: string): Promise<BrandContext> {
   const project = orgId ? await getProjectById(workspaceId, orgId) : null;
@@ -39,6 +47,24 @@ async function getBrandContext(workspaceId: string, orgId?: string): Promise<Bra
   };
 }
 
+function looksLikeBase64(content: string): boolean {
+  const trimmed = content.trim().replace(/^data:[^;]+;base64,/, '');
+  return trimmed.length > 100 && /^[A-Za-z0-9+/=\s]+$/.test(trimmed.slice(0, 200));
+}
+
+async function parseExcelBuffer(buf: Buffer): Promise<string[]> {
+  const workbook = new ExcelJS.Workbook();
+  // exceljs typings accept Buffer via ArrayBuffer-like
+  await workbook.xlsx.load(buf as never);
+  const sheet = workbook.worksheets[0];
+  if (!sheet) return [];
+  const rows: unknown[][] = [];
+  sheet.eachRow((row) => {
+    rows.push((row.values as unknown[]).slice(1).map((v) => (v == null ? '' : String(v))));
+  });
+  return extractUrlsFromSheetRows(rows);
+}
+
 export async function parseImportContent(
   content: string,
   sourceType: ImportSourceType
@@ -48,6 +74,18 @@ export async function parseImportContent(
       .split(/[\n,;]+/)
       .map((s) => s.trim())
       .filter(Boolean);
+  }
+  if (sourceType === 'csv') {
+    return extractUrlsFromCsv(content);
+  }
+  if (sourceType === 'excel') {
+    if (looksLikeBase64(content)) {
+      const raw = content.trim().replace(/^data:[^;]+;base64,/, '');
+      const buf = Buffer.from(raw, 'base64');
+      return parseExcelBuffer(buf);
+    }
+    // Client may already extract URLs into newline/CSV text
+    return extractUrlsFromCsv(content);
   }
   return extractUrlsFromText(content);
 }
@@ -177,7 +215,7 @@ export async function runAutomationPipeline(
     for (const row of validRows) {
       const domain = String(row.normalized_domain);
       const url = String(row.normalized_url ?? `https://${domain}`);
-      const analysis = analyzeDomain(domain, url);
+      const analysis = await analyzeDomainLive(domain, url);
 
       const analysisId = randomUUID();
       await getSupabaseAdmin()
@@ -196,6 +234,10 @@ export async function runAutomationPipeline(
           detected_pages: analysis.detectedPages,
           opportunity_types: analysis.opportunityTypes,
           metadata: analysis.metadata,
+          metrics_source: analysis.metricsSource,
+          robots_txt_status: analysis.robotsTxtStatus ?? null,
+          sitemap_found: analysis.sitemapFound ?? null,
+          fetch_status_code: analysis.fetchStatusCode ?? null,
         });
 
       stepsCompleted.push('analyze');
@@ -239,7 +281,21 @@ export async function runAutomationPipeline(
           import_id: importId,
           domain_analysis_id: analysisId,
           discovery_source: 'import',
-          metadata: { detected_pages: analysis.detectedPages, niche: analysis.niche },
+          authority_estimated: true,
+          traffic_estimated: true,
+          metrics_source: analysis.metricsSource === 'live' ? 'estimated' : 'estimated',
+          metadata: {
+            detected_pages: analysis.detectedPages,
+            niche: analysis.niche,
+            difficulty: classification.difficulty,
+            estimated: true,
+            metrics_labels: {
+              domain_rating: 'Estimated',
+              monthly_traffic: 'Estimated',
+              success_probability: 'Estimated',
+              difficulty: 'Estimated',
+            },
+          },
         });
 
       await getSupabaseAdmin()
@@ -308,6 +364,17 @@ export async function runAutomationPipeline(
           submission_type: String(opp.opportunity_type),
           assisted_mode: inferAssistedMode(String(opp.opportunity_type)),
           status: 'prepared',
+          tracking_status: 'ready',
+          estimated_review_hours: estimateReviewHours(String(opp.opportunity_type)),
+          estimated_approval_hours: estimateApprovalHours(String(opp.opportunity_type)),
+          prefill_payload: buildPrefillPayload({
+            brandName: brand.brandName,
+            projectDomain: brand.projectDomain,
+            industry: brand.industry,
+            opportunityTitle: String(opp.title),
+            opportunityDomain: String(opp.domain ?? ''),
+            opportunityType: String(opp.opportunity_type),
+          }),
           metadata: { generated_by: 'automation_pipeline', run_id: runId },
         });
     }
@@ -578,8 +645,23 @@ export async function updateSubmissionStatus(
   notes?: string
 ) {
   const patch: Record<string, unknown> = { status, notes: notes ?? null };
+  const trackingMap: Record<string, string> = {
+    prepared: 'ready',
+    ready: 'ready',
+    awaiting_approval: 'awaiting_approval',
+    submitted: 'submitted',
+    waiting: 'pending_review',
+    pending_review: 'pending_review',
+    accepted: 'accepted',
+    rejected: 'rejected',
+    failed: 'failed',
+    published: 'accepted',
+    verified: 'verified',
+  };
+  if (trackingMap[status]) patch.tracking_status = trackingMap[status];
   if (status === 'submitted') patch.submitted_at = new Date().toISOString();
-  if (status === 'published') patch.published_at = new Date().toISOString();
+  if (status === 'published' || status === 'accepted') patch.published_at = new Date().toISOString();
+  if (status === 'verified') patch.verified_at = new Date().toISOString();
 
   const { data, error } = await getSupabaseAdmin()
     .from('backlink_submissions')
@@ -594,9 +676,12 @@ export async function updateSubmissionStatus(
   const automationMap: Record<string, TrackingStatus> = {
     submitted: 'submitted',
     waiting: 'waiting',
+    pending_review: 'waiting',
     accepted: 'accepted',
     rejected: 'rejected',
     published: 'published',
+    verified: 'verified',
+    failed: 'rejected',
   };
   if (automationMap[status]) {
     await getSupabaseAdmin()
@@ -617,10 +702,49 @@ export async function runVerificationCheck(workspaceId: string, backlinkId: stri
     .single();
   if (!bl) throw new Error('Backlink not found');
 
-  const outcomes = ['verified', 'pending', 'broken', 'redirected'] as const;
-  const hash = backlinkId.charCodeAt(0) % outcomes.length;
-  const outcome = outcomes[hash];
+  const sourceUrl = String(bl.source_url ?? bl.url ?? '');
+  const targetUrl = String(bl.target_url ?? '');
   const checkId = randomUUID();
+  let result;
+
+  try {
+    const res = await fetch(sourceUrl, {
+      method: 'GET',
+      redirect: 'follow',
+      signal: AbortSignal.timeout(12000),
+      headers: { 'User-Agent': 'SEO-OS-BacklinkVerifier/1.0' },
+    });
+    const html = await res.text();
+    result = inspectBacklinkHtml(
+      html,
+      {
+        targetUrl,
+        expectedAnchor: bl.anchor_text ? String(bl.anchor_text) : undefined,
+      },
+      res.status,
+      res.url
+    );
+  } catch (err) {
+    result = {
+      outcome: 'unreachable' as const,
+      httpStatus: null,
+      redirectUrl: null,
+      targetFound: false,
+      anchorMatched: null,
+      isNofollow: null,
+      isBroken: true,
+      checkedAt: new Date().toISOString(),
+      errorMessage: err instanceof Error ? err.message : 'fetch_failed',
+    };
+  }
+
+  const statusMap: Record<string, string> = {
+    verified: 'verified',
+    pending: 'pending',
+    broken: 'broken',
+    redirected: 'redirected',
+    unreachable: 'broken',
+  };
 
   await getSupabaseAdmin()
     .from('backlink_checks')
@@ -628,27 +752,46 @@ export async function runVerificationCheck(workspaceId: string, backlinkId: stri
       id: checkId,
       backlink_id: backlinkId,
       workspace_id: workspaceId,
-      status: outcome,
+      status: statusMap[result.outcome] ?? 'pending',
       check_type: 'automated',
-      is_broken: outcome === 'broken',
-      redirect_url: outcome === 'redirected' ? bl.target_url : null,
-      http_status: outcome === 'verified' ? 200 : outcome === 'broken' ? 404 : 301,
-      checked_at: new Date().toISOString(),
+      is_broken: result.isBroken,
+      redirect_url: result.redirectUrl,
+      http_status: result.httpStatus,
+      checked_at: result.checkedAt,
+      metadata: {
+        targetFound: result.targetFound,
+        anchorMatched: result.anchorMatched,
+        isNofollow: result.isNofollow,
+        errorMessage: 'errorMessage' in result ? result.errorMessage : undefined,
+      },
     });
 
-  if (outcome === 'verified') {
+  if (result.outcome === 'verified') {
     await getSupabaseAdmin()
       .from('backlinks')
       .update({ verification_status: 'verified', verified_at: new Date().toISOString() })
       .eq('id', backlinkId);
-  } else if (outcome === 'broken' || outcome === 'redirected') {
+  } else if (result.outcome === 'broken' || result.outcome === 'unreachable' || result.outcome === 'redirected') {
     await getSupabaseAdmin()
       .from('backlinks')
-      .update({ verification_status: 'lost' })
+      .update({ verification_status: result.outcome === 'redirected' ? 'unreachable' : 'lost' })
       .eq('id', backlinkId);
   }
 
-  return { checkId, outcome, backlinkId };
+  return { checkId, outcome: result.outcome, backlinkId, details: result };
+}
+
+export async function enqueueVerificationCheck(workspaceId: string, backlinkId: string) {
+  const jobId = await enqueueJob(
+    QUEUES.CRAWL,
+    'backlink_verify',
+    { type: 'backlink_verify', workspaceId, backlinkId },
+    { singletonKey: `verify-${backlinkId}`, retryLimit: 2, retryDelay: 30 }
+  );
+  if (!jobId) {
+    return runVerificationCheck(workspaceId, backlinkId);
+  }
+  return { queued: true, jobId, backlinkId };
 }
 
 export async function listSubmissions(workspaceId: string) {

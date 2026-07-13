@@ -35,6 +35,23 @@ reportsRouter.get('/summary', authMiddleware, requireRole('viewer'), async (req,
   }
 });
 
+reportsRouter.get(
+  '/backlink-ops.xlsx',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const { exportBacklinkOpsWorkbook } = await import('../../modules/reports/reports.service.js');
+      const file = await exportBacklinkOpsWorkbook(param(req.params.projectId));
+      res.setHeader('Content-Type', file.contentType);
+      res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+      res.send(file.body);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 reportsRouter.get('/types', authMiddleware, requireRole('viewer'), async (_req, res, next) => {
   try {
     res.json({ data: await listReportTypes() });

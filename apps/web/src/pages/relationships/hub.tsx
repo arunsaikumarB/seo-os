@@ -108,10 +108,11 @@ export function RelationshipHubPage() {
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <Users className="h-6 w-6 text-violet-500" /> Relationship Intelligence
+            <Users className="h-6 w-6" /> Relationship Hub
           </h1>
           <p className="text-muted-foreground mt-1">
-            Discover, enrich, score, and maintain publisher relationships from public data
+            Website owners, editors, contacts, history, campaign context, replies, notes, scores, and
+            AI next actions.
           </p>
         </div>
         <Button onClick={() => discover.mutate()} disabled={discover.isPending}>

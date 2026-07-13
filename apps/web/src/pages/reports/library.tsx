@@ -22,7 +22,6 @@ import { PageTransition, StaggerGrid, StaggerItem } from '@/components/demo/page
 import { useApi } from '@/hooks/use-api';
 import { useAuth } from '@/providers/auth-provider';
 import { useAppStore } from '@/stores/app-store';
-import { useDemoMode } from '@/hooks/use-demo-mode';
 import { getApiErrorMessage } from '@/lib/api';
 import { toast } from 'sonner';
 
@@ -63,7 +62,6 @@ export function ReportsLibraryPage() {
   const { request } = useApi();
   const { getAccessToken } = useAuth();
   const orgId = useAppStore((s) => s.currentOrgId);
-  const { isDemoMode } = useDemoMode();
   const qc = useQueryClient();
   const [selectedType, setSelectedType] = useState('executive');
   const [schedule, setSchedule] = useState('manual');
@@ -151,10 +149,6 @@ export function ReportsLibraryPage() {
 
   async function download(runId: string, format: string) {
     try {
-      if (isDemoMode) {
-        toast.message('Demo mode: export simulated');
-        return;
-      }
       const token = await getAccessToken();
       const res = await fetch(
         `${apiBase()}/v1/projects/${projectId}/reports/runs/${runId}/export?format=${format}`,
@@ -201,15 +195,46 @@ export function ReportsLibraryPage() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <FileBarChart className="h-6 w-6" /> Reports & Executive Intelligence
+            <FileBarChart className="h-6 w-6" /> Reports
           </h1>
           <p className="text-muted-foreground">
-            Professional, schedulable, white-label reports powered by Analytics
+            Backlink operations Excel exports and executive report library
           </p>
         </div>
-        <Button variant="outline" size="sm" asChild>
-          <Link to={`/projects/${projectId}/analytics/overview`}>Open Analytics</Link>
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            onClick={async () => {
+              try {
+                const token = await getAccessToken();
+                const res = await fetch(
+                  `${apiBase()}/v1/projects/${projectId}/reports/backlink-ops.xlsx`,
+                  {
+                    headers: {
+                      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                      ...(orgId ? { 'X-Org-Id': orgId } : {}),
+                    },
+                  }
+                );
+                if (!res.ok) throw new Error(await res.text());
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'backlink-operations.xlsx';
+                a.click();
+                URL.revokeObjectURL(url);
+              } catch (err) {
+                toast.error(getApiErrorMessage(err, 'Excel export failed'));
+              }
+            }}
+          >
+            Download Backlink Ops Excel
+          </Button>
+          <Button variant="outline" size="sm" asChild>
+            <Link to={`/projects/${projectId}/analytics/overview`}>Open Analytics</Link>
+          </Button>
+        </div>
       </div>
 
       <StaggerGrid className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

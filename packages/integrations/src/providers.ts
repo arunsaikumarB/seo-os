@@ -134,17 +134,45 @@ export const smtpProvider = createStubProvider('smtp', 'SMTP', () => ({
   usage: [usage('sends', 0)],
 }));
 
-export const gmailProvider = createStubProvider('gmail', 'Gmail', () => ({
-  recordsUpserted: 1,
-  snapshots: [{ type: 'email_health', payload: { provider: 'gmail', status: 'connected' } }],
-  usage: [usage('sends', 0)],
-}));
+export const gmailProvider: IntegrationProvider = {
+  ...createStubProvider('gmail', 'Gmail', () => ({
+    recordsUpserted: 0,
+    snapshots: [],
+    usage: [usage('sends', 0)],
+  })),
+  async connect(input) {
+    const hasOAuth =
+      Boolean(input.credentials.accessToken) ||
+      Boolean(input.credentials.refreshToken) ||
+      (Boolean(input.credentials.oauthCode) &&
+        String(input.credentials.oauthCode) !== 'demo-connect');
+    if (!hasOAuth) {
+      throw new Error('OAuth credentials required (V1.1) — Gmail send is deferred until OAuth is configured');
+    }
+    return baseConnect('gmail', input, 'Gmail');
+  },
+};
 
-export const outlookProvider = createStubProvider('outlook', 'Outlook', () => ({
-  recordsUpserted: 1,
-  snapshots: [{ type: 'email_health', payload: { provider: 'outlook', status: 'connected' } }],
-  usage: [usage('sends', 0)],
-}));
+export const outlookProvider: IntegrationProvider = {
+  ...createStubProvider('outlook', 'Outlook', () => ({
+    recordsUpserted: 0,
+    snapshots: [],
+    usage: [usage('sends', 0)],
+  })),
+  async connect(input) {
+    const hasOAuth =
+      Boolean(input.credentials.accessToken) ||
+      Boolean(input.credentials.refreshToken) ||
+      (Boolean(input.credentials.oauthCode) &&
+        String(input.credentials.oauthCode) !== 'demo-connect');
+    if (!hasOAuth) {
+      throw new Error(
+        'OAuth credentials required (V1.1) — Outlook send is deferred until OAuth is configured'
+      );
+    }
+    return baseConnect('outlook', input, 'Outlook');
+  },
+};
 
 export const wordpressProvider = createStubProvider('wordpress', 'WordPress', (ctx) => ({
   recordsUpserted: 5,

@@ -16,8 +16,12 @@ export interface ClassificationResult {
   priority: Priority;
   successProbability: number;
   replyRate: number;
+  difficulty: number;
   recommendedAction: string;
   scoreTier: string;
+  /** Probabilistic fields are heuristic unless a live provider is wired */
+  estimated: true;
+  metricsSource: 'estimated';
 }
 
 export interface ClassificationContext {
@@ -99,6 +103,10 @@ export function classifyOpportunity(
   const replyRate = predictReplyRate(aiCtx);
   const scoreTier = getScoreTier(opportunityScore);
   const priority = computePriority(opportunityScore, relevanceScore, spamRisk);
+  const difficulty = Math.min(
+    95,
+    Math.round(40 + analysis.domainRating * 0.35 + (spamRisk > 40 ? 10 : 0))
+  );
 
   return {
     backlinkType,
@@ -108,7 +116,10 @@ export function classifyOpportunity(
     priority,
     successProbability,
     replyRate,
+    difficulty,
     recommendedAction: recommendAction(backlinkType, scoreTier, analysis),
     scoreTier,
+    estimated: true,
+    metricsSource: 'estimated',
   };
 }

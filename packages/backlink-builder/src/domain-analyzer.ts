@@ -25,6 +25,10 @@ export interface DomainAnalysisResult {
   opportunityTypes: BacklinkTypeId[];
   primaryType: BacklinkTypeId;
   metadata: Record<string, unknown>;
+  metricsSource: 'estimated' | 'live';
+  robotsTxtStatus?: string;
+  sitemapFound?: boolean;
+  fetchStatusCode?: number;
 }
 
 const TLD_COUNTRY: Record<string, string> = {
@@ -128,6 +132,98 @@ export function analyzeDomain(domain: string, url?: string): DomainAnalysisResul
     detectedPages: buildDetectedPages(clean, primaryCategory),
     opportunityTypes,
     primaryType,
+    metricsSource: 'estimated',
     metadata: { analyzedUrl: url ?? `https://${clean}`, analyzer: 'heuristic_v1' },
+  };
+}
+
+/**
+ * Prefer live fetch of homepage / robots.txt / sitemap when network is available.
+ * Falls back to estimated analysis with metricsSource='estimated'.
+ */
+export async function analyzeDomainLive(
+  domain: string,
+  url?: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<DomainAnalysisResult> {
+  const base = analyzeDomain(domain, url);
+  const origin = `https://${base.domain}`;
+  const meta = { ...base.metadata } as Record<string, unknown>;
+  let robotsTxtStatus = 'unknown';
+  let sitemapFound = false;
+  let fetchStatusCode: number | undefined;
+  let metricsSource: 'estimated' | 'live' = 'estimated';
+
+  try {
+    const homeRes = await fetchImpl(url ?? origin, {
+      method: 'GET',
+      redirect: 'follow',
+      signal: AbortSignal.timeout(8000),
+      headers: { 'User-Agent': 'SEO-OS-BacklinkBuilder/1.0' },
+    });
+    fetchStatusCode = homeRes.status;
+    if (homeRes.ok) {
+      metricsSource = 'live';
+      const html = (await homeRes.text()).slice(0, 50_000).toLowerCase();
+      meta.homepageFetched = true;
+      meta.hasContactLink = html.includes('contact');
+      meta.hasGuestPostHint =
+        html.includes('write for us') || html.includes('guest post') || html.includes('contribute');
+      meta.hasGuidelines = html.includes('guideline') || html.includes('editorial');
+      if (meta.hasGuestPostHint) {
+        base.detectedPages.guestPost = base.detectedPages.guestPost ?? `${origin}/write-for-us`;
+        base.detectedPages.submission = base.detectedPages.submission ?? `${origin}/contribute`;
+      }
+    }
+  } catch (err) {
+    meta.homepageFetchError = err instanceof Error ? err.message : 'fetch_failed';
+  }
+
+  try {
+    const robotsRes = await fetchImpl(`${origin}/robots.txt`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(5000),
+      headers: { 'User-Agent': 'SEO-OS-BacklinkBuilder/1.0' },
+    });
+    if (robotsRes.ok) {
+      robotsTxtStatus = 'found';
+      const robots = await robotsRes.text();
+      meta.robotsTxtSnippet = robots.slice(0, 1000);
+      if (/sitemap:\s*(\S+)/i.test(robots)) sitemapFound = true;
+      metricsSource = 'live';
+    } else {
+      robotsTxtStatus = `http_${robotsRes.status}`;
+    }
+  } catch {
+    robotsTxtStatus = 'unreachable';
+  }
+
+  if (!sitemapFound) {
+    try {
+      const sm = await fetchImpl(`${origin}/sitemap.xml`, {
+        method: 'GET',
+        signal: AbortSignal.timeout(5000),
+        headers: { 'User-Agent': 'SEO-OS-BacklinkBuilder/1.0' },
+      });
+      if (sm.ok) {
+        sitemapFound = true;
+        metricsSource = 'live';
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return {
+    ...base,
+    metricsSource,
+    robotsTxtStatus,
+    sitemapFound,
+    fetchStatusCode,
+    metadata: {
+      ...meta,
+      analyzer: metricsSource === 'live' ? 'live_fetch_v1' : 'heuristic_v1',
+      authorityNote: 'DR/traffic remain Estimated until a live SEO metrics provider is configured',
+    },
   };
 }

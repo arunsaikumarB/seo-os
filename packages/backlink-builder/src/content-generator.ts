@@ -178,3 +178,82 @@ export function contentTypesForOpportunity(opportunityType: string): ContentDraf
   };
   return map[opportunityType] ?? ['email', 'guest_post'];
 }
+
+export interface GuestPostPack {
+  seoTitle: string;
+  metaDescription: string;
+  h1: string;
+  h2: string[];
+  slug: string;
+  tags: string[];
+  faq: Array<{ question: string; answer: string }>;
+  schemaJsonLd: Record<string, unknown>;
+  suggestedLinks: Array<{ anchor: string; url: string }>;
+  suggestedImages: Array<{ brief: string; alt: string }>;
+  bodyOutline: string;
+  generationStatus: {
+    images: 'v1.1_provider_required';
+    video: 'v1.1_provider_required';
+  };
+}
+
+/** Blog / guest-post pack — text + suggestions only in V1 */
+export function generateGuestPostPack(
+  oppCtx: OpportunityAiContext,
+  brand: BrandContext
+): GuestPostPack {
+  const topic = oppCtx.title || oppCtx.website_name || 'Industry Insights';
+  const slug = `${brand.brandName}-${topic}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 60);
+  const target = suggestTargetPage(brand.projectDomain ?? oppCtx.domain);
+  const anchor = suggestAnchorText(oppCtx, brand.brandName);
+  return {
+    seoTitle: `${topic}: A Practical Guide from ${brand.brandName}`,
+    metaDescription: `${brand.brandName} shares actionable insights on ${topic} for ${brand.industry ?? 'professionals'}.`,
+    h1: `${topic}: What Matters in ${new Date().getFullYear()}`,
+    h2: [
+      `Why ${topic} matters`,
+      `How ${brand.brandName} approaches it`,
+      'Common mistakes to avoid',
+      'Next steps for readers',
+    ],
+    slug,
+    tags: [brand.industry ?? 'business', 'guide', topic.split(' ')[0]?.toLowerCase() ?? 'insights'].filter(Boolean),
+    faq: [
+      {
+        question: `What is ${topic}?`,
+        answer: `${topic} is a key theme for ${brand.industry ?? 'modern'} teams. ${brand.brandName} covers practical approaches.`,
+      },
+      {
+        question: `How can ${brand.brandName} help?`,
+        answer: `Visit ${target} for resources, tools, and expert guidance.`,
+      },
+    ],
+    schemaJsonLd: {
+      '@context': 'https://schema.org',
+      '@type': 'Article',
+      headline: `${topic}: A Practical Guide from ${brand.brandName}`,
+      author: { '@type': 'Organization', name: brand.brandName },
+      description: `${brand.brandName} insights on ${topic}`,
+    },
+    suggestedLinks: [{ anchor, url: target }],
+    suggestedImages: [
+      {
+        brief: `Hero illustration of ${topic} for ${brand.brandName} guest post`,
+        alt: `${topic} illustration`,
+      },
+      {
+        brief: `Simple diagram showing ${brand.brandName} workflow related to ${topic}`,
+        alt: `${brand.brandName} workflow diagram`,
+      },
+    ],
+    bodyOutline: generateGuestPostDraft(oppCtx, brand.brandName) + knowledgeBlock(brand),
+    generationStatus: {
+      images: 'v1.1_provider_required',
+      video: 'v1.1_provider_required',
+    },
+  };
+}

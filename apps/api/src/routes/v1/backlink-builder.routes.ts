@@ -360,3 +360,41 @@ backlinkBuilderRouter.patch(
 );
 
 backlinkBuilderRouter.use('/automation', automationRouter);
+
+// Alias: POST /backlink-builder/discover (plan V1.0)
+backlinkBuilderRouter.post(
+  '/discover',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const { runDiscoverWebsites } = await import(
+        '../../modules/backlinks/discovery.service.js'
+      );
+      const body = z
+        .object({
+          website: z.string().optional(),
+          industry: z.string().optional(),
+          country: z.string().optional(),
+          keywords: z.array(z.string()).optional(),
+          targetDr: z.number().int().min(0).max(100).optional(),
+          targetTraffic: z.number().int().min(0).optional(),
+        })
+        .parse(req.body);
+      const { orgId, userId } = (req as AuthenticatedRequest).auth;
+      const result = await runDiscoverWebsites(param(req.params.projectId), body, {
+        userId,
+        orgId,
+      });
+      res.status(201).json({
+        data: {
+          ...result,
+          disclaimer:
+            'Authority, traffic, and success metrics are Estimated until a live SEO provider is connected.',
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);

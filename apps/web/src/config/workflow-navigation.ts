@@ -1,21 +1,18 @@
 import {
   LayoutDashboard,
-  Building2,
-  FolderKanban,
-  UsersRound,
   Settings,
   Link2,
   Upload,
   Search,
   Sparkles,
   ListChecks,
-  ListTree,
   Target,
-  Mail,
+  FileText,
+  ClipboardList,
   Handshake,
   CheckCircle2,
   FileBarChart,
-  MessageSquare,
+  Radar,
 } from 'lucide-react';
 import type { NavItem } from './navigation';
 
@@ -27,32 +24,24 @@ export interface WorkflowNavSection {
 }
 
 export interface WorkflowNavItem extends NavItem {
-  /** Absolute path (org/global). When false, href is relative to /projects/:id */
   absolute?: boolean;
 }
 
 /**
- * Backlink-first primary navigation for Version 1.0.
- * Secondary engines (Browser Intelligence, Knowledge, Memory, etc.) stay on API routes
- * but are intentionally omitted from the sidebar.
+ * V1.0 Backlink Operations — single product surface.
+ * Secondary engines remain on API routes but are omitted from the sidebar.
  */
 export const workflowNavSections: WorkflowNavSection[] = [
   {
-    id: 'home',
-    label: 'Home',
-    emoji: '🎯',
+    id: 'dashboard',
+    label: 'Dashboard',
+    emoji: '📊',
     items: [
       {
-        label: 'Mission Control',
+        label: 'Dashboard',
         href: 'mission-control',
         icon: LayoutDashboard,
         featureFlag: 'mission_control',
-      },
-      {
-        label: 'SEO AI Assistant',
-        href: 'command-center',
-        icon: MessageSquare,
-        featureFlag: 'ai_workforce',
       },
     ],
   },
@@ -74,6 +63,12 @@ export const workflowNavSections: WorkflowNavSection[] = [
         featureFlag: 'backlink_builder',
       },
       {
+        label: 'Discover Websites',
+        href: 'backlink-builder/discover',
+        icon: Radar,
+        featureFlag: 'backlink_builder',
+      },
+      {
         label: 'Explorer',
         href: 'backlink-builder/explorer',
         icon: Search,
@@ -92,30 +87,29 @@ export const workflowNavSections: WorkflowNavSection[] = [
         featureFlag: 'backlink_builder',
       },
       {
-        label: 'Pipeline',
-        href: 'backlink-builder/pipeline',
-        icon: ListTree,
-        featureFlag: 'backlink_builder',
-      },
-      {
         label: 'Campaigns',
         href: 'campaigns',
         icon: Target,
         featureFlag: 'backlink_builder',
       },
       {
-        label: 'Outreach',
-        href: 'outreach/inbox',
-        icon: Mail,
-        featureFlag: 'outreach',
+        label: 'Content Studio',
+        href: 'content/library',
+        icon: FileText,
       },
       {
-        label: 'Relationships',
+        label: 'Submission Center',
+        href: 'backlink-builder/tracking',
+        icon: ClipboardList,
+        featureFlag: 'backlink_builder',
+      },
+      {
+        label: 'Relationship Hub',
         href: 'relationships',
         icon: Handshake,
       },
       {
-        label: 'Link Verification',
+        label: 'Verification',
         href: 'backlink-builder/pending',
         icon: CheckCircle2,
         featureFlag: 'backlink_builder',
@@ -131,17 +125,11 @@ export const workflowNavSections: WorkflowNavSection[] = [
   {
     id: 'workspace',
     label: 'Workspace',
-    emoji: '🏢',
-    items: [
-      { label: 'Projects', href: '/projects', icon: FolderKanban, absolute: true },
-      { label: 'Team', href: '/org/team', icon: UsersRound, absolute: true },
-      { label: 'Organizations', href: '/projects', icon: Building2, absolute: true },
-      { label: 'Settings', href: 'settings/general', icon: Settings },
-    ],
+    emoji: '⚙️',
+    items: [{ label: 'Settings', href: 'settings/general', icon: Settings }],
   },
 ];
 
-/** Flat lookup for breadcrumbs and help */
 export function findWorkflowNavLabel(pathSegment: string): string | undefined {
   for (const section of workflowNavSections) {
     const item = section.items.find((i) => i.href === pathSegment || i.href.endsWith(pathSegment));
