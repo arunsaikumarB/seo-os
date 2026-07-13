@@ -53,9 +53,9 @@ export async function readyHandler(_req: Request, res: Response): Promise<void> 
 
 export function versionHandler(_req: Request, res: Response): void {
   res.json({
-    version: '11.0.5-closed-beta',
+    version: '1.2.3-pif',
     api: 'v1',
-    release: 'Closed Beta',
+    release: 'Provider Integration Framework',
   });
 }
 
@@ -144,7 +144,7 @@ export async function opsHealthHandler(_req: Request, res: Response): Promise<vo
       avgMs: metrics.avgMs,
     },
     aiProviders,
-    version: '11.0.5-closed-beta',
+    version: '1.2.3-pif',
   };
 
   res.status(200).json({ data: payload });
