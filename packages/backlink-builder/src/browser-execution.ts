@@ -322,6 +322,44 @@ export function mapAssetsToFields(
   return { ...mapped, ...overrides };
 }
 
+/** Job statuses including watcher / auto-resume lifecycle (DB CHECK in 081). */
+export const EXECUTION_JOB_STATUSES = [
+  'queued',
+  'preparing',
+  'launching_browser',
+  'authenticating',
+  'navigating',
+  'analyzing_form',
+  'uploading_assets',
+  'filling_fields',
+  'validating',
+  'ready_for_review',
+  'awaiting_user',
+  'submitting',
+  'waiting_verification',
+  'completed',
+  'failed',
+  'cancelled',
+  'retry_scheduled',
+  'paused',
+  'needs_approval',
+  'blocked_captcha',
+  'blocked_mfa',
+  'blocked_email_verify',
+  'blocked_phone_verify',
+  'watching',
+  'watching_captcha',
+  'watching_login',
+  'watching_mfa',
+  'watching_email',
+  'watching_phone',
+  'ready_to_continue',
+  'submitted',
+  'verified',
+] as const;
+
+export type ExecutionJobStatus = (typeof EXECUTION_JOB_STATUSES)[number];
+
 export function gateStatusFromBlocker(blocker: ExecutionGate): string | null {
   switch (blocker) {
     case 'captcha':
@@ -338,6 +376,34 @@ export function gateStatusFromBlocker(blocker: ExecutionGate): string | null {
     default:
       return null;
   }
+}
+
+/** After blocked_* is recorded, transition into watching_* for auto-resume polling. */
+export function watchingStatusFromBlocker(blocker: ExecutionGate): string | null {
+  switch (blocker) {
+    case 'captcha':
+      return 'watching_captcha';
+    case 'login':
+      return 'watching_login';
+    case 'mfa':
+      return 'watching_mfa';
+    case 'email_verify':
+      return 'watching_email';
+    case 'phone_verify':
+      return 'watching_phone';
+    default:
+      return null;
+  }
+}
+
+export function isWatchableGate(blocker: ExecutionGate): boolean {
+  return (
+    blocker === 'captcha' ||
+    blocker === 'login' ||
+    blocker === 'mfa' ||
+    blocker === 'email_verify' ||
+    blocker === 'phone_verify'
+  );
 }
 
 export function redactFormValues(values: Record<string, unknown>): Record<string, unknown> {

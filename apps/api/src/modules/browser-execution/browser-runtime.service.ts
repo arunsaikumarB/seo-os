@@ -205,10 +205,154 @@ export class BrowserExecutionService {
   /**
    * Submit is only called after approval. Still pauses if gate detected on page.
    */
+  async listCookieNames(): Promise<string[]> {
+    if (!this.context) return [];
+    try {
+      const cookies = await this.context.cookies();
+      return cookies.map((c) => c.name);
+    } catch {
+      return [];
+    }
+  }
+
+  async probeGateDom(): Promise<{
+    captchaIframeVisible?: boolean;
+    captchaContainerVisible?: boolean;
+    submitDisabled?: boolean;
+    logoutVisible?: boolean;
+    avatarVisible?: boolean;
+    verifiedBadgeVisible?: boolean;
+    successBannerVisible?: boolean;
+  }> {
+    if (!this.page) return {};
+    try {
+      // String form avoids Node TS needing DOM lib; runs in browser context only.
+      return (await this.page.evaluate(`(() => {
+        const visible = (el) => {
+          if (!el) return false;
+          const style = window.getComputedStyle(el);
+          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+          const rect = el.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        };
+        const captchaIframe = document.querySelector(
+          'iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="turnstile"], iframe[title*="captcha" i]'
+        );
+        const captchaContainer = document.querySelector(
+          '.g-recaptcha, .h-captcha, .cf-turnstile, [data-sitekey], #captcha, .captcha'
+        );
+        const submit = document.querySelector('button[type="submit"], input[type="submit"]');
+        const logout = Array.from(document.querySelectorAll('a,button')).find((el) =>
+          /log\\s?out|sign\\s?out/i.test(el.textContent || '')
+        );
+        const avatar = document.querySelector(
+          '[class*="avatar" i], [data-testid*="avatar" i], img[alt*="avatar" i], .user-menu, .account-menu'
+        );
+        const verified = Array.from(document.querySelectorAll('*')).some((el) =>
+          /verified|account activated|email confirmed/i.test(el.textContent || '')
+        );
+        const success = Array.from(document.querySelectorAll('[role="alert"], .toast, .banner, .alert')).some(
+          (el) => /success|verified|thank you|submitted/i.test(el.textContent || '')
+        );
+        return {
+          captchaIframeVisible: visible(captchaIframe),
+          captchaContainerVisible: visible(captchaContainer),
+          submitDisabled: submit ? Boolean(submit.disabled) : undefined,
+          logoutVisible: Boolean(logout && visible(logout)),
+          avatarVisible: Boolean(avatar && visible(avatar)),
+          verifiedBadgeVisible: verified,
+          successBannerVisible: success,
+        };
+      })()`)) as {
+        captchaIframeVisible?: boolean;
+        captchaContainerVisible?: boolean;
+        submitDisabled?: boolean;
+        logoutVisible?: boolean;
+        avatarVisible?: boolean;
+        verifiedBadgeVisible?: boolean;
+        successBannerVisible?: boolean;
+      };
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * Revalidate required fields / validation messages before auto-submit after a gate clears.
+   * Never bypasses protected gates.
+   */
+  async revalidateBeforeSubmit(mapping: Record<string, unknown> = {}): Promise<{
+    ok: boolean;
+    missing: string[];
+    validationMessages: string[];
+    corrected: string[];
+  }> {
+    if (!this.page) throw new Error('No page');
+    const missing: string[] = [];
+    const corrected: string[] = [];
+    const validationMessages: string[] = [];
+
+    try {
+      const requiredEmpty = (await this.page.evaluate(`(() => {
+        const empty = [];
+        document.querySelectorAll('input[required], textarea[required], select[required]').forEach((el) => {
+          if (!String(el.value || '').trim()) {
+            empty.push(el.name || el.id || el.getAttribute('aria-label') || 'required');
+          }
+        });
+        return empty;
+      })()`)) as string[];
+      missing.push(...requiredEmpty);
+    } catch {
+      // ignore
+    }
+
+    // Attempt automatic correction from known mapping (never passwords / OTP)
+    if (missing.length && mapping) {
+      const fillResult = await this.fillFields(mapping);
+      corrected.push(...fillResult.filled);
+      try {
+        const stillEmpty = (await this.page.evaluate(`(() => {
+          const empty = [];
+          document.querySelectorAll('input[required], textarea[required], select[required]').forEach((el) => {
+            if (!String(el.value || '').trim()) {
+              empty.push(el.name || el.id || 'required');
+            }
+          });
+          return empty;
+        })()`)) as string[];
+        missing.length = 0;
+        missing.push(...stillEmpty);
+      } catch {
+        // keep previous missing
+      }
+    }
+
+    try {
+      const msgs = (await this.page.evaluate(`(() =>
+        Array.from(document.querySelectorAll('[aria-invalid="true"], .error, .invalid-feedback, .field-error'))
+          .map((el) => (el.textContent || '').trim())
+          .filter(Boolean)
+          .slice(0, 10)
+      )()`)) as string[];
+      validationMessages.push(...msgs);
+    } catch {
+      // ignore
+    }
+
+    return {
+      ok: missing.length === 0 && validationMessages.length === 0,
+      missing,
+      validationMessages,
+      corrected,
+    };
+  }
+
   async attemptSubmit(submitSelector = 'button[type="submit"], input[type="submit"]'): Promise<{
     submitted: boolean;
     gate?: PageCapture['detectedGates'][number];
     capture: PageCapture;
+    validationFailed?: boolean;
   }> {
     if (!this.page) throw new Error('No page');
     const before = await this.capture('before_submit_check');
@@ -229,6 +373,14 @@ export class BrowserExecutionService {
       const btn = this.page.locator(submitSelector).first();
       if ((await btn.count()) === 0) {
         return { submitted: false, capture: await this.capture('submit_missing') };
+      }
+      const disabled = await btn.isDisabled().catch(() => false);
+      if (disabled) {
+        return {
+          submitted: false,
+          validationFailed: true,
+          capture: await this.capture('submit_disabled'),
+        };
       }
       await btn.click({ timeout: 10_000 });
       await this.page.waitForTimeout(1500);

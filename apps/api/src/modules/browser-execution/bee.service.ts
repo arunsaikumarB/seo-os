@@ -6,6 +6,7 @@ import {
   redactFormValues,
   gateStatusFromBlocker,
   type AssetMapping,
+  type ExecutionGate,
   type ExecutionPlanStep,
 } from '@seo-os/backlink-builder';
 import { DEFAULT_FEATURE_FLAGS } from '@seo-os/shared';
@@ -52,6 +53,11 @@ export async function getOrCreatePolicy(workspaceId: string) {
     require_approval_before_submit: true,
     max_parallel_sessions: 1,
     daily_goal: 20,
+    auto_resume: true,
+    watch_interval_ms: 2000,
+    max_watch_ms: 1_800_000,
+    session_reuse: true,
+    queue_auto_continue: true,
   };
   const { data, error } = await getSupabaseAdmin()
     .from('execution_policies')
@@ -78,6 +84,11 @@ export async function updatePolicy(workspaceId: string, patch: Record<string, un
     'compliance_level',
     'approval_rules',
     'compliance_rules',
+    'auto_resume',
+    'watch_interval_ms',
+    'max_watch_ms',
+    'session_reuse',
+    'queue_auto_continue',
   ];
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
   for (const k of allowed) {
@@ -367,8 +378,26 @@ export async function startJob(workspaceId: string, jobId: string, userId?: stri
     throw Object.assign(new Error('Max parallel browser sessions reached'), { status: 429 });
   }
 
-  const sessionId = randomUUID();
   const headed = DEFAULT_FEATURE_FLAGS.bee_headed_debug === true;
+  let sessionId = randomUUID();
+  let reusedStorage: unknown | null = null;
+  let reusedFrom: string | null = null;
+
+  if (policy.session_reuse !== false && job.site_domain) {
+    const { findReusableSession, loadStorageStateFromSession } = await import('./bee-session.js');
+    const reusable = await findReusableSession(workspaceId, String(job.site_domain));
+    if (reusable?.storage_state_enc) {
+      reusedStorage = await loadStorageStateFromSession(reusable);
+      if (reusedStorage) {
+        reusedFrom = String(reusable.id);
+        await appendLog(workspaceId, jobId, 'info', 'Reusing encrypted session storage for domain', {
+          priorSessionId: reusedFrom,
+          siteDomain: job.site_domain,
+        });
+      }
+    }
+  }
+
   await getSupabaseAdmin().from('browser_sessions').insert({
     id: sessionId,
     workspace_id: workspaceId,
@@ -377,20 +406,36 @@ export async function startJob(workspaceId: string, jobId: string, userId?: stri
     status: 'running',
     site_domain: job.site_domain,
     health_status: 'unknown',
+    storage_state_enc: reusedStorage
+      ? (
+          await import('@seo-os/integrations').then((m) =>
+            m.encryptJson(reusedStorage as Record<string, unknown>)
+          )
+        )
+      : null,
     created_by: userId ?? null,
+    last_reuse_at: reusedFrom ? new Date().toISOString() : null,
   });
+
+  // Stash storage on job metrics for worker launch
+  const metrics = {
+    ...((job.metrics as Record<string, unknown>) ?? {}),
+    reuseStorage: Boolean(reusedStorage),
+    reusedFromSessionId: reusedFrom,
+  };
 
   await getSupabaseAdmin()
     .from('execution_jobs')
     .update({
       status: 'preparing',
       session_id: sessionId,
-      started_at: new Date().toISOString(),
+      started_at: job.started_at ?? new Date().toISOString(),
+      metrics,
       updated_at: new Date().toISOString(),
     })
     .eq('id', jobId);
 
-  await appendLog(workspaceId, jobId, 'info', 'Execution start queued', { sessionId });
+  await appendLog(workspaceId, jobId, 'info', 'Execution start queued', { sessionId, reusedFrom });
 
   await enqueueJob(
     QUEUES.PLAYWRIGHT,
@@ -401,6 +446,7 @@ export async function startJob(workspaceId: string, jobId: string, userId?: stri
       workspaceId,
       sessionId,
       action: 'run',
+      restoreStorage: Boolean(reusedStorage),
     },
     { singletonKey: `bee-exec-${jobId}`, retryLimit: Number(policy.retry_count ?? 2) }
   );
@@ -445,10 +491,33 @@ export async function pauseJob(workspaceId: string, jobId: string) {
   return getJob(workspaceId, jobId);
 }
 
-export async function resumeJob(workspaceId: string, jobId: string) {
-  await setJobStatus(workspaceId, jobId, 'preparing');
-  await appendLog(workspaceId, jobId, 'info', 'Execution resume queued');
+export async function resumeJob(
+  workspaceId: string,
+  jobId: string,
+  opts: { resumeReason?: string; auto?: boolean } = {}
+) {
   const job = await getJob(workspaceId, jobId);
+  if (!job) throw Object.assign(new Error('Job not found'), { status: 404 });
+
+  // Manual resume after user completed a gate: clear paused watchable gate steps
+  // (human_approval still requires approveJob)
+  if (!opts.auto) {
+    await getSupabaseAdmin()
+      .from('execution_steps')
+      .update({ status: 'done', finished_at: new Date().toISOString() })
+      .eq('job_id', jobId)
+      .in('blocker', ['captcha', 'login', 'mfa', 'email_verify', 'phone_verify'])
+      .in('status', ['paused', 'running']);
+  }
+
+  await setJobStatus(workspaceId, jobId, 'preparing', {
+    resume_reason: opts.resumeReason ?? (opts.auto ? 'auto_resume' : 'manual_resume'),
+    auto_resumed: opts.auto === true,
+  });
+  await appendLog(workspaceId, jobId, 'info', opts.auto ? 'Auto-resume queued' : 'Execution resume queued', {
+    resumeReason: opts.resumeReason,
+    auto: Boolean(opts.auto),
+  });
   await enqueueJob(
     QUEUES.PLAYWRIGHT,
     'bee_execute',
@@ -456,12 +525,131 @@ export async function resumeJob(workspaceId: string, jobId: string) {
       type: 'bee_execute',
       jobId,
       workspaceId,
-      sessionId: job?.session_id,
+      sessionId: job.session_id,
       action: 'run',
+      restoreStorage: true,
     },
     { singletonKey: `bee-exec-${jobId}` }
   );
   return getJob(workspaceId, jobId);
+}
+
+export async function autoResumeJob(
+  workspaceId: string,
+  jobId: string,
+  opts: { resumeReason?: string; gate?: ExecutionGate | string | null } = {}
+) {
+  await markGateStepDone(workspaceId, jobId, opts.gate ?? null);
+  return resumeJob(workspaceId, jobId, {
+    resumeReason: opts.resumeReason ?? `auto_after_${opts.gate ?? 'gate'}`,
+    auto: true,
+  });
+}
+
+export async function markGateStepDone(
+  workspaceId: string,
+  jobId: string,
+  gate: ExecutionGate | string | null | undefined
+) {
+  if (!gate) return;
+  await getSupabaseAdmin()
+    .from('execution_steps')
+    .update({ status: 'done', finished_at: new Date().toISOString() })
+    .eq('job_id', jobId)
+    .eq('workspace_id', workspaceId)
+    .eq('blocker', gate)
+    .in('status', ['paused', 'pending', 'running']);
+}
+
+export async function mergeJobMetrics(
+  workspaceId: string,
+  jobId: string,
+  patch: Record<string, unknown>
+) {
+  const job = await getJob(workspaceId, jobId);
+  const metrics = { ...((job?.metrics as Record<string, unknown>) ?? {}), ...patch };
+  await getSupabaseAdmin()
+    .from('execution_jobs')
+    .update({ metrics, updated_at: new Date().toISOString() })
+    .eq('id', jobId)
+    .eq('workspace_id', workspaceId);
+  return metrics;
+}
+
+/**
+ * After one website finishes, start the next queued job (supports 20/50/100/500 queues).
+ */
+export async function continueQueuedJobs(
+  workspaceId: string,
+  opts: { afterJobId?: string; batchId?: string; limit?: number } = {}
+): Promise<string[]> {
+  const policy = await getOrCreatePolicy(workspaceId);
+  if (policy.queue_auto_continue === false) return [];
+
+  const { count: running } = await getSupabaseAdmin()
+    .from('browser_sessions')
+    .select('id', { count: 'exact', head: true })
+    .eq('workspace_id', workspaceId)
+    .eq('status', 'running')
+    .is('deleted_at', null);
+  const slots = Math.max(0, Number(policy.max_parallel_sessions ?? 1) - (running ?? 0));
+  if (slots <= 0) return [];
+
+  const take = Math.min(slots, Math.max(1, opts.limit ?? 1));
+  let q = getSupabaseAdmin()
+    .from('execution_jobs')
+    .select('id')
+    .eq('workspace_id', workspaceId)
+    .eq('status', 'queued')
+    .is('deleted_at', null)
+    .order('created_at', { ascending: true })
+    .limit(take);
+  if (opts.batchId) q = q.eq('queue_batch_id', opts.batchId);
+  if (opts.afterJobId) q = q.neq('id', opts.afterJobId);
+
+  const { data } = await q;
+  const started: string[] = [];
+  for (const row of data ?? []) {
+    try {
+      await startJob(workspaceId, String(row.id));
+      started.push(String(row.id));
+    } catch {
+      break;
+    }
+  }
+  return started;
+}
+
+export async function getExecutionReport(workspaceId: string, jobId: string) {
+  const job = await getJob(workspaceId, jobId);
+  if (!job) return null;
+  const logs = await listLogs(workspaceId, jobId);
+  const metrics = (job.metrics as Record<string, unknown>) ?? {};
+  const started = job.started_at ? new Date(String(job.started_at)).getTime() : null;
+  const finished = job.finished_at ? new Date(String(job.finished_at)).getTime() : null;
+  const watchMs = Number(job.watch_duration_ms ?? metrics.watchDurationMs ?? 0);
+  const totalMs = started && finished ? finished - started : null;
+  const manualMs = watchMs;
+  const automationMs = totalMs != null ? Math.max(0, totalMs - manualMs) : null;
+  return {
+    jobId,
+    status: job.status,
+    siteDomain: job.site_domain,
+    pauseReason: job.pause_reason ?? metrics.pauseReason ?? null,
+    resumeReason: job.resume_reason ?? metrics.resumeReason ?? null,
+    watchDurationMs: watchMs || null,
+    manualTimeMs: manualMs || null,
+    automationTimeMs: automationMs,
+    autoResumed: Boolean(job.auto_resumed),
+    success: job.status === 'completed' || job.status === 'submitted' || job.status === 'verified',
+    failure: job.status === 'failed',
+    timeline: logs.map((l) => ({
+      at: l.created_at,
+      level: l.level,
+      message: l.message,
+      data: l.data,
+    })),
+  };
 }
 
 export async function cancelJob(workspaceId: string, jobId: string) {
@@ -618,14 +806,38 @@ export async function getStatistics(workspaceId: string) {
     failed: 0,
     blocked: 0,
     cancelled: 0,
+    watching: 0,
+    ready_to_continue: 0,
+    auto_resumed: 0,
+    completed_after_captcha: 0,
+    completed_after_login: 0,
   };
   let runtimeSum = 0;
   let runtimeN = 0;
-  let current: { website?: string; step?: string; browser?: string } = {};
+  let current: {
+    website?: string;
+    step?: string;
+    browser?: string;
+    queueProgress?: string;
+  } = {};
 
   for (const j of jobs) {
     const s = String(j.status);
-    if (['preparing', 'launching_browser', 'authenticating', 'navigating', 'analyzing_form', 'uploading_assets', 'filling_fields', 'validating', 'submitting', 'waiting_verification'].includes(s)) {
+    if (
+      [
+        'preparing',
+        'launching_browser',
+        'authenticating',
+        'navigating',
+        'analyzing_form',
+        'uploading_assets',
+        'filling_fields',
+        'validating',
+        'submitting',
+        'waiting_verification',
+        'submitted',
+      ].includes(s)
+    ) {
       counts.running++;
       if (!current.website) {
         current = {
@@ -637,10 +849,27 @@ export async function getStatistics(workspaceId: string) {
     } else if (s === 'queued' || s === 'retry_scheduled') counts.queued++;
     else if (s === 'paused' || s === 'awaiting_user' || s === 'ready_for_review') counts.paused++;
     else if (s === 'needs_approval') counts.needs_approval++;
-    else if (s === 'completed') counts.completed++;
-    else if (s === 'failed') counts.failed++;
+    else if (s === 'completed' || s === 'verified') {
+      counts.completed++;
+      const resume = String(j.resume_reason ?? '');
+      const pause = String(j.pause_reason ?? '');
+      if (pause === 'captcha' || resume.includes('captcha')) counts.completed_after_captcha++;
+      if (pause === 'login' || resume.includes('login')) counts.completed_after_login++;
+    } else if (s === 'failed') counts.failed++;
     else if (s.startsWith('blocked_')) counts.blocked++;
+    else if (s.startsWith('watching')) {
+      counts.watching++;
+      if (!current.website) {
+        current = {
+          website: String(j.site_domain ?? ''),
+          step: s,
+          browser: String(j.session_id ?? ''),
+        };
+      }
+    } else if (s === 'ready_to_continue') counts.ready_to_continue++;
     else if (s === 'cancelled') counts.cancelled++;
+
+    if (j.auto_resumed) counts.auto_resumed++;
 
     if (j.started_at && j.finished_at) {
       runtimeSum += new Date(String(j.finished_at)).getTime() - new Date(String(j.started_at)).getTime();
@@ -650,15 +879,32 @@ export async function getStatistics(workspaceId: string) {
 
   const done = counts.completed + counts.failed;
   const successRate = done > 0 ? Math.round((counts.completed / done) * 1000) / 10 : null;
+  const avgMs = runtimeN ? Math.round(runtimeSum / runtimeN) : 120_000;
+  current.queueProgress = `${counts.completed}/${counts.completed + counts.queued + counts.running + counts.watching}`;
 
   const day = new Date().toISOString().slice(0, 10);
   await getSupabaseAdmin().from('execution_statistics').upsert(
     {
       workspace_id: workspaceId,
       day,
-      ...counts,
+      running: counts.running,
+      queued: counts.queued,
+      paused: counts.paused,
+      needs_approval: counts.needs_approval,
+      completed: counts.completed,
+      failed: counts.failed,
+      blocked: counts.blocked,
+      cancelled: counts.cancelled,
+      watching: counts.watching,
+      auto_resumed: counts.auto_resumed,
+      completed_after_captcha: counts.completed_after_captcha,
+      completed_after_login: counts.completed_after_login,
       avg_runtime_ms: runtimeN ? Math.round(runtimeSum / runtimeN) : null,
       success_rate: successRate,
+      meta: {
+        ready_to_continue: counts.ready_to_continue,
+        current,
+      },
       updated_at: new Date().toISOString(),
     },
     { onConflict: 'workspace_id,day' }
@@ -668,7 +914,11 @@ export async function getStatistics(workspaceId: string) {
     ...counts,
     successRate,
     avgRuntimeMs: runtimeN ? Math.round(runtimeSum / runtimeN) : null,
-    etaSeconds: counts.queued * 120,
+    etaSeconds: Math.round((counts.queued + counts.watching) * (avgMs / 1000)),
+    estimatedFinishAt:
+      counts.queued + counts.watching > 0
+        ? new Date(Date.now() + (counts.queued + counts.watching) * avgMs).toISOString()
+        : null,
     current,
     metricsSource: 'live' as const,
   };

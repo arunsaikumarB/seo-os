@@ -24,7 +24,7 @@ export async function initSentry(opts: {
     mod.init({
       dsn: opts.dsn,
       environment: opts.environment ?? process.env.NODE_ENV ?? 'production',
-      release: opts.release ?? 'seo-os-api@1.2.4-enterprise',
+      release: opts.release ?? 'seo-os-api@1.2.5-bee-resume',
       tracesSampleRate: 0.05,
     });
     sentry = {

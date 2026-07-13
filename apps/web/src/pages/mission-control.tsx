@@ -52,10 +52,15 @@ type MissionSummary = {
     completed?: number;
     failed?: number;
     blocked?: number;
+    watching?: number;
+    auto_resumed?: number;
+    completed_after_captcha?: number;
+    completed_after_login?: number;
     successRate?: number | null;
     avgRuntimeMs?: number | null;
     etaSeconds?: number;
-    current?: { website?: string; step?: string };
+    estimatedFinishAt?: string | null;
+    current?: { website?: string; step?: string; browser?: string; queueProgress?: string };
   };
   imageIntelligence?: {
     generated?: number;
@@ -277,7 +282,7 @@ export function MissionControlPage() {
             <Activity className="h-4 w-4" /> Browser Execution
           </CardTitle>
           <CardDescription>
-            Running · Queued · Paused · Needs Approval · Blocked · Success rate · ETA
+            Running · Queued · Watching · Paused · Auto-resumed · Blocked · ETA
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 sm:grid-cols-4 text-sm">
@@ -288,9 +293,16 @@ export function MissionControlPage() {
             </p>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground">Paused / Needs approval</p>
+            <p className="text-xs text-muted-foreground">Watching / Paused</p>
             <p className="font-medium">
-              {data?.browserExecution?.paused ?? 0} / {data?.browserExecution?.needs_approval ?? 0}
+              {data?.browserExecution?.watching ?? 0} / {data?.browserExecution?.paused ?? 0}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Auto-resumed / After CAPTCHA</p>
+            <p className="font-medium">
+              {data?.browserExecution?.auto_resumed ?? 0} /{' '}
+              {data?.browserExecution?.completed_after_captcha ?? 0}
             </p>
           </div>
           <div>
@@ -299,19 +311,21 @@ export function MissionControlPage() {
               {data?.browserExecution?.blocked ?? 0} / {data?.browserExecution?.failed ?? 0}
             </p>
           </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Success · ETA</p>
-            <p className="font-medium">
-              {data?.browserExecution?.successRate != null
-                ? `${data.browserExecution.successRate}%`
-                : '—'}{' '}
-              · {Math.round((data?.browserExecution?.etaSeconds ?? 0) / 60)}m
-            </p>
-          </div>
           <div className="sm:col-span-4 flex justify-between items-center">
             <p className="text-xs text-muted-foreground">
               Current: {data?.browserExecution?.current?.website || '—'} ·{' '}
               {data?.browserExecution?.current?.step || 'idle'}
+              {data?.browserExecution?.current?.browser
+                ? ` · browser ${String(data.browserExecution.current.browser).slice(0, 8)}`
+                : ''}
+              {data?.browserExecution?.current?.queueProgress
+                ? ` · queue ${data.browserExecution.current.queueProgress}`
+                : ''}
+              {data?.browserExecution?.estimatedFinishAt
+                ? ` · ETA ${new Date(data.browserExecution.estimatedFinishAt).toLocaleTimeString()}`
+                : data?.browserExecution?.etaSeconds
+                  ? ` · ~${Math.round((data.browserExecution.etaSeconds ?? 0) / 60)}m`
+                  : ''}
             </p>
             <Button variant="outline" size="sm" asChild>
               <Link to={`/projects/${projectId}/backlink-builder/execution`}>Execution Center</Link>

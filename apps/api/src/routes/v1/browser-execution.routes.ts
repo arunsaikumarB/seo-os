@@ -7,6 +7,7 @@ import {
   approveJob,
   cancelJob,
   createExecution,
+  getExecutionReport,
   getJob,
   getOrCreatePolicy,
   getStatistics,
@@ -379,6 +380,16 @@ browserExecutionRouter.get(
     try {
       requireBee();
       const format = String(req.query.format ?? 'json');
+      const jobId = req.query.jobId ? String(req.query.jobId) : undefined;
+      if (jobId) {
+        const report = await getExecutionReport(param(req.params.projectId), jobId);
+        if (!report) {
+          res.status(404).json({ error: 'Job not found' });
+          return;
+        }
+        res.json({ data: report });
+        return;
+      }
       const stats = await getStatistics(param(req.params.projectId));
       const jobs = await listJobs(param(req.params.projectId));
       const history = await listHistory(param(req.params.projectId));
@@ -391,6 +402,10 @@ browserExecutionRouter.get(
           status: j.status,
           domain: j.site_domain,
           mode: j.mode,
+          pauseReason: j.pause_reason,
+          resumeReason: j.resume_reason,
+          watchDurationMs: j.watch_duration_ms,
+          autoResumed: j.auto_resumed,
           createdAt: j.created_at,
           finishedAt: j.finished_at,
         })),

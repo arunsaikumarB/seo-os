@@ -1,7 +1,7 @@
 # SEO OS — Browser Execution Engine (BEE)
 
-**Status:** Awaiting approval — **no implementation until approved**  
-**Baseline:** SEO OS v1.2.1 · Backlink Builder production-complete  
+**Status:** Implemented (v1.2.5-bee-resume — watchers + auto-resume)  
+**Baseline:** SEO OS v1.2.5 · Backlink Builder production-complete  
 **Module:** Browser Execution Engine (BEE)  
 **Nature:** Production browser **execution** framework (not a demo; not Browser Intelligence alone)  
 **Mandate:** Extend Backlink Builder + existing Playwright / V1.1 browser assistant. **Do not rebuild** completed BB functionality.

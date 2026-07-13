@@ -47,10 +47,15 @@ type BeeStats = {
   completed: number;
   failed: number;
   blocked: number;
+  watching?: number;
+  auto_resumed?: number;
+  completed_after_captcha?: number;
+  completed_after_login?: number;
   successRate: number | null;
   avgRuntimeMs: number | null;
   etaSeconds: number;
-  current?: { website?: string; step?: string; browser?: string };
+  estimatedFinishAt?: string | null;
+  current?: { website?: string; step?: string; browser?: string; queueProgress?: string };
 };
 
 const TABS = [
@@ -131,6 +136,11 @@ export function BrowserExecutionCenterPage() {
           retry_count: number;
           cooldown_seconds: number;
           require_approval_before_submit: boolean;
+          auto_resume?: boolean;
+          watch_interval_ms?: number;
+          max_watch_ms?: number;
+          session_reuse?: boolean;
+          queue_auto_continue?: boolean;
         };
       }>(`/v1/projects/${projectId}/browser/policies`),
     enabled: !!projectId && tab === 'policies',
@@ -192,6 +202,12 @@ export function BrowserExecutionCenterPage() {
       needs_approval: 'bg-amber-500/15 text-amber-700',
       blocked_captcha: 'bg-red-500/15 text-red-700',
       blocked_mfa: 'bg-red-500/15 text-red-700',
+      watching_captcha: 'bg-sky-500/15 text-sky-700',
+      watching_login: 'bg-sky-500/15 text-sky-700',
+      watching_mfa: 'bg-sky-500/15 text-sky-700',
+      watching_email: 'bg-sky-500/15 text-sky-700',
+      watching_phone: 'bg-sky-500/15 text-sky-700',
+      ready_to_continue: 'bg-emerald-500/15 text-emerald-700',
       completed: 'bg-emerald-500/15 text-emerald-700',
       failed: 'bg-red-500/15 text-red-700',
     };
@@ -205,7 +221,7 @@ export function BrowserExecutionCenterPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Execution Center</h1>
           <p className="text-muted-foreground">
             Browser Execution Engine — user-authorized Playwright workflows. CAPTCHA, MFA, and
-            email/phone verification always pause for you.
+            email/phone verification always pause; watchers auto-resume after you complete them.
           </p>
         </div>
         <Button variant="outline" size="sm" asChild>
@@ -236,7 +252,11 @@ export function BrowserExecutionCenterPage() {
               [
                 ['Running', s?.running],
                 ['Queued', s?.queued],
+                ['Watching', s?.watching],
                 ['Paused', s?.paused],
+                ['Auto-resumed', s?.auto_resumed],
+                ['After CAPTCHA', s?.completed_after_captcha],
+                ['After Login', s?.completed_after_login],
                 ['Needs Approval', s?.needs_approval],
                 ['Completed', s?.completed],
                 ['Failed', s?.failed],
@@ -500,7 +520,8 @@ export function BrowserExecutionCenterPage() {
               <Settings2 className="h-4 w-4" /> Execution policies
             </CardTitle>
             <CardDescription>
-              Default is Always Ask. Automatic Eligible never bypasses CAPTCHA/MFA/verification.
+              Default is Always Ask. Auto-resume watches for user-completed gates — never bypasses
+              CAPTCHA/MFA/verification.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -545,6 +566,48 @@ export function BrowserExecutionCenterPage() {
                 <Label htmlFor="retry">Retry count</Label>
                 <Input id="retry" type="number" defaultValue={policy.data.data.retry_count} />
               </div>
+              <div className="space-y-1">
+                <Label htmlFor="watch-interval">Watch interval (ms)</Label>
+                <Input
+                  id="watch-interval"
+                  type="number"
+                  defaultValue={policy.data.data.watch_interval_ms ?? 2000}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="max-watch">Max watch time (ms)</Label>
+                <Input
+                  id="max-watch"
+                  type="number"
+                  defaultValue={policy.data.data.max_watch_ms ?? 1800000}
+                />
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-4 text-sm">
+              <label className="flex items-center gap-2">
+                <input
+                  id="auto-resume"
+                  type="checkbox"
+                  defaultChecked={policy.data.data.auto_resume !== false}
+                />
+                Auto Resume
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  id="session-reuse"
+                  type="checkbox"
+                  defaultChecked={policy.data.data.session_reuse !== false}
+                />
+                Session Reuse
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  id="queue-continue"
+                  type="checkbox"
+                  defaultChecked={policy.data.data.queue_auto_continue !== false}
+                />
+                Queue Auto Continue
+              </label>
             </div>
             <Button
               onClick={() => {
@@ -558,6 +621,18 @@ export function BrowserExecutionCenterPage() {
                   ),
                   submission_speed: (document.getElementById('speed') as HTMLSelectElement).value,
                   retry_count: Number((document.getElementById('retry') as HTMLInputElement).value),
+                  watch_interval_ms: Number(
+                    (document.getElementById('watch-interval') as HTMLInputElement).value
+                  ),
+                  max_watch_ms: Number(
+                    (document.getElementById('max-watch') as HTMLInputElement).value
+                  ),
+                  auto_resume: (document.getElementById('auto-resume') as HTMLInputElement).checked,
+                  session_reuse: (document.getElementById('session-reuse') as HTMLInputElement)
+                    .checked,
+                  queue_auto_continue: (
+                    document.getElementById('queue-continue') as HTMLInputElement
+                  ).checked,
                   require_approval_before_submit: submission_policy !== 'automatic_eligible',
                 });
               }}

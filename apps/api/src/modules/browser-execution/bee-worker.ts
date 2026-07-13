@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   detectFormIntelligence,
   gateStatusFromBlocker,
+  isWatchableGate,
   type ExecutionGate,
 } from '@seo-os/backlink-builder';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
@@ -10,25 +11,23 @@ import {
   disposeSessionRuntime,
   getSessionRuntime,
 } from '../browser-execution/browser-runtime.service.js';
-import { appendLog, recordHistory } from '../browser-execution/bee.service.js';
+import { appendLog, recordHistory, mergeJobMetrics } from '../browser-execution/bee.service.js';
 import { enqueueJob, QUEUES } from '../../jobs/boss.js';
 import { DEFAULT_FEATURE_FLAGS } from '@seo-os/shared';
+import {
+  loadStorageStateFromSession,
+  persistSessionStorageState,
+} from './bee-session.js';
+import { enqueueGateWatch } from './bee-watchers.js';
 
-async function updateJob(
-  jobId: string,
-  patch: Record<string, unknown>
-) {
+async function updateJob(jobId: string, patch: Record<string, unknown>) {
   await getSupabaseAdmin()
     .from('execution_jobs')
     .update({ ...patch, updated_at: new Date().toISOString() })
     .eq('id', jobId);
 }
 
-async function updateStep(
-  jobId: string,
-  stepIndex: number,
-  patch: Record<string, unknown>
-) {
+async function updateStep(jobId: string, stepIndex: number, patch: Record<string, unknown>) {
   await getSupabaseAdmin()
     .from('execution_steps')
     .update({ ...patch, updated_at: new Date().toISOString() })
@@ -45,7 +44,6 @@ async function storeScreenshot(
 ) {
   if (!base64) return;
   const path = `browser-execution/${workspaceId}/${jobId}/${label}-${Date.now()}.jpg`;
-  // Prefer Storage when bucket exists; always persist meta row with inline ref fallback
   try {
     const buf = Buffer.from(base64, 'base64');
     const { error } = await getSupabaseAdmin().storage
@@ -96,10 +94,7 @@ async function learnSelectors(
         failure_count: Number(existing.failure_count ?? 0) + (ok ? 0 : 1),
         confidence: Math.min(
           99,
-          Math.max(
-            5,
-            Number(existing.confidence ?? 50) + (ok ? 5 : -8)
-          )
+          Math.max(5, Number(existing.confidence ?? 50) + (ok ? 5 : -8))
         ),
         last_verified_at: new Date().toISOString(),
         source: 'learned',
@@ -128,15 +123,81 @@ function speedDelayMs(speed: string): number {
   return 500;
 }
 
+async function pauseForGate(params: {
+  workspaceId: string;
+  jobId: string;
+  sessionId: string;
+  stepIndex: number;
+  stepId: string | null;
+  gate: NonNullable<ExecutionGate>;
+  screenshotBase64?: string;
+  context?: Record<string, unknown>;
+}): Promise<void> {
+  const { workspaceId, jobId, sessionId, stepIndex, stepId, gate } = params;
+  const gateStatus = gateStatusFromBlocker(gate) ?? 'needs_approval';
+
+  await updateStep(jobId, stepIndex, {
+    status: 'paused',
+    finished_at: new Date().toISOString(),
+  });
+  await updateJob(jobId, {
+    status: gateStatus,
+    pause_reason: gate,
+    current_step_index: stepIndex,
+  });
+  await mergeJobMetrics(workspaceId, jobId, {
+    pauseReason: gate,
+    pausedAt: new Date().toISOString(),
+    pauseContext: params.context ?? {},
+  });
+  await appendLog(workspaceId, jobId, 'warn', `Paused for ${gate} — user intervention required`, {
+    nonNegotiable: true,
+    note: 'Never bypassed — watcher will auto-resume after user completes this step',
+    ...params.context,
+  });
+
+  if (params.screenshotBase64) {
+    await storeScreenshot(workspaceId, jobId, stepId, `gate_${gate}`, params.screenshotBase64);
+  }
+
+  if (sessionId) {
+    await persistSessionStorageState(sessionId);
+    await getSupabaseAdmin()
+      .from('browser_sessions')
+      .update({ status: 'paused' })
+      .eq('id', sessionId);
+  }
+
+  const { data: policyRow } = await getSupabaseAdmin()
+    .from('execution_policies')
+    .select('auto_resume, watch_interval_ms')
+    .eq('workspace_id', workspaceId)
+    .maybeSingle();
+
+  if (isWatchableGate(gate) && policyRow?.auto_resume !== false) {
+    await enqueueGateWatch({
+      jobId,
+      workspaceId,
+      sessionId,
+      gate,
+      intervalMs: Number(policyRow?.watch_interval_ms ?? 2000),
+    });
+  }
+}
+
 export async function runBeeExecutionJob(data: {
   jobId: string;
   workspaceId: string;
   sessionId?: string;
   action?: string;
+  restoreStorage?: boolean;
 }): Promise<void> {
   const { jobId, workspaceId } = data;
   if (data.action === 'pause') {
-    if (data.sessionId) await disposeSessionRuntime(data.sessionId);
+    if (data.sessionId) {
+      await persistSessionStorageState(data.sessionId);
+      await disposeSessionRuntime(data.sessionId);
+    }
     return;
   }
 
@@ -147,7 +208,7 @@ export async function runBeeExecutionJob(data: {
     .eq('workspace_id', workspaceId)
     .single();
   if (!job) return;
-  if (['cancelled', 'completed'].includes(String(job.status))) return;
+  if (['cancelled', 'completed', 'verified'].includes(String(job.status))) return;
 
   const sessionId = String(data.sessionId ?? job.session_id ?? '');
   const runtime = getSessionRuntime(sessionId || jobId);
@@ -155,7 +216,10 @@ export async function runBeeExecutionJob(data: {
     mapping?: Record<string, unknown>;
     form?: ReturnType<typeof detectFormIntelligence>;
   };
-  const policy = (job.policy_snapshot ?? {}) as { submission_speed?: string };
+  const policy = (job.policy_snapshot ?? {}) as {
+    submission_speed?: string;
+    auto_resume?: boolean;
+  };
   const delay = speedDelayMs(String(policy.submission_speed ?? 'normal'));
 
   const { data: steps } = await getSupabaseAdmin()
@@ -177,7 +241,6 @@ export async function runBeeExecutionJob(data: {
       .eq('id', sessionId);
 
     if (!health.playwrightAvailable) {
-      // Controlled prepare/preview path without live browser: advance until first user gate
       await appendLog(
         workspaceId,
         jobId,
@@ -186,15 +249,46 @@ export async function runBeeExecutionJob(data: {
         { health }
       );
     } else {
-      await runtime.launch({
-        mode: DEFAULT_FEATURE_FLAGS.bee_headed_debug ? 'headed' : 'headless',
-      });
+      let alreadyOpen = false;
+      try {
+        await runtime.capture('resume_ping');
+        alreadyOpen = true;
+      } catch {
+        alreadyOpen = false;
+      }
+
+      if (!alreadyOpen) {
+        let storageState: unknown | null = null;
+        if (data.restoreStorage !== false && sessionId) {
+          const { data: sess } = await getSupabaseAdmin()
+            .from('browser_sessions')
+            .select('storage_state_enc')
+            .eq('id', sessionId)
+            .maybeSingle();
+          if (sess) storageState = await loadStorageStateFromSession(sess);
+        }
+        await runtime.launch({
+          mode: DEFAULT_FEATURE_FLAGS.bee_headed_debug ? 'headed' : 'headless',
+          storageState: storageState ?? undefined,
+        });
+        if (storageState) {
+          await appendLog(workspaceId, jobId, 'info', 'Browser launched with restored session storage', {
+            sessionReuse: true,
+          });
+        }
+      }
+
+      if (sessionId) {
+        await getSupabaseAdmin()
+          .from('browser_sessions')
+          .update({ status: 'running' })
+          .eq('id', sessionId);
+      }
     }
 
     for (const step of steps ?? []) {
       if (['done', 'skipped'].includes(String(step.status))) continue;
 
-      // Reload job status for pause/cancel
       const { data: live } = await getSupabaseAdmin()
         .from('execution_jobs')
         .select('status, approved_at')
@@ -202,6 +296,13 @@ export async function runBeeExecutionJob(data: {
         .single();
       if (!live || ['cancelled', 'paused'].includes(String(live.status))) {
         await appendLog(workspaceId, jobId, 'info', 'Execution halted', { status: live?.status });
+        return;
+      }
+      // Do not continue if still blocked/watching (another tick owns resume)
+      if (
+        String(live.status).startsWith('watching') ||
+        String(live.status).startsWith('blocked_')
+      ) {
         return;
       }
 
@@ -216,7 +317,7 @@ export async function runBeeExecutionJob(data: {
         current_step_index: step.step_index,
       });
 
-      // Gate: pause for user — never bypass
+      // Gate: pause for user — never bypass; start watcher for auto-resume
       if (blocker && blocker !== null) {
         if (blocker === 'human_approval' && live.approved_at) {
           await updateStep(jobId, step.step_index, {
@@ -225,21 +326,25 @@ export async function runBeeExecutionJob(data: {
           });
           continue;
         }
-        const gateStatus = gateStatusFromBlocker(blocker) ?? 'needs_approval';
-        await updateStep(jobId, step.step_index, {
-          status: 'paused',
-          finished_at: new Date().toISOString(),
-        });
-        await updateJob(jobId, { status: gateStatus });
-        await appendLog(workspaceId, jobId, 'warn', `Paused for ${blocker} — user intervention required`, {
-          nonNegotiable: true,
-        });
-        if (sessionId) {
-          await getSupabaseAdmin()
-            .from('browser_sessions')
-            .update({ status: 'paused' })
-            .eq('id', sessionId);
+        let shot: string | undefined;
+        if (health.playwrightAvailable) {
+          try {
+            const cap = await runtime.capture(`gate_${blocker}`);
+            shot = cap.screenshotBase64;
+          } catch {
+            // ignore
+          }
         }
+        await pauseForGate({
+          workspaceId,
+          jobId,
+          sessionId,
+          stepIndex: step.step_index,
+          stepId: step.id,
+          gate: blocker,
+          screenshotBase64: shot,
+          context: { stepAction: action },
+        });
         return;
       }
 
@@ -250,14 +355,24 @@ export async function runBeeExecutionJob(data: {
           const url = String(detail.url ?? '');
           if (url) {
             const cap = await runtime.navigate(url);
-            await storeScreenshot(workspaceId, jobId, step.id, String(detail.label ?? action), cap.screenshotBase64);
-            // If unexpected gates appear, pause
+            await storeScreenshot(
+              workspaceId,
+              jobId,
+              step.id,
+              String(detail.label ?? action),
+              cap.screenshotBase64
+            );
             for (const g of cap.detectedGates) {
-              if (g === 'captcha' || g === 'mfa' || g === 'email_verify' || g === 'phone_verify') {
-                await updateJob(jobId, { status: gateStatusFromBlocker(g) ?? 'paused' });
-                await updateStep(jobId, step.step_index, { status: 'paused' });
-                await appendLog(workspaceId, jobId, 'warn', `Detected ${g} during navigation — paused`, {
-                  url: cap.url,
+              if (g === 'captcha' || g === 'mfa' || g === 'email_verify' || g === 'phone_verify' || g === 'login') {
+                await pauseForGate({
+                  workspaceId,
+                  jobId,
+                  sessionId,
+                  stepIndex: step.step_index,
+                  stepId: step.id,
+                  gate: g,
+                  screenshotBase64: cap.screenshotBase64,
+                  context: { url: cap.url, during: action },
                 });
                 return;
               }
@@ -299,21 +414,49 @@ export async function runBeeExecutionJob(data: {
           for (const f of result.filled) {
             await learnSelectors(workspaceId, String(job.site_domain), f, `input[name="${f}"]`, true);
           }
-        } else if (action === 'upload_logo' || action === 'upload_images' || action === 'upload_videos') {
-          await appendLog(workspaceId, jobId, 'info', `${action} — asset injection queued for mapped files`, {
-            note: 'File paths resolved from asset library when available',
-          });
+        } else if (
+          action === 'upload_logo' ||
+          action === 'upload_images' ||
+          action === 'upload_videos'
+        ) {
+          await appendLog(
+            workspaceId,
+            jobId,
+            'info',
+            `${action} — asset injection queued for mapped files`,
+            { note: 'File paths resolved from asset library when available' }
+          );
         } else if (action === 'preview') {
           const cap = await runtime.capture('preview');
           await storeScreenshot(workspaceId, jobId, step.id, 'preview', cap.screenshotBase64);
           await updateJob(jobId, { status: 'ready_for_review' });
         } else if (action === 'submit') {
           if (!job.approved_at && job.mode !== 'automatic_eligible') {
-            await updateJob(jobId, { status: 'needs_approval' });
+            await updateJob(jobId, { status: 'needs_approval', pause_reason: 'human_approval' });
             await updateStep(jobId, step.step_index, { status: 'paused' });
             await appendLog(workspaceId, jobId, 'warn', 'Submit blocked — approval required');
             return;
           }
+
+          // After gate clearance: revalidate then submit
+          const validation = await runtime.revalidateBeforeSubmit(plan.mapping ?? {});
+          await appendLog(workspaceId, jobId, 'info', 'Pre-submit revalidation', validation);
+          if (!validation.ok) {
+            await updateJob(jobId, {
+              status: 'needs_approval',
+              pause_reason: 'validation_failed',
+            });
+            await updateStep(jobId, step.step_index, { status: 'paused' });
+            await appendLog(
+              workspaceId,
+              jobId,
+              'warn',
+              'Validation failed after gate — paused for user correction',
+              validation
+            );
+            return;
+          }
+
           const result = await runtime.attemptSubmit();
           await storeScreenshot(
             workspaceId,
@@ -323,14 +466,19 @@ export async function runBeeExecutionJob(data: {
             result.capture.screenshotBase64
           );
           if (result.gate) {
-            await updateJob(jobId, { status: gateStatusFromBlocker(result.gate) ?? 'paused' });
-            await updateStep(jobId, step.step_index, { status: 'paused' });
-            await appendLog(workspaceId, jobId, 'warn', `Submit paused — ${result.gate}`, {
-              nonNegotiable: true,
+            await pauseForGate({
+              workspaceId,
+              jobId,
+              sessionId,
+              stepIndex: step.step_index,
+              stepId: step.id,
+              gate: result.gate,
+              screenshotBase64: result.capture.screenshotBase64,
+              context: { during: 'submit' },
             });
             return;
           }
-          if (!result.submitted) {
+          if (result.validationFailed || !result.submitted) {
             await updateJob(jobId, {
               status: 'failed',
               error_code: 'SUBMIT_FAILED',
@@ -340,7 +488,7 @@ export async function runBeeExecutionJob(data: {
             await recordHistory(workspaceId, jobId, 'failed');
             return;
           }
-          // Dual-write tracking
+          await updateJob(jobId, { status: 'submitted' });
           if (job.opportunity_id) {
             await getSupabaseAdmin()
               .from('opportunities')
@@ -355,19 +503,41 @@ export async function runBeeExecutionJob(data: {
             opportunityId: job.opportunity_id,
             executionJobId: jobId,
           });
+          await updateJob(jobId, { status: 'verified' });
         } else if (action === 'login') {
-          // Login never auto-fills passwords from logs — pause for user/session
-          await updateJob(jobId, { status: 'needs_approval' });
-          await updateStep(jobId, step.step_index, { status: 'paused' });
-          await appendLog(workspaceId, jobId, 'warn', 'Login required — authenticate in session then Resume', {
-            nonNegotiable: true,
+          await pauseForGate({
+            workspaceId,
+            jobId,
+            sessionId,
+            stepIndex: step.step_index,
+            stepId: step.id,
+            gate: 'login',
+            context: { message: 'Authenticate in session — never auto-filled' },
           });
           return;
         }
       } else {
-        // No playwright: mark analytical steps done until a gate
-        if (['open', 'navigate', 'analyze_form', 'fill', 'select', 'screenshot', 'upload_logo', 'upload_images', 'upload_videos', 'preview'].includes(action)) {
-          await appendLog(workspaceId, jobId, 'info', `Prepared step ${action} (runtime deferred)`, detail);
+        if (
+          [
+            'open',
+            'navigate',
+            'analyze_form',
+            'fill',
+            'select',
+            'screenshot',
+            'upload_logo',
+            'upload_images',
+            'upload_videos',
+            'preview',
+          ].includes(action)
+        ) {
+          await appendLog(
+            workspaceId,
+            jobId,
+            'info',
+            `Prepared step ${action} (runtime deferred)`,
+            detail
+          );
         } else if (action === 'submit' || action === 'verify') {
           await updateJob(jobId, { status: 'needs_approval' });
           await updateStep(jobId, step.step_index, { status: 'paused' });
@@ -378,6 +548,19 @@ export async function runBeeExecutionJob(data: {
             'Runtime required for submit/verify — install Playwright and Resume after approval'
           );
           return;
+        } else if (action === 'login' || action === 'wait_approval') {
+          const gate = (blocker as ExecutionGate) ?? 'login';
+          if (gate && isWatchableGate(gate)) {
+            await pauseForGate({
+              workspaceId,
+              jobId,
+              sessionId,
+              stepIndex: step.step_index,
+              stepId: step.id,
+              gate,
+            });
+            return;
+          }
         }
       }
 
@@ -389,21 +572,34 @@ export async function runBeeExecutionJob(data: {
       await new Promise((r) => setTimeout(r, delay));
     }
 
+    if (sessionId) {
+      await persistSessionStorageState(sessionId);
+      await getSupabaseAdmin()
+        .from('browser_sessions')
+        .update({
+          status: 'closed',
+          closed_at: new Date().toISOString(),
+          // keep storage for reuse — do not wipe
+        })
+        .eq('id', sessionId);
+      // Keep runtime disposed but storage in DB for next job on same domain
+      await disposeSessionRuntime(sessionId);
+    }
+
     await updateJob(jobId, {
       status: 'completed',
       finished_at: new Date().toISOString(),
     });
-    if (sessionId) {
-      await getSupabaseAdmin()
-        .from('browser_sessions')
-        .update({ status: 'closed', closed_at: new Date().toISOString() })
-        .eq('id', sessionId);
-      await disposeSessionRuntime(sessionId);
-    }
-    await recordHistory(workspaceId, jobId, 'completed');
+    await recordHistory(workspaceId, jobId, 'completed', {
+      timing: {
+        watchDurationMs: job.watch_duration_ms,
+        pauseReason: job.pause_reason,
+        resumeReason: job.resume_reason,
+        autoResumed: job.auto_resumed,
+      },
+    });
     await appendLog(workspaceId, jobId, 'info', 'Execution completed');
 
-    // Learning worker enqueue
     if (DEFAULT_FEATURE_FLAGS.bee_learning) {
       await enqueueJob(QUEUES.LOW, 'bee_learning', {
         type: 'bee_learning',
@@ -411,6 +607,21 @@ export async function runBeeExecutionJob(data: {
         workspaceId,
       });
     }
+
+    // Queue continuation — next website
+    await enqueueJob(QUEUES.LOW, 'bee_queue', {
+      type: 'bee_queue',
+      workspaceId,
+      afterJobId: jobId,
+      batchId: job.queue_batch_id ?? null,
+      limit: 1,
+    });
+
+    await enqueueJob(QUEUES.LOW, 'bee_session_health', {
+      type: 'bee_session_health',
+      workspaceId,
+      sessionId,
+    });
   } catch (err) {
     logger.error({ err, jobId }, 'BEE execution failed');
     await updateJob(jobId, {
@@ -423,7 +634,10 @@ export async function runBeeExecutionJob(data: {
       error: err instanceof Error ? err.message : String(err),
     });
     await recordHistory(workspaceId, jobId, 'failed');
-    if (sessionId) await disposeSessionRuntime(sessionId);
+    if (sessionId) {
+      await persistSessionStorageState(sessionId).catch(() => undefined);
+      await disposeSessionRuntime(sessionId);
+    }
     throw err;
   }
 }
