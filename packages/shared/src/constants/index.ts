@@ -1,5 +1,5 @@
 export const APP_NAME = 'SEO OS';
-export const APP_TAGLINE = 'The AI Workforce for SEO Teams';
+export const APP_TAGLINE = 'AI Backlink Builder';
 
 export const API_VERSION = 'v1';
 

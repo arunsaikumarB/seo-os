@@ -492,13 +492,13 @@ export const DEMO_TIMELINE = [
 ];
 
 export const DEMO_CHAT_PROMPTS = [
-  'Analyze Chefgaa.',
-  'Find opportunities.',
-  'Create campaign.',
-  'Generate guest post.',
-  'Explain competitors.',
-  'Generate report.',
-  'Build outreach strategy.',
+  'Find high-value backlink opportunities',
+  'Prioritize my opportunity queue',
+  'Draft a guest post outreach email',
+  'Which prospects should I contact first?',
+  'Summarize imported websites',
+  'Build an outreach sequence',
+  'Check link verification status',
 ];
 
 export const DEMO_EXECUTIVE_METRICS = {

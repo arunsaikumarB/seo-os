@@ -16,7 +16,11 @@ import {
 } from '@seo-os/backlink-builder';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { getProjectById } from '../projects/project.service.js';
-import { listMemory } from '../memory/memory.service.js';
+import { listMemory, createMemoryEntry, createMemoryFact } from '../memory/memory.service.js';
+import { startBrowserIntelligenceScan, executeBrowserIntelligenceScan } from '../intelligence/browser-intelligence.service.js';
+import { uploadDocument } from '../knowledge/document.service.js';
+import { fireAndForget } from '../platform/event-bus.service.js';
+import { logger } from '../../lib/logger.js';
 
 async function getBrandContext(workspaceId: string, orgId?: string): Promise<BrandContext> {
   const project = orgId ? await getProjectById(workspaceId, orgId) : null;
@@ -324,6 +328,22 @@ export async function runAutomationPipeline(
       completed_at: new Date().toISOString(),
     });
 
+    // Background engines (Browser / Knowledge / Memory / Relationships / Campaign queue)
+    // continue to run after import analysis — not exposed as separate product modules.
+    fireAndForget(
+      triggerBackgroundEnginesAfterImport({
+        workspaceId,
+        importId,
+        orgId,
+        userId: _userId,
+        opportunitiesCreated,
+        domains: validRows
+          .map((r) => String(r.normalized_domain ?? ''))
+          .filter(Boolean)
+          .slice(0, 8),
+      })
+    );
+
     return {
       runId,
       importId,
@@ -349,6 +369,127 @@ function inferAssistedMode(type: string): string {
   if (type === 'forum') return 'forum';
   if (type === 'qa_site') return 'qa';
   return 'manual';
+}
+
+/**
+ * Keep supporting engines warm after import without surfacing them in the V1 UI.
+ */
+async function triggerBackgroundEnginesAfterImport(opts: {
+  workspaceId: string;
+  importId: string;
+  orgId?: string;
+  userId?: string;
+  opportunitiesCreated: number;
+  domains: string[];
+}) {
+  const { workspaceId, importId, userId, opportunitiesCreated, domains } = opts;
+  try {
+    if (userId) {
+      await createMemoryEntry(workspaceId, userId, {
+        tier: 'project',
+        content: `Imported and analyzed ${opportunitiesCreated} website(s) for backlink opportunities (import ${importId.slice(0, 8)}). Domains: ${domains.slice(0, 5).join(', ') || 'none'}.`,
+        metadata: { source: 'backlink_import', importId, opportunitiesCreated },
+      });
+      await createMemoryFact(workspaceId, {
+        factType: 'project',
+        content: `Latest import created ${opportunitiesCreated} backlink opportunities ready for outreach qualification.`,
+      });
+    }
+  } catch (err) {
+    logger.warn({ err, workspaceId, importId }, 'background memory write skipped');
+  }
+
+  try {
+    if (userId) {
+      const lines = [
+        `# Backlink import summary`,
+        ``,
+        `Import ID: ${importId}`,
+        `Opportunities created: ${opportunitiesCreated}`,
+        `Domains analyzed:`,
+        ...domains.map((d) => `- ${d}`),
+        ``,
+        `Generated automatically so the Knowledge Engine can support outreach and campaign drafting.`,
+      ].join('\n');
+      await uploadDocument(workspaceId, userId, {
+        title: `Import analysis ${new Date().toISOString().slice(0, 10)}`,
+        content: lines,
+        filename: `import-${importId.slice(0, 8)}.md`,
+        mimeType: 'text/plain',
+      });
+    }
+  } catch (err) {
+    logger.warn({ err, workspaceId, importId }, 'background knowledge upload skipped');
+  }
+
+  // Relationship Engine: seed organizations from imported opportunities
+  try {
+    const { data: opps } = await getSupabaseAdmin()
+      .from('opportunities')
+      .select('id, domain, website_name, url, score, country, language')
+      .eq('import_id', importId)
+      .eq('workspace_id', workspaceId);
+
+    for (const opp of opps ?? []) {
+      const domain = String(opp.domain ?? '');
+      if (!domain) continue;
+      const { data: existing } = await getSupabaseAdmin()
+        .from('relationship_organizations')
+        .select('id')
+        .eq('workspace_id', workspaceId)
+        .eq('domain', domain)
+        .maybeSingle();
+
+      let relOrgId = existing?.id as string | undefined;
+      if (!relOrgId) {
+        relOrgId = randomUUID();
+        await getSupabaseAdmin().from('relationship_organizations').insert({
+          id: relOrgId,
+          workspace_id: workspaceId,
+          company_name: String(opp.website_name ?? domain),
+          domain,
+          website: opp.url ?? `https://${domain}`,
+          country: opp.country ?? 'US',
+          language: opp.language ?? 'en',
+          relationship_score: Math.min(100, Math.round(Number(opp.score ?? 40))),
+          warmth: 'cold',
+          metadata: { source: 'backlink_import', opportunity_id: opp.id },
+        });
+      }
+
+      await getSupabaseAdmin().from('backlink_relationships').upsert(
+        {
+          workspace_id: workspaceId,
+          domain,
+          organization_id: relOrgId,
+          warmth: 'cold',
+          opportunity_count: 1,
+          notes: `Seeded from import ${importId.slice(0, 8)}`,
+        },
+        { onConflict: 'workspace_id,domain' }
+      );
+    }
+  } catch (err) {
+    logger.warn({ err, workspaceId, importId }, 'background relationship seed skipped');
+  }
+
+  // Browser Intelligence: queue light scans for a few top domains (Campaign Engine
+  // already receives opportunities via queue_status=pending_approval above).
+  if (userId) {
+    for (const domain of domains.slice(0, 3)) {
+      const targetUrl = domain.startsWith('http') ? domain : `https://${domain}`;
+      try {
+        const scan = await startBrowserIntelligenceScan(workspaceId, userId, targetUrl);
+        fireAndForget(
+          executeBrowserIntelligenceScan(String(scan.id), workspaceId, opts.orgId).then(() =>
+            logger.info({ workspaceId, domain, scanId: scan.id }, 'background browser scan finished')
+          )
+        );
+      } catch (err) {
+        logger.warn({ err, workspaceId, domain }, 'background browser scan skipped');
+      }
+    }
+  }
 }
 
 export async function getAutomationSummary(workspaceId: string) {
@@ -388,12 +529,14 @@ export async function getAutomationSummary(workspaceId: string) {
   const importedWebsites = (opps.data ?? []).filter((o) => o.import_id).length;
   const analyzed =
     (statusCounts.analyzed ?? 0) + (statusCounts.prepared ?? 0) + (statusCounts.qualified ?? 0);
+  const qualifiedOpportunities =
+    (statusCounts.qualified ?? 0) + (statusCounts.prepared ?? 0);
 
   return {
     importedWebsites,
     totalImports: imports.count ?? 0,
     analyzedWebsites: analyzed,
-    qualifiedOpportunities: statusCounts.qualified ?? 0,
+    qualifiedOpportunities,
     contentGenerated: statusCounts.prepared ?? 0,
     pendingApproval: statusCounts.prepared ?? 0,
     submitted: subCounts.submitted ?? 0,

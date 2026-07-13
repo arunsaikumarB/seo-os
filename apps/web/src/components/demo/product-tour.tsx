@@ -9,69 +9,49 @@ const TOUR_STEPS = [
   {
     title: 'Welcome to SEO OS',
     description:
-      'The AI workforce for SEO teams. Let us show you how AI transforms SEO operations.',
+      'Your AI Backlink Builder. One product flow from import to verified links.',
     path: null as string | null,
     orgPath: null as string | null,
   },
   {
     title: 'Mission Control',
     description:
-      'Your AI Operations Center — live workforce, campaigns, approvals, and system health at a glance.',
+      'Backlink KPIs only — imports, opportunities, outreach, replies, wins, and success rate.',
     path: 'mission-control',
     orgPath: null,
   },
   {
-    title: 'Knowledge Engine',
+    title: 'Backlink Builder',
     description:
-      'Upload brand docs and strategy. AI learns your business and grounds every decision.',
-    path: 'knowledge/library',
+      'Import websites, run AI analysis, manage the pipeline, campaigns, and verification in one place.',
+    path: 'backlink-builder',
     orgPath: null,
   },
   {
-    title: 'SEO Intelligence',
+    title: 'Import & AI Analysis',
     description:
-      'Website analysis, competitors, keywords, and scored opportunities — discovered automatically.',
-    path: 'intelligence/website',
+      'Paste website lists. Browser Intelligence, Knowledge, Memory, and Relationships run automatically in the background.',
+    path: 'backlink-builder/import',
     orgPath: null,
   },
   {
-    title: 'Campaign Engine',
+    title: 'Campaigns & Outreach',
     description:
-      'Turn opportunities into structured campaigns with AI planning and approval workflows.',
+      'Qualify opportunities, launch campaigns, and send outreach from the same Backlink Builder section.',
     path: 'campaigns',
     orgPath: null,
   },
   {
-    title: 'AI Command Center',
+    title: 'SEO AI Assistant',
     description:
-      'ChatGPT-like interface. Ask anything — analyze, create campaigns, generate content.',
+      'Ask for opportunity priorities, outreach drafts, and verification guidance — focused on backlinks.',
     path: 'command-center',
     orgPath: null,
   },
   {
-    title: 'Integrations & Technical SEO',
-    description:
-      'Connect Search Console, Analytics, Slack, and run technical site audits from one hub.',
-    path: 'integrations/hub',
-    orgPath: null,
-  },
-  {
-    title: 'Closed Beta Feedback',
-    description:
-      'Report bugs and ideas in Feedback Center. Your input shapes Version 1.0.',
-    path: null,
-    orgPath: '/org/feedback',
-  },
-  {
-    title: 'Executive Dashboard',
-    description: 'Organization-wide metrics, time saved, and productivity scores for leadership.',
-    path: null,
-    orgPath: '/org/executive',
-  },
-  {
     title: "You're Ready",
     description:
-      'Enable Demo Mode anytime for a fully interactive presentation. Press Ctrl+K for quick navigation. Visit Help for shortcuts.',
+      'Start with Import Websites. Press Ctrl+K anytime to jump. Visit Help if you get stuck.',
     path: null,
     orgPath: '/org/help',
   },

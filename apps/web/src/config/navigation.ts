@@ -2,30 +2,26 @@ import type { LucideIcon } from 'lucide-react';
 import type { FeatureFlag } from '@seo-os/shared';
 import {
   LayoutDashboard,
-  Bot,
-  BookOpen,
-  Brain,
-  Target,
-  FileText,
-  Mail,
-  Link2,
-  Wrench,
-  Users,
-  BarChart3,
-  FileBarChart,
   Settings,
   MessageSquare,
   UsersRound,
   Bell,
   Plug,
-  ScrollText,
+  BookOpen,
   Building2,
-  Globe,
-  Hash,
-  ListChecks,
-  ShieldCheck,
-  Workflow,
   FlaskConical,
+  ScrollText,
+  Link2,
+  Upload,
+  Search,
+  Sparkles,
+  ListChecks,
+  ListTree,
+  Target,
+  Mail,
+  Handshake,
+  CheckCircle2,
+  FileBarChart,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -38,18 +34,23 @@ export interface NavItem {
   featureFlag?: FeatureFlag;
 }
 
+/** Organization shell — auth/workspace intact; secondary modules trimmed. */
 export const orgNav: NavItem[] = [
   { label: 'Team', href: '/org/team', icon: UsersRound },
   { label: 'Settings', href: '/org/settings/general', icon: Settings },
   { label: 'Notifications', href: '/org/settings/notifications', icon: Bell },
-  { label: 'Executive', href: '/org/executive', icon: Building2 },
-  { label: 'Audit Log', href: '/org/audit-log', icon: ScrollText },
   { label: 'Integrations', href: '/org/integrations', icon: Plug, featureFlag: 'integrations' },
   { label: 'Help', href: '/org/help', icon: BookOpen },
   { label: 'Feedback', href: '/org/feedback', icon: MessageSquare, featureFlag: 'feedback_center' },
+  { label: 'Audit Log', href: '/org/audit-log', icon: ScrollText },
+  { label: 'Executive', href: '/org/executive', icon: Building2 },
   { label: 'Closed Beta', href: '/org/beta', icon: FlaskConical, featureFlag: 'closed_beta' },
 ];
 
+/**
+ * Flat project nav for command palette / breadcrumbs.
+ * Primary UX is workflowNavSections — keep this list aligned with Backlink Builder v1.
+ */
 export const projectNav: NavItem[] = [
   {
     label: 'Mission Control',
@@ -58,36 +59,35 @@ export const projectNav: NavItem[] = [
     featureFlag: 'mission_control',
   },
   {
-    label: 'Backlink Builder',
-    href: 'backlink-builder',
-    icon: Link2,
-    featureFlag: 'backlink_builder',
-    badge: 'Flagship',
-  },
-  {
-    label: 'AI Command Center',
+    label: 'SEO AI Assistant',
     href: 'command-center',
     icon: MessageSquare,
     featureFlag: 'ai_workforce',
   },
   {
-    label: 'AI Agents',
-    href: 'agents/catalog',
-    icon: Bot,
-    featureFlag: 'ai_workforce',
+    label: 'Dashboard',
+    href: 'backlink-builder',
+    icon: Link2,
+    featureFlag: 'backlink_builder',
   },
   {
-    label: 'Knowledge Base',
-    href: 'knowledge/library',
-    icon: BookOpen,
-    featureFlag: 'knowledge_base',
+    label: 'Import Websites',
+    href: 'backlink-builder/import',
+    icon: Upload,
+    featureFlag: 'backlink_builder',
   },
-  { label: 'AI Memory', href: 'memory/timeline', icon: Brain, featureFlag: 'ai_memory' },
-  { label: 'Website Analyzer', href: 'intelligence/website', icon: Globe },
-  { label: 'Competitors', href: 'competitors', icon: Users },
-  { label: 'Keywords', href: 'intelligence/keywords', icon: Hash },
-  { label: 'Prospects', href: 'prospects/pipeline', icon: Target, featureFlag: 'backlink_builder' },
-  { label: 'Campaigns', href: 'campaigns', icon: Link2, featureFlag: 'backlink_builder' },
+  {
+    label: 'Explorer',
+    href: 'backlink-builder/explorer',
+    icon: Search,
+    featureFlag: 'backlink_builder',
+  },
+  {
+    label: 'AI Analysis',
+    href: 'backlink-builder/automation',
+    icon: Sparkles,
+    featureFlag: 'backlink_builder',
+  },
   {
     label: 'Opportunity Queue',
     href: 'campaigns/queue',
@@ -95,32 +95,34 @@ export const projectNav: NavItem[] = [
     featureFlag: 'backlink_builder',
   },
   {
-    label: 'Approval Center',
-    href: 'campaigns/approvals',
-    icon: ShieldCheck,
+    label: 'Pipeline',
+    href: 'backlink-builder/pipeline',
+    icon: ListTree,
     featureFlag: 'backlink_builder',
   },
-  { label: 'Content Studio', href: 'content/library', icon: FileText },
-  { label: 'Outreach', href: 'outreach/inbox', icon: Mail, featureFlag: 'outreach' },
   {
-    label: 'Workflows',
-    href: 'workflows',
-    icon: Workflow,
-    featureFlag: 'workflows',
+    label: 'Campaigns',
+    href: 'campaigns',
+    icon: Target,
+    featureFlag: 'backlink_builder',
   },
   {
-    label: 'Technical SEO',
-    href: 'technical/overview',
-    icon: Wrench,
-    featureFlag: 'technical_seo',
+    label: 'Outreach',
+    href: 'outreach/inbox',
+    icon: Mail,
+    featureFlag: 'outreach',
   },
   {
-    label: 'Integrations',
-    href: 'integrations/hub',
-    icon: Plug,
-    featureFlag: 'integrations',
+    label: 'Relationships',
+    href: 'relationships',
+    icon: Handshake,
   },
-  { label: 'Analytics', href: 'analytics/overview', icon: BarChart3, featureFlag: 'analytics' },
+  {
+    label: 'Link Verification',
+    href: 'backlink-builder/pending',
+    icon: CheckCircle2,
+    featureFlag: 'backlink_builder',
+  },
   {
     label: 'Reports',
     href: 'reports/library',
@@ -132,8 +134,8 @@ export const projectNav: NavItem[] = [
 
 export const mobileNavItems = (projectId: string): NavItem[] => [
   { label: 'Home', href: `/projects/${projectId}/mission-control`, icon: LayoutDashboard },
+  { label: 'Builder', href: `/projects/${projectId}/backlink-builder`, icon: Link2 },
   { label: 'Projects', href: '/projects', icon: Building2 },
-  { label: 'Search', href: `/projects/${projectId}/search`, icon: MessageSquare },
-  { label: 'Team', href: '/org/team', icon: UsersRound },
+  { label: 'Assistant', href: `/projects/${projectId}/command-center`, icon: MessageSquare },
   { label: 'Settings', href: `/projects/${projectId}/settings/general`, icon: Settings },
 ];

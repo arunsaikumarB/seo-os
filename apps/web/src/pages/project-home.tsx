@@ -2,13 +2,13 @@ import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import {
-  Globe,
   BookOpen,
   Link2,
   Mail,
   Search,
   Sparkles,
   ArrowRight,
+  Upload,
 } from 'lucide-react';
 import { useApi } from '@/hooks/use-api';
 import { useAppStore } from '@/stores/app-store';
@@ -20,12 +20,12 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 
 const QUICK_ACTIONS = [
-  { label: 'Analyze Website', href: 'intelligence/browser', icon: Globe },
-  { label: 'Knowledge Base', href: 'knowledge/library', icon: BookOpen },
+  { label: 'Import Websites', href: 'backlink-builder/import', icon: Upload },
   { label: 'Backlink Builder', href: 'backlink-builder', icon: Link2 },
+  { label: 'Opportunity Queue', href: 'campaigns/queue', icon: Search },
   { label: 'Outreach', href: 'outreach/inbox', icon: Mail },
-  { label: 'SEO Audit', href: 'backlink-builder/audit', icon: Search },
-  { label: 'AI Chat', href: 'command-center', icon: Sparkles },
+  { label: 'SEO AI Assistant', href: 'command-center', icon: Sparkles },
+  { label: 'Reports', href: 'reports/library', icon: BookOpen },
 ];
 
 export function ProjectHomePage() {

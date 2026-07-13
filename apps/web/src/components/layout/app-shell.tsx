@@ -6,7 +6,6 @@ import { MobileNav } from './mobile-nav';
 import { CommandPalette } from './command-palette';
 import { Breadcrumbs } from './breadcrumbs';
 import { useBreadcrumbs } from '@/hooks/use-breadcrumbs';
-import { WorkflowRoadmap } from '@/components/workflow/workflow-roadmap';
 import { HelpDrawer } from '@/components/workflow/help-drawer';
 import { AiCoachPanel } from '@/components/workflow/ai-coach-panel';
 import { LearningModeBanner } from '@/components/workflow/learning-mode-banner';
@@ -21,7 +20,6 @@ interface AppShellProps {
 
 export function AppShell({ projectId }: AppShellProps) {
   const breadcrumbs = useBreadcrumbs(projectId);
-  const expertMode = useAppStore((s) => s.expertMode);
   const setCurrentProjectId = useAppStore((s) => s.setCurrentProjectId);
 
   useEffect(() => {
@@ -43,11 +41,6 @@ export function AppShell({ projectId }: AppShellProps) {
         <BetaAnnouncementBar />
         <Topbar projectId={projectId} showProjectSwitcher />
         <LearningModeBanner projectId={projectId} />
-        {!expertMode && (
-          <div className="border-b px-4 py-2 md:px-6">
-            <WorkflowRoadmap projectId={projectId} compact />
-          </div>
-        )}
         <div className="flex items-center justify-between gap-3 border-b px-4 py-2 md:px-6">
           <Breadcrumbs items={breadcrumbs} className="min-w-0 flex-1" />
           <div className="flex shrink-0 items-center gap-2">

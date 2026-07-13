@@ -71,7 +71,7 @@ export function CommandCenterPage() {
           id: 'welcome',
           role: 'assistant',
           content:
-            'Welcome to SEO OS Command Center. I have full context on Chefgaa — competitors, keywords, and 12 pending opportunities. Try: "Analyze Chefgaa" or "Find opportunities."',
+            'Welcome to the SEO AI Assistant. I help with backlink discovery, outreach, and verification. Try: "Find high-value backlink opportunities" or "Draft a guest post outreach email."',
           agent_type: 'seo_strategist',
         },
       ]);
@@ -122,18 +122,32 @@ export function CommandCenterPage() {
     queryClient.invalidateQueries({ queryKey: ['chat-messages', projectId, conversationId] });
   }
 
-  const promptList = isDemoMode ? DEMO_CHAT_PROMPTS : (prompts.data?.data ?? []);
+  const BACKLINK_PROMPTS = [
+    'Find high-value backlink opportunities',
+    'Prioritize my opportunity queue',
+    'Draft a guest post outreach email',
+    'Which prospects should I contact first?',
+    'Summarize imported websites',
+    'Build an outreach sequence',
+    'Check link verification status',
+  ];
+
+  const promptList = isDemoMode
+    ? DEMO_CHAT_PROMPTS
+    : prompts.data?.data?.length
+      ? prompts.data.data
+      : BACKLINK_PROMPTS;
   const allMessages = isDemoMode ? localMessages : (messages.data?.data ?? localMessages);
 
   return (
     <PageTransition className="flex h-[calc(100vh-12rem)] flex-col gap-4">
       <div>
         <div className="flex items-center gap-2">
-          <h1 className="text-2xl font-semibold tracking-tight">AI Command Center</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">SEO AI Assistant</h1>
           {isDemoMode && <Badge className="text-[10px]">Streaming Demo</Badge>}
         </div>
         <p className="text-muted-foreground">
-          ChatGPT-like interface with RAG, memory, and agent delegation
+          Backlink-focused AI help — opportunities, outreach drafts, and verification guidance
         </p>
       </div>
 

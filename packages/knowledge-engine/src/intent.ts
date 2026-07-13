@@ -32,10 +32,11 @@ export function classifyIntent(message: string): IntentMatch | null {
 }
 
 export const SUGGESTED_PROMPTS = [
-  'Summarize our uploaded knowledge base documents',
-  'What are our target keywords and how should we prioritize them?',
-  'Create an SEO strategy outline for this project',
-  '@ceo What should we focus on this quarter?',
-  'What does our brand voice guidelines say?',
-  '@research_manager What should we research next?',
+  'Find high-value backlink opportunities',
+  'Prioritize my opportunity queue',
+  'Draft a guest post outreach email',
+  'Which prospects should I contact first?',
+  'Summarize imported websites',
+  'Build an outreach sequence',
+  'Check link verification status',
 ];

@@ -13,15 +13,14 @@ import {
   Sparkles,
   Search,
   GitBranch,
-  Trophy,
   ShieldCheck,
   ArrowRight,
   Users,
   Target,
-  Bot,
+  Mail,
   BarChart3,
-  XCircle,
   Upload,
+  Bot,
 } from 'lucide-react';
 import type { BacklinkSummary } from './types';
 
@@ -163,21 +162,19 @@ export function BacklinkBuilderWidget({ summary, projectId, compact }: BacklinkB
 
 export function BacklinkBuilderNav() {
   const { projectId = '' } = useParams();
-  const base = `/projects/${projectId}/backlink-builder`;
+  const base = `/projects/${projectId}`;
   const links = [
-    { href: base, label: 'Dashboard', icon: Link2 },
-    { href: `${base}/import`, label: 'Import', icon: Upload },
-    { href: `${base}/automation`, label: 'Automation', icon: Bot },
-    { href: `${base}/explorer`, label: 'Explorer', icon: Search },
-    { href: `${base}/pipeline`, label: 'Pipeline', icon: GitBranch },
-    { href: `${base}/recommendations`, label: 'AI Recs', icon: Sparkles },
-    { href: `${base}/relationships`, label: 'Relationships', icon: Users },
-    { href: `/projects/${projectId}/relationships`, label: 'Intel Hub', icon: Users },
+    { href: `${base}/backlink-builder`, label: 'Dashboard', icon: Link2 },
+    { href: `${base}/backlink-builder/import`, label: 'Import', icon: Upload },
+    { href: `${base}/backlink-builder/explorer`, label: 'Explorer', icon: Search },
+    { href: `${base}/backlink-builder/automation`, label: 'AI Analysis', icon: Sparkles },
+    { href: `${base}/campaigns/queue`, label: 'Queue', icon: Target },
+    { href: `${base}/backlink-builder/pipeline`, label: 'Pipeline', icon: GitBranch },
     { href: `${base}/campaigns`, label: 'Campaigns', icon: Target },
-    { href: `${base}/won`, label: 'Won', icon: Trophy },
-    { href: `${base}/pending`, label: 'Link Verification', icon: ShieldCheck },
-    { href: `${base}/lost`, label: 'Lost', icon: XCircle },
-    { href: `${base}/audit`, label: 'Audit', icon: BarChart3 },
+    { href: `${base}/outreach/inbox`, label: 'Outreach', icon: Mail },
+    { href: `${base}/relationships`, label: 'Relationships', icon: Users },
+    { href: `${base}/backlink-builder/pending`, label: 'Verification', icon: ShieldCheck },
+    { href: `${base}/reports/library`, label: 'Reports', icon: BarChart3 },
   ];
 
   return (
