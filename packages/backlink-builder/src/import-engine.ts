@@ -111,6 +111,63 @@ export function extractUrlsFromSheetRows(rows: unknown[][]): string[] {
   return urls;
 }
 
+export interface RichImportRow {
+  url: string;
+  keywords?: string;
+  description?: string;
+  anchorText?: string;
+  targetPage?: string;
+  businessInfo?: string;
+  notes?: string;
+  images?: string;
+  videos?: string;
+}
+
+const RICH_HEADERS: Record<keyof Omit<RichImportRow, 'url'>, RegExp> = {
+  keywords: /^(keywords?|kw)$/i,
+  description: /^(descriptions?|desc|about)$/i,
+  anchorText: /^(anchors?|anchor_?text)$/i,
+  targetPage: /^(targets?|target_?(page|url)|landing)$/i,
+  businessInfo: /^(business|company|nap)$/i,
+  notes: /^(notes?|comments?)$/i,
+  images: /^(images?|image_?url)$/i,
+  videos: /^(videos?|video_?url)$/i,
+};
+
+/** Parse CSV/TSV into rich import rows for V1.1 Excel import */
+export function extractRichImportRows(text: string): RichImportRow[] {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim());
+  if (!lines.length) return [];
+  const delim = lines[0].includes('\t') ? '\t' : lines[0].includes(';') ? ';' : ',';
+  const header = lines[0].split(delim).map((c) => c.trim().replace(/^["']|["']$/g, ''));
+  const urlIdx = header.findIndex((h) => URL_HEADER.test(h));
+  const idx = (re: RegExp) => header.findIndex((h) => re.test(h));
+  const map = {
+    keywords: idx(RICH_HEADERS.keywords),
+    description: idx(RICH_HEADERS.description),
+    anchorText: idx(RICH_HEADERS.anchorText),
+    targetPage: idx(RICH_HEADERS.targetPage),
+    businessInfo: idx(RICH_HEADERS.businessInfo),
+    notes: idx(RICH_HEADERS.notes),
+    images: idx(RICH_HEADERS.images),
+    videos: idx(RICH_HEADERS.videos),
+  };
+  const start = urlIdx >= 0 ? 1 : 0;
+  const uCol = urlIdx >= 0 ? urlIdx : 0;
+  const out: RichImportRow[] = [];
+  for (let i = start; i < lines.length; i++) {
+    const cells = lines[i].split(delim).map((c) => c.trim().replace(/^["']|["']$/g, ''));
+    const url = cells[uCol];
+    if (!url) continue;
+    const row: RichImportRow = { url };
+    for (const [key, col] of Object.entries(map) as Array<[keyof typeof map, number]>) {
+      if (col >= 0 && cells[col]) row[key] = cells[col];
+    }
+    out.push(row);
+  }
+  return out;
+}
+
 export function deduplicateAndValidate(urls: string[]): {
   rows: ParsedImportRow[];
   stats: ImportStats;

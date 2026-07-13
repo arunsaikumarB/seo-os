@@ -6,6 +6,7 @@ import { TelemetryCollector } from './telemetry.js';
 import { PromptTemplateStore } from './prompt-templates.js';
 import { DEFAULT_AI_CONFIG } from './config.js';
 import { registerSprint2Agents } from './agents/sprint2-stubs.js';
+import { registerV11WorkforceAgents } from './agents/v11-workforce.js';
 import { createProviderRegistry } from '@seo-os/providers';
 import type { ProviderRegistryConfig } from '@seo-os/providers';
 
@@ -22,6 +23,7 @@ export interface AIRuntime {
 export function createAIRuntime(providerConfig: ProviderRegistryConfig): AIRuntime {
   const registry = new AgentRegistry();
   registerSprint2Agents((type, handler) => registry.register(type, handler));
+  registerV11WorkforceAgents((type, handler) => registry.register(type, handler));
 
   const providers = createProviderRegistry(providerConfig);
   const events = new AIEventBus();

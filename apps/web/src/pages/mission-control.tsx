@@ -31,7 +31,15 @@ type MissionSummary = {
   backlinkBuilder?: BacklinkSummary;
   automation?: AutomationSummary;
   relationshipIntelligence?: { relationshipHealth?: number; avgHealth?: number };
-  workforce?: { recentRuns?: Array<{ id: string; agent_type?: string; status: string; created_at: string }> };
+  workforce?: {
+    recentRuns?: Array<{ id: string; agent_type?: string; status: string; created_at: string }>;
+    strip?: {
+      currentAgent?: string | null;
+      queue?: number;
+      progress?: number;
+      completedJobs?: unknown[];
+    };
+  };
   campaigns?: { timeline?: Array<{ title: string; event_type: string; created_at: string }> };
 };
 
@@ -208,6 +216,35 @@ export function MissionControlPage() {
           ))}
         </StaggerGrid>
       )}
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Activity className="h-4 w-4" /> AI Workforce
+          </CardTitle>
+          <CardDescription>Current agent, queue depth, errors, and completed jobs</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 sm:grid-cols-4 text-sm">
+          <div>
+            <p className="text-xs text-muted-foreground">Current agent</p>
+            <p className="font-medium">{data?.workforce?.strip?.currentAgent ?? 'Idle'}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Queue</p>
+            <p className="font-medium">{data?.workforce?.strip?.queue ?? 0}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Progress</p>
+            <p className="font-medium">{data?.workforce?.strip?.progress ?? 0}%</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Completed (recent)</p>
+            <p className="font-medium">
+              {data?.workforce?.strip?.completedJobs?.length ?? 0}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="pb-2">

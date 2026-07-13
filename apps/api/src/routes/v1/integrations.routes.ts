@@ -221,3 +221,27 @@ integrationsRouter.post(
     }
   }
 );
+
+integrationsRouter.get(
+  '/oauth/:provider/start',
+  authMiddleware,
+  requireRole('admin'),
+  async (req, res, next) => {
+    try {
+      const provider = param(req.params.provider);
+      if (provider !== 'google' && provider !== 'microsoft') {
+        throw new AppError(400, 'VALIDATION_ERROR', 'provider must be google or microsoft');
+      }
+      const { buildOAuthStartUrl } = await import('../../modules/integrations/oauth.service.js');
+      const { userId, orgId } = (req as AuthenticatedRequest).auth;
+      const result = buildOAuthStartUrl(provider, {
+        workspaceId: param(req.params.projectId),
+        userId,
+        orgId,
+      });
+      res.json({ data: result });
+    } catch (err) {
+      next(err);
+    }
+  }
+);

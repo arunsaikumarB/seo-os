@@ -423,3 +423,59 @@ intelligenceRouter.patch(
     }
   }
 );
+
+// V1.1 Browser Assistant plans (also under backlink-builder)
+intelligenceRouter.post(
+  '/browser/plans',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const { createBrowserPlan } = await import('../../modules/backlinks/v11.service.js');
+      const body = z.object({ opportunityId: z.string().uuid() }).parse(req.body);
+      const { orgId } = (req as AuthenticatedRequest).auth;
+      res.status(201).json({
+        data: await createBrowserPlan(param(req.params.projectId), body.opportunityId, orgId),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+intelligenceRouter.get(
+  '/browser/plans/:planId',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const { getBrowserPlan } = await import('../../modules/backlinks/v11.service.js');
+      const plan = await getBrowserPlan(param(req.params.projectId), param(req.params.planId));
+      if (!plan) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Plan not found');
+      res.json({ data: plan });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+intelligenceRouter.post(
+  '/browser/plans/:planId/assist',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const { startBrowserAssist } = await import('../../modules/backlinks/v11.service.js');
+      const { DEFAULT_FEATURE_FLAGS } = await import('@seo-os/shared');
+      res.json({
+        data: await startBrowserAssist(
+          param(req.params.projectId),
+          param(req.params.planId),
+          DEFAULT_FEATURE_FLAGS.v11_browser_assist_fill
+        ),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);

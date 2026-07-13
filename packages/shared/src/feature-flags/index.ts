@@ -14,11 +14,21 @@ export const FEATURE_FLAGS = [
   'feedback_center',
   'marketplace',
   'white_label',
+  'v11_submission_assistant',
+  'v11_submission_queue',
+  'v11_browser_assistant',
+  'v11_browser_assist_fill',
+  'v11_oauth_email',
+  'v11_content_studio_v2',
+  'v11_media_studios',
+  'v11_keyword_intel',
+  'v11_recommendations',
+  'v11_ai_workforce_v2',
 ] as const;
 
 export type FeatureFlag = (typeof FEATURE_FLAGS)[number];
 
-/** Defaults — closed beta program enabled for v0.99.5 */
+/** Defaults — closed beta program enabled for v0.99.5; V1.1 flags on for production rollout */
 export const DEFAULT_FEATURE_FLAGS: Record<FeatureFlag, boolean> = {
   ai_workforce: true,
   mission_control: true,
@@ -35,6 +45,16 @@ export const DEFAULT_FEATURE_FLAGS: Record<FeatureFlag, boolean> = {
   feedback_center: true,
   marketplace: false,
   white_label: true,
+  v11_submission_assistant: true,
+  v11_submission_queue: true,
+  v11_browser_assistant: true,
+  v11_browser_assist_fill: false,
+  v11_oauth_email: true,
+  v11_content_studio_v2: true,
+  v11_media_studios: true,
+  v11_keyword_intel: true,
+  v11_recommendations: true,
+  v11_ai_workforce_v2: true,
 };
 
 export type AIEventType =

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,18 +9,36 @@ import { toast } from 'sonner';
 import { BacklinkBuilderHero } from '@/components/backlink-builder/backlink-builder-widget';
 import type { BacklinkRecord } from '@/components/backlink-builder/types';
 import { formatType } from '@/components/backlink-builder/types';
-import { Clock, CheckCircle, RefreshCw } from 'lucide-react';
+import { Clock, CheckCircle, RefreshCw, History } from 'lucide-react';
+
+type CheckRow = {
+  id: string;
+  outcome?: string;
+  http_status?: number;
+  created_at: string;
+  details?: Record<string, unknown>;
+};
 
 export function BacklinkPendingPage() {
   const { projectId = '' } = useParams();
   const { request } = useApi();
   const queryClient = useQueryClient();
+  const [historyId, setHistoryId] = useState<string | null>(null);
 
   const pending = useQuery({
     queryKey: ['backlink-pending', projectId],
     queryFn: () =>
       request<{ data: BacklinkRecord[] }>(`/v1/projects/${projectId}/backlink-builder/pending`),
     enabled: !!projectId,
+  });
+
+  const checks = useQuery({
+    queryKey: ['backlink-checks', projectId, historyId],
+    queryFn: () =>
+      request<{ data: CheckRow[] }>(
+        `/v1/projects/${projectId}/backlink-builder/backlinks/${historyId}/checks`
+      ),
+    enabled: !!projectId && !!historyId,
   });
 
   const verifyManual = useMutation({
@@ -45,6 +64,7 @@ export function BacklinkPendingPage() {
       toast.success(`HTTP check: ${res.data.outcome}`);
       queryClient.invalidateQueries({ queryKey: ['backlink-pending', projectId] });
       queryClient.invalidateQueries({ queryKey: ['backlink-summary', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['backlink-checks', projectId] });
     },
     onError: (err: Error) => toast.error(err.message || 'Verification failed'),
   });
@@ -53,7 +73,7 @@ export function BacklinkPendingPage() {
     <div className="space-y-6">
       <BacklinkBuilderHero
         title="Verification"
-        subtitle="Real HTTP fetch of the source URL — checks status, target presence, anchor match, and nofollow heuristics."
+        subtitle="Real HTTP fetch of the source URL — checks status, target presence, anchor match, and nofollow heuristics. Loss events notify via platform notifications."
       />
 
       <Card>
@@ -95,6 +115,13 @@ export function BacklinkPendingPage() {
                   <Button
                     size="sm"
                     variant="ghost"
+                    onClick={() => setHistoryId(historyId === bl.id ? null : bl.id)}
+                  >
+                    <History className="h-3 w-3 mr-1" /> History
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
                     disabled={verifyManual.isPending}
                     onClick={() => verifyManual.mutate({ id: bl.id, status: 'lost' })}
                   >
@@ -102,6 +129,22 @@ export function BacklinkPendingPage() {
                   </Button>
                 </div>
               </CardContent>
+              {historyId === bl.id && (
+                <CardContent className="pt-0 pb-4 space-y-1">
+                  {checks.isLoading ? (
+                    <p className="text-xs text-muted-foreground">Loading checks…</p>
+                  ) : (checks.data?.data ?? []).length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No check history yet.</p>
+                  ) : (
+                    (checks.data?.data ?? []).map((c) => (
+                      <p key={c.id} className="text-xs text-muted-foreground">
+                        {new Date(c.created_at).toLocaleString()} — {c.outcome ?? 'check'}
+                        {c.http_status != null ? ` (HTTP ${c.http_status})` : ''}
+                      </p>
+                    ))
+                  )}
+                </CardContent>
+              )}
             </Card>
           ))}
           {(pending.data?.data ?? []).length === 0 && (

@@ -446,4 +446,24 @@ projectScopeRouter.use('/reports', reportsRouter);
 projectScopeRouter.use('/technical-seo', technicalSeoRouter);
 projectScopeRouter.use('/integrations', integrationsRouter);
 
+v1Router.get('/integrations/oauth/:provider/callback', async (req, res, next) => {
+  try {
+    const provider = param(req.params.provider);
+    if (provider !== 'google' && provider !== 'microsoft') {
+      throw new AppError(400, 'VALIDATION_ERROR', 'Invalid provider');
+    }
+    const code = typeof req.query.code === 'string' ? req.query.code : '';
+    const state = typeof req.query.state === 'string' ? req.query.state : '';
+    if (!code || !state) throw new AppError(400, 'VALIDATION_ERROR', 'Missing code/state');
+    const { handleOAuthCallback } = await import('../../modules/integrations/oauth.service.js');
+    const result = await handleOAuthCallback(provider, code, state);
+    const webOrigin = process.env.CORS_ORIGIN?.split(',')[0] ?? 'http://localhost:5173';
+    res.redirect(
+      `${webOrigin}/projects/${result.connection.workspace_id}/integrations/hub?oauth=${provider}&status=connected`
+    );
+  } catch (err) {
+    next(err);
+  }
+});
+
 v1Router.use('/projects/:projectId', projectScopeRouter);

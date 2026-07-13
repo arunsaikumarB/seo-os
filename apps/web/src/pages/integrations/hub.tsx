@@ -280,21 +280,32 @@ export function IntegrationsHubPage({ projectIdOverride }: { projectIdOverride?:
                   size="sm"
                   disabled={
                     connectedKeys.has(p.key) ||
-                    connect.isPending ||
-                    p.key === 'gmail' ||
-                    p.key === 'outlook'
+                    connect.isPending
                   }
-                  title={
-                    p.key === 'gmail' || p.key === 'outlook'
-                      ? 'OAuth credentials required (V1.1)'
-                      : undefined
-                  }
-                  onClick={() => connect.mutate(p.key)}
+                  onClick={async () => {
+                    if (p.key === 'gmail' || p.key === 'outlook') {
+                      try {
+                        const provider = p.key === 'gmail' ? 'google' : 'microsoft';
+                        const res = await request<{ data: { url: string } }>(
+                          `/v1/projects/${projectId}/integrations/oauth/${provider}/start`
+                        );
+                        window.location.href = res.data.url;
+                      } catch (err) {
+                        toast.error(
+                          err instanceof Error
+                            ? err.message
+                            : 'OAuth credentials required (configure env)'
+                        );
+                      }
+                      return;
+                    }
+                    connect.mutate(p.key);
+                  }}
                 >
                   {connectedKeys.has(p.key)
                     ? 'Connected'
                     : p.key === 'gmail' || p.key === 'outlook'
-                      ? 'V1.1 OAuth'
+                      ? 'Connect OAuth'
                       : 'Connect'}
                 </Button>
               </div>

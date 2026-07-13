@@ -19,6 +19,7 @@ import {
   type BrandContext,
   type ContentDraftType,
   type ImportSourceType,
+  type RichImportRow,
   type TrackingStatus,
 } from '@seo-os/backlink-builder';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
@@ -94,10 +95,16 @@ export async function createImport(
   workspaceId: string,
   sourceType: ImportSourceType,
   urls: string[],
-  opts: { fileName?: string; userId?: string } = {}
+  opts: { fileName?: string; userId?: string; richRows?: RichImportRow[] } = {}
 ) {
   const { rows, stats } = deduplicateAndValidate(urls);
   const importId = randomUUID();
+
+  const richByUrl = new Map<string, RichImportRow>();
+  for (const r of opts.richRows ?? []) {
+    const key = r.url.trim().toLowerCase();
+    if (key) richByUrl.set(key, r);
+  }
 
   await getSupabaseAdmin()
     .from('backlink_imports')
@@ -112,6 +119,25 @@ export async function createImport(
       duplicate_rows: stats.duplicates,
       invalid_rows: stats.invalid,
       created_by: opts.userId ?? null,
+      metadata: {
+        richColumns: Boolean(opts.richRows?.length),
+        richRowCount: opts.richRows?.length ?? 0,
+        richByUrl: Object.fromEntries(
+          [...richByUrl.entries()].map(([k, v]) => [
+            k,
+            {
+              keywords: v.keywords ?? null,
+              description: v.description ?? null,
+              anchorText: v.anchorText ?? null,
+              targetPage: v.targetPage ?? null,
+              businessInfo: v.businessInfo ?? null,
+              notes: v.notes ?? null,
+              images: v.images ?? null,
+              videos: v.videos ?? null,
+            },
+          ])
+        ),
+      },
     });
 
   if (rows.length) {
@@ -132,7 +158,7 @@ export async function createImport(
       );
   }
 
-  return { importId, stats, rows };
+  return { importId, stats, rows, richMapped: richByUrl.size };
 }
 
 export async function listImports(workspaceId: string, limit = 20) {
@@ -209,12 +235,20 @@ export async function runAutomationPipeline(
     const validRows = (detail.rows as Array<Record<string, unknown>>).filter(
       (r) => r.status === 'valid'
     );
+    const importMeta = (detail.metadata ?? {}) as {
+      richByUrl?: Record<string, Record<string, string | null>>;
+    };
+    const richByUrl = importMeta.richByUrl ?? {};
     let opportunitiesCreated = 0;
     let contentGenerated = 0;
 
     for (const row of validRows) {
       const domain = String(row.normalized_domain);
       const url = String(row.normalized_url ?? `https://${domain}`);
+      const rich =
+        richByUrl[String(row.raw_url ?? '').toLowerCase()] ??
+        richByUrl[url.toLowerCase()] ??
+        {};
       const analysis = await analyzeDomainLive(domain, url);
 
       const analysisId = randomUUID();
@@ -289,6 +323,7 @@ export async function runAutomationPipeline(
             niche: analysis.niche,
             difficulty: classification.difficulty,
             estimated: true,
+            importEnrichment: rich,
             metrics_labels: {
               domain_rating: 'Estimated',
               monthly_traffic: 'Estimated',

@@ -42,6 +42,8 @@ async function storeCredentials(connectionId: string, credentials: Record<string
   if (error) throw error;
 }
 
+export { storeCredentials as storeIntegrationCredentials };
+
 async function loadCredentials(connectionId: string): Promise<Record<string, unknown>> {
   const { data, error } = await getSupabaseAdmin()
     .from('integration_credentials')

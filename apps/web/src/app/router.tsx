@@ -123,8 +123,8 @@ const BacklinkCampaignsPage = lazy(() =>
   }))
 );
 const BacklinkRecommendationsPage = lazy(() =>
-  import('@/pages/backlink-builder/recommendations').then((m) => ({
-    default: m.BacklinkRecommendationsPage,
+  import('@/pages/backlink-builder/recommendations-v11').then((m) => ({
+    default: m.RecommendationsPage,
   }))
 );
 const BacklinkImportPage = lazy(() =>
@@ -140,6 +140,20 @@ const BacklinkAutomationPage = lazy(() =>
 );
 const BacklinkTrackingPage = lazy(() =>
   import('@/pages/backlink-builder/tracking').then((m) => ({ default: m.BacklinkTrackingPage }))
+);
+const SubmissionQueuePage = lazy(() =>
+  import('@/pages/backlink-builder/queue').then((m) => ({ default: m.SubmissionQueuePage }))
+);
+const BrowserAssistantPage = lazy(() =>
+  import('@/pages/backlink-builder/browser-assistant').then((m) => ({
+    default: m.BrowserAssistantPage,
+  }))
+);
+const ImageStudioPage = lazy(() =>
+  import('@/pages/backlink-builder/media-studios').then((m) => ({ default: m.ImageStudioPage }))
+);
+const VideoStudioPage = lazy(() =>
+  import('@/pages/backlink-builder/media-studios').then((m) => ({ default: m.VideoStudioPage }))
 );
 const ApprovalCenterPage = lazy(() =>
   import('@/pages/campaigns/approval-center').then((m) => ({ default: m.ApprovalCenterPage }))
@@ -389,6 +403,19 @@ export function AppRouter() {
                     <Route
                       path="backlink-builder/tracking"
                       element={lazyEl(BacklinkTrackingPage)}
+                    />
+                    <Route path="backlink-builder/queue" element={lazyEl(SubmissionQueuePage)} />
+                    <Route
+                      path="backlink-builder/browser-assistant"
+                      element={lazyEl(BrowserAssistantPage)}
+                    />
+                    <Route
+                      path="backlink-builder/image-studio"
+                      element={lazyEl(ImageStudioPage)}
+                    />
+                    <Route
+                      path="backlink-builder/video-studio"
+                      element={lazyEl(VideoStudioPage)}
                     />
                     <Route path="command-center" element={lazyEl(CommandCenterPage)} />
                     <Route path="knowledge/library" element={lazyEl(KnowledgeLibraryPage)} />

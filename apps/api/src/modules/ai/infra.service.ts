@@ -115,6 +115,17 @@ export async function getMissionControlSummary(workspaceId: string) {
   const activeRuns = runs.filter((r) => r.status === 'running' || r.status === 'queued').length;
   const completedRuns = runs.filter((r) => r.status === 'completed').length;
 
+  const { getWorkforceStrip, getQueueBoard } = await import('../backlinks/v11.service.js');
+  const [workforceStrip, queueBoard] = await Promise.all([
+    getWorkforceStrip(workspaceId).catch(() => null),
+    getQueueBoard(workspaceId, 'kanban').catch(() => null),
+  ]);
+
+  const stageCounts: Record<string, number> = {};
+  for (const [stage, items] of Object.entries(queueBoard?.columns ?? {})) {
+    stageCounts[stage] = (items as unknown[]).length;
+  }
+
   return {
     knowledge,
     memory: {
@@ -127,7 +138,9 @@ export async function getMissionControlSummary(workspaceId: string) {
       activeRuns,
       completedRuns,
       recentRuns: runs,
+      strip: workforceStrip,
     },
+    campaignOps: stageCounts,
     intelligence,
     campaigns: {
       ...campaigns,

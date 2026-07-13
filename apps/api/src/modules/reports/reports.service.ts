@@ -848,32 +848,33 @@ function slug(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'report';
 }
 
-/** V1.0 Backlink Operations Excel export */
-export async function exportBacklinkOpsWorkbook(workspaceId: string) {
+/** V1.0 Backlink Operations Excel export + CSV/PDF variants */
+export async function exportBacklinkOpsWorkbook(
+  workspaceId: string,
+  format: 'xlsx' | 'csv' | 'pdf' = 'xlsx'
+) {
   const { data: submissions } = await getSupabaseAdmin()
     .from('backlink_submissions')
     .select(
-      'status, tracking_status, submitted_at, verified_at, estimated_review_hours, estimated_approval_hours, notes, opportunities:opportunity_id(title, domain, opportunity_type, priority, automation_status)'
+      'status, tracking_status, queue_stage, submitted_at, verified_at, estimated_review_hours, estimated_approval_hours, notes, opportunities:opportunity_id(title, domain, opportunity_type, priority, automation_status)'
     )
     .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false })
     .limit(500);
 
-  const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'SEO OS Backlink Builder';
-  const sheet = workbook.addWorksheet('Backlink Ops');
-  sheet.addRow([
+  const header = [
     'Website',
-    'Opportunity Type',
-    'Status',
-    'Submitted',
-    'Verified',
+    'Backlink Type',
+    'Submission Status',
+    'Review Status',
+    'Verification',
     'Priority',
     'Est. Review Time (hrs)',
     'Est. Approval Time (hrs)',
     'Notes',
-  ]).font = { bold: true };
+  ];
 
+  const rows: string[][] = [header];
   for (const row of submissions ?? []) {
     const opp = row.opportunities as {
       title?: string;
@@ -882,23 +883,58 @@ export async function exportBacklinkOpsWorkbook(workspaceId: string) {
       priority?: string;
       automation_status?: string;
     } | null;
-    sheet.addRow([
+    rows.push([
       opp?.domain ?? opp?.title ?? '',
       opp?.opportunity_type ?? '',
+      row.queue_stage ?? row.tracking_status ?? row.status ?? '',
       row.tracking_status ?? row.status ?? '',
-      row.submitted_at ?? '',
-      row.verified_at ?? '',
+      row.verified_at ? 'verified' : 'pending',
       opp?.priority ?? '',
-      row.estimated_review_hours ?? '',
-      row.estimated_approval_hours ?? '',
+      String(row.estimated_review_hours ?? ''),
+      String(row.estimated_approval_hours ?? ''),
       row.notes ?? '',
     ]);
   }
 
-  sheet.getRow(1).eachCell((cell) => {
-    cell.note = 'Est. Review/Approval times are Estimated heuristics';
-  });
+  if (format === 'csv') {
+    const body = rows.map((r) => r.map(csvEscape).join(',')).join('\n');
+    return {
+      body: Buffer.from(body, 'utf8'),
+      contentType: 'text/csv',
+      filename: 'backlink-operations.csv',
+    };
+  }
 
+  if (format === 'pdf') {
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    let page = doc.addPage();
+    let y = page.getHeight() - 40;
+    page.drawText('Backlink Operations Report', { x: 40, y, size: 14, font });
+    y -= 24;
+    for (const r of rows.slice(0, 40)) {
+      if (y < 40) {
+        page = doc.addPage();
+        y = page.getHeight() - 40;
+      }
+      page.drawText(r.join(' | ').slice(0, 110), { x: 40, y, size: 8, font });
+      y -= 12;
+    }
+    const pdfBytes = await doc.save();
+    return {
+      body: Buffer.from(pdfBytes),
+      contentType: 'application/pdf',
+      filename: 'backlink-operations.pdf',
+    };
+  }
+
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'SEO OS Backlink Builder';
+  const sheet = workbook.addWorksheet('Backlink Ops');
+  rows.forEach((r, i) => {
+    if (i === 0) sheet.addRow(r).font = { bold: true };
+    else sheet.addRow(r);
+  });
   const body = Buffer.from(await workbook.xlsx.writeBuffer());
   return {
     body,

@@ -7,7 +7,7 @@ import { getEnv } from '../../config/env.js';
 
 export async function listAgents() {
   const rt = getAIRuntime();
-  return rt.registry.listSprint2Agents();
+  return rt.registry.listDefinitions().filter((d) => rt.registry.hasHandler(d.agentType));
 }
 
 export async function listAgentRuns(workspaceId: string, limit = 20) {

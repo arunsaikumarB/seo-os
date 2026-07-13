@@ -86,6 +86,14 @@ describe('submission estimates', () => {
   });
 });
 
+describe('queue stages', () => {
+  it('allows prepared to submitted', async () => {
+    const { canTransitionQueueStage } = await import('../src/queue-stages.js');
+    expect(canTransitionQueueStage('prepared', 'submitted')).toBe(true);
+    expect(canTransitionQueueStage('verified', 'submitted')).toBe(false);
+  });
+});
+
 describe('content pack', () => {
   it('builds guest post pack with V1.1 generation gates', () => {
     const pack = generateGuestPostPack(

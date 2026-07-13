@@ -16,6 +16,7 @@ import {
   enqueueVerificationCheck,
   updateSubmissionStatus,
 } from '../../modules/backlinks/automation.service.js';
+import { extractRichImportRows } from '@seo-os/backlink-builder';
 import {
   discoverProjectKeywords,
   enqueueAutomationPipeline,
@@ -103,9 +104,14 @@ automationRouter.post('/import', authMiddleware, requireRole('member'), async (r
     const body = importSchema.parse(req.body);
     const { userId } = (req as AuthenticatedRequest).auth;
     const urls = await parseImportContent(body.content, body.sourceType);
+    const richRows =
+      body.sourceType === 'csv' || body.sourceType === 'excel' || body.sourceType === 'txt'
+        ? extractRichImportRows(body.content)
+        : [];
     const result = await createImport(param(req.params.projectId), body.sourceType, urls, {
       fileName: body.fileName,
       userId,
+      richRows,
     });
     res.status(201).json({ data: result });
   } catch (err) {

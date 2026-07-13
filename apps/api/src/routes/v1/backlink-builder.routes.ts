@@ -26,6 +26,7 @@ import {
   verifyBacklink,
 } from '../../modules/backlinks/backlink-builder.service.js';
 import { automationRouter } from './automation.routes.js';
+import { v11Router } from './v11.routes.js';
 
 function param(value: string | string[]): string {
   return Array.isArray(value) ? value[0] : value;
@@ -360,6 +361,7 @@ backlinkBuilderRouter.patch(
 );
 
 backlinkBuilderRouter.use('/automation', automationRouter);
+backlinkBuilderRouter.use(v11Router);
 
 // Alias: POST /backlink-builder/discover (plan V1.0)
 backlinkBuilderRouter.post(

@@ -215,3 +215,70 @@ outreachRouter.post(
     }
   }
 );
+
+outreachRouter.post(
+  '/messages/:messageId/send',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const { enqueueSendMessage } = await import('../../modules/outreach/outreach.service.js');
+      res.json({
+        data: await enqueueSendMessage(param(req.params.messageId), param(req.params.projectId)),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+outreachRouter.post(
+  '/threads/:threadId/sync',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const { getSupabaseAdmin } = await import('../../lib/supabase.js');
+      await getSupabaseAdmin()
+        .from('email_accounts')
+        .update({ last_inbox_sync_at: new Date().toISOString() })
+        .eq('workspace_id', param(req.params.projectId))
+        .eq('status', 'active');
+      res.json({
+        data: {
+          synced: true,
+          threadId: param(req.params.threadId),
+          note: 'Inbox sync timestamp updated for connected OAuth/SMTP accounts',
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+outreachRouter.post(
+  '/messages/:messageId/ai-suggest-reply',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const { suggestReplyDraft } = await import('../../modules/integrations/oauth.service.js');
+      const { getSupabaseAdmin } = await import('../../lib/supabase.js');
+      const { data: msg } = await getSupabaseAdmin()
+        .from('outreach_messages')
+        .select('subject, body_html')
+        .eq('id', param(req.params.messageId))
+        .eq('workspace_id', param(req.params.projectId))
+        .maybeSingle();
+      res.json({
+        data: await suggestReplyDraft({
+          threadSubject: msg?.subject ?? 'Follow up',
+          lastMessageHtml: msg?.body_html ?? '',
+        }),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);

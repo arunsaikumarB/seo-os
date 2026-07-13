@@ -8,6 +8,7 @@ import { handleWorkflowJobs } from './handlers/workflow.js';
 import { handleReportJobs } from './handlers/reports.js';
 import { handleIntegrationJobs } from './handlers/integrations.js';
 import { handleBacklinkJobs } from './handlers/backlinks.js';
+import { handlePlaywrightJobs } from './handlers/playwright.js';
 
 export async function startJobInfrastructure(): Promise<void> {
   const boss = await getBoss();
@@ -31,6 +32,12 @@ export async function startJobInfrastructure(): Promise<void> {
     const scanJobs = all.filter((j) => !String(j.data.type ?? '').startsWith('backlink_'));
     if (backlinkJobs.length) await handleBacklinkJobs(backlinkJobs);
     if (scanJobs.length) await handleIntelligenceScanJobs(scanJobs);
+  });
+
+  await registerJobHandler(QUEUES.PLAYWRIGHT, async (jobs) => {
+    await handlePlaywrightJobs(
+      jobs.map((j) => ({ id: j.id, data: j.data as Record<string, unknown> }))
+    );
   });
 
   await registerJobHandler(QUEUES.LOW, async (jobs) => {
@@ -79,6 +86,6 @@ export async function startJobInfrastructure(): Promise<void> {
   });
 
   logger.info(
-    'Job infrastructure ready (agents, ingest, crawl, outreach, workflow, report, integration handlers registered)'
+    'Job infrastructure ready (agents, ingest, crawl, playwright, outreach, workflow, report, integration handlers registered)'
   );
 }

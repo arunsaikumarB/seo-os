@@ -42,7 +42,43 @@ reportsRouter.get(
   async (req, res, next) => {
     try {
       const { exportBacklinkOpsWorkbook } = await import('../../modules/reports/reports.service.js');
-      const file = await exportBacklinkOpsWorkbook(param(req.params.projectId));
+      const format =
+        req.query.format === 'csv' || req.query.format === 'pdf' ? req.query.format : 'xlsx';
+      const file = await exportBacklinkOpsWorkbook(param(req.params.projectId), format);
+      res.setHeader('Content-Type', file.contentType);
+      res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+      res.send(file.body);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+reportsRouter.get(
+  '/backlink-ops.csv',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const { exportBacklinkOpsWorkbook } = await import('../../modules/reports/reports.service.js');
+      const file = await exportBacklinkOpsWorkbook(param(req.params.projectId), 'csv');
+      res.setHeader('Content-Type', file.contentType);
+      res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+      res.send(file.body);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+reportsRouter.get(
+  '/backlink-ops.pdf',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const { exportBacklinkOpsWorkbook } = await import('../../modules/reports/reports.service.js');
+      const file = await exportBacklinkOpsWorkbook(param(req.params.projectId), 'pdf');
       res.setHeader('Content-Type', file.contentType);
       res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
       res.send(file.body);
