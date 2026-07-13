@@ -217,6 +217,9 @@ const IntegrationsHubPage = lazy(() =>
 const ProviderDashboardPage = lazy(() =>
   import('@/pages/providers/dashboard').then((m) => ({ default: m.ProviderDashboardPage }))
 );
+const DiagnosticsPage = lazy(() =>
+  import('@/pages/diagnostics').then((m) => ({ default: m.DiagnosticsPage }))
+);
 const HelpCenterPage = lazy(() =>
   import('@/pages/help/center').then((m) => ({ default: m.HelpCenterPage }))
 );
@@ -248,7 +251,9 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 15_000,
-      refetchOnWindowFocus: true,
+      gcTime: 5 * 60_000,
+      refetchOnWindowFocus: false,
+      retry: 1,
     },
   },
 });
@@ -350,6 +355,7 @@ export function AppRouter() {
                       element={lazyEl(OrgNotificationsPage)}
                     />
                     <Route path="audit-log" element={lazyEl(OrgAuditLogPage)} />
+                    <Route path="diagnostics" element={lazyEl(DiagnosticsPage)} />
                   </Route>
 
                   <Route
@@ -463,6 +469,7 @@ export function AppRouter() {
                     <Route path="technical/overview" element={lazyEl(TechnicalSeoOverviewPage)} />
                     <Route path="integrations/hub" element={lazyEl(IntegrationsHubPage)} />
                     <Route path="providers" element={lazyEl(ProviderDashboardPage)} />
+                    <Route path="diagnostics" element={lazyEl(DiagnosticsPage)} />
                     <Route path="agents/catalog" element={lazyEl(AgentsCatalogPage)} />
                     <Route path="content/library" element={lazyEl(ContentLibraryPage)} />
                     <Route path="settings/general" element={lazyEl(ProjectSettingsPage)} />

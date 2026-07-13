@@ -18,6 +18,9 @@ export const apiEnvSchema = z.object({
     .string()
     .optional()
     .transform((v) => v === 'true'),
+  SENTRY_DSN: z.string().optional(),
+  SENTRY_ENVIRONMENT: z.string().optional(),
+  OTEL_SERVICE_NAME: z.string().optional(),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;

@@ -22,6 +22,7 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,js,json,md}\"",
     "verify:local": "node scripts/verify-local.mjs",
     "smoke:staging": "node scripts/smoke-staging.mjs",
+    "smoke:enterprise": "node scripts/smoke-enterprise.mjs",
     "db:push": "supabase db push",
     "db:reset": "supabase db reset"
   },

@@ -18,6 +18,7 @@ import {
   Activity,
   Image as ImageIcon,
   Plug,
+  HeartPulse,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -78,6 +79,21 @@ type MissionSummary = {
     todaysCalls?: number;
     errors?: number;
     failoverEvents?: number;
+  };
+  enterpriseHealth?: {
+    status?: string;
+    latencyMs?: number;
+    checks?: Record<string, string>;
+    metrics?: {
+      errorRate?: number;
+      successRate?: number;
+      pendingJobs?: number;
+      avgMs?: number;
+      requests?: number;
+      errors?: number;
+    };
+    memory?: { rssMb?: number; heapUsedMb?: number };
+    queues?: Record<string, number>;
   };
 };
 
@@ -392,6 +408,55 @@ export function MissionControlPage() {
           <div className="sm:col-span-4 flex justify-end">
             <Button variant="outline" size="sm" asChild>
               <Link to={`/projects/${projectId}/providers`}>Provider Dashboard</Link>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <HeartPulse className="h-4 w-4" /> Enterprise Health
+          </CardTitle>
+          <CardDescription>
+            API · DB · Queue · Workers · Error rate · Latency · Memory · Pending jobs
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 sm:grid-cols-4 text-sm">
+          <div>
+            <p className="text-xs text-muted-foreground">Platform status</p>
+            <p className="font-medium capitalize">{data?.enterpriseHealth?.status ?? '—'}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">API / DB / Queue</p>
+            <p className="font-medium">
+              {data?.enterpriseHealth?.checks?.api ?? '—'} /{' '}
+              {data?.enterpriseHealth?.checks?.database ?? '—'} /{' '}
+              {data?.enterpriseHealth?.checks?.queue ?? '—'}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Success · Error rate</p>
+            <p className="font-medium">
+              {data?.enterpriseHealth?.metrics?.successRate ?? '—'}% ·{' '}
+              {data?.enterpriseHealth?.metrics?.errorRate ?? '—'}%
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Latency · Memory</p>
+            <p className="font-medium">
+              {data?.enterpriseHealth?.metrics?.avgMs ?? data?.enterpriseHealth?.latencyMs ?? '—'}{' '}
+              ms · {data?.enterpriseHealth?.memory?.heapUsedMb ?? '—'} MB
+            </p>
+          </div>
+          <div className="sm:col-span-4 flex justify-between items-center">
+            <p className="text-xs text-muted-foreground">
+              Pending jobs: {data?.enterpriseHealth?.metrics?.pendingJobs ?? 0} · Requests:{' '}
+              {data?.enterpriseHealth?.metrics?.requests ?? 0} · Errors:{' '}
+              {data?.enterpriseHealth?.metrics?.errors ?? 0}
+            </p>
+            <Button variant="outline" size="sm" asChild>
+              <Link to={`/projects/${projectId}/diagnostics`}>Diagnostics</Link>
             </Button>
           </div>
         </CardContent>

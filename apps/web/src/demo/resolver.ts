@@ -831,6 +831,20 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
           errors: 3,
           failoverEvents: 1,
         },
+        enterpriseHealth: {
+          status: 'healthy',
+          latencyMs: 18,
+          checks: { api: 'ok', database: 'ok', queue: 'ok', workers: 'ok', storage: 'ok' },
+          metrics: {
+            errorRate: 0.4,
+            successRate: 99.6,
+            pendingJobs: 3,
+            avgMs: 42,
+            requests: 1280,
+            errors: 5,
+          },
+          memory: { rssMb: 256, heapUsedMb: 128 },
+        },
       },
     };
   }

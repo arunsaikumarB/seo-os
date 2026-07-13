@@ -20,8 +20,21 @@ export function createApp() {
     helmet({
       crossOriginResourcePolicy: { policy: 'cross-origin' },
       contentSecurityPolicy: false,
+      referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+      hsts:
+        env.NODE_ENV === 'production' || env.NODE_ENV === 'staging'
+          ? { maxAge: 31536000, includeSubDomains: true }
+          : false,
+      frameguard: { action: 'deny' },
+      noSniff: true,
+      xssFilter: true,
     })
   );
+  app.use((_req, res, next) => {
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    next();
+  });
   app.use(cors({ origin: env.CORS_ORIGIN.split(',').map((o) => o.trim()), credentials: true }));
   app.use(express.json({ limit: '10mb' }));
   app.use(traceIdMiddleware);
@@ -30,6 +43,9 @@ export function createApp() {
   app.use(
     pinoHttp({
       logger,
+      customProps: (req) => ({
+        traceId: (req as { traceId?: string }).traceId,
+      }),
     }) as express.RequestHandler
   );
 

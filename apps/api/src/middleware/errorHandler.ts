@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import { AppError, isAppError } from '@seo-os/shared';
 import { logger } from '../lib/logger.js';
+import { captureException } from '../lib/sentry.js';
 import type { RequestWithTrace } from './traceId.js';
 
 interface PostgrestErrorLike {
@@ -47,17 +48,20 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
 
   if (isAppError(err)) {
     logger.warn({ err, traceId }, err.message);
+    if (err.status >= 500) captureException(err, { traceId, path: req.originalUrl });
     res.status(err.status).json(err.toProblemDetails(req.originalUrl, traceId));
     return;
   }
 
   if (isPostgrestError(err)) {
     const problem = mapDatabaseError(err);
+    if (problem.status >= 500) captureException(err, { traceId, path: req.originalUrl });
     res.status(problem.status).json(problem.toProblemDetails(req.originalUrl, traceId));
     return;
   }
 
   logger.error({ err, traceId }, 'Unhandled error');
+  captureException(err, { traceId, path: req.originalUrl, method: req.method });
   const problem = new AppError(500, 'INTERNAL_ERROR', 'An unexpected error occurred');
   res.status(500).json(problem.toProblemDetails(req.originalUrl, traceId));
 }

@@ -23,6 +23,7 @@ import {
   CheckCircle2,
   FileBarChart,
   Radar,
+  HeartPulse,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -43,6 +44,7 @@ export const orgNav: NavItem[] = [
   { label: 'Help', href: '/org/help', icon: BookOpen },
   { label: 'Feedback', href: '/org/feedback', icon: MessageSquare, featureFlag: 'feedback_center' },
   { label: 'Audit Log', href: '/org/audit-log', icon: ScrollText },
+  { label: 'Diagnostics', href: '/org/diagnostics', icon: HeartPulse },
   { label: 'Executive', href: '/org/executive', icon: Building2 },
   { label: 'Closed Beta', href: '/org/beta', icon: FlaskConical, featureFlag: 'closed_beta' },
 ];
@@ -99,6 +101,7 @@ export const projectNav: NavItem[] = [
   },
   { label: 'Content Studio', href: 'content/library', icon: FileText },
   { label: 'Providers', href: 'providers', icon: Plug, featureFlag: 'integrations' },
+  { label: 'Diagnostics', href: 'diagnostics', icon: HeartPulse },
   {
     label: 'Submission Center',
     href: 'backlink-builder/tracking',

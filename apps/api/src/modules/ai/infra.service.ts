@@ -119,14 +119,22 @@ export async function getMissionControlSummary(workspaceId: string) {
   const { getStatistics: getBeeStatistics } = await import('../browser-execution/bee.service.js');
   const { getImageStatistics } = await import('../image-intelligence/iie.service.js');
   const { getProviderHealthSnapshot } = await import('../providers/pif.service.js');
-  const [workforceStrip, queueBoard, browserExecution, imageIntelligence, providerFramework] =
-    await Promise.all([
-      getWorkforceStrip(workspaceId).catch(() => null),
-      getQueueBoard(workspaceId, 'kanban').catch(() => null),
-      getBeeStatistics(workspaceId).catch(() => null),
-      getImageStatistics(workspaceId).catch(() => null),
-      getProviderHealthSnapshot(workspaceId).catch(() => null),
-    ]);
+  const { getEnterpriseHealthSnapshot } = await import('../../routes/health.js');
+  const [
+    workforceStrip,
+    queueBoard,
+    browserExecution,
+    imageIntelligence,
+    providerFramework,
+    enterpriseHealth,
+  ] = await Promise.all([
+    getWorkforceStrip(workspaceId).catch(() => null),
+    getQueueBoard(workspaceId, 'kanban').catch(() => null),
+    getBeeStatistics(workspaceId).catch(() => null),
+    getImageStatistics(workspaceId).catch(() => null),
+    getProviderHealthSnapshot(workspaceId).catch(() => null),
+    getEnterpriseHealthSnapshot().catch(() => null),
+  ]);
 
   const stageCounts: Record<string, number> = {};
   for (const [stage, items] of Object.entries(queueBoard?.columns ?? {})) {
@@ -151,6 +159,7 @@ export async function getMissionControlSummary(workspaceId: string) {
     browserExecution,
     imageIntelligence,
     providerFramework,
+    enterpriseHealth,
     intelligence,
     campaigns: {
       ...campaigns,
