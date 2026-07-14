@@ -1,14 +1,14 @@
 import type { Request, Response } from 'express';
 import { getEnv } from '../config/env.js';
 import { getSupabaseAdmin } from '../lib/supabase.js';
-import { getBoss, QUEUES } from '../jobs/boss.js';
+import { getBoss, QUEUES, getQueueOpsSnapshot, areQueuesInitialized } from '../jobs/boss.js';
 import { getMetricsSnapshot } from '../lib/metrics.js';
 import { getAIRuntime } from '../modules/ai/runtime.js';
 import { listCircuits } from '../lib/circuit-breaker.js';
 import { getProviderManager } from '@seo-os/providers';
 
 export function healthHandler(_req: Request, res: Response): void {
-  res.status(200).json({ status: 'ok', service: 'seo-os-api', version: '1.2.6-qualify-pipeline' });
+  res.status(200).json({ status: 'ok', service: 'seo-os-api', version: '1.2.7-queue-init' });
 }
 
 export async function readyHandler(_req: Request, res: Response): Promise<void> {
@@ -53,13 +53,13 @@ export async function readyHandler(_req: Request, res: Response): Promise<void> 
         ? 'degraded'
         : 'ready',
     checks,
-    version: '1.2.6-qualify-pipeline',
+    version: '1.2.7-queue-init',
   });
 }
 
 export function versionHandler(_req: Request, res: Response): void {
   res.json({
-    version: '1.2.6-qualify-pipeline',
+    version: '1.2.7-queue-init',
     api: 'v1',
     release: 'Enterprise Production Polish',
   });
@@ -230,10 +230,42 @@ export async function opsHealthHandler(_req: Request, res: Response): Promise<vo
       workersEnabled: env.ENABLE_WORKERS,
       providerMode: env.PROVIDER_MODE,
     },
-    version: '1.2.6-qualify-pipeline',
+    version: '1.2.7-queue-init',
   };
 
   res.status(200).json({ data: payload });
+}
+
+/** Queue + worker diagnostics for ops */
+export async function opsQueuesHandler(_req: Request, res: Response): Promise<void> {
+  const snapshot = await getQueueOpsSnapshot();
+  const healthy =
+    !snapshot.workersEnabled ||
+    (snapshot.queuesInitialized &&
+      snapshot.queues.every((q) => q.exists && q.workerAttached));
+
+  res.status(200).json({
+    data: {
+      status: healthy ? 'ok' : 'degraded',
+      workersEnabled: snapshot.workersEnabled,
+      queuesInitialized: snapshot.queuesInitialized || areQueuesInitialized(),
+      queues: snapshot.queues.map((q) => ({
+        name: q.name,
+        exists: q.exists,
+        workerAttached: q.workerAttached,
+        workerActive: q.workerActive,
+        activeJobs: q.activeJobs,
+        pendingJobs: q.pendingJobs,
+        failedJobs: q.failedJobs,
+        lastProcessedAt: q.lastProcessedAt,
+        lastFetchedOn: q.lastFetchedOn,
+        lastJobEndedOn: q.lastJobEndedOn,
+        lastError: q.lastError,
+      })),
+      requiredQueues: Object.values(QUEUES),
+      version: '1.2.7-queue-init',
+    },
+  });
 }
 
 export async function getEnterpriseHealthSnapshot(): Promise<Record<string, unknown>> {

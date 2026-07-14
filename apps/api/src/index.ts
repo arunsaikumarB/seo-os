@@ -39,7 +39,7 @@ async function main() {
   await initSentry({
     dsn: env.SENTRY_DSN || undefined,
     environment: env.SENTRY_ENVIRONMENT || env.NODE_ENV,
-    release: 'seo-os-api@1.2.5-bee-resume',
+    release: 'seo-os-api@1.2.7-queue-init',
   });
 
   const app = createApp();

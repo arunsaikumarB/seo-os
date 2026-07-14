@@ -1,5 +1,5 @@
 import { logger } from '../lib/logger.js';
-import { getBoss, registerJobHandler, QUEUES } from './boss.js';
+import { getBoss, registerJobHandler, QUEUES, ensureRequiredQueues, enqueueJob } from './boss.js';
 import { handleAgentJobs } from './handlers/agents.js';
 import { handleIngestJobs } from './handlers/ingest.js';
 import { handleIntelligenceScanJobs } from './handlers/intelligence.js';
@@ -18,10 +18,14 @@ import {
 } from '../modules/browser-execution/bee-watchers.js';
 import { handleImageJobs } from '../modules/image-intelligence/iie-worker.js';
 import { handleProviderJobs } from '../modules/providers/pif-worker.js';
+import { recoverStuckAnalyzingImports } from '../modules/backlinks/discovery.service.js';
 
 export async function startJobInfrastructure(): Promise<void> {
   const boss = await getBoss();
   if (!boss) return;
+
+  // pg-boss v10: queues must exist before work()/send()
+  await ensureRequiredQueues(boss);
 
   await registerJobHandler(QUEUES.AGENTS, async (jobs) => {
     await handleAgentJobs(jobs.map((j) => ({ id: j.id, data: j.data as Record<string, unknown> })));
@@ -85,6 +89,9 @@ export async function startJobInfrastructure(): Promise<void> {
     const providerJobs = jobs.filter((j) =>
       String((j.data as Record<string, unknown>)?.type ?? '').startsWith('provider_')
     );
+    const recoverJobs = jobs.filter(
+      (j) => (j.data as Record<string, unknown>)?.type === 'automation_recover_stuck'
+    );
     const otherJobs = jobs.filter((j) => {
       const d = j.data as Record<string, unknown>;
       return (
@@ -96,6 +103,7 @@ export async function startJobInfrastructure(): Promise<void> {
         d?.type !== 'bee_cleanup' &&
         d?.type !== 'bee_queue' &&
         d?.type !== 'bee_session_health' &&
+        d?.type !== 'automation_recover_stuck' &&
         !String(d?.type ?? '').startsWith('image_') &&
         !String(d?.type ?? '').startsWith('provider_')
       );
@@ -150,12 +158,38 @@ export async function startJobInfrastructure(): Promise<void> {
         providerJobs.map((j) => ({ id: j.id, data: j.data as Record<string, unknown> }))
       );
     }
+    if (recoverJobs.length) {
+      await recoverStuckAnalyzingImports();
+    }
     for (const job of otherJobs) {
       logger.debug({ jobId: job.id }, 'Low-priority job received');
     }
   });
 
+  // Startup + periodic recovery for imports left analyzing without a run
+  try {
+    const recovered = await recoverStuckAnalyzingImports();
+    logger.info({ recovered }, 'Startup stuck-import recovery finished');
+  } catch (err) {
+    logger.warn({ err }, 'Startup stuck-import recovery failed');
+  }
+
+  try {
+    await boss.schedule(
+      QUEUES.LOW,
+      '*/5 * * * *',
+      { type: 'automation_recover_stuck' },
+      { tz: 'UTC' }
+    );
+    logger.info('Scheduled automation_recover_stuck every 5 minutes');
+  } catch (err) {
+    logger.warn({ err }, 'Failed to schedule stuck-import recovery — enqueueing one-shot fallback');
+    await enqueueJob(QUEUES.LOW, 'automation_recover_stuck', {
+      type: 'automation_recover_stuck',
+    }, { singletonKey: 'automation-recover-stuck', startAfter: 60 });
+  }
+
   logger.info(
-    'Job infrastructure ready (agents, ingest, crawl, playwright/BEE+watch/resume, outreach, workflow, report, integration, bee-learning/queue/session-health, image-intelligence, provider-framework handlers registered)'
+    'Job infrastructure ready (queues initialized; agents, ingest, crawl, playwright/BEE+watch/resume, outreach, workflow, report, integration, bee-learning/queue/session-health, image-intelligence, provider-framework, recover-stuck handlers registered)'
   );
 }

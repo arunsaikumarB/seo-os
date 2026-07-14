@@ -6,7 +6,7 @@ import { getEnv } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { traceIdMiddleware } from './middleware/traceId.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
-import { healthHandler, readyHandler, versionHandler, metricsHandler, opsHealthHandler } from './routes/health.js';
+import { healthHandler, readyHandler, versionHandler, metricsHandler, opsHealthHandler, opsQueuesHandler } from './routes/health.js';
 import { v1Router } from './routes/v1/index.js';
 import { rateLimit } from './middleware/rateLimit.js';
 import { metricsMiddleware } from './middleware/metrics.js';
@@ -53,6 +53,7 @@ export function createApp() {
   app.get('/ready', readyHandler);
   app.get('/metrics', metricsHandler);
   app.get('/ops/health', opsHealthHandler);
+  app.get('/ops/queues', opsQueuesHandler);
   app.get('/v1/version', versionHandler);
 
   app.use('/v1', v1Router);
