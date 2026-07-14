@@ -12,7 +12,6 @@ import {
   extractUrlsFromText,
   generateContent,
   inspectBacklinkHtml,
-  stepProgress,
   buildPrefillPayload,
   estimateApprovalHours,
   estimateReviewHours,
@@ -27,9 +26,85 @@ import { getProjectById } from '../projects/project.service.js';
 import { listMemory, createMemoryEntry, createMemoryFact } from '../memory/memory.service.js';
 import { startBrowserIntelligenceScan, executeBrowserIntelligenceScan } from '../intelligence/browser-intelligence.service.js';
 import { uploadDocument } from '../knowledge/document.service.js';
-import { fireAndForget } from '../platform/event-bus.service.js';
+import { fireAndForget, publishPlatformEvent } from '../platform/event-bus.service.js';
 import { logger } from '../../lib/logger.js';
 import { enqueueJob, QUEUES } from '../../jobs/boss.js';
+
+type WriteResult = { error: unknown; data?: unknown };
+
+function writeErrorMessage(error: unknown): string {
+  if (error && typeof error === 'object' && 'message' in error) {
+    return String((error as { message: unknown }).message);
+  }
+  return String(error ?? 'unknown write error');
+}
+
+async function requireWrite(stage: string, result: WriteResult): Promise<void> {
+  if (result.error) {
+    throw Object.assign(new Error(`${stage}: ${writeErrorMessage(result.error)}`), {
+      code: 'PIPELINE_WRITE_FAILED',
+      stage,
+    });
+  }
+}
+
+async function appendRunLog(params: {
+  workspaceId: string;
+  runId: string;
+  importId?: string;
+  level?: 'debug' | 'info' | 'warn' | 'error';
+  stage: string;
+  message: string;
+  detail?: Record<string, unknown>;
+}) {
+  const { error } = await getSupabaseAdmin().from('backlink_automation_run_logs').insert({
+    id: randomUUID(),
+    workspace_id: params.workspaceId,
+    run_id: params.runId,
+    import_id: params.importId ?? null,
+    level: params.level ?? 'info',
+    stage: params.stage,
+    message: params.message,
+    detail: params.detail ?? {},
+  });
+  if (error) {
+    logger.warn({ err: error, runId: params.runId }, 'automation run log insert failed');
+  }
+}
+
+async function emitAutomationEvent(params: {
+  workspaceId: string;
+  orgId?: string;
+  userId?: string;
+  eventType: string;
+  title: string;
+  summary?: string;
+  entityType?: string;
+  entityId?: string;
+  payload?: Record<string, unknown>;
+  severity?: 'info' | 'success' | 'warning' | 'failure';
+}) {
+  await publishPlatformEvent({
+    workspaceId: params.workspaceId,
+    orgId: params.orgId ?? null,
+    sourceModule: 'backlink_automation',
+    eventType: params.eventType,
+    title: params.title,
+    summary: params.summary,
+    severity: params.severity ?? 'info',
+    entityType: params.entityType,
+    entityId: params.entityId,
+    payload: params.payload,
+    actorId: params.userId ?? null,
+  });
+}
+
+function progressFromStages(steps: Set<string>): number {
+  const ordered = AUTOMATION_PIPELINE_STEPS.map((s) => s.id);
+  if (ordered.length === 0) return 0;
+  const done = ordered.filter((id) => steps.has(id)).length;
+  return Math.min(100, Math.round((done / ordered.length) * 100));
+}
 
 async function getBrandContext(workspaceId: string, orgId?: string): Promise<BrandContext> {
   const project = orgId ? await getProjectById(workspaceId, orgId) : null;
@@ -208,152 +283,315 @@ export async function runAutomationPipeline(
   workspaceId: string,
   importId: string,
   orgId?: string,
-  _userId?: string
+  userId?: string
 ) {
   const detail = await getImportDetail(importId, workspaceId);
   if (!detail) throw new Error('Import not found');
 
   const runId = randomUUID();
-  const stepsCompleted: string[] = [];
+  const steps = new Set<string>();
   const brand = await getBrandContext(workspaceId, orgId);
+  const stageErrors: Array<{ stage: string; domain?: string; message: string }> = [];
 
-  await getSupabaseAdmin().from('backlink_automation_runs').insert({
+  const { error: runInsertErr } = await getSupabaseAdmin().from('backlink_automation_runs').insert({
     id: runId,
     workspace_id: workspaceId,
     import_id: importId,
     status: 'running',
-    current_step: 'analyze',
+    current_step: 'validate',
     progress: 0,
     started_at: new Date().toISOString(),
   });
+  await requireWrite('create_run', { error: runInsertErr });
+
+  const log = (
+    stage: string,
+    message: string,
+    opts: { level?: 'debug' | 'info' | 'warn' | 'error'; detail?: Record<string, unknown> } = {}
+  ) =>
+    appendRunLog({
+      workspaceId,
+      runId,
+      importId,
+      stage,
+      message,
+      level: opts.level,
+      detail: opts.detail,
+    });
+
+  const bump = async (step: string, currentStep: string) => {
+    steps.add(step);
+    await updateRun(runId, {
+      current_step: currentStep,
+      progress: progressFromStages(steps),
+      steps_completed: [...steps],
+    });
+  };
 
   try {
-    stepsCompleted.push('import', 'validate');
-    await updateImportStatus(importId, 'analyzing');
-    await updateRun(runId, { current_step: 'analyze', progress: stepProgress(stepsCompleted) });
+    await log('import', `Importing URLs from import ${importId.slice(0, 8)}…`);
+    steps.add('import');
+    await emitAutomationEvent({
+      workspaceId,
+      orgId,
+      userId,
+      eventType: 'website_imported',
+      title: 'Websites imported',
+      entityType: 'backlink_import',
+      entityId: importId,
+      payload: { importId },
+    });
 
     const validRows = (detail.rows as Array<Record<string, unknown>>).filter(
       (r) => r.status === 'valid'
     );
+    await log('validate', `Validated ${validRows.length} of ${detail.rows?.length ?? 0} URLs`);
+    await bump('validate', 'analyze');
+    await updateImportStatus(importId, 'analyzing');
+    await emitAutomationEvent({
+      workspaceId,
+      orgId,
+      userId,
+      eventType: 'website_validated',
+      title: 'Import validated',
+      summary: `${validRows.length} valid URLs ready for analysis`,
+      entityType: 'backlink_import',
+      entityId: importId,
+      payload: { valid: validRows.length },
+    });
+
+    if (validRows.length === 0) {
+      await log('validate', 'No valid URLs to process', { level: 'error' });
+      await updateImportStatus(importId, 'failed');
+      await updateRun(runId, {
+        status: 'failed',
+        progress: progressFromStages(steps),
+        error_message: 'No valid URLs in import',
+        steps_completed: [...steps],
+        completed_at: new Date().toISOString(),
+      });
+      throw new Error('No valid URLs in import');
+    }
+
     const importMeta = (detail.metadata ?? {}) as {
       richByUrl?: Record<string, Record<string, string | null>>;
     };
     const richByUrl = importMeta.richByUrl ?? {};
     let opportunitiesCreated = 0;
+    let analysesCreated = 0;
     let contentGenerated = 0;
+    let submissionsCreated = 0;
+    let relationshipsCreated = 0;
 
-    for (const row of validRows) {
-      const domain = String(row.normalized_domain);
-      const url = String(row.normalized_url ?? `https://${domain}`);
-      const rich =
-        richByUrl[String(row.raw_url ?? '').toLowerCase()] ??
-        richByUrl[url.toLowerCase()] ??
-        {};
-      const analysis = await analyzeDomainLive(domain, url);
+    const CONCURRENCY = 5;
+    for (let i = 0; i < validRows.length; i += CONCURRENCY) {
+      const batch = validRows.slice(i, i + CONCURRENCY);
+      await Promise.all(
+        batch.map(async (row) => {
+          const domain = String(row.normalized_domain);
+          const url = String(row.normalized_url ?? `https://${domain}`);
+          const rich =
+            richByUrl[String(row.raw_url ?? '').toLowerCase()] ??
+            richByUrl[url.toLowerCase()] ??
+            {};
 
-      const analysisId = randomUUID();
-      await getSupabaseAdmin()
-        .from('backlink_domain_analyses')
-        .insert({
-          id: analysisId,
-          workspace_id: workspaceId,
-          domain,
-          import_row_id: String(row.id),
-          website_name: analysis.websiteName,
-          niche: analysis.niche,
-          language: analysis.language,
-          country: analysis.country,
-          domain_rating: analysis.domainRating,
-          monthly_traffic: analysis.monthlyTraffic,
-          detected_pages: analysis.detectedPages,
-          opportunity_types: analysis.opportunityTypes,
-          metadata: analysis.metadata,
-          metrics_source: analysis.metricsSource,
-          robots_txt_status: analysis.robotsTxtStatus ?? null,
-          sitemap_found: analysis.sitemapFound ?? null,
-          fetch_status_code: analysis.fetchStatusCode ?? null,
-        });
+          try {
+            await log('analyze', `Scanning homepage — ${domain}`);
+            await log('analyze', `Fetching robots.txt — ${domain}`, { level: 'debug' });
+            const analysis = await analyzeDomainLive(domain, url);
+            await log(
+              'analyze',
+              `Analyzed ${domain} (DR ${analysis.domainRating ?? 'n/a'}, robots ${analysis.robotsTxtStatus ?? 'n/a'})`
+            );
 
-      stepsCompleted.push('analyze');
-      await updateRun(runId, { current_step: 'classify', progress: stepProgress(stepsCompleted) });
+            const analysisId = randomUUID();
+            const analysisInsert = await getSupabaseAdmin()
+              .from('backlink_domain_analyses')
+              .insert({
+                id: analysisId,
+                workspace_id: workspaceId,
+                domain,
+                import_row_id: String(row.id),
+                website_name: analysis.websiteName,
+                niche: analysis.niche,
+                language: analysis.language,
+                country: analysis.country,
+                domain_rating: analysis.domainRating,
+                monthly_traffic: analysis.monthlyTraffic,
+                detected_pages: analysis.detectedPages,
+                opportunity_types: analysis.opportunityTypes,
+                metadata: analysis.metadata,
+                metrics_source: analysis.metricsSource,
+                robots_txt_status: analysis.robotsTxtStatus ?? null,
+                sitemap_found: analysis.sitemapFound ?? null,
+                fetch_status_code: analysis.fetchStatusCode ?? null,
+              });
+            await requireWrite(`analyze:${domain}`, analysisInsert);
+            analysesCreated++;
 
-      const classification = classifyOpportunity(analysis, {
-        projectDomain: brand.projectDomain,
-        projectIndustry: brand.industry,
-        brandName: brand.brandName,
+            await log('classify', `Classifying opportunity — ${domain}`);
+            const classification = classifyOpportunity(analysis, {
+              projectDomain: brand.projectDomain,
+              projectIndustry: brand.industry,
+              brandName: brand.brandName,
+            });
+            const typeMeta = BACKLINK_TYPES.find((t) => t.id === classification.backlinkType);
+            await log(
+              'score',
+              `Score ${classification.opportunityScore} · priority ${classification.priority} · ${classification.backlinkType} — ${domain}`
+            );
+
+            const oppId = randomUUID();
+            const oppInsert = await getSupabaseAdmin().from('opportunities').insert({
+              id: oppId,
+              workspace_id: workspaceId,
+              opportunity_type: classification.backlinkType,
+              title: analysis.websiteName,
+              url,
+              domain,
+              score: classification.opportunityScore,
+              status: 'discovered',
+              pipeline_stage: 'discovered',
+              automation_status: 'analyzed',
+              website_name: analysis.websiteName,
+              domain_rating: analysis.domainRating,
+              monthly_traffic: analysis.monthlyTraffic,
+              country: analysis.country,
+              language: analysis.language,
+              spam_score: classification.spamRisk,
+              success_probability: classification.successProbability,
+              reply_rate_prediction: classification.replyRate,
+              relevance_score: classification.relevanceScore,
+              priority: classification.priority,
+              recommended_action: classification.recommendedAction,
+              ai_recommendation: classification.recommendedAction,
+              backlink_category: typeMeta?.category ?? null,
+              import_id: importId,
+              domain_analysis_id: analysisId,
+              discovery_source: 'import',
+              authority_estimated: true,
+              traffic_estimated: true,
+              metrics_source: 'estimated',
+              queue_status: 'pending_review',
+              metadata: {
+                detected_pages: analysis.detectedPages,
+                niche: analysis.niche,
+                difficulty: classification.difficulty,
+                estimated: true,
+                importEnrichment: rich,
+                cms: (analysis.metadata as Record<string, unknown>)?.cms ?? null,
+                metrics_labels: {
+                  domain_rating: 'Estimated',
+                  monthly_traffic: 'Estimated',
+                  success_probability: 'Estimated',
+                  difficulty: 'Estimated',
+                },
+              },
+            });
+            await requireWrite(`opportunity:${domain}`, oppInsert);
+            opportunitiesCreated++;
+
+            await requireWrite(
+              `link_row:${domain}`,
+              await getSupabaseAdmin()
+                .from('backlink_import_rows')
+                .update({ opportunity_id: oppId })
+                .eq('id', String(row.id))
+            );
+            await requireWrite(
+              `link_analysis:${domain}`,
+              await getSupabaseAdmin()
+                .from('backlink_domain_analyses')
+                .update({ opportunity_id: oppId })
+                .eq('id', analysisId)
+            );
+
+            await emitAutomationEvent({
+              workspaceId,
+              orgId,
+              userId,
+              eventType: 'website_analyzed',
+              title: `Analyzed ${domain}`,
+              entityType: 'opportunity',
+              entityId: oppId,
+              payload: { domain, score: classification.opportunityScore },
+            });
+            await emitAutomationEvent({
+              workspaceId,
+              orgId,
+              userId,
+              eventType: 'opportunity_created',
+              title: `Opportunity created — ${domain}`,
+              severity: 'success',
+              entityType: 'opportunity',
+              entityId: oppId,
+              payload: {
+                domain,
+                type: classification.backlinkType,
+                priority: classification.priority,
+              },
+            });
+            await log('store', `Created opportunity for ${domain}`);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            stageErrors.push({ stage: 'analyze_classify', domain, message });
+            await log('analyze', `Failed ${domain}: ${message}`, {
+              level: 'error',
+              detail: { domain, message },
+            });
+          }
+        })
+      );
+
+      await bump('analyze', 'classify');
+      await bump('classify', 'score');
+      await bump('score', 'generate');
+      await updateRun(runId, {
+        stats: {
+          opportunitiesCreated,
+          analysesCreated,
+          processed: Math.min(i + batch.length, validRows.length),
+          total: validRows.length,
+          errors: stageErrors.length,
+        },
       });
+    }
 
-      const typeMeta = BACKLINK_TYPES.find((t) => t.id === classification.backlinkType);
-
-      const oppId = randomUUID();
-      await getSupabaseAdmin()
-        .from('opportunities')
-        .insert({
-          id: oppId,
-          workspace_id: workspaceId,
-          opportunity_type: classification.backlinkType,
-          title: analysis.websiteName,
-          url,
-          domain,
-          score: classification.opportunityScore,
-          status: 'discovered',
-          pipeline_stage: 'discovered',
-          automation_status: 'analyzed',
-          website_name: analysis.websiteName,
-          domain_rating: analysis.domainRating,
-          monthly_traffic: analysis.monthlyTraffic,
-          country: analysis.country,
-          language: analysis.language,
-          spam_score: classification.spamRisk,
-          success_probability: classification.successProbability,
-          reply_rate_prediction: classification.replyRate,
-          relevance_score: classification.relevanceScore,
-          priority: classification.priority,
-          recommended_action: classification.recommendedAction,
-          ai_recommendation: classification.recommendedAction,
-          backlink_category: typeMeta?.category ?? null,
-          import_id: importId,
-          domain_analysis_id: analysisId,
-          discovery_source: 'import',
-          authority_estimated: true,
-          traffic_estimated: true,
-          metrics_source: analysis.metricsSource === 'live' ? 'estimated' : 'estimated',
-          metadata: {
-            detected_pages: analysis.detectedPages,
-            niche: analysis.niche,
-            difficulty: classification.difficulty,
-            estimated: true,
-            importEnrichment: rich,
-            metrics_labels: {
-              domain_rating: 'Estimated',
-              monthly_traffic: 'Estimated',
-              success_probability: 'Estimated',
-              difficulty: 'Estimated',
-            },
-          },
-        });
-
-      await getSupabaseAdmin()
-        .from('backlink_import_rows')
-        .update({ opportunity_id: oppId })
-        .eq('id', String(row.id));
-
-      await getSupabaseAdmin()
-        .from('backlink_domain_analyses')
-        .update({ opportunity_id: oppId })
-        .eq('id', analysisId);
-
-      opportunitiesCreated++;
-      stepsCompleted.push('classify', 'score');
+    if (opportunitiesCreated === 0) {
+      const msg = `No opportunities persisted (${stageErrors.length} row failures)`;
+      await log('store', msg, { level: 'error', detail: { stageErrors } });
+      await updateImportStatus(importId, 'failed');
+      await updateRun(runId, {
+        status: 'failed',
+        progress: progressFromStages(steps),
+        error_message: msg,
+        steps_completed: [...steps],
+        stats: { opportunitiesCreated: 0, analysesCreated, errors: stageErrors },
+        completed_at: new Date().toISOString(),
+      });
+      await emitAutomationEvent({
+        workspaceId,
+        orgId,
+        userId,
+        eventType: 'automation_pipeline_failed',
+        title: 'Automation pipeline failed',
+        summary: msg,
+        severity: 'failure',
+        entityType: 'backlink_import',
+        entityId: importId,
+      });
+      throw new Error(msg);
     }
 
     await updateImportStatus(importId, 'generating');
-    await updateRun(runId, { current_step: 'generate', progress: stepProgress(stepsCompleted) });
+    await log('generate', `Generating outreach drafts for ${opportunitiesCreated} opportunities…`);
 
-    const { data: newOpps } = await getSupabaseAdmin()
+    const { data: newOpps, error: oppFetchErr } = await getSupabaseAdmin()
       .from('opportunities')
-      .select('id, opportunity_type, title, domain, website_name, score')
-      .eq('import_id', importId);
+      .select('id, opportunity_type, title, domain, website_name, score, country, language, url')
+      .eq('import_id', importId)
+      .eq('workspace_id', workspaceId);
+    await requireWrite('fetch_opportunities', { error: oppFetchErr, data: newOpps });
 
     for (const opp of newOpps ?? []) {
       const types = contentTypesForOpportunity(String(opp.opportunity_type));
@@ -365,56 +603,232 @@ export async function runAutomationPipeline(
         website_name: opp.website_name as string | null,
       };
 
+      let firstDraftId: string | null = null;
       for (const draftType of types) {
         const content = generateContent(draftType as ContentDraftType, oppCtx, brand);
-        await getSupabaseAdmin()
-          .from('backlink_ai_drafts')
-          .insert({
-            id: randomUUID(),
-            workspace_id: workspaceId,
-            opportunity_id: String(opp.id),
-            draft_type: draftType,
-            title: `${draftType.replace(/_/g, ' ')} — ${opp.title}`,
-            content,
-            status: 'draft',
-          });
+        const draftId = randomUUID();
+        const draftInsert = await getSupabaseAdmin().from('backlink_ai_drafts').insert({
+          id: draftId,
+          workspace_id: workspaceId,
+          opportunity_id: String(opp.id),
+          draft_type: draftType,
+          title: `${draftType.replace(/_/g, ' ')} — ${opp.title}`,
+          content,
+          status: 'draft',
+        });
+        await requireWrite(`draft:${opp.domain}:${draftType}`, draftInsert);
         contentGenerated++;
+        if (!firstDraftId) firstDraftId = draftId;
+        await emitAutomationEvent({
+          workspaceId,
+          orgId,
+          userId,
+          eventType: 'draft_generated',
+          title: `Draft generated — ${draftType}`,
+          entityType: 'backlink_ai_draft',
+          entityId: draftId,
+          payload: { opportunityId: opp.id, draftType },
+        });
       }
 
-      await getSupabaseAdmin()
+      await log('generate', `Generated drafts for ${opp.domain}`);
+
+      const prepUpdate = await getSupabaseAdmin()
         .from('opportunities')
         .update({
           automation_status: 'prepared',
           pipeline_stage: 'qualified',
-          queue_status: 'pending_approval',
+          queue_status: 'pending_review',
+          status: 'qualified',
         })
         .eq('id', String(opp.id));
+      await requireWrite(`prepare:${opp.domain}`, prepUpdate);
 
-      await getSupabaseAdmin()
-        .from('backlink_submissions')
-        .insert({
-          id: randomUUID(),
-          workspace_id: workspaceId,
-          opportunity_id: String(opp.id),
-          submission_type: String(opp.opportunity_type),
-          assisted_mode: inferAssistedMode(String(opp.opportunity_type)),
-          status: 'prepared',
-          tracking_status: 'ready',
-          estimated_review_hours: estimateReviewHours(String(opp.opportunity_type)),
-          estimated_approval_hours: estimateApprovalHours(String(opp.opportunity_type)),
-          prefill_payload: buildPrefillPayload({
-            brandName: brand.brandName,
-            projectDomain: brand.projectDomain,
-            industry: brand.industry,
-            opportunityTitle: String(opp.title),
-            opportunityDomain: String(opp.domain ?? ''),
-            opportunityType: String(opp.opportunity_type),
-          }),
-          metadata: { generated_by: 'automation_pipeline', run_id: runId },
-        });
+      const submissionId = randomUUID();
+      const subInsert = await getSupabaseAdmin().from('backlink_submissions').insert({
+        id: submissionId,
+        workspace_id: workspaceId,
+        opportunity_id: String(opp.id),
+        submission_type: String(opp.opportunity_type),
+        assisted_mode: inferAssistedMode(String(opp.opportunity_type)),
+        status: 'prepared',
+        tracking_status: 'ready',
+        queue_stage: 'prepared',
+        estimated_review_hours: estimateReviewHours(String(opp.opportunity_type)),
+        estimated_approval_hours: estimateApprovalHours(String(opp.opportunity_type)),
+        prefill_payload: buildPrefillPayload({
+          brandName: brand.brandName,
+          projectDomain: brand.projectDomain,
+          industry: brand.industry,
+          opportunityTitle: String(opp.title),
+          opportunityDomain: String(opp.domain ?? ''),
+          opportunityType: String(opp.opportunity_type),
+        }),
+        metadata: {
+          generated_by: 'automation_pipeline',
+          run_id: runId,
+          draft_id: firstDraftId,
+        },
+      });
+      await requireWrite(`submission:${opp.domain}`, subInsert);
+      submissionsCreated++;
+      await emitAutomationEvent({
+        workspaceId,
+        orgId,
+        userId,
+        eventType: 'submission_created',
+        title: `Submission queued — ${opp.domain}`,
+        severity: 'success',
+        entityType: 'backlink_submission',
+        entityId: submissionId,
+        payload: { opportunityId: opp.id, draftId: firstDraftId },
+      });
+      await log('queue', `Submission queue entry for ${opp.domain}`);
     }
 
-    stepsCompleted.push('generate', 'queue', 'assist', 'track', 'store');
+    await bump('generate', 'queue');
+    await bump('queue', 'assist');
+    await bump('assist', 'track');
+
+    // Relationships (required for completion)
+    await log('store', 'Creating relationship organizations and contacts…');
+    for (const opp of newOpps ?? []) {
+      const domain = String(opp.domain ?? '');
+      if (!domain) continue;
+      const { data: existing } = await getSupabaseAdmin()
+        .from('relationship_organizations')
+        .select('id')
+        .eq('workspace_id', workspaceId)
+        .eq('domain', domain)
+        .maybeSingle();
+
+      let relOrgId = existing?.id as string | undefined;
+      if (!relOrgId) {
+        relOrgId = randomUUID();
+        const orgInsert = await getSupabaseAdmin().from('relationship_organizations').insert({
+          id: relOrgId,
+          workspace_id: workspaceId,
+          company_name: String(opp.website_name ?? domain),
+          domain,
+          website: opp.url ?? `https://${domain}`,
+          country: opp.country ?? 'US',
+          language: opp.language ?? 'en',
+          relationship_score: Math.min(100, Math.round(Number(opp.score ?? 40))),
+          priority_score: Math.min(100, Math.round(Number(opp.score ?? 40))),
+          response_probability: Math.min(90, Math.round(Number(opp.score ?? 40) * 0.7)),
+          campaign_suitability: Math.min(100, Math.round(Number(opp.score ?? 40))),
+          warmth: 'cold',
+          notes: 'Auto-created from automation pipeline',
+          metadata: {
+            source: 'backlink_import',
+            opportunity_id: opp.id,
+            next_action: 'Review opportunity and approve outreach',
+          },
+        });
+        await requireWrite(`relationship_org:${domain}`, orgInsert);
+        relationshipsCreated++;
+      }
+
+      const contactId = randomUUID();
+      const contactInsert = await getSupabaseAdmin().from('relationship_contacts').insert({
+        id: contactId,
+        workspace_id: workspaceId,
+        organization_id: relOrgId,
+        name: `Editorial team — ${domain}`,
+        role: 'Editor',
+        department: 'Editorial',
+        preferred_contact_method: 'form',
+        confidence_score: 40,
+        is_recommended_outreach: Number(opp.score ?? 0) >= 50,
+        metadata: {
+          source: 'automation_pipeline',
+          note: 'Placeholder contact from public site profile — enrich before outreach',
+        },
+      });
+      await requireWrite(`relationship_contact:${domain}`, contactInsert);
+
+      const timelineInsert = await getSupabaseAdmin().from('relationship_timeline').insert({
+        id: randomUUID(),
+        workspace_id: workspaceId,
+        organization_id: relOrgId,
+        contact_id: contactId,
+        event_type: 'organization_enriched',
+        title: `Organization seeded from import`,
+        description: `Opportunity ${opp.title} scored ${opp.score}. Next: review in Opportunity Queue.`,
+        metadata: { opportunity_id: opp.id, run_id: runId },
+        actor_id: userId ?? null,
+      });
+      await requireWrite(`relationship_timeline:${domain}`, timelineInsert);
+
+      await requireWrite(
+        `backlink_relationship:${domain}`,
+        await getSupabaseAdmin().from('backlink_relationships').upsert(
+          {
+            workspace_id: workspaceId,
+            domain,
+            organization_id: relOrgId,
+            warmth: 'cold',
+            opportunity_count: 1,
+            notes: `Seeded from import ${importId.slice(0, 8)}`,
+          },
+          { onConflict: 'workspace_id,domain' }
+        )
+      );
+
+      await emitAutomationEvent({
+        workspaceId,
+        orgId,
+        userId,
+        eventType: 'relationship_created',
+        title: `Relationship seeded — ${domain}`,
+        entityType: 'relationship_organization',
+        entityId: relOrgId,
+        payload: { domain, contactId },
+      });
+    }
+    await log('store', `Relationships saved (${relationshipsCreated} new orgs)`);
+
+    await bump('track', 'store');
+    steps.add('store');
+    steps.add('verify');
+
+    const analytics = await refreshAutomationAnalytics(workspaceId);
+    await emitAutomationEvent({
+      workspaceId,
+      orgId,
+      userId,
+      eventType: 'analytics_updated',
+      title: 'Automation analytics updated',
+      payload: analytics,
+    });
+    await emitAutomationEvent({
+      workspaceId,
+      orgId,
+      userId,
+      eventType: 'mission_control_updated',
+      title: 'Mission Control refresh',
+      severity: 'success',
+      payload: { importId, runId },
+    });
+    await emitAutomationEvent({
+      workspaceId,
+      orgId,
+      userId,
+      eventType: 'report_updated',
+      title: 'Reports data refreshed',
+      payload: { importId, opportunitiesCreated },
+    });
+    await emitAutomationEvent({
+      workspaceId,
+      orgId,
+      userId,
+      eventType: 'dashboard_updated',
+      title: 'Dashboard counters refreshed',
+      payload: analytics,
+    });
+
+    const partial = stageErrors.length > 0 || opportunitiesCreated < validRows.length;
+    const finalStatus = partial ? 'partially_completed' : 'completed';
     await updateImportStatus(importId, 'completed', {
       opportunities_created: opportunitiesCreated,
       content_generated: contentGenerated,
@@ -422,22 +836,58 @@ export async function runAutomationPipeline(
     });
 
     await updateRun(runId, {
-      status: 'completed',
+      status: finalStatus,
       current_step: 'store',
       progress: 100,
-      steps_completed: [...new Set(stepsCompleted)],
-      stats: { opportunitiesCreated, contentGenerated, validRows: validRows.length },
+      steps_completed: [...steps],
+      stats: {
+        opportunitiesCreated,
+        analysesCreated,
+        contentGenerated,
+        submissionsCreated,
+        relationshipsCreated,
+        validRows: validRows.length,
+        errors: stageErrors,
+      },
+      error_message: partial
+        ? `${stageErrors.length} domain(s) failed — see run logs`
+        : null,
       completed_at: new Date().toISOString(),
     });
 
-    // Background engines (Browser / Knowledge / Memory / Relationships / Campaign queue)
-    // continue to run after import analysis — not exposed as separate product modules.
+    await log(
+      'store',
+      partial
+        ? `Completed with partial success: ${opportunitiesCreated}/${validRows.length} opportunities`
+        : `Completed successfully: ${opportunitiesCreated} opportunities, ${contentGenerated} drafts, ${submissionsCreated} submissions`,
+      { level: partial ? 'warn' : 'info' }
+    );
+
+    await emitAutomationEvent({
+      workspaceId,
+      orgId,
+      userId,
+      eventType: 'automation_pipeline_completed',
+      title: partial ? 'Automation partially completed' : 'Automation completed',
+      severity: partial ? 'warning' : 'success',
+      entityType: 'backlink_import',
+      entityId: importId,
+      payload: {
+        runId,
+        opportunitiesCreated,
+        contentGenerated,
+        submissionsCreated,
+        relationshipsCreated,
+      },
+    });
+
+    // Non-blocking enrichment only (memory/knowledge/browser) — core data already persisted
     fireAndForget(
       triggerBackgroundEnginesAfterImport({
         workspaceId,
         importId,
         orgId,
-        userId: _userId,
+        userId,
         opportunitiesCreated,
         domains: validRows
           .map((r) => String(r.normalized_domain ?? ''))
@@ -451,15 +901,34 @@ export async function runAutomationPipeline(
       importId,
       opportunitiesCreated,
       contentGenerated,
-      stepsCompleted: [...new Set(stepsCompleted)],
+      submissionsCreated,
+      relationshipsCreated,
+      analysesCreated,
+      stepsCompleted: [...steps],
+      status: finalStatus,
+      errors: stageErrors,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Pipeline failed';
+    await log('store', `Pipeline failed: ${message}`, { level: 'error' });
     await updateImportStatus(importId, 'failed');
     await updateRun(runId, {
       status: 'failed',
       error_message: message,
+      steps_completed: [...steps],
+      progress: progressFromStages(steps),
       completed_at: new Date().toISOString(),
+    });
+    await emitAutomationEvent({
+      workspaceId,
+      orgId,
+      userId,
+      eventType: 'automation_pipeline_failed',
+      title: 'Automation pipeline failed',
+      summary: message,
+      severity: 'failure',
+      entityType: 'backlink_import',
+      entityId: importId,
     });
     throw err;
   }
@@ -474,7 +943,7 @@ function inferAssistedMode(type: string): string {
 }
 
 /**
- * Keep supporting engines warm after import without surfacing them in the V1 UI.
+ * Optional background enrichment only — core relationships already written in the main pipeline.
  */
 async function triggerBackgroundEnginesAfterImport(opts: {
   workspaceId: string;
@@ -510,8 +979,6 @@ async function triggerBackgroundEnginesAfterImport(opts: {
         `Opportunities created: ${opportunitiesCreated}`,
         `Domains analyzed:`,
         ...domains.map((d) => `- ${d}`),
-        ``,
-        `Generated automatically so the Knowledge Engine can support outreach and campaign drafting.`,
       ].join('\n');
       await uploadDocument(workspaceId, userId, {
         title: `Import analysis ${new Date().toISOString().slice(0, 10)}`,
@@ -524,59 +991,6 @@ async function triggerBackgroundEnginesAfterImport(opts: {
     logger.warn({ err, workspaceId, importId }, 'background knowledge upload skipped');
   }
 
-  // Relationship Engine: seed organizations from imported opportunities
-  try {
-    const { data: opps } = await getSupabaseAdmin()
-      .from('opportunities')
-      .select('id, domain, website_name, url, score, country, language')
-      .eq('import_id', importId)
-      .eq('workspace_id', workspaceId);
-
-    for (const opp of opps ?? []) {
-      const domain = String(opp.domain ?? '');
-      if (!domain) continue;
-      const { data: existing } = await getSupabaseAdmin()
-        .from('relationship_organizations')
-        .select('id')
-        .eq('workspace_id', workspaceId)
-        .eq('domain', domain)
-        .maybeSingle();
-
-      let relOrgId = existing?.id as string | undefined;
-      if (!relOrgId) {
-        relOrgId = randomUUID();
-        await getSupabaseAdmin().from('relationship_organizations').insert({
-          id: relOrgId,
-          workspace_id: workspaceId,
-          company_name: String(opp.website_name ?? domain),
-          domain,
-          website: opp.url ?? `https://${domain}`,
-          country: opp.country ?? 'US',
-          language: opp.language ?? 'en',
-          relationship_score: Math.min(100, Math.round(Number(opp.score ?? 40))),
-          warmth: 'cold',
-          metadata: { source: 'backlink_import', opportunity_id: opp.id },
-        });
-      }
-
-      await getSupabaseAdmin().from('backlink_relationships').upsert(
-        {
-          workspace_id: workspaceId,
-          domain,
-          organization_id: relOrgId,
-          warmth: 'cold',
-          opportunity_count: 1,
-          notes: `Seeded from import ${importId.slice(0, 8)}`,
-        },
-        { onConflict: 'workspace_id,domain' }
-      );
-    }
-  } catch (err) {
-    logger.warn({ err, workspaceId, importId }, 'background relationship seed skipped');
-  }
-
-  // Browser Intelligence: queue light scans for a few top domains (Campaign Engine
-  // already receives opportunities via queue_status=pending_approval above).
   if (userId) {
     for (const domain of domains.slice(0, 3)) {
       const targetUrl = domain.startsWith('http') ? domain : `https://${domain}`;
@@ -594,26 +1008,152 @@ async function triggerBackgroundEnginesAfterImport(opts: {
   }
 }
 
+export async function listAutomationRunLogs(workspaceId: string, runId: string) {
+  const { data, error } = await getSupabaseAdmin()
+    .from('backlink_automation_run_logs')
+    .select('*')
+    .eq('workspace_id', workspaceId)
+    .eq('run_id', runId)
+    .order('created_at', { ascending: true })
+    .limit(500);
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function refreshAutomationAnalytics(workspaceId: string) {
+  const day = new Date().toISOString().slice(0, 10);
+  const safeCount = async (fn: () => PromiseLike<{ count: number | null; error: unknown }>) => {
+    try {
+      const { count, error } = await fn();
+      if (error) return 0;
+      return count ?? 0;
+    } catch {
+      return 0;
+    }
+  };
+
+  const [
+    imported_websites,
+    analyzed_websites,
+    qualified_opportunities,
+    generated_drafts,
+    submissions,
+    relationships,
+    verified_backlinks,
+    campaigns,
+  ] = await Promise.all([
+    safeCount(() =>
+      getSupabaseAdmin()
+        .from('backlink_import_rows')
+        .select('id', { count: 'exact', head: true })
+        .eq('workspace_id', workspaceId)
+        .eq('status', 'valid')
+    ),
+    safeCount(() =>
+      getSupabaseAdmin()
+        .from('backlink_domain_analyses')
+        .select('id', { count: 'exact', head: true })
+        .eq('workspace_id', workspaceId)
+    ),
+    safeCount(() =>
+      getSupabaseAdmin()
+        .from('opportunities')
+        .select('id', { count: 'exact', head: true })
+        .eq('workspace_id', workspaceId)
+    ),
+    safeCount(() =>
+      getSupabaseAdmin()
+        .from('backlink_ai_drafts')
+        .select('id', { count: 'exact', head: true })
+        .eq('workspace_id', workspaceId)
+    ),
+    safeCount(() =>
+      getSupabaseAdmin()
+        .from('backlink_submissions')
+        .select('id', { count: 'exact', head: true })
+        .eq('workspace_id', workspaceId)
+    ),
+    safeCount(() =>
+      getSupabaseAdmin()
+        .from('relationship_organizations')
+        .select('id', { count: 'exact', head: true })
+        .eq('workspace_id', workspaceId)
+    ),
+    safeCount(() =>
+      getSupabaseAdmin()
+        .from('backlink_submissions')
+        .select('id', { count: 'exact', head: true })
+        .eq('workspace_id', workspaceId)
+        .eq('queue_stage', 'verified')
+    ),
+    safeCount(() =>
+      getSupabaseAdmin()
+        .from('campaigns')
+        .select('id', { count: 'exact', head: true })
+        .eq('workspace_id', workspaceId)
+    ),
+  ]);
+
+  const { data: pendingRows } = await getSupabaseAdmin()
+    .from('opportunities')
+    .select('id')
+    .eq('workspace_id', workspaceId)
+    .eq('queue_status', 'pending_review');
+  const pending_approvals = pendingRows?.length ?? 0;
+
+  const snapshot = {
+    imported_websites,
+    analyzed_websites,
+    qualified_opportunities,
+    generated_drafts,
+    pending_approvals,
+    relationships,
+    submissions,
+    verified_backlinks,
+    campaigns,
+  };
+
+  const upsert = await getSupabaseAdmin().from('backlink_automation_analytics').upsert(
+    {
+      workspace_id: workspaceId,
+      day,
+      ...snapshot,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'workspace_id,day' }
+  );
+  if (upsert.error) {
+    logger.warn({ err: upsert.error }, 'automation analytics upsert skipped');
+  }
+
+  return snapshot;
+}
+
 export async function getAutomationSummary(workspaceId: string) {
-  const [imports, opps, submissions, runs] = await Promise.all([
-    getSupabaseAdmin()
-      .from('backlink_imports')
-      .select('id', { count: 'exact', head: true })
-      .eq('workspace_id', workspaceId),
+  const analytics = await refreshAutomationAnalytics(workspaceId).catch(async () => {
+    // Analytics table may not exist until migration 082 — fall back to live counts
+    return null;
+  });
+
+  const [opps, submissions, runs, drafts] = await Promise.all([
     getSupabaseAdmin()
       .from('opportunities')
-      .select('automation_status, import_id')
+      .select('automation_status, import_id, queue_status')
       .eq('workspace_id', workspaceId),
     getSupabaseAdmin()
       .from('backlink_submissions')
-      .select('status')
+      .select('status, queue_stage')
       .eq('workspace_id', workspaceId),
     getSupabaseAdmin()
       .from('backlink_automation_runs')
       .select('*')
       .eq('workspace_id', workspaceId)
       .order('created_at', { ascending: false })
-      .limit(3),
+      .limit(5),
+    getSupabaseAdmin()
+      .from('backlink_ai_drafts')
+      .select('id', { count: 'exact', head: true })
+      .eq('workspace_id', workspaceId),
   ]);
 
   const statusCounts: Record<string, number> = {};
@@ -628,29 +1168,37 @@ export async function getAutomationSummary(workspaceId: string) {
     subCounts[st] = (subCounts[st] ?? 0) + 1;
   }
 
-  const importedWebsites = (opps.data ?? []).filter((o) => o.import_id).length;
-  const analyzed =
+  const importedWebsites =
+    analytics?.imported_websites ?? (opps.data ?? []).filter((o) => o.import_id).length;
+  const analyzedWebsites =
+    analytics?.analyzed_websites ??
     (statusCounts.analyzed ?? 0) + (statusCounts.prepared ?? 0) + (statusCounts.qualified ?? 0);
-  const qualifiedOpportunities =
-    (statusCounts.qualified ?? 0) + (statusCounts.prepared ?? 0);
+  const pendingApproval =
+    analytics?.pending_approvals ??
+    (opps.data ?? []).filter((o) => o.queue_status === 'pending_review').length;
+  const contentGenerated = analytics?.generated_drafts ?? drafts.count ?? 0;
 
   return {
     importedWebsites,
-    totalImports: imports.count ?? 0,
-    analyzedWebsites: analyzed,
-    qualifiedOpportunities,
-    contentGenerated: statusCounts.prepared ?? 0,
-    pendingApproval: statusCounts.prepared ?? 0,
+    totalImports: importedWebsites,
+    analyzedWebsites,
+    qualifiedOpportunities: analytics?.qualified_opportunities ?? (opps.data ?? []).length,
+    contentGenerated,
+    pendingApproval,
     submitted: subCounts.submitted ?? 0,
     published: subCounts.published ?? 0,
-    verified: statusCounts.verified ?? 0,
+    verified: analytics?.verified_backlinks ?? statusCounts.verified ?? 0,
     rejected: subCounts.rejected ?? 0,
     waiting: subCounts.waiting ?? 0,
     accepted: subCounts.accepted ?? 0,
+    relationships: analytics?.relationships ?? 0,
+    submissions: analytics?.submissions ?? (submissions.data ?? []).length,
+    campaigns: analytics?.campaigns ?? 0,
     pipelineSteps: AUTOMATION_PIPELINE_STEPS,
     recentRuns: runs.data ?? [],
     statusBreakdown: statusCounts,
     submissionBreakdown: subCounts,
+    analytics,
     disclaimer:
       'SEO OS automates preparation, classification, and tracking. Third-party websites control publication — backlinks are never guaranteed.',
   };

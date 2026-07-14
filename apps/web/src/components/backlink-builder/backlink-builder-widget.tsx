@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -7,7 +6,6 @@ import { Badge } from '@/components/ui/badge';
 import { AnimatedCounter } from '@/components/demo/animated-counter';
 import { ProgressBarLabel } from '@/components/demo/animated-progress';
 import { PageTransition, StaggerGrid, StaggerItem } from '@/components/demo/page-transition';
-import { AIThinkingPanel } from '@/components/demo/ai-thinking-panel';
 import {
   Link2,
   Sparkles,
@@ -191,23 +189,6 @@ export function BacklinkBuilderNav() {
 }
 
 export function BacklinkBuilderHero({ title, subtitle }: { title: string; subtitle: string }) {
-  const [step, setStep] = useState(0);
-  const thinkingSteps = [
-    'Scanning referring domains...',
-    'Scoring 34 backlink types...',
-    'Predicting success probability...',
-    'Building recommendations...',
-    'Completed.',
-  ];
-
-  useEffect(() => {
-    const timer = setInterval(
-      () => setStep((s) => (s >= thinkingSteps.length - 1 ? 0 : s + 1)),
-      2200
-    );
-    return () => clearInterval(timer);
-  }, [thinkingSteps.length]);
-
   return (
     <PageTransition className="space-y-4">
       <div className="relative overflow-hidden rounded-xl border bg-gradient-to-r from-primary/10 via-background to-violet-500/5 p-6">
@@ -220,11 +201,6 @@ export function BacklinkBuilderHero({ title, subtitle }: { title: string; subtit
             <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
             <p className="text-muted-foreground max-w-xl">{subtitle}</p>
           </div>
-          <AIThinkingPanel
-            steps={thinkingSteps}
-            currentStep={step}
-            active={step < thinkingSteps.length - 1}
-          />
         </div>
       </div>
       <BacklinkBuilderNav />

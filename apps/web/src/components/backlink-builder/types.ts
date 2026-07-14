@@ -41,6 +41,9 @@ export type AutomationSummary = {
   rejected: number;
   waiting: number;
   accepted: number;
+  relationships?: number;
+  submissions?: number;
+  campaigns?: number;
   disclaimer?: string;
   recentRuns?: Array<{
     id: string;
@@ -48,6 +51,7 @@ export type AutomationSummary = {
     current_step?: string;
     progress: number;
     steps_completed?: string[];
+    error_message?: string | null;
     created_at: string;
   }>;
   pipelineSteps?: Array<{ id: string; label: string; order: number }>;

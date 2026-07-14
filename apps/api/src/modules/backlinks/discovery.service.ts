@@ -86,7 +86,7 @@ export async function runDiscoverWebsites(
         authority_estimated: true,
         traffic_estimated: true,
         metrics_source: 'estimated',
-        queue_status: 'pending_approval',
+        queue_status: 'pending_review',
         metadata: {
           discovery_run_id: runId,
           match_reasons: c.matchReasons,
@@ -146,16 +146,41 @@ export async function enqueueAutomationPipeline(
   orgId?: string,
   userId?: string
 ) {
+  // Surface activity immediately in Import History (before worker picks up the job).
+  await getSupabaseAdmin()
+    .from('backlink_imports')
+    .update({ status: 'analyzing' })
+    .eq('id', importId)
+    .eq('workspace_id', workspaceId)
+    .in('status', ['validated', 'failed', 'pending']);
+
   const jobId = await enqueueJob(
     QUEUES.CRAWL,
     'backlink_automation',
     { type: 'backlink_automation', workspaceId, importId, orgId, userId },
     { singletonKey: `automation-${importId}`, retryLimit: 1 }
   );
-  if (!jobId) {
-    return runAutomationPipeline(workspaceId, importId, orgId, userId);
+  if (jobId) {
+    return { queued: true, jobId, importId, status: 'queued' as const };
   }
-  return { queued: true, jobId, importId };
+
+  // Workers enabled but send() returned null → singleton already active (do NOT re-run sync).
+  const { getEnv } = await import('../../config/env.js');
+  if (getEnv().ENABLE_WORKERS) {
+    return {
+      queued: true,
+      jobId: null,
+      importId,
+      status: 'already_active' as const,
+      message: 'Automation already queued or running for this import',
+    };
+  }
+
+  // Workers disabled: never block the HTTP request for large imports.
+  void runAutomationPipeline(workspaceId, importId, orgId, userId).catch((err) => {
+    logger.error({ err, importId, workspaceId }, 'Inline automation pipeline failed');
+  });
+  return { queued: false, jobId: null, importId, status: 'started_inline' as const };
 }
 
 export async function discoverProjectKeywords(

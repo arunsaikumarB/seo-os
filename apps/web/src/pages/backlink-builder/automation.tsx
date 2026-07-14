@@ -1,5 +1,4 @@
 import { useParams, Link } from 'react-router-dom';
-import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -9,9 +8,8 @@ import { useApi } from '@/hooks/use-api';
 import { BacklinkBuilderNav } from '@/components/backlink-builder/backlink-builder-widget';
 import { PageTransition } from '@/components/demo/page-transition';
 import { ProgressBarLabel } from '@/components/demo/animated-progress';
-import { AIThinkingPanel } from '@/components/demo/ai-thinking-panel';
 import type { AutomationSummary } from '@/components/backlink-builder/types';
-import { Zap, Upload, CheckCircle, ArrowRight } from 'lucide-react';
+import { Zap, Upload, CheckCircle, ArrowRight, AlertTriangle } from 'lucide-react';
 
 const PIPELINE_STEPS = [
   'import',
@@ -27,26 +25,18 @@ const PIPELINE_STEPS = [
   'store',
 ];
 
+type RunLog = {
+  id: string;
+  level: string;
+  stage: string;
+  message: string;
+  detail?: Record<string, unknown>;
+  created_at: string;
+};
+
 export function BacklinkAutomationPage() {
   const { projectId = '' } = useParams();
   const { request } = useApi();
-  const [thinkStep, setThinkStep] = useState(0);
-  const thinkingSteps = [
-    'Validating imported URLs...',
-    'Analyzing domain authority & niche...',
-    'Classifying backlink opportunities...',
-    'Generating outreach content...',
-    'Queuing for approval...',
-    'Completed.',
-  ];
-
-  useEffect(() => {
-    const timer = setInterval(
-      () => setThinkStep((s) => (s >= thinkingSteps.length - 1 ? 0 : s + 1)),
-      2200
-    );
-    return () => clearInterval(timer);
-  }, [thinkingSteps.length]);
 
   const summary = useQuery({
     queryKey: ['automation-summary', projectId],
@@ -55,13 +45,34 @@ export function BacklinkAutomationPage() {
         `/v1/projects/${projectId}/backlink-builder/automation/summary`
       ),
     enabled: !!projectId,
-    refetchInterval: 10_000,
+    refetchInterval: (q) => {
+      const run = q.state.data?.data?.recentRuns?.[0];
+      return run && ['running', 'queued', 'retrying'].includes(String(run.status)) ? 2500 : 8000;
+    },
   });
 
   const data = summary.data?.data;
   const activeRun = data?.recentRuns?.[0];
-  const completedSteps = data?.recentRuns?.[0]?.steps_completed ?? [];
-  const progress = activeRun?.progress ?? (data?.analyzedWebsites ? 85 : 0);
+  const completedSteps: string[] = Array.isArray(activeRun?.steps_completed)
+    ? (activeRun?.steps_completed as string[])
+    : [];
+  const progress = Number(activeRun?.progress ?? 0);
+  const runActive = ['running', 'queued', 'retrying', 'waiting'].includes(
+    String(activeRun?.status ?? '')
+  );
+
+  const logs = useQuery({
+    queryKey: ['automation-run-logs', projectId, activeRun?.id],
+    queryFn: () =>
+      request<{ data: RunLog[] }>(
+        `/v1/projects/${projectId}/backlink-builder/automation/runs/${activeRun!.id}/logs`
+      ),
+    enabled: !!projectId && !!activeRun?.id,
+    refetchInterval: runActive ? 2000 : false,
+  });
+
+  const logLines = logs.data?.data ?? [];
+  const latestError = [...logLines].reverse().find((l) => l.level === 'error');
 
   return (
     <PageTransition className="space-y-6">
@@ -79,7 +90,7 @@ export function BacklinkAutomationPage() {
           <Zap className="h-6 w-6 text-violet-500" /> Automation Pipeline
         </h1>
         <p className="text-muted-foreground mt-1">
-          End-to-end workflow from import through verification
+          Live worker execution — progress and logs reflect persisted database writes only
         </p>
       </div>
 
@@ -91,22 +102,22 @@ export function BacklinkAutomationPage() {
             <CardHeader className="pb-2">
               <div className="flex justify-between items-center">
                 <CardTitle className="text-base">Pipeline Progress</CardTitle>
-                <Badge className={activeRun?.status === 'running' ? 'animate-pulse' : ''}>
-                  {activeRun?.status ?? 'idle'}
+                <Badge className={runActive ? 'animate-pulse' : ''}>
+                  {String(activeRun?.status ?? 'idle').replace(/_/g, ' ')}
                 </Badge>
               </div>
               <CardDescription>
                 {activeRun?.current_step
                   ? `Current step: ${String(activeRun.current_step).replace(/_/g, ' ')}`
                   : 'Import websites to start the automation pipeline'}
+                {activeRun?.error_message ? ` · ${String(activeRun.error_message)}` : ''}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <ProgressBarLabel label="Overall progress" value={progress} />
               <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
                 {PIPELINE_STEPS.map((step, i) => {
-                  const done =
-                    completedSteps.includes(step) || (!activeRun && data?.analyzedWebsites);
+                  const done = completedSteps.includes(step);
                   const active = activeRun?.current_step === step;
                   return (
                     <div
@@ -130,27 +141,72 @@ export function BacklinkAutomationPage() {
           </Card>
 
           <div className="grid gap-4 lg:grid-cols-2">
-            <AIThinkingPanel
-              steps={thinkingSteps}
-              currentStep={thinkStep}
-              active={thinkStep < thinkingSteps.length - 1}
-            />
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Live execution log</CardTitle>
+                <CardDescription>
+                  Streamed from the worker — no simulated messages
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {latestError && (
+                  <div className="mb-3 flex gap-2 rounded-md border border-red-500/30 bg-red-500/5 p-2 text-xs">
+                    <AlertTriangle className="h-4 w-4 text-red-500 shrink-0" />
+                    <div>
+                      <p className="font-medium">Stage: {latestError.stage}</p>
+                      <p className="text-muted-foreground">{latestError.message}</p>
+                    </div>
+                  </div>
+                )}
+                <div className="max-h-72 overflow-y-auto space-y-1 font-mono text-xs">
+                  {logLines.length === 0 && (
+                    <p className="text-muted-foreground">
+                      {activeRun?.id
+                        ? 'Waiting for worker logs…'
+                        : 'No active or recent run. Start an import to see live logs.'}
+                    </p>
+                  )}
+                  {logLines.map((line) => (
+                    <div
+                      key={line.id}
+                      className={
+                        line.level === 'error'
+                          ? 'text-red-600 dark:text-red-400'
+                          : line.level === 'warn'
+                            ? 'text-amber-700 dark:text-amber-300'
+                            : 'text-muted-foreground'
+                      }
+                    >
+                      <span className="opacity-60">
+                        {new Date(line.created_at).toLocaleTimeString()}
+                      </span>{' '}
+                      <span className="uppercase tracking-wide">[{line.stage}]</span> {line.message}
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
 
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">Automation Metrics</CardTitle>
+                <CardDescription>Live database counts</CardDescription>
               </CardHeader>
               <CardContent className="grid grid-cols-2 gap-3 text-sm">
-                {[
-                  ['Imported', data?.importedWebsites],
-                  ['Analyzed', data?.analyzedWebsites],
-                  ['Content Generated', data?.contentGenerated],
-                  ['Pending Approval', data?.pendingApproval],
-                  ['Submitted', data?.submitted],
-                  ['Published', data?.published],
-                  ['Verified', data?.verified],
-                  ['Rejected', data?.rejected],
-                ].map(([label, val]) => (
+                {(
+                  [
+                    ['Imported', data?.importedWebsites],
+                    ['Analyzed', data?.analyzedWebsites],
+                    ['Qualified', data?.qualifiedOpportunities],
+                    ['Drafts', data?.contentGenerated],
+                    ['Pending Approval', data?.pendingApproval],
+                    ['Submissions', data?.submissions],
+                    ['Relationships', data?.relationships],
+                    ['Campaigns', data?.campaigns],
+                    ['Submitted', data?.submitted],
+                    ['Verified', data?.verified],
+                  ] as const
+                ).map(([label, val]) => (
                   <div key={String(label)} className="flex justify-between rounded border p-2">
                     <span className="text-muted-foreground">{label}</span>
                     <span className="font-semibold tabular-nums">{val ?? 0}</span>
@@ -160,14 +216,20 @@ export function BacklinkAutomationPage() {
             </Card>
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button asChild>
-              <Link to={`/projects/${projectId}/backlink-builder/tracking`}>
-                View Tracking <ArrowRight className="h-3.5 w-3.5 ml-1" />
+              <Link to={`/projects/${projectId}/backlink-builder/explorer`}>Open Explorer</Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link to={`/projects/${projectId}/campaigns/queue`}>
+                Opportunity Queue <ArrowRight className="h-3.5 w-3.5 ml-1" />
               </Link>
             </Button>
             <Button variant="outline" asChild>
-              <Link to={`/projects/${projectId}/backlink-builder/explorer`}>Open Explorer</Link>
+              <Link to={`/projects/${projectId}/backlink-builder/queue`}>Submission Queue</Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link to={`/projects/${projectId}/mission-control`}>Mission Control</Link>
             </Button>
           </div>
         </>

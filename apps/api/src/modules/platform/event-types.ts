@@ -32,6 +32,19 @@ export const PLATFORM_EVENT_TYPES = [
   'integration_token_refreshed',
   'beta_org_enabled',
   'beta_feedback_submitted',
+  // Automation pipeline (real execution)
+  'website_imported',
+  'website_validated',
+  'website_analyzed',
+  'opportunity_created',
+  'draft_generated',
+  'submission_created',
+  'relationship_created',
+  'analytics_updated',
+  'mission_control_updated',
+  'report_updated',
+  'automation_pipeline_completed',
+  'automation_pipeline_failed',
 ] as const;
 
 export type PlatformEventType = (typeof PLATFORM_EVENT_TYPES)[number];

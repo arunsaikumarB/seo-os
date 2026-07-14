@@ -9,6 +9,7 @@ import {
   getAutomationRun,
   getAutomationSummary,
   getImportDetail,
+  listAutomationRunLogs,
   listImports,
   listSubmissions,
   listTracking,
@@ -33,6 +34,8 @@ const importSchema = z.object({
   sourceType: z.enum(['csv', 'excel', 'txt', 'manual', 'url_list']),
   content: z.string().min(1),
   fileName: z.string().optional(),
+  /** When true (default), enqueue classify/score/content/queue after import. */
+  runPipeline: z.boolean().optional().default(true),
 });
 
 const submissionSchema = z.object({
@@ -102,7 +105,7 @@ automationRouter.get(
 automationRouter.post('/import', authMiddleware, requireRole('member'), async (req, res, next) => {
   try {
     const body = importSchema.parse(req.body);
-    const { userId } = (req as AuthenticatedRequest).auth;
+    const { userId, orgId } = (req as AuthenticatedRequest).auth;
     const urls = await parseImportContent(body.content, body.sourceType);
     const richRows =
       body.sourceType === 'csv' || body.sourceType === 'excel' || body.sourceType === 'txt'
@@ -113,7 +116,27 @@ automationRouter.post('/import', authMiddleware, requireRole('member'), async (r
       userId,
       richRows,
     });
-    res.status(201).json({ data: result });
+
+    let pipeline: Awaited<ReturnType<typeof enqueueAutomationPipeline>> | null = null;
+    if (body.runPipeline !== false && result.stats.valid > 0) {
+      pipeline = await enqueueAutomationPipeline(
+        param(req.params.projectId),
+        result.importId,
+        orgId,
+        userId
+      );
+    }
+
+    res.status(201).json({
+      data: {
+        ...result,
+        pipeline,
+        message:
+          pipeline != null
+            ? 'Import saved — automation pipeline started (classify, score, content, queue)'
+            : 'Import saved',
+      },
+    });
   } catch (err) {
     next(err);
   }
@@ -220,6 +243,23 @@ automationRouter.get(
       const run = await getAutomationRun(param(req.params.runId), param(req.params.projectId));
       if (!run) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Run not found');
       res.json({ data: run });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+automationRouter.get(
+  '/runs/:runId/logs',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const logs = await listAutomationRunLogs(
+        param(req.params.projectId),
+        param(req.params.runId)
+      );
+      res.json({ data: logs });
     } catch (err) {
       next(err);
     }
