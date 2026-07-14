@@ -27,6 +27,13 @@ export async function startJobInfrastructure(): Promise<void> {
   // pg-boss v10: queues must exist before work()/send()
   await ensureRequiredQueues(boss);
 
+  // Keep critical attached for ops health even when unused
+  await registerJobHandler(QUEUES.CRITICAL, async (jobs) => {
+    for (const job of jobs) {
+      logger.debug({ jobId: job.id }, 'Critical queue job received (no-op)');
+    }
+  });
+
   await registerJobHandler(QUEUES.AGENTS, async (jobs) => {
     await handleAgentJobs(jobs.map((j) => ({ id: j.id, data: j.data as Record<string, unknown> })));
   });
