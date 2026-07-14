@@ -5,6 +5,8 @@ import {
   analyzeDomainLive,
   AUTOMATION_PIPELINE_STEPS,
   classifyOpportunity,
+  qualifyOpportunity,
+  formatQualificationReport,
   contentTypesForOpportunity,
   deduplicateAndValidate,
   extractUrlsFromCsv,
@@ -18,6 +20,7 @@ import {
   type BrandContext,
   type ContentDraftType,
   type ImportSourceType,
+  type QualificationResult,
   type RichImportRow,
   type TrackingStatus,
 } from '@seo-os/backlink-builder';
@@ -56,7 +59,7 @@ async function appendRunLog(params: {
   stage: string;
   message: string;
   detail?: Record<string, unknown>;
-}) {
+}): Promise<{ ok: boolean; error?: string }> {
   const { error } = await getSupabaseAdmin().from('backlink_automation_run_logs').insert({
     id: randomUUID(),
     workspace_id: params.workspaceId,
@@ -68,8 +71,11 @@ async function appendRunLog(params: {
     detail: params.detail ?? {},
   });
   if (error) {
+    const msg = writeErrorMessage(error);
     logger.warn({ err: error, runId: params.runId }, 'automation run log insert failed');
+    return { ok: false, error: msg };
   }
+  return { ok: true };
 }
 
 async function emitAutomationEvent(params: {
@@ -292,6 +298,8 @@ export async function runAutomationPipeline(
   const steps = new Set<string>();
   const brand = await getBrandContext(workspaceId, orgId);
   const stageErrors: Array<{ stage: string; domain?: string; message: string }> = [];
+  const qualificationReport: QualificationResult[] = [];
+  let logWriteFailures = 0;
 
   const { error: runInsertErr } = await getSupabaseAdmin().from('backlink_automation_runs').insert({
     id: runId,
@@ -304,12 +312,12 @@ export async function runAutomationPipeline(
   });
   await requireWrite('create_run', { error: runInsertErr });
 
-  const log = (
+  const log = async (
     stage: string,
     message: string,
     opts: { level?: 'debug' | 'info' | 'warn' | 'error'; detail?: Record<string, unknown> } = {}
-  ) =>
-    appendRunLog({
+  ) => {
+    const result = await appendRunLog({
       workspaceId,
       runId,
       importId,
@@ -318,6 +326,8 @@ export async function runAutomationPipeline(
       level: opts.level,
       detail: opts.detail,
     });
+    if (!result.ok) logWriteFailures++;
+  };
 
   const bump = async (step: string, currentStep: string) => {
     steps.add(step);
@@ -441,6 +451,47 @@ export async function runAutomationPipeline(
               `Score ${classification.opportunityScore} · priority ${classification.priority} · ${classification.backlinkType} — ${domain}`
             );
 
+            const qualification = qualifyOpportunity(analysis, classification);
+            qualificationReport.push(qualification);
+            await log(
+              'classify',
+              `${qualification.websiteName}\nClassification:\n${qualification.classificationLabel}\nScore: ${qualification.score}\nQualified: ${qualification.qualified ? 'YES' : 'NO'}${
+                qualification.qualified ? '' : `\nReason:\n${qualification.reason}`
+              }`,
+              {
+                level: qualification.qualified ? 'info' : 'warn',
+                detail: {
+                  domain,
+                  qualified: qualification.qualified,
+                  reason: qualification.reason,
+                  score: qualification.score,
+                  type: qualification.backlinkType,
+                  label: qualification.classificationLabel,
+                  signals: qualification.signals,
+                },
+              }
+            );
+
+            if (!qualification.qualified) {
+              await emitAutomationEvent({
+                workspaceId,
+                orgId,
+                userId,
+                eventType: 'website_analyzed',
+                title: `Analyzed ${domain} — not qualified`,
+                severity: 'warning',
+                entityType: 'backlink_domain_analysis',
+                entityId: analysisId,
+                payload: {
+                  domain,
+                  score: classification.opportunityScore,
+                  qualified: false,
+                  reason: qualification.reason,
+                },
+              });
+              return;
+            }
+
             const oppId = randomUUID();
             const oppInsert = await getSupabaseAdmin().from('opportunities').insert({
               id: oppId,
@@ -450,9 +501,9 @@ export async function runAutomationPipeline(
               url,
               domain,
               score: classification.opportunityScore,
-              status: 'discovered',
-              pipeline_stage: 'discovered',
-              automation_status: 'analyzed',
+              status: 'qualified',
+              pipeline_stage: 'qualified',
+              automation_status: 'qualified',
               website_name: analysis.websiteName,
               domain_rating: analysis.domainRating,
               monthly_traffic: analysis.monthlyTraffic,
@@ -471,17 +522,23 @@ export async function runAutomationPipeline(
               discovery_source: 'import',
               authority_estimated: true,
               traffic_estimated: true,
-              metrics_source: 'estimated',
+              metrics_source: analysis.metricsSource === 'live' ? 'live' : 'estimated',
               queue_status: 'pending_review',
               metadata: {
                 detected_pages: analysis.detectedPages,
                 niche: analysis.niche,
                 difficulty: classification.difficulty,
-                estimated: true,
+                estimated: analysis.metricsSource !== 'live',
                 importEnrichment: rich,
                 cms: (analysis.metadata as Record<string, unknown>)?.cms ?? null,
+                qualification: {
+                  qualified: true,
+                  reason: qualification.reason,
+                  label: qualification.classificationLabel,
+                  signals: qualification.signals,
+                },
                 metrics_labels: {
-                  domain_rating: 'Estimated',
+                  domain_rating: analysis.metricsSource === 'live' ? 'Live' : 'Estimated',
                   monthly_traffic: 'Estimated',
                   success_probability: 'Estimated',
                   difficulty: 'Estimated',
@@ -514,14 +571,14 @@ export async function runAutomationPipeline(
               title: `Analyzed ${domain}`,
               entityType: 'opportunity',
               entityId: oppId,
-              payload: { domain, score: classification.opportunityScore },
+              payload: { domain, score: classification.opportunityScore, qualified: true },
             });
             await emitAutomationEvent({
               workspaceId,
               orgId,
               userId,
               eventType: 'opportunity_created',
-              title: `Opportunity created — ${domain}`,
+              title: `Qualified opportunity — ${domain}`,
               severity: 'success',
               entityType: 'opportunity',
               entityId: oppId,
@@ -529,9 +586,11 @@ export async function runAutomationPipeline(
                 domain,
                 type: classification.backlinkType,
                 priority: classification.priority,
+                score: classification.opportunityScore,
+                qualificationReason: qualification.reason,
               },
             });
-            await log('store', `Created opportunity for ${domain}`);
+            await log('store', `Created qualified opportunity for ${domain}`);
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             stageErrors.push({ stage: 'analyze_classify', domain, message });
@@ -550,23 +609,50 @@ export async function runAutomationPipeline(
         stats: {
           opportunitiesCreated,
           analysesCreated,
+          qualified: qualificationReport.filter((r) => r.qualified).length,
+          rejected: qualificationReport.filter((r) => !r.qualified).length,
           processed: Math.min(i + batch.length, validRows.length),
           total: validRows.length,
           errors: stageErrors.length,
+          logWriteFailures,
         },
       });
     }
 
+    const reportText = formatQualificationReport(qualificationReport);
+    await log('classify', `Qualification report\n\n${reportText}`, {
+      detail: { qualificationReport },
+    });
+
     if (opportunitiesCreated === 0) {
-      const msg = `No opportunities persisted (${stageErrors.length} row failures)`;
-      await log('store', msg, { level: 'error', detail: { stageErrors } });
+      const rejectedReasons = qualificationReport
+        .filter((r) => !r.qualified)
+        .reduce<Record<string, number>>((acc, r) => {
+          acc[r.reason] = (acc[r.reason] ?? 0) + 1;
+          return acc;
+        }, {});
+      const msg =
+        qualificationReport.length > 0
+          ? `No opportunities qualified (${qualificationReport.length} classified, 0 qualified). Reasons: ${JSON.stringify(rejectedReasons)}`
+          : `No opportunities persisted (${stageErrors.length} row failures)`;
+      await log('store', msg, {
+        level: 'error',
+        detail: { stageErrors, qualificationReport, rejectedReasons },
+      });
       await updateImportStatus(importId, 'failed');
       await updateRun(runId, {
         status: 'failed',
         progress: progressFromStages(steps),
         error_message: msg,
         steps_completed: [...steps],
-        stats: { opportunitiesCreated: 0, analysesCreated, errors: stageErrors },
+        stats: {
+          opportunitiesCreated: 0,
+          analysesCreated,
+          qualificationReport,
+          rejectedReasons,
+          errors: stageErrors,
+          logWriteFailures,
+        },
         completed_at: new Date().toISOString(),
       });
       await emitAutomationEvent({
@@ -847,18 +933,24 @@ export async function runAutomationPipeline(
         submissionsCreated,
         relationshipsCreated,
         validRows: validRows.length,
+        qualified: qualificationReport.filter((r) => r.qualified).length,
+        rejected: qualificationReport.filter((r) => !r.qualified).length,
+        qualificationReport,
         errors: stageErrors,
+        logWriteFailures,
       },
       error_message: partial
         ? `${stageErrors.length} domain(s) failed — see run logs`
-        : null,
+        : logWriteFailures > 0
+          ? `Completed with ${logWriteFailures} log write failure(s)`
+          : null,
       completed_at: new Date().toISOString(),
     });
 
     await log(
       'store',
       partial
-        ? `Completed with partial success: ${opportunitiesCreated}/${validRows.length} opportunities`
+        ? `Completed with partial success: ${opportunitiesCreated}/${validRows.length} opportunities (${qualificationReport.filter((r) => !r.qualified).length} not qualified)`
         : `Completed successfully: ${opportunitiesCreated} opportunities, ${contentGenerated} drafts, ${submissionsCreated} submissions`,
       { level: partial ? 'warn' : 'info' }
     );
@@ -1060,6 +1152,7 @@ export async function refreshAutomationAnalytics(workspaceId: string) {
         .from('opportunities')
         .select('id', { count: 'exact', head: true })
         .eq('workspace_id', workspaceId)
+        .not('import_id', 'is', null)
     ),
     safeCount(() =>
       getSupabaseAdmin()

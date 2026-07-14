@@ -83,24 +83,23 @@ function estimateTraffic(domain: string): number {
   return Math.round((dr / 100) * 50000 + (hashDomain(domain + 't') % 20000));
 }
 
-function buildDetectedPages(domain: string, primaryType: string): DetectedPages {
-  const base = `https://${domain}`;
-  const pages: DetectedPages = { contact: `${base}/contact` };
-  if (primaryType === 'guest_post' || primaryType === 'resource_page') {
-    pages.guestPost = `${base}/write-for-us`;
-    pages.submission = `${base}/contribute`;
-    pages.resource = `${base}/resources`;
-  }
-  if (primaryType === 'directory') pages.directory = `${base}/submit`;
-  if (primaryType === 'forum') pages.forum = `${base}/forum`;
-  if (primaryType === 'qa_site') pages.qa = `${base}/questions`;
-  return pages;
+function buildDetectedPages(domain: string, _primaryType: string): DetectedPages {
+  // Do not invent write-for-us / contribute URLs — qualification requires live confirmation.
+  // Contact is a soft guess only; live fetch must set hasContactLink before it counts.
+  return { contact: `https://${domain}/contact` };
 }
+
+const PUBLISHER_HINTS =
+  /techradar|techspot|tomshardware|digitaltrends|theverge|wired|arstechnica|engadget|cnet|zdnet|pcmag|pcworld|androidauthority|xda|makeuseof|howtogeek|windowscentral|pcgamer|gamespot|ign/i;
 
 function detectOpportunityTypes(domain: string, niche: string): BacklinkTypeId[] {
   const types: BacklinkTypeId[] = [];
   const category = categorizeDomain(domain);
-  types.push(category as BacklinkTypeId);
+  if (PUBLISHER_HINTS.test(domain) || niche === 'marketing') {
+    types.push('news', 'guest_post', 'resource_page');
+  } else {
+    types.push(category as BacklinkTypeId);
+  }
 
   if (niche === 'marketing') types.push('guest_post', 'resource_page', 'digital_pr');
   if (niche === 'technology') types.push('guest_post', 'broken_link', 'resource_page');
@@ -166,13 +165,45 @@ export async function analyzeDomainLive(
       metricsSource = 'live';
       const html = (await homeRes.text()).slice(0, 50_000).toLowerCase();
       meta.homepageFetched = true;
-      meta.hasContactLink = html.includes('contact');
+      meta.hasContactLink =
+        html.includes('contact') || html.includes('mailto:') || html.includes('/about');
       meta.hasGuestPostHint =
-        html.includes('write for us') || html.includes('guest post') || html.includes('contribute');
-      meta.hasGuidelines = html.includes('guideline') || html.includes('editorial');
-      if (meta.hasGuestPostHint) {
-        base.detectedPages.guestPost = base.detectedPages.guestPost ?? `${origin}/write-for-us`;
-        base.detectedPages.submission = base.detectedPages.submission ?? `${origin}/contribute`;
+        html.includes('write for us') ||
+        html.includes('guest post') ||
+        html.includes('guest blog') ||
+        html.includes('contribute') ||
+        html.includes('submit a tip') ||
+        html.includes('submit a story') ||
+        html.includes('writer guidelines') ||
+        html.includes('become a writer') ||
+        html.includes('send us a tip');
+      meta.hasGuidelines =
+        html.includes('guideline') ||
+        html.includes('editorial') ||
+        html.includes('pitch') ||
+        html.includes('submissions') ||
+        html.includes('contributor');
+      if (meta.hasGuestPostHint || meta.hasGuidelines) {
+        meta.submissionPathConfirmed = true;
+        base.detectedPages.guestPost = `${origin}/write-for-us`;
+        base.detectedPages.submission = `${origin}/contribute`;
+        base.detectedPages.resource = `${origin}/resources`;
+        // Prefer guest_post when live evidence of contribution path exists
+        if (meta.hasGuestPostHint && base.primaryType === 'news') {
+          base.primaryType = 'guest_post';
+        }
+      }
+      if (html.includes('directory') || html.includes('submit listing')) {
+        meta.directoryPathConfirmed = true;
+        base.detectedPages.directory = `${origin}/submit`;
+      }
+      if (html.includes('forum') || html.includes('community')) {
+        meta.forumPathConfirmed = true;
+        base.detectedPages.forum = `${origin}/forum`;
+      }
+      if (html.includes('question') || html.includes('answers')) {
+        meta.qaPathConfirmed = true;
+        base.detectedPages.qa = `${origin}/questions`;
       }
     }
   } catch (err) {

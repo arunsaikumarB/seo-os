@@ -8,7 +8,7 @@ import { listCircuits } from '../lib/circuit-breaker.js';
 import { getProviderManager } from '@seo-os/providers';
 
 export function healthHandler(_req: Request, res: Response): void {
-  res.status(200).json({ status: 'ok', service: 'seo-os-api', version: '1.2.5-bee-resume' });
+  res.status(200).json({ status: 'ok', service: 'seo-os-api', version: '1.2.6-qualify-pipeline' });
 }
 
 export async function readyHandler(_req: Request, res: Response): Promise<void> {
@@ -53,13 +53,13 @@ export async function readyHandler(_req: Request, res: Response): Promise<void> 
         ? 'degraded'
         : 'ready',
     checks,
-    version: '1.2.5-bee-resume',
+    version: '1.2.6-qualify-pipeline',
   });
 }
 
 export function versionHandler(_req: Request, res: Response): void {
   res.json({
-    version: '1.2.5-bee-resume',
+    version: '1.2.6-qualify-pipeline',
     api: 'v1',
     release: 'Enterprise Production Polish',
   });
@@ -230,7 +230,7 @@ export async function opsHealthHandler(_req: Request, res: Response): Promise<vo
       workersEnabled: env.ENABLE_WORKERS,
       providerMode: env.PROVIDER_MODE,
     },
-    version: '1.2.5-bee-resume',
+    version: '1.2.6-qualify-pipeline',
   };
 
   res.status(200).json({ data: payload });

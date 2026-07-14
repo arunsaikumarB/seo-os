@@ -34,6 +34,20 @@ type RunLog = {
   created_at: string;
 };
 
+type QualifyRow = {
+  websiteName?: string;
+  domain: string;
+  classificationLabel: string;
+  score: number;
+  qualified: boolean;
+  reason: string;
+};
+
+function qualificationRows(run: Record<string, unknown> | undefined): QualifyRow[] {
+  const stats = run?.stats as { qualificationReport?: QualifyRow[] } | undefined;
+  return Array.isArray(stats?.qualificationReport) ? stats.qualificationReport : [];
+}
+
 export function BacklinkAutomationPage() {
   const { projectId = '' } = useParams();
   const { request } = useApi();
@@ -52,7 +66,7 @@ export function BacklinkAutomationPage() {
   });
 
   const data = summary.data?.data;
-  const activeRun = data?.recentRuns?.[0];
+  const activeRun = data?.recentRuns?.[0] as Record<string, unknown> | undefined;
   const completedSteps: string[] = Array.isArray(activeRun?.steps_completed)
     ? (activeRun?.steps_completed as string[])
     : [];
@@ -60,6 +74,7 @@ export function BacklinkAutomationPage() {
   const runActive = ['running', 'queued', 'retrying', 'waiting'].includes(
     String(activeRun?.status ?? '')
   );
+  const qualifyRows = qualificationRows(activeRun);
 
   const logs = useQuery({
     queryKey: ['automation-run-logs', projectId, activeRun?.id],
@@ -118,15 +133,15 @@ export function BacklinkAutomationPage() {
               <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
                 {PIPELINE_STEPS.map((step, i) => {
                   const done = completedSteps.includes(step);
-                  const active = activeRun?.current_step === step;
+                  const current = activeRun?.current_step === step;
                   return (
                     <div
                       key={step}
-                      className={`rounded-md border p-2 text-center text-xs ${
+                      className={`rounded border p-2 text-center text-xs ${
                         done
-                          ? 'border-emerald-500/30 bg-emerald-500/5'
-                          : active
-                            ? 'border-violet-500/30 bg-violet-500/5 ring-1 ring-violet-500/20'
+                          ? 'border-emerald-500/40 bg-emerald-500/5'
+                          : current
+                            ? 'border-violet-500/50 bg-violet-500/5'
                             : ''
                       }`}
                     >
@@ -145,7 +160,7 @@ export function BacklinkAutomationPage() {
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">Live execution log</CardTitle>
                 <CardDescription>
-                  Streamed from the worker — no simulated messages
+                  Streamed from the worker — Classify → Qualify → Opportunity
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -158,12 +173,31 @@ export function BacklinkAutomationPage() {
                     </div>
                   </div>
                 )}
+                {qualifyRows.length > 0 && (
+                  <div className="mb-3 max-h-48 overflow-y-auto rounded border bg-muted/30 p-2 text-xs whitespace-pre-wrap font-mono">
+                    {qualifyRows
+                      .slice(0, 20)
+                      .map((r) =>
+                        [
+                          r.websiteName || r.domain,
+                          'Classification:',
+                          r.classificationLabel,
+                          `Score: ${r.score}`,
+                          `Qualified: ${r.qualified ? 'YES' : 'NO'}`,
+                          ...(r.qualified ? [] : ['Reason:', r.reason]),
+                        ].join('\n')
+                      )
+                      .join('\n\n')}
+                  </div>
+                )}
                 <div className="max-h-72 overflow-y-auto space-y-1 font-mono text-xs">
                   {logLines.length === 0 && (
                     <p className="text-muted-foreground">
-                      {activeRun?.id
-                        ? 'Waiting for worker logs…'
-                        : 'No active or recent run. Start an import to see live logs.'}
+                      {!activeRun?.id
+                        ? 'No active or recent run. Start an import to see live logs.'
+                        : runActive
+                          ? 'Waiting for worker logs…'
+                          : 'No persisted worker logs for this run. Re-import after v1.2.6 to stream Qualify lines.'}
                     </p>
                   )}
                   {logLines.map((line) => (
