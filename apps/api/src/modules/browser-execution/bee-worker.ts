@@ -29,6 +29,7 @@ import {
   persistSessionStorageState,
 } from './bee-session.js';
 import { enqueueGateWatch } from './bee-watchers.js';
+import { classifyNavigationFailure, withStageTimeout } from './bee-timeouts.js';
 
 async function updateJob(jobId: string, patch: Record<string, unknown>) {
   await getSupabaseAdmin()
@@ -128,9 +129,10 @@ async function learnSelectors(
 }
 
 function speedDelayMs(speed: string): number {
-  if (speed === 'slow') return 1200;
-  if (speed === 'fast') return 200;
-  return 500;
+  // Minimal pacing only — parallel workers + pool carry throughput
+  if (speed === 'slow') return 400;
+  if (speed === 'fast') return 0;
+  return 50;
 }
 
 async function pauseForGate(params: {
@@ -193,6 +195,14 @@ async function pauseForGate(params: {
       intervalMs: Number(policyRow?.watch_interval_ms ?? 2000),
     });
   }
+
+  // Immediately fill free workers with next queued websites
+  await enqueueJob(
+    QUEUES.LOW,
+    'bee_queue',
+    { type: 'bee_queue', workspaceId },
+    { singletonKey: `bee-queue-drain-${workspaceId}`, startAfter: 0 }
+  );
 }
 
 export async function runBeeExecutionJob(data: {
@@ -284,15 +294,22 @@ export async function runBeeExecutionJob(data: {
             .maybeSingle();
           if (sess) storageState = await loadStorageStateFromSession(sess);
         }
-        await runtime.launch({
-          mode: DEFAULT_FEATURE_FLAGS.bee_headed_debug ? 'headed' : 'headless',
-          storageState: storageState ?? undefined,
-        });
-        if (storageState) {
-          await appendLog(workspaceId, jobId, 'info', 'Browser launched with restored session storage', {
-            sessionReuse: true,
-          });
-        }
+        await withStageTimeout('launch', () =>
+          runtime.launch({
+            mode: DEFAULT_FEATURE_FLAGS.bee_headed_debug ? 'headed' : 'headless',
+            storageState: storageState ?? undefined,
+            timeoutMs: 20_000,
+          })
+        );
+        await appendLog(
+          workspaceId,
+          jobId,
+          'info',
+          storageState
+            ? 'Launching Browser — restored authenticated session'
+            : 'Launching Browser',
+          { sessionReuse: Boolean(storageState), pooled: true }
+        );
       }
 
       if (sessionId) {
@@ -371,7 +388,10 @@ export async function runBeeExecutionJob(data: {
         if (action === 'open' || action === 'navigate') {
           const url = String(detail.url ?? '');
           if (url) {
-            const cap = await runtime.navigate(url);
+            await appendLog(workspaceId, jobId, 'info', 'Opening Website', { url });
+            const cap = await withStageTimeout(action === 'open' ? 'open' : 'navigate', () =>
+              runtime.navigate(url, 20_000)
+            );
             await storeScreenshot(
               workspaceId,
               jobId,
@@ -395,7 +415,14 @@ export async function runBeeExecutionJob(data: {
               }
             }
             if (cap.htmlSnippet) {
-              const form = detectFormIntelligence(cap.htmlSnippet);
+              await appendLog(workspaceId, jobId, 'info', 'Finding Form', {});
+              const form = await withStageTimeout('find_form', async () =>
+                detectFormIntelligence(cap.htmlSnippet!)
+              );
+              await appendLog(workspaceId, jobId, 'info', 'Detecting Fields', {
+                controls: form.controls.length,
+                required: form.requiredFields,
+              });
               await getSupabaseAdmin()
                 .from('execution_profiles')
                 .update({
@@ -417,16 +444,20 @@ export async function runBeeExecutionJob(data: {
             cap.screenshotBase64
           );
         } else if (action === 'analyze_form') {
-          const cap = await runtime.capture('analyze');
+          await appendLog(workspaceId, jobId, 'info', 'Finding Form', {});
+          const cap = await withStageTimeout('find_form', () => runtime.capture('analyze'));
           if (cap.htmlSnippet) {
             const form = detectFormIntelligence(cap.htmlSnippet);
-            await appendLog(workspaceId, jobId, 'info', 'Form analyzed', {
+            await appendLog(workspaceId, jobId, 'info', 'Detecting Fields', {
               controls: form.controls.length,
               required: form.requiredFields,
             });
           }
         } else if (action === 'fill' || action === 'select') {
-          const result = await runtime.fillFields(plan.mapping ?? {});
+          await appendLog(workspaceId, jobId, 'info', 'Filling Company Info', {});
+          const result = await withStageTimeout('fill', () =>
+            runtime.fillFields(plan.mapping ?? {})
+          );
           await appendLog(workspaceId, jobId, 'info', 'Fields mapped', result);
           for (const f of result.filled) {
             await learnSelectors(workspaceId, String(job.site_domain), f, `input[name="${f}"]`, true);
@@ -436,13 +467,10 @@ export async function runBeeExecutionJob(data: {
           action === 'upload_images' ||
           action === 'upload_videos'
         ) {
-          await appendLog(
-            workspaceId,
-            jobId,
-            'info',
-            `${action} — asset injection queued for mapped files`,
-            { note: 'File paths resolved from asset library when available' }
-          );
+          await appendLog(workspaceId, jobId, 'info', 'Uploading Assets', {
+            action,
+            note: 'File paths resolved from asset library when available',
+          });
         } else if (action === 'preview') {
           const cap = await runtime.capture('preview');
           await storeScreenshot(workspaceId, jobId, step.id, 'preview', cap.screenshotBase64);
@@ -474,7 +502,8 @@ export async function runBeeExecutionJob(data: {
             return;
           }
 
-          const result = await runtime.attemptSubmit();
+          await appendLog(workspaceId, jobId, 'info', 'Submitting', {});
+          const result = await withStageTimeout('submit', () => runtime.attemptSubmit());
           await storeScreenshot(
             workspaceId,
             jobId,
@@ -482,6 +511,9 @@ export async function runBeeExecutionJob(data: {
             result.submitted ? 'after_submit' : 'submit_blocked',
             result.capture.screenshotBase64
           );
+          if (result.submitted) {
+            await appendLog(workspaceId, jobId, 'info', 'Submitted', {});
+          }
           if (result.gate) {
             await pauseForGate({
               workspaceId,
@@ -513,6 +545,7 @@ export async function runBeeExecutionJob(data: {
               .eq('id', job.opportunity_id);
           }
         } else if (action === 'verify') {
+          await appendLog(workspaceId, jobId, 'info', 'Verification Scheduled', {});
           await updateJob(jobId, { status: 'waiting_verification' });
           await enqueueJob(QUEUES.CRAWL, 'backlink_verify', {
             type: 'backlink_reverify_hint',
@@ -625,13 +658,12 @@ export async function runBeeExecutionJob(data: {
       });
     }
 
-    // Queue continuation — next website
+    // Queue continuation — fill all free parallel slots
     await enqueueJob(QUEUES.LOW, 'bee_queue', {
       type: 'bee_queue',
       workspaceId,
       afterJobId: jobId,
       batchId: job.queue_batch_id ?? null,
-      limit: 1,
     });
 
     await enqueueJob(QUEUES.LOW, 'bee_session_health', {
@@ -649,10 +681,22 @@ export async function runBeeExecutionJob(data: {
       .maybeSingle();
 
     const stepAction = String(liveJob?.current_step_index ?? 'unknown');
+    const nav = classifyNavigationFailure(err);
+    const errCode =
+      (err as { failureCode?: string; code?: string } | null)?.failureCode ||
+      (err as { code?: string } | null)?.code ||
+      nav.code;
     const classified = classifyExecutionError(err, { step: stepAction });
+    const failureCode = errCode || classified.failureCode;
+    const failLabel =
+      nav.message && failureCode !== classified.failureCode
+        ? `Temporary Failure — ${nav.message}`
+        : classified.label.startsWith('Temporary')
+          ? classified.label
+          : `Temporary Failure — ${classified.label}`;
     const analysis = analyzeFailureAi({
-      failureCode: classified.failureCode,
-      failureMessage: classified.failureMessage,
+      failureCode,
+      failureMessage: nav.message || classified.failureMessage,
       status: 'failed',
     });
 
@@ -665,7 +709,7 @@ export async function runBeeExecutionJob(data: {
           workspaceId,
           jobId,
           null,
-          `error_${classified.failureCode.toLowerCase()}`,
+          `error_${String(failureCode).toLowerCase()}`,
           cap.screenshotBase64
         );
       }
@@ -675,12 +719,12 @@ export async function runBeeExecutionJob(data: {
 
     const metricsPatch = {
       failure: {
-        failureCode: classified.failureCode,
-        failureMessage: classified.failureMessage,
+        failureCode,
+        failureMessage: nav.message || classified.failureMessage,
         failureStep: classified.failureStep,
         failureTimestamp: classified.failureTimestamp,
-        retryClass: classified.retryClass,
-        label: classified.label,
+        retryClass: nav.retryable || isAutoRetryable(failureCode) ? 'temporary' : 'unsupported',
+        label: failLabel,
         suggestedFix: classified.suggestedFix,
         stack: err instanceof Error ? err.stack?.slice(0, 4000) : null,
         analysis,
@@ -699,7 +743,7 @@ export async function runBeeExecutionJob(data: {
       const friendly = friendlyRuntimeError(err);
       const rawBlob = `${friendly} ${classified.failureMessage} ${err instanceof Error ? err.message : ''}`;
       const isRuntimeMissing =
-        classified.failureCode === 'BROWSER_RUNTIME_MISSING' ||
+        failureCode === 'BROWSER_RUNTIME_MISSING' ||
         /Browser Runtime Missing|executable doesn't exist|could not find browser|playwright.*install chromium/i.test(
           rawBlob
         );
@@ -716,27 +760,29 @@ export async function runBeeExecutionJob(data: {
         if (healed.ready) {
           await resumeWaitingInfrastructureJobs().catch(() => undefined);
         }
+        await enqueueJob(QUEUES.LOW, 'bee_queue', { type: 'bee_queue', workspaceId });
         return;
       }
     }
 
     await updateJob(jobId, {
       status: 'failed',
-      error_code: classified.failureCode,
-      error_message: classified.label,
+      error_code: failureCode,
+      error_message: failLabel,
       finished_at: new Date().toISOString(),
     });
-    await appendLog(workspaceId, jobId, 'error', classified.label, {
-      failureCode: classified.failureCode,
-      failureMessage: classified.failureMessage,
+    await appendLog(workspaceId, jobId, 'error', failLabel, {
+      failureCode,
+      failureMessage: nav.message || classified.failureMessage,
       failureStep: classified.failureStep,
       failureTimestamp: classified.failureTimestamp,
       suggestedFix: classified.suggestedFix,
+      retryable: nav.retryable,
       analysis,
       stack: err instanceof Error ? err.stack?.slice(0, 2000) : null,
     });
     await recordHistory(workspaceId, jobId, 'failed', {
-      errorCode: classified.failureCode,
+      errorCode: failureCode,
       timing: { failureTimestamp: classified.failureTimestamp },
     });
 
@@ -745,28 +791,36 @@ export async function runBeeExecutionJob(data: {
       await disposeSessionRuntime(sessionId);
     }
 
-    // Smart auto-retry for temporary failures
-    if (isAutoRetryable(classified.failureCode)) {
+    // Never stall the queue — fill free workers immediately
+    await enqueueJob(QUEUES.LOW, 'bee_queue', {
+      type: 'bee_queue',
+      workspaceId,
+      afterJobId: jobId,
+    });
+
+    // Smart auto-retry for temporary / retryable failures (async — does not block queue)
+    const retryable = nav.retryable || isAutoRetryable(failureCode);
+    if (retryable) {
       const policy = await getOrCreatePolicy(workspaceId);
       const attempt = Number(liveJob?.retry_count ?? 0) + 1;
       const max = Number(policy.retry_count ?? 2);
-      const delay = retryBackoffSeconds(attempt);
-      if (delay != null && attempt <= max) {
+      const delaySec = retryBackoffSeconds(attempt);
+      if (delaySec != null && attempt <= max) {
         await appendLog(
           workspaceId,
           jobId,
           'warn',
-          `Auto-retry ${attempt}/${max} in ${delay}s — ${classified.label}`,
-          { delaySeconds: delay, failureCode: classified.failureCode }
+          `Auto-retry ${attempt}/${max} in ${delaySec}s — ${failLabel}`,
+          { delaySeconds: delaySec, failureCode }
         );
-        await retryJob(workspaceId, jobId, { delaySeconds: delay }).catch((retryErr) => {
+        await retryJob(workspaceId, jobId, { delaySeconds: delaySec }).catch((retryErr) => {
           logger.warn({ retryErr, jobId }, 'Auto-retry schedule failed');
         });
         return;
       }
     }
 
-    throw err;
+    // Fail-fast: mark done and continue — do not rethrow (avoids worker stall)
   }
 }
 
@@ -789,4 +843,34 @@ function statusForAction(action: string): string {
     screenshot: 'navigating',
   };
   return map[action] ?? 'preparing';
+}
+
+/** Human-readable pipeline labels for UI (never expose worker jargon). */
+export function pipelineLabelForStatus(status: string, pauseReason?: string | null): string {
+  if (status.startsWith('watching_captcha') || pauseReason === 'captcha') return 'Waiting CAPTCHA';
+  if (status.startsWith('watching_login') || pauseReason === 'login') return 'Waiting Login';
+  if (status.includes('mfa') || pauseReason === 'mfa') return 'Waiting MFA';
+  if (status.includes('email') || pauseReason === 'email_verify') return 'Waiting Email Verification';
+  if (status.includes('phone') || pauseReason === 'phone_verify') return 'Waiting Phone Verification';
+  const map: Record<string, string> = {
+    queued: 'Queued',
+    preparing: 'Preparing',
+    launching_browser: 'Launching Browser',
+    navigating: 'Opening Website',
+    authenticating: 'Waiting Login',
+    analyzing_form: 'Finding Form',
+    filling_fields: 'Filling Company Info',
+    uploading_assets: 'Uploading Assets',
+    validating: 'Detecting Fields',
+    ready_for_review: 'Ready for Review',
+    awaiting_user: 'Waiting Login',
+    submitting: 'Submitting',
+    submitted: 'Submitted',
+    waiting_verification: 'Verification Scheduled',
+    completed: 'Submitted',
+    verified: 'Verified',
+    failed: 'Temporary Failure',
+    retry_scheduled: 'Retrying',
+  };
+  return map[status] ?? status.replace(/_/g, ' ');
 }

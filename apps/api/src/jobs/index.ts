@@ -54,19 +54,21 @@ export async function startJobInfrastructure(): Promise<void> {
     if (scanJobs.length) await handleIntelligenceScanJobs(scanJobs);
   });
 
-  await registerJobHandler(QUEUES.PLAYWRIGHT, async (jobs) => {
-    const mapped = jobs.map((j) => ({ id: j.id, data: j.data as Record<string, unknown> }));
-    const watch = mapped.filter((j) => String(j.data.type ?? '') === 'bee_watch');
-    const resume = mapped.filter((j) => String(j.data.type ?? '') === 'bee_resume');
-    const exec = mapped.filter(
-      (j) =>
-        String(j.data.type ?? '') !== 'bee_watch' && String(j.data.type ?? '') !== 'bee_resume'
-    );
-    if (watch.length) await handleBeeWatchJobs(watch);
-    if (resume.length) await handleBeeResumeJobs(resume);
-    if (exec.length) await handlePlaywrightJobs(exec);
-  });
+  // Parallel browser executes (default 4 workers) — watchers/resume use LOW so they never steal slots
+  await registerJobHandler(
+    QUEUES.PLAYWRIGHT,
+    async (jobs) => {
+      const mapped = jobs.map((j) => ({ id: j.id, data: j.data as Record<string, unknown> }));
+      const exec = mapped.filter(
+        (j) =>
+          String(j.data.type ?? '') !== 'bee_watch' && String(j.data.type ?? '') !== 'bee_resume'
+      );
+      if (exec.length) await handlePlaywrightJobs(exec);
+    },
+    { concurrency: 4, batchSize: 1, pollingIntervalSeconds: 1 }
+  );
 
+  // Higher concurrency so CAPTCHA/login watchers + queue drain never block each other
   await registerJobHandler(QUEUES.LOW, async (jobs) => {
     const outreachJobs = jobs.filter((j) => (j.data as Record<string, unknown>)?.messageId);
     const workflowJobs = jobs.filter(
@@ -86,6 +88,12 @@ export async function startJobInfrastructure(): Promise<void> {
     );
     const beeQueue = jobs.filter(
       (j) => (j.data as Record<string, unknown>)?.type === 'bee_queue'
+    );
+    const beeWatch = jobs.filter(
+      (j) => (j.data as Record<string, unknown>)?.type === 'bee_watch'
+    );
+    const beeResume = jobs.filter(
+      (j) => (j.data as Record<string, unknown>)?.type === 'bee_resume'
     );
     const beeSessionHealth = jobs.filter(
       (j) => (j.data as Record<string, unknown>)?.type === 'bee_session_health'
@@ -109,12 +117,24 @@ export async function startJobInfrastructure(): Promise<void> {
         d?.type !== 'bee_learning' &&
         d?.type !== 'bee_cleanup' &&
         d?.type !== 'bee_queue' &&
+        d?.type !== 'bee_watch' &&
+        d?.type !== 'bee_resume' &&
         d?.type !== 'bee_session_health' &&
         d?.type !== 'automation_recover_stuck' &&
         !String(d?.type ?? '').startsWith('image_') &&
         !String(d?.type ?? '').startsWith('provider_')
       );
     });
+    if (beeWatch.length) {
+      await handleBeeWatchJobs(
+        beeWatch.map((j) => ({ id: j.id, data: j.data as Record<string, unknown> }))
+      );
+    }
+    if (beeResume.length) {
+      await handleBeeResumeJobs(
+        beeResume.map((j) => ({ id: j.id, data: j.data as Record<string, unknown> }))
+      );
+    }
     if (outreachJobs.length) {
       await handleOutreachJobs(
         outreachJobs.map((j) => ({ id: j.id, data: j.data as Record<string, unknown> }))
@@ -171,7 +191,7 @@ export async function startJobInfrastructure(): Promise<void> {
     for (const job of otherJobs) {
       logger.debug({ jobId: job.id }, 'Low-priority job received');
     }
-  });
+  }, { concurrency: 4, batchSize: 4, pollingIntervalSeconds: 1 });
 
   // Startup + periodic recovery for imports left analyzing without a run
   try {

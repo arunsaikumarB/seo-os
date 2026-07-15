@@ -27,7 +27,20 @@ type QueueMonitor = {
   failed: number;
   cancelled: number;
   averageRuntimeMs: number | null;
+  averageSubmissionMs?: number | null;
   successRate: number | null;
+  etaSeconds?: number;
+  estimatedFinishAt?: string | null;
+  workerUsage?: string | null;
+  maxParallelSessions?: number | null;
+  workers?: Array<{
+    workerId: number;
+    status: 'idle' | 'busy';
+    website: string | null;
+    step: string | null;
+    elapsedMs: number;
+    etaMs: number | null;
+  }>;
 };
 
 type JobDetails = {
@@ -66,32 +79,33 @@ type JobDetails = {
 
 const STATUS_LABEL: Record<string, string> = {
   queued: 'Queued',
-  preparing: 'Preparing…',
-  launching_browser: 'Opening website…',
-  authenticating: 'Signing in…',
-  navigating: 'Opening website…',
-  analyzing_form: 'Studying form…',
-  uploading_assets: 'Uploading logo…',
-  filling_fields: 'Filling business details…',
-  validating: 'Checking fields…',
-  submitting: 'Submitting…',
-  waiting_verification: 'Estimated approval · 7–14 days',
-  retry_scheduled: 'Retrying…',
-  awaiting_user: 'Waiting for you…',
+  preparing: 'Preparing',
+  launching_browser: 'Launching Browser',
+  authenticating: 'Waiting Login',
+  navigating: 'Opening Website',
+  analyzing_form: 'Finding Form',
+  uploading_assets: 'Uploading Assets',
+  filling_fields: 'Filling Company Info',
+  validating: 'Detecting Fields',
+  submitting: 'Submitting',
+  waiting_verification: 'Verification Scheduled',
+  retry_scheduled: 'Retrying',
+  awaiting_user: 'Waiting Login',
   needs_approval: 'Needs your approval',
   paused: 'Paused',
-  ready_for_review: 'Ready for your review',
-  watching_captcha: 'Waiting for CAPTCHA…',
-  watching_login: 'Waiting for login…',
-  watching_email: 'Waiting for email verification…',
-  watching_phone: 'Waiting for phone verification…',
-  blocked_captcha: 'CAPTCHA required',
-  blocked_mfa: 'Verification required',
-  waiting_infrastructure: 'Waiting for browser setup…',
-  completed: 'Submitted successfully',
+  ready_for_review: 'Ready for Review',
+  watching_captcha: 'Waiting CAPTCHA',
+  watching_login: 'Waiting Login',
+  watching_email: 'Waiting Email Verification',
+  watching_phone: 'Waiting Phone Verification',
+  watching_mfa: 'Waiting MFA',
+  blocked_captcha: 'Waiting CAPTCHA',
+  blocked_mfa: 'Waiting MFA',
+  waiting_infrastructure: 'Waiting for browser setup',
+  completed: 'Submitted',
   verified: 'Verified',
-  submitted: 'Submitted successfully',
-  failed: 'Failed',
+  submitted: 'Submitted',
+  failed: 'Temporary Failure',
   cancelled: 'Cancelled',
 };
 
@@ -130,7 +144,7 @@ export function BeeOpsPanel({ projectId, selectedJobId, onSelectJob }: Props) {
         `/v1/projects/${projectId}/browser/health`
       ),
     enabled: !!projectId,
-    refetchInterval: 15_000,
+    refetchInterval: 5_000,
   });
 
   const queue = useQuery({
@@ -138,7 +152,7 @@ export function BeeOpsPanel({ projectId, selectedJobId, onSelectJob }: Props) {
     queryFn: () =>
       request<{ data: QueueMonitor }>(`/v1/projects/${projectId}/browser/queue-monitor`),
     enabled: !!projectId,
-    refetchInterval: 8_000,
+    refetchInterval: 1_000,
   });
 
   const details = useQuery({
@@ -148,7 +162,7 @@ export function BeeOpsPanel({ projectId, selectedJobId, onSelectJob }: Props) {
         `/v1/projects/${projectId}/browser/jobs/${selectedJobId}/details`
       ),
     enabled: !!projectId && !!selectedJobId,
-    refetchInterval: 3_000,
+    refetchInterval: 1_000,
   });
 
   const liveLogs = useQuery({
@@ -158,7 +172,7 @@ export function BeeOpsPanel({ projectId, selectedJobId, onSelectJob }: Props) {
         data: Array<{ id: string; level: string; message: string; created_at: string }>;
       }>(`/v1/projects/${projectId}/browser/logs?jobId=${selectedJobId}`),
     enabled: !!projectId && !!selectedJobId,
-    refetchInterval: 2_000,
+    refetchInterval: 1_000,
   });
 
   const bulkRetry = useMutation({
@@ -303,29 +317,73 @@ export function BeeOpsPanel({ projectId, selectedJobId, onSelectJob }: Props) {
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Queue Monitor</CardTitle>
           <CardDescription>
-            Queued · Running · Paused · Waiting User · Retrying · Completed · Failed · Cancelled
+            Live every second · Workers continue while CAPTCHA/Login wait in background
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-4 lg:grid-cols-5 text-sm">
-          {(
-            [
-              ['Queued', q?.queued],
-              ['Running', q?.running],
-              ['Paused', q?.paused],
-              ['Waiting User', q?.waitingUser],
-              ['Retrying', q?.retrying],
-              ['Completed', q?.completed],
-              ['Failed', q?.failed],
-              ['Cancelled', q?.cancelled],
-              ['Avg Runtime', q?.averageRuntimeMs != null ? `${Math.round(q.averageRuntimeMs / 1000)}s` : '—'],
-              ['Success Rate', q?.successRate != null ? `${q.successRate}%` : '—'],
-            ] as const
-          ).map(([label, val]) => (
-            <div key={label}>
-              <p className="text-[10px] text-muted-foreground">{label}</p>
-              <p className="font-medium tabular-nums">{val ?? 0}</p>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-4 lg:grid-cols-5 text-sm">
+            {(
+              [
+                ['Queued', q?.queued],
+                ['Running', q?.running],
+                ['Completed', q?.completed],
+                [
+                  'Avg Runtime',
+                  q?.averageRuntimeMs != null ? `${Math.round(q.averageRuntimeMs / 1000)}s` : '—',
+                ],
+                [
+                  'Avg Submission',
+                  q?.averageSubmissionMs != null
+                    ? `${Math.round(q.averageSubmissionMs / 1000)}s`
+                    : '—',
+                ],
+                [
+                  'ETA',
+                  q?.etaSeconds != null ? `~${Math.round(q.etaSeconds / 60)} min` : '—',
+                ],
+                ['Workers', q?.workerUsage ?? '—'],
+                ['Waiting User', q?.waitingUser],
+                ['Failed', q?.failed],
+                ['Success Rate', q?.successRate != null ? `${q.successRate}%` : '—'],
+              ] as const
+            ).map(([label, val]) => (
+              <div key={label}>
+                <p className="text-[10px] text-muted-foreground">{label}</p>
+                <p className="font-medium tabular-nums">{val ?? 0}</p>
+              </div>
+            ))}
+          </div>
+          {(q?.workers?.length ?? 0) > 0 ? (
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              {q!.workers!.map((w) => (
+                <div
+                  key={w.workerId}
+                  className="rounded-md border px-3 py-2 text-sm"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-medium">Worker {w.workerId}</p>
+                    <Badge
+                      className={
+                        w.status === 'busy'
+                          ? 'border-transparent bg-foreground text-background'
+                          : 'bg-muted text-muted-foreground'
+                      }
+                    >
+                      {w.status === 'busy' ? 'Busy' : 'Idle'}
+                    </Badge>
+                  </div>
+                  <p className="mt-1 truncate text-xs text-muted-foreground">
+                    {w.website || '—'}
+                  </p>
+                  <p className="text-xs">{w.step || 'Idle'}</p>
+                  <p className="mt-1 text-[10px] text-muted-foreground tabular-nums">
+                    Elapsed {Math.round((w.elapsedMs || 0) / 1000)}s
+                    {w.etaMs != null ? ` · ETA ${Math.round(w.etaMs / 1000)}s` : ''}
+                  </p>
+                </div>
+              ))}
             </div>
-          ))}
+          ) : null}
         </CardContent>
       </Card>
 

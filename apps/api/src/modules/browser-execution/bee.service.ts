@@ -57,10 +57,11 @@ export async function getOrCreatePolicy(workspaceId: string) {
     workspace_id: workspaceId,
     submission_policy: 'always_ask',
     require_approval_before_submit: true,
-    max_parallel_sessions: 1,
+    max_parallel_sessions: 4,
+    submission_speed: 'fast',
     daily_goal: 20,
     auto_resume: true,
-    watch_interval_ms: 2000,
+    watch_interval_ms: 1000,
     max_watch_ms: 1_800_000,
     session_reuse: true,
     queue_auto_continue: true,
@@ -493,7 +494,7 @@ export async function startJob(workspaceId: string, jobId: string, userId?: stri
     .eq('workspace_id', workspaceId)
     .eq('status', 'running')
     .is('deleted_at', null);
-  if ((count ?? 0) >= Number(policy.max_parallel_sessions ?? 1)) {
+  if ((count ?? 0) >= Number(policy.max_parallel_sessions ?? 4)) {
     throw Object.assign(new Error('Max parallel browser sessions reached'), { status: 429 });
   }
 
@@ -711,10 +712,12 @@ export async function continueQueuedJobs(
     .eq('workspace_id', workspaceId)
     .eq('status', 'running')
     .is('deleted_at', null);
-  const slots = Math.max(0, Number(policy.max_parallel_sessions ?? 1) - (running ?? 0));
+  const maxParallel = Number(policy.max_parallel_sessions ?? 4);
+  const slots = Math.max(0, maxParallel - (running ?? 0));
   if (slots <= 0) return [];
 
-  const take = Math.min(slots, Math.max(1, opts.limit ?? 1));
+  // Fill all free worker slots immediately (never wait for manual refresh)
+  const take = Math.min(slots, Math.max(1, opts.limit ?? slots));
   let q = getSupabaseAdmin()
     .from('execution_jobs')
     .select('id')
@@ -728,14 +731,16 @@ export async function continueQueuedJobs(
 
   const { data } = await q;
   const started: string[] = [];
-  for (const row of data ?? []) {
-    try {
-      await startJob(workspaceId, String(row.id));
-      started.push(String(row.id));
-    } catch {
-      break;
-    }
-  }
+  await Promise.all(
+    (data ?? []).map(async (row) => {
+      try {
+        await startJob(workspaceId, String(row.id));
+        started.push(String(row.id));
+      } catch {
+        /* slot race / 429 — leave queued for next scheduler tick */
+      }
+    })
+  );
   return started;
 }
 
@@ -985,6 +990,20 @@ export async function listSessions(workspaceId: string) {
 
 export async function getStatistics(workspaceId: string) {
   const jobs = await listJobs(workspaceId);
+  const policy = await getOrCreatePolicy(workspaceId);
+  const maxWorkers = Math.max(1, Number(policy.max_parallel_sessions ?? 4));
+  let poolStats: {
+    headlessConnected: boolean;
+    headedConnected: boolean;
+    activeSessions: number;
+  } = { headlessConnected: false, headedConnected: false, activeSessions: 0 };
+  try {
+    const { getBrowserPoolStats } = await import('./browser-runtime.service.js');
+    poolStats = getBrowserPoolStats();
+  } catch {
+    /* optional */
+  }
+
   const counts = {
     running: 0,
     queued: 0,
@@ -1002,12 +1021,53 @@ export async function getStatistics(workspaceId: string) {
   };
   let runtimeSum = 0;
   let runtimeN = 0;
+  let submitSum = 0;
+  let submitN = 0;
   let current: {
     website?: string;
     step?: string;
     browser?: string;
     queueProgress?: string;
   } = {};
+
+  const runningJobs: Array<{
+    website: string;
+    step: string;
+    stepLabel: string;
+    sessionId: string;
+    startedAt: string | null;
+    elapsedMs: number;
+    etaMs: number | null;
+  }> = [];
+
+  const pipelineLabel = (status: string, pauseReason?: string | null) => {
+    if (status.startsWith('watching_captcha') || pauseReason === 'captcha') return 'Waiting CAPTCHA';
+    if (status.startsWith('watching_login') || pauseReason === 'login') return 'Waiting Login';
+    if (status.includes('mfa') || pauseReason === 'mfa') return 'Waiting MFA';
+    if (status.includes('email') || pauseReason === 'email_verify') return 'Waiting Email Verification';
+    if (status.includes('phone') || pauseReason === 'phone_verify') return 'Waiting Phone Verification';
+    const map: Record<string, string> = {
+      queued: 'Queued',
+      preparing: 'Preparing',
+      launching_browser: 'Launching Browser',
+      navigating: 'Opening Website',
+      authenticating: 'Waiting Login',
+      analyzing_form: 'Finding Form',
+      filling_fields: 'Filling Company Info',
+      uploading_assets: 'Uploading Assets',
+      validating: 'Detecting Fields',
+      ready_for_review: 'Ready for Review',
+      awaiting_user: 'Waiting Login',
+      submitting: 'Submitting',
+      submitted: 'Submitted',
+      waiting_verification: 'Verification Scheduled',
+      completed: 'Submitted',
+      verified: 'Verified',
+      failed: 'Temporary Failure',
+      retry_scheduled: 'Retrying',
+    };
+    return map[status] ?? status.replace(/_/g, ' ');
+  };
 
   for (const j of jobs) {
     const s = String(j.status);
@@ -1027,10 +1087,21 @@ export async function getStatistics(workspaceId: string) {
       ].includes(s)
     ) {
       counts.running++;
+      const startedAt = j.started_at ? String(j.started_at) : null;
+      const elapsedMs = startedAt ? Date.now() - new Date(startedAt).getTime() : 0;
+      runningJobs.push({
+        website: String(j.site_domain ?? ''),
+        step: s,
+        stepLabel: pipelineLabel(s, j.pause_reason != null ? String(j.pause_reason) : null),
+        sessionId: String(j.session_id ?? ''),
+        startedAt,
+        elapsedMs,
+        etaMs: null,
+      });
       if (!current.website) {
         current = {
           website: String(j.site_domain ?? ''),
-          step: s,
+          step: pipelineLabel(s),
           browser: String(j.session_id ?? ''),
         };
       }
@@ -1051,7 +1122,7 @@ export async function getStatistics(workspaceId: string) {
       if (!current.website) {
         current = {
           website: String(j.site_domain ?? ''),
-          step: s,
+          step: pipelineLabel(s, j.pause_reason != null ? String(j.pause_reason) : null),
           browser: String(j.session_id ?? ''),
         };
       }
@@ -1061,8 +1132,14 @@ export async function getStatistics(workspaceId: string) {
     if (j.auto_resumed) counts.auto_resumed++;
 
     if (j.started_at && j.finished_at) {
-      runtimeSum += new Date(String(j.finished_at)).getTime() - new Date(String(j.started_at)).getTime();
+      const ms =
+        new Date(String(j.finished_at)).getTime() - new Date(String(j.started_at)).getTime();
+      runtimeSum += ms;
       runtimeN++;
+      if (s === 'completed' || s === 'verified' || s === 'submitted') {
+        submitSum += ms;
+        submitN++;
+      }
     }
   }
 
@@ -1082,8 +1159,39 @@ export async function getStatistics(workspaceId: string) {
 
   const done = counts.completed + counts.failed;
   const successRate = done > 0 ? Math.round((counts.completed / done) * 1000) / 10 : null;
-  const avgMs = runtimeN ? Math.round(runtimeSum / runtimeN) : 120_000;
+  const avgMs = runtimeN ? Math.round(runtimeSum / runtimeN) : 90_000;
+  const avgSubmitMs = submitN ? Math.round(submitSum / submitN) : null;
+  // Parallel ETA: remaining work divided by active capacity (exclude CAPTCHA watchers from worker slots)
+  const remaining = counts.queued;
+  const effectiveWorkers = Math.max(1, Math.min(maxWorkers, Math.max(counts.running, 1)));
+  const etaMs = remaining > 0 ? Math.ceil(remaining / effectiveWorkers) * avgMs : 0;
   current.queueProgress = `${counts.completed}/${counts.completed + counts.queued + counts.running + counts.watching}`;
+
+  for (const w of runningJobs) {
+    w.etaMs = Math.max(0, avgMs - w.elapsedMs);
+  }
+
+  const workers = Array.from({ length: maxWorkers }, (_, i) => {
+    const job = runningJobs[i];
+    if (!job) {
+      return {
+        workerId: i + 1,
+        status: 'idle' as const,
+        website: null as string | null,
+        step: null as string | null,
+        elapsedMs: 0,
+        etaMs: null as number | null,
+      };
+    }
+    return {
+      workerId: i + 1,
+      status: 'busy' as const,
+      website: job.website,
+      step: job.stepLabel,
+      elapsedMs: job.elapsedMs,
+      etaMs: job.etaMs,
+    };
+  });
 
   const day = new Date().toISOString().slice(0, 10);
   await getSupabaseAdmin().from('execution_statistics').upsert(
@@ -1107,6 +1215,9 @@ export async function getStatistics(workspaceId: string) {
       meta: {
         ready_to_continue: counts.ready_to_continue,
         current,
+        workerUsage: `${counts.running}/${maxWorkers}`,
+        avgSubmissionMs: avgSubmitMs,
+        pool: poolStats,
       },
       updated_at: new Date().toISOString(),
     },
@@ -1120,11 +1231,13 @@ export async function getStatistics(workspaceId: string) {
     topFailureReasons,
     successRate,
     avgRuntimeMs: runtimeN ? Math.round(runtimeSum / runtimeN) : null,
-    etaSeconds: Math.round((counts.queued + counts.watching) * (avgMs / 1000)),
-    estimatedFinishAt:
-      counts.queued + counts.watching > 0
-        ? new Date(Date.now() + (counts.queued + counts.watching) * avgMs).toISOString()
-        : null,
+    avgSubmissionMs: avgSubmitMs,
+    maxParallelSessions: maxWorkers,
+    workerUsage: `${Math.min(counts.running, maxWorkers)}/${maxWorkers}`,
+    workers,
+    browserPool: poolStats,
+    etaSeconds: Math.round(etaMs / 1000),
+    estimatedFinishAt: etaMs > 0 ? new Date(Date.now() + etaMs).toISOString() : null,
     current,
     metricsSource: 'live' as const,
   };

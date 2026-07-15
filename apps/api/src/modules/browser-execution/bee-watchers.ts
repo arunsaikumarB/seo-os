@@ -43,22 +43,24 @@ function asGate(value: unknown): ExecutionGate {
 export async function handleBeeWatchJobs(
   jobs: Array<{ id: string; data: Record<string, unknown> }>
 ): Promise<void> {
-  for (const job of jobs) {
-    if (String(job.data.type ?? '') !== 'bee_watch') continue;
-    const jobId = String(job.data.jobId ?? '');
-    const workspaceId = String(job.data.workspaceId ?? '');
-    const sessionId = String(job.data.sessionId ?? '');
-    const gate = asGate(job.data.gate);
-    const tick = Number(job.data.tick ?? 0);
-    if (!jobId || !workspaceId || !gate || !isWatchableGate(gate)) continue;
+  // Watchers run on LOW and in parallel — never block browser execute workers
+  await Promise.all(
+    jobs.map(async (job) => {
+      if (String(job.data.type ?? '') !== 'bee_watch') return;
+      const jobId = String(job.data.jobId ?? '');
+      const workspaceId = String(job.data.workspaceId ?? '');
+      const sessionId = String(job.data.sessionId ?? '');
+      const gate = asGate(job.data.gate);
+      const tick = Number(job.data.tick ?? 0);
+      if (!jobId || !workspaceId || !gate || !isWatchableGate(gate)) return;
 
-    try {
-      await runWatchTick({ jobId, workspaceId, sessionId, gate, tick });
-    } catch (err) {
-      logger.error({ err, jobId, gate }, 'bee_watch tick failed');
-      throw err;
-    }
-  }
+      try {
+        await runWatchTick({ jobId, workspaceId, sessionId, gate, tick });
+      } catch (err) {
+        logger.error({ err, jobId, gate }, 'bee_watch tick failed');
+      }
+    })
+  );
 }
 
 async function runWatchTick(params: {
@@ -85,7 +87,8 @@ async function runWatchTick(params: {
 
   const policy = await getOrCreatePolicy(workspaceId);
   const autoResume = policy.auto_resume !== false;
-  const intervalMs = Math.max(1000, Number(policy.watch_interval_ms ?? 2000));
+  // Poll frequently so resume after user action happens within ~2s
+  const intervalMs = Math.max(1000, Math.min(2000, Number(policy.watch_interval_ms ?? 2000)));
   const maxWatchMs = Math.max(intervalMs, Number(policy.max_watch_ms ?? 1_800_000));
   const watchStarted = execJob.watch_started_at
     ? new Date(String(execJob.watch_started_at)).getTime()
@@ -224,7 +227,7 @@ async function enqueueNextWatch(params: {
   tick: number;
 }): Promise<void> {
   await enqueueJob(
-    QUEUES.PLAYWRIGHT,
+    QUEUES.LOW,
     'bee_watch',
     {
       type: 'bee_watch',
@@ -236,7 +239,7 @@ async function enqueueNextWatch(params: {
     },
     {
       singletonKey: `bee-watch-${params.jobId}`,
-      startAfter: Math.ceil(params.intervalMs / 1000) || 2,
+      startAfter: Math.max(1, Math.ceil(params.intervalMs / 1000)),
     }
   );
 }
@@ -266,7 +269,7 @@ export async function handleBeeQueueJobs(
     const started = await continueQueuedJobs(workspaceId, {
       afterJobId: job.data.afterJobId ? String(job.data.afterJobId) : undefined,
       batchId: job.data.batchId ? String(job.data.batchId) : undefined,
-      limit: Number(job.data.limit ?? 1),
+      limit: job.data.limit != null ? Number(job.data.limit) : undefined,
     });
     logger.info({ workspaceId, started: started.length }, 'BEE queue continuation');
   }
@@ -339,7 +342,7 @@ export async function enqueueGateWatch(params: {
     .eq('id', params.jobId);
 
   await enqueueJob(
-    QUEUES.PLAYWRIGHT,
+    QUEUES.LOW,
     'bee_watch',
     {
       type: 'bee_watch',
@@ -351,7 +354,15 @@ export async function enqueueGateWatch(params: {
     },
     {
       singletonKey: `bee-watch-${params.jobId}`,
-      startAfter: Math.ceil((params.intervalMs ?? 2000) / 1000) || 2,
+      startAfter: 1,
     }
+  );
+
+  // Free execution slots immediately — watchers do not hold workers
+  await enqueueJob(
+    QUEUES.LOW,
+    'bee_queue',
+    { type: 'bee_queue', workspaceId: params.workspaceId },
+    { singletonKey: `bee-queue-drain-${params.workspaceId}`, startAfter: 0 }
   );
 }

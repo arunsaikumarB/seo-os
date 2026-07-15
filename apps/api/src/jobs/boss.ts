@@ -110,19 +110,33 @@ export async function stopBoss(): Promise<void> {
 
 export type JobHandler = (jobs: PgBoss.Job<Record<string, unknown>>[]) => Promise<void>;
 
-export async function registerJobHandler(queue: string, handler: JobHandler): Promise<void> {
+export async function registerJobHandler(
+  queue: string,
+  handler: JobHandler,
+  opts?: { concurrency?: number; batchSize?: number; pollingIntervalSeconds?: number }
+): Promise<void> {
   const boss = await getBoss();
   if (!boss) return;
   if (!queuesInitialized) {
     throw new Error(`Cannot register worker for ${queue} — queues not initialized`);
   }
 
-  await boss.work(queue, async (jobs) => {
-    lastProcessedAt.set(queue, new Date().toISOString());
-    await handler(jobs as PgBoss.Job<Record<string, unknown>>[]);
-  });
+  const concurrency = Math.max(1, Math.min(16, opts?.concurrency ?? 1));
+  const batchSize = Math.max(1, opts?.batchSize ?? 1);
+  const pollingIntervalSeconds = opts?.pollingIntervalSeconds ?? 1;
+
+  for (let i = 0; i < concurrency; i++) {
+    await boss.work(
+      queue,
+      { batchSize, pollingIntervalSeconds },
+      async (jobs) => {
+        lastProcessedAt.set(queue, new Date().toISOString());
+        await handler(jobs as PgBoss.Job<Record<string, unknown>>[]);
+      }
+    );
+  }
   attachedWorkers.add(queue);
-  logger.info({ queue }, 'Job handler registered');
+  logger.info({ queue, concurrency, batchSize }, 'Job handler registered');
 }
 
 export async function enqueueJob<T extends Record<string, unknown>>(

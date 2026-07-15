@@ -598,8 +598,14 @@ export async function getQueueMonitor(workspaceId: string) {
     watching: stats.watching ?? 0,
     blocked: stats.blocked,
     averageRuntimeMs: stats.avgRuntimeMs,
+    averageSubmissionMs: stats.avgSubmissionMs ?? null,
     successRate: stats.successRate,
     etaSeconds: stats.etaSeconds,
+    estimatedFinishAt: stats.estimatedFinishAt ?? null,
+    workerUsage: stats.workerUsage ?? null,
+    maxParallelSessions: stats.maxParallelSessions ?? null,
+    workers: stats.workers ?? [],
+    browserPool: stats.browserPool ?? null,
     current: stats.current,
   };
 }

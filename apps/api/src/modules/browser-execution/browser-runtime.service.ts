@@ -29,8 +29,13 @@ export interface PageCapture {
 }
 
 type PlaywrightModule = typeof import('playwright');
+type PlaywrightBrowser = import('playwright').Browser;
 
 let playwrightMod: PlaywrightModule | null | undefined;
+
+/** Shared Chromium processes — contexts are cheap; browsers are expensive. */
+const browserPool = new Map<BrowserMode, PlaywrightBrowser>();
+let poolLaunchInFlight: Map<BrowserMode, Promise<PlaywrightBrowser>> = new Map();
 
 async function loadPlaywright(): Promise<PlaywrightModule | null> {
   if (playwrightMod !== undefined) return playwrightMod;
@@ -43,12 +48,45 @@ async function loadPlaywright(): Promise<PlaywrightModule | null> {
   }
 }
 
+async function acquirePooledBrowser(mode: BrowserMode, timeoutMs: number): Promise<PlaywrightBrowser> {
+  const existing = browserPool.get(mode);
+  if (existing?.isConnected()) return existing;
+
+  const inFlight = poolLaunchInFlight.get(mode);
+  if (inFlight) return inFlight;
+
+  const launchPromise = (async () => {
+    const pw = await loadPlaywright();
+    if (!pw) throw new Error('Playwright unavailable');
+    process.env.PLAYWRIGHT_CHROMIUM_USE_HEADLESS_SHELL ??= '0';
+    const executablePath = pw.chromium.executablePath();
+    const browser = await pw.chromium.launch({
+      headless: mode === 'headless',
+      timeout: timeoutMs,
+      executablePath,
+    });
+    browserPool.set(mode, browser);
+    browser.on('disconnected', () => {
+      if (browserPool.get(mode) === browser) browserPool.delete(mode);
+    });
+    logger.info({ mode }, 'BEE browser pool launched Chromium');
+    return browser;
+  })().finally(() => {
+    poolLaunchInFlight.delete(mode);
+  });
+
+  poolLaunchInFlight.set(mode, launchPromise);
+  return launchPromise;
+}
+
 export class BrowserExecutionService {
   private browser: import('playwright').Browser | null = null;
   private context: import('playwright').BrowserContext | null = null;
   private page: import('playwright').Page | null = null;
   private consoleLogs: string[] = [];
   private mode: BrowserMode = 'headless';
+  /** When true, close() releases context only — Chromium stays in the pool. */
+  private pooled = false;
 
   async health(): Promise<RuntimeHealth> {
     const pw = await loadPlaywright();
@@ -60,8 +98,8 @@ export class BrowserExecutionService {
       };
     }
     try {
-      if (this.browser?.isConnected()) {
-        return { status: 'healthy', message: 'Browser connected', playwrightAvailable: true };
+      if (this.browser?.isConnected() || browserPool.get(this.mode)?.isConnected()) {
+        return { status: 'healthy', message: 'Browser pool ready', playwrightAvailable: true };
       }
       return { status: 'healthy', message: 'Playwright ready (no active browser)', playwrightAvailable: true };
     } catch (err) {
@@ -81,22 +119,17 @@ export class BrowserExecutionService {
           'Browser Runtime Missing — Administrator Action Required. Suggested Fix: Install Chromium.'
         ),
         {
-        code: 'BROWSER_RUNTIME_MISSING',
-      });
+          code: 'BROWSER_RUNTIME_MISSING',
+        }
+      );
     }
-    await this.close();
+    await this.closeContextOnly();
     this.mode = opts.mode;
     this.consoleLogs = [];
     try {
-      // Prefer full Chromium binary (not chromium_headless_shell) — Railway/Linux
-      // often misses the headless-shell package after Playwright upgrades.
       process.env.PLAYWRIGHT_CHROMIUM_USE_HEADLESS_SHELL ??= '0';
-      const executablePath = pw.chromium.executablePath();
-      this.browser = await pw.chromium.launch({
-        headless: opts.mode === 'headless',
-        timeout: opts.timeoutMs ?? 60_000,
-        executablePath,
-      });
+      this.browser = await acquirePooledBrowser(opts.mode, opts.timeoutMs ?? 20_000);
+      this.pooled = true;
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err);
       if (/executable doesn't exist|could not find browser|browserType\.launch|headless_shell/i.test(raw)) {
@@ -119,7 +152,7 @@ export class BrowserExecutionService {
       this.consoleLogs.push(line.slice(0, 500));
       if (this.consoleLogs.length > 200) this.consoleLogs.shift();
     });
-    logger.info({ mode: opts.mode }, 'BEE browser launched');
+    logger.info({ mode: opts.mode, pooled: true }, 'BEE context acquired from browser pool');
   }
 
   async restoreStorageState(state: unknown): Promise<void> {
@@ -137,9 +170,20 @@ export class BrowserExecutionService {
     return this.context.storageState();
   }
 
-  async navigate(url: string, timeoutMs = 45_000): Promise<PageCapture> {
+  async navigate(url: string, timeoutMs = 20_000): Promise<PageCapture> {
     if (!this.page) throw new Error('No page — call launch() first');
-    await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+    try {
+      await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+    } catch (err) {
+      const { classifyNavigationFailure } = await import('./bee-timeouts.js');
+      const c = classifyNavigationFailure(err);
+      throw Object.assign(new Error(c.message), {
+        code: c.code,
+        failureCode: c.code,
+        temporary: c.retryable,
+        cause: err,
+      });
+    }
     return this.capture('navigated');
   }
 
@@ -419,14 +463,23 @@ export class BrowserExecutionService {
     await this.launch({ mode });
   }
 
-  async close(): Promise<void> {
+  private async closeContextOnly(): Promise<void> {
     try {
       await this.page?.close().catch(() => undefined);
       await this.context?.close().catch(() => undefined);
-      await this.browser?.close().catch(() => undefined);
     } finally {
       this.page = null;
       this.context = null;
+    }
+  }
+
+  async close(): Promise<void> {
+    await this.closeContextOnly();
+    // Keep pooled Chromium warm for the next job
+    if (!this.pooled) {
+      await this.browser?.close().catch(() => undefined);
+      this.browser = null;
+    } else {
       this.browser = null;
     }
   }
@@ -434,6 +487,18 @@ export class BrowserExecutionService {
 
 /** Process-local session registry (single API instance). Multi-instance: store state in DB only. */
 const sessionRuntimes = new Map<string, BrowserExecutionService>();
+
+export function getBrowserPoolStats(): {
+  headlessConnected: boolean;
+  headedConnected: boolean;
+  activeSessions: number;
+} {
+  return {
+    headlessConnected: Boolean(browserPool.get('headless')?.isConnected()),
+    headedConnected: Boolean(browserPool.get('headed')?.isConnected()),
+    activeSessions: sessionRuntimes.size,
+  };
+}
 
 export async function isPlaywrightAvailable(): Promise<boolean> {
   const pw = await loadPlaywright();

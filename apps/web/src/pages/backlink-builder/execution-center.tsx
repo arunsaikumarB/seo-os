@@ -59,8 +59,19 @@ type BeeStats = {
   completed_after_login?: number;
   successRate: number | null;
   avgRuntimeMs: number | null;
+  avgSubmissionMs?: number | null;
   etaSeconds: number;
   estimatedFinishAt?: string | null;
+  workerUsage?: string;
+  maxParallelSessions?: number;
+  workers?: Array<{
+    workerId: number;
+    status: 'idle' | 'busy';
+    website: string | null;
+    step: string | null;
+    elapsedMs: number;
+    etaMs: number | null;
+  }>;
   current?: { website?: string; step?: string; browser?: string; queueProgress?: string };
 };
 
@@ -147,7 +158,7 @@ export function BrowserExecutionCenterPage() {
     queryFn: () =>
       request<{ data: BeeStats }>(`/v1/projects/${projectId}/browser/statistics`),
     enabled: !!projectId,
-    refetchInterval: 10_000,
+    refetchInterval: 1_000,
   });
 
   const opportunities = useQuery({
@@ -164,7 +175,7 @@ export function BrowserExecutionCenterPage() {
     queryKey: ['bee-jobs', projectId],
     queryFn: () => request<{ data: BeeJob[] }>(`/v1/projects/${projectId}/browser/jobs`),
     enabled: !!projectId,
-    refetchInterval: 8_000,
+    refetchInterval: 1_000,
   });
 
   const jobDetail = useQuery({
@@ -458,17 +469,21 @@ export function BrowserExecutionCenterPage() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {(
               [
-                ['Running', s?.running],
                 ['Queued', s?.queued],
-                ['Watching', s?.watching],
-                ['Paused', s?.paused],
-                ['Auto-resumed', s?.auto_resumed],
-                ['After CAPTCHA', s?.completed_after_captcha],
-                ['After Login', s?.completed_after_login],
-                ['Needs Approval', s?.needs_approval],
+                ['Running', s?.running],
                 ['Completed', s?.completed],
+                [
+                  'Avg Runtime',
+                  s?.avgRuntimeMs != null ? `${Math.round(s.avgRuntimeMs / 1000)}s` : '—',
+                ],
+                [
+                  'Avg Submission',
+                  s?.avgSubmissionMs != null ? `${Math.round(s.avgSubmissionMs / 1000)}s` : '—',
+                ],
+                ['Est. Finish', s?.etaSeconds != null ? `~${Math.round(s.etaSeconds / 60)} min` : '—'],
+                ['Workers', s?.workerUsage ?? '—'],
+                ['Watching', s?.watching],
                 ['Failed', s?.failed],
-                ['Blocked', s?.blocked],
                 ['Success Rate', s?.successRate != null ? `${s.successRate}%` : '—'],
               ] as const
             ).map(([label, value]) => (
@@ -483,25 +498,45 @@ export function BrowserExecutionCenterPage() {
 
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base">Current</CardTitle>
+              <CardTitle className="text-base">Live Workers</CardTitle>
               <CardDescription>
-                ETA ~{Math.round((s?.etaSeconds ?? 0) / 60)} min · Avg runtime{' '}
-                {s?.avgRuntimeMs ? `${Math.round(s.avgRuntimeMs / 1000)}s` : '—'}
+                Parallel browsers · CAPTCHA/Login pauses release workers · ETA ~
+                {Math.round((s?.etaSeconds ?? 0) / 60)} min
               </CardDescription>
             </CardHeader>
-            <CardContent className="text-sm grid gap-2 sm:grid-cols-3">
-              <div>
-                <p className="text-xs text-muted-foreground">Website</p>
-                <p className="font-medium">{s?.current?.website || '—'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Step</p>
-                <p className="font-medium">{s?.current?.step || '—'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Browser session</p>
-                <p className="font-medium truncate">{s?.current?.browser || '—'}</p>
-              </div>
+            <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 text-sm">
+              {(s?.workers?.length
+                ? s.workers
+                : Array.from({ length: s?.maxParallelSessions ?? 4 }, (_, i) => ({
+                    workerId: i + 1,
+                    status: 'idle' as const,
+                    website: null,
+                    step: null,
+                    elapsedMs: 0,
+                    etaMs: null,
+                  }))
+              ).map((w) => (
+                <div key={w.workerId} className="rounded-md border px-3 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-medium">Worker {w.workerId}</p>
+                    <Badge
+                      className={
+                        w.status === 'busy'
+                          ? 'border-transparent bg-foreground text-background'
+                          : 'bg-muted text-muted-foreground'
+                      }
+                    >
+                      {w.status === 'busy' ? 'Busy' : 'Idle'}
+                    </Badge>
+                  </div>
+                  <p className="mt-1 truncate text-xs text-muted-foreground">{w.website || '—'}</p>
+                  <p className="text-xs">{w.step || 'Idle'}</p>
+                  <p className="mt-1 text-[10px] text-muted-foreground tabular-nums">
+                    Elapsed {Math.round((w.elapsedMs || 0) / 1000)}s
+                    {w.etaMs != null ? ` · ETA ${Math.round(w.etaMs / 1000)}s` : ''}
+                  </p>
+                </div>
+              ))}
             </CardContent>
           </Card>
 
