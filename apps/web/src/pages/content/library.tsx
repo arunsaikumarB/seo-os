@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -12,10 +12,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/demo/empty-state';
 import { useApi } from '@/hooks/use-api';
 import { ImageIntelligencePanel } from '@/pages/content/image-intelligence';
-import {
-  OpportunitySelector,
-  type SelectedOpportunity,
-} from '@/components/opportunities/opportunity-selector';
+import { OpportunitySelector } from '@/components/opportunities/opportunity-selector';
+import { CurrentOpportunityBanner } from '@/components/opportunities/current-opportunity-banner';
+import { useCurrentOpportunity } from '@/hooks/use-current-opportunity';
 
 type DraftRow = {
   id: string;
@@ -73,15 +72,19 @@ export function ContentLibraryPage() {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [showCreate, setShowCreate] = useState(false);
-  const [selectedOpp, setSelectedOpp] = useState<SelectedOpportunity | null>(null);
+  const { opportunity: selectedOpp, setOpportunity } = useCurrentOpportunity(projectId);
   const [packType, setPackType] = useState('guest_post');
   const [editingPackId, setEditingPackId] = useState<string | null>(null);
   const [packJson, setPackJson] = useState('');
 
-  const handleSelectOpp = useCallback((opp: SelectedOpportunity | null) => {
-    setSelectedOpp(opp);
+  const handleSelectOpp = (opp: typeof selectedOpp) => {
+    setOpportunity(opp);
     if (opp) setPackType(resolvePackType(String(opp.opportunity_type)));
-  }, []);
+  };
+
+  useEffect(() => {
+    if (selectedOpp) setPackType(resolvePackType(String(selectedOpp.opportunity_type)));
+  }, [selectedOpp?.id, selectedOpp?.opportunity_type]);
 
   const drafts = useQuery({
     queryKey: ['content-drafts', projectId],
@@ -303,11 +306,14 @@ export function ContentLibraryPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <CurrentOpportunityBanner projectId={projectId} />
           <OpportunitySelector
             projectId={projectId}
             selectedId={selectedOpp?.id ?? null}
             onSelect={handleSelectOpp}
             mode="content"
+            showTable={!selectedOpp}
+            allowClear
           />
 
           {selectedOpp && (

@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -9,10 +9,9 @@ import { Badge } from '@/components/ui/badge';
 import { useApi } from '@/hooks/use-api';
 import { PageTransition } from '@/components/demo/page-transition';
 import { useFeatureFlags } from '@/hooks/use-feature-flags';
-import {
-  OpportunitySelector,
-  type SelectedOpportunity,
-} from '@/components/opportunities/opportunity-selector';
+import { OpportunitySelector } from '@/components/opportunities/opportunity-selector';
+import { CurrentOpportunityBanner } from '@/components/opportunities/current-opportunity-banner';
+import { useCurrentOpportunity } from '@/hooks/use-current-opportunity';
 
 export function BrowserAssistantPage() {
   const { projectId = '' } = useParams();
@@ -20,12 +19,12 @@ export function BrowserAssistantPage() {
   const flags = useFeatureFlags();
   const assistFillEnabled = flags.isEnabled('v11_browser_assist_fill');
   const qc = useQueryClient();
-  const [selectedOpp, setSelectedOpp] = useState<SelectedOpportunity | null>(null);
+  const { opportunity: selectedOpp, setOpportunity } = useCurrentOpportunity(projectId);
   const [planId, setPlanId] = useState<string | null>(null);
-  const handleSelect = useCallback((opp: SelectedOpportunity | null) => {
-    setSelectedOpp(opp);
+  const handleSelect = (opp: typeof selectedOpp) => {
+    setOpportunity(opp);
     setPlanId(null);
-  }, []);
+  };
 
   const plan = useQuery({
     queryKey: ['browser-plan', projectId, planId],
@@ -96,13 +95,16 @@ export function BrowserAssistantPage() {
             Select an approved website — site context and backlink type load automatically.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <OpportunitySelector
-            projectId={projectId}
-            selectedId={selectedOpp?.id ?? null}
-            onSelect={handleSelect}
-            mode="content"
-          />
+          <CardContent className="space-y-4">
+            <CurrentOpportunityBanner projectId={projectId} />
+            <OpportunitySelector
+              projectId={projectId}
+              selectedId={selectedOpp?.id ?? null}
+              onSelect={handleSelect}
+              mode="content"
+              showTable={!selectedOpp}
+              allowClear
+            />
           <Button disabled={!selectedOpp || create.isPending} onClick={() => create.mutate()}>
             Generate plan
             {selectedOpp ? ` for ${selectedOpp.website}` : ''}

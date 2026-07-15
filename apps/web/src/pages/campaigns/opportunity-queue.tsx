@@ -7,6 +7,12 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useApi } from '@/hooks/use-api';
 import { ListChecks, Sparkles } from 'lucide-react';
+import { CurrentOpportunityBanner } from '@/components/opportunities/current-opportunity-banner';
+import {
+  useCurrentOpportunity,
+  useCurrentOpportunityStore,
+} from '@/hooks/use-current-opportunity';
+import type { SelectedOpportunity } from '@/components/opportunities/opportunity-selector';
 
 type Opportunity = {
   id: string;
@@ -36,9 +42,12 @@ export function OpportunityQueuePage() {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<QueueFilter>('pending_review');
+  const setSharedOpportunity = useCurrentOpportunityStore((s) => s.setOpportunity);
+  useCurrentOpportunity(projectId); // hydrate shared context while on queue
 
   const invalidateDownstream = () => {
     queryClient.invalidateQueries({ queryKey: ['opportunity-queue', projectId] });
+    queryClient.invalidateQueries({ queryKey: ['approved-opportunities', projectId] });
     queryClient.invalidateQueries({ queryKey: ['submissions', projectId] });
     queryClient.invalidateQueries({ queryKey: ['content-drafts', projectId] });
     queryClient.invalidateQueries({ queryKey: ['content-library', projectId] });
@@ -46,6 +55,18 @@ export function OpportunityQueuePage() {
     queryClient.invalidateQueries({ queryKey: ['pipeline', projectId] });
     queryClient.invalidateQueries({ queryKey: ['backlink-builder', projectId] });
   };
+
+  const toShared = (row: Opportunity): SelectedOpportunity => ({
+    id: row.id,
+    website: row.title,
+    domain: row.domain ?? null,
+    title: row.title,
+    score: row.score,
+    opportunity_type: row.opportunity_type,
+    status: 'approved',
+    readiness: 'ready',
+    pipeline_stage: row.pipeline_stage,
+  });
 
   const queue = useQuery({
     queryKey: ['opportunity-queue', projectId, filter],
@@ -74,7 +95,9 @@ export function OpportunityQueuePage() {
       }),
     onSuccess: (_data, vars) => {
       if (vars.action === 'approve') {
-        toast.success('Approved — moved to Submission Queue with linked draft');
+        toast.success('Approved — available as current opportunity across modules');
+        const row = (queue.data?.data ?? []).find((o) => o.id === vars.id);
+        if (row) setSharedOpportunity(projectId, toShared(row));
       } else {
         toast.success('Opportunity rejected');
       }
@@ -103,7 +126,9 @@ export function OpportunityQueuePage() {
           `${errors.length} failed${results.length ? `, ${results.length} succeeded` : ''}: ${errors[0]?.message ?? 'Unknown error'}`
         );
       } else if (action === 'approve') {
-        toast.success(`Approved ${results.length} — moved to Submission Queue`);
+        toast.success(`Approved ${results.length} — shared current opportunity updated`);
+        const last = results[results.length - 1];
+        if (last) setSharedOpportunity(projectId, toShared(last));
       } else {
         toast.success(`Rejected ${results.length}`);
       }
@@ -127,13 +152,15 @@ export function OpportunityQueuePage() {
 
   return (
     <div className="space-y-6">
+      <CurrentOpportunityBanner projectId={projectId} />
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
             <ListChecks className="h-6 w-6" /> Opportunity Queue
           </h1>
           <p className="text-muted-foreground">
-            Review, prioritize, and approve discovered opportunities
+            Review, prioritize, and approve discovered opportunities. Approving sets the shared
+            current opportunity for Image Studio and other modules.
           </p>
         </div>
         <Button

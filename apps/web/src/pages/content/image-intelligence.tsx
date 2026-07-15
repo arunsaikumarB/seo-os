@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -9,10 +9,9 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useApi } from '@/hooks/use-api';
-import {
-  OpportunitySelector,
-  type SelectedOpportunity,
-} from '@/components/opportunities/opportunity-selector';
+import { OpportunitySelector } from '@/components/opportunities/opportunity-selector';
+import { CurrentOpportunityBanner } from '@/components/opportunities/current-opportunity-banner';
+import { useCurrentOpportunity } from '@/hooks/use-current-opportunity';
 import {
   ImageGenerationReadinessPanel,
   useImageGenerationReadiness,
@@ -44,11 +43,8 @@ export function ImageIntelligencePanel({ embedded = false }: { embedded?: boolea
   const { projectId = '' } = useParams();
   const { request } = useApi();
   const qc = useQueryClient();
-  const [selectedOpp, setSelectedOpp] = useState<SelectedOpportunity | null>(null);
+  const { opportunity: selectedOpp, setOpportunity } = useCurrentOpportunity(projectId);
   const [imageType, setImageType] = useState('blog_hero');
-  const handleSelectOpp = useCallback((opp: SelectedOpportunity | null) => {
-    setSelectedOpp(opp);
-  }, []);
 
   const meta = useQuery({
     queryKey: ['iie-images', projectId],
@@ -143,6 +139,8 @@ export function ImageIntelligencePanel({ embedded = false }: { embedded?: boolea
         </div>
       )}
 
+      <CurrentOpportunityBanner projectId={projectId} />
+
       <ImageGenerationReadinessPanel projectId={projectId} opportunityId={selectedOpp?.id} />
 
       <div className="grid gap-3 sm:grid-cols-4">
@@ -174,7 +172,7 @@ export function ImageIntelligencePanel({ embedded = false }: { embedded?: boolea
           <OpportunitySelector
             projectId={projectId}
             selectedId={selectedOpp?.id ?? null}
-            onSelect={handleSelectOpp}
+            onSelect={setOpportunity}
             mode="content"
             showTable={false}
           />

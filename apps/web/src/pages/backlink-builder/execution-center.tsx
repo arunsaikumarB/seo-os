@@ -20,6 +20,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useApi } from '@/hooks/use-api';
+import { CurrentOpportunityBanner } from '@/components/opportunities/current-opportunity-banner';
+import { useCurrentOpportunity } from '@/hooks/use-current-opportunity';
+import type { SelectedOpportunity } from '@/components/opportunities/opportunity-selector';
 
 type BeeJob = {
   id: string;
@@ -111,6 +114,7 @@ export function BrowserExecutionCenterPage() {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [selectedOppIds, setSelectedOppIds] = useState<Set<string>>(new Set());
   const [bulkProgress, setBulkProgress] = useState<BulkProgressItem[]>([]);
+  const { opportunity: currentOpp, setOpportunity } = useCurrentOpportunity(projectId);
 
   const setTab = (t: (typeof TABS)[number]) => {
     setParams({ tab: t });
@@ -343,10 +347,30 @@ export function BrowserExecutionCenterPage() {
 
   const toggleOpp = (id: string, selectable: boolean) => {
     if (!selectable) return;
+    const row = (opportunities.data?.data ?? []).find((o) => o.id === id);
     setSelectedOppIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
-      else next.add(id);
+      else {
+        next.add(id);
+        if (row) {
+          const snap: SelectedOpportunity = {
+            id: row.id,
+            website: row.website,
+            domain: row.domain,
+            title: row.title,
+            score: row.score,
+            opportunity_type: row.opportunity_type,
+            status: row.status,
+            readiness: row.readiness,
+            pipeline_stage: row.pipeline_stage,
+            selectable: row.selectable,
+            has_submission: row.has_submission,
+            has_content_draft: row.has_content_draft,
+          };
+          setOpportunity(snap);
+        }
+      }
       return next;
     });
   };
@@ -388,6 +412,14 @@ export function BrowserExecutionCenterPage() {
           </Link>
         </Button>
       </div>
+
+      <CurrentOpportunityBanner projectId={projectId} />
+      {currentOpp ? (
+        <p className="text-xs text-muted-foreground">
+          Selecting an opportunity also updates the shared current website (
+          <span className="font-medium text-foreground">{currentOpp.website}</span>).
+        </p>
+      ) : null}
 
       <div className="flex flex-wrap gap-2">
         {TABS.map((t) => (

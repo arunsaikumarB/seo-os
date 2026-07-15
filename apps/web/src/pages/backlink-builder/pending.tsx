@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,10 +10,9 @@ import { BacklinkBuilderHero } from '@/components/backlink-builder/backlink-buil
 import type { BacklinkRecord } from '@/components/backlink-builder/types';
 import { formatType } from '@/components/backlink-builder/types';
 import { Clock, CheckCircle, RefreshCw, History } from 'lucide-react';
-import {
-  OpportunitySelector,
-  type SelectedOpportunity,
-} from '@/components/opportunities/opportunity-selector';
+import { OpportunitySelector } from '@/components/opportunities/opportunity-selector';
+import { CurrentOpportunityBanner } from '@/components/opportunities/current-opportunity-banner';
+import { useCurrentOpportunity } from '@/hooks/use-current-opportunity';
 
 type CheckRow = {
   id: string;
@@ -28,10 +27,8 @@ export function BacklinkPendingPage() {
   const { request } = useApi();
   const queryClient = useQueryClient();
   const [historyId, setHistoryId] = useState<string | null>(null);
-  const [selectedOpp, setSelectedOpp] = useState<SelectedOpportunity | null>(null);
-  const handleSelectOpp = useCallback((opp: SelectedOpportunity | null) => {
-    setSelectedOpp(opp);
-  }, []);
+  const { opportunity: selectedOpp, setOpportunity: handleSelectOpp } =
+    useCurrentOpportunity(projectId);
 
   const pending = useQuery({
     queryKey: ['backlink-pending', projectId],
@@ -103,7 +100,8 @@ export function BacklinkPendingPage() {
             Filter verification work by approved website. Leave empty to see all pending links.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-3">
+          <CurrentOpportunityBanner projectId={projectId} />
           <OpportunitySelector
             projectId={projectId}
             selectedId={selectedOpp?.id ?? null}

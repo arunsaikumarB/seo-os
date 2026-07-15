@@ -72,6 +72,7 @@ export function useApprovedOpportunities(projectId: string) {
 
 /**
  * Single reusable opportunity picker — website-first, UUID never shown or edited.
+ * Pass selectedId/onSelect from useCurrentOpportunity() so all modules stay in sync.
  */
 export function OpportunitySelector({
   projectId,
@@ -89,7 +90,6 @@ export function OpportunitySelector({
   const items = query.data?.data ?? [];
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
-  const autoSelectedRef = useRef(false);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -109,13 +109,11 @@ export function OpportunitySelector({
 
   const selected = items.find((o) => o.id === selectedId) ?? null;
 
+  // Auto-select only when nothing is active yet and exactly one approved site exists
   useEffect(() => {
-    if (query.isLoading || autoSelectedRef.current) return;
-    if (items.length === 1) {
-      autoSelectedRef.current = true;
-      onSelectRef.current(items[0]);
-    }
-  }, [items, query.isLoading]);
+    if (query.isLoading || selectedId) return;
+    if (items.length === 1) onSelectRef.current(items[0]!);
+  }, [items, query.isLoading, selectedId]);
 
   if (query.isLoading) {
     return <Skeleton className="h-28 w-full" />;
@@ -127,8 +125,15 @@ export function OpportunitySelector({
 
   return (
     <div className="space-y-3">
+      {!selectedId && (
+        <p className="text-sm text-muted-foreground">
+          No current opportunity — search and select an approved website below. Your choice stays
+          active across Image Studio, Content Studio, and other modules until you change it.
+        </p>
+      )}
+
       <div className="space-y-1">
-        <Label htmlFor="opp-selector-search">Search</Label>
+        <Label htmlFor="opp-selector-search">Search approved websites</Label>
         <Input
           id="opp-selector-search"
           value={search}
@@ -153,7 +158,7 @@ export function OpportunitySelector({
             onSelect(items.find((o) => o.id === value) ?? null);
           }}
         >
-          <option value="">{allowClear ? 'All websites…' : 'Choose a website…'}</option>
+          <option value="">{allowClear ? 'Clear selection…' : 'Choose a website…'}</option>
           {filtered.map((o) => (
             <option key={o.id} value={o.id}>
               {o.website}

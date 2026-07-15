@@ -1,4 +1,3 @@
-import { useCallback, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -7,19 +6,16 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useApi } from '@/hooks/use-api';
 import { ArrowLeft } from 'lucide-react';
-import {
-  OpportunitySelector,
-  type SelectedOpportunity,
-} from '@/components/opportunities/opportunity-selector';
+import { OpportunitySelector } from '@/components/opportunities/opportunity-selector';
+import { CurrentOpportunityBanner } from '@/components/opportunities/current-opportunity-banner';
+import { useCurrentOpportunity } from '@/hooks/use-current-opportunity';
 
 export function CampaignDetailPage() {
   const { projectId = '', campaignId = '' } = useParams();
   const { request } = useApi();
   const queryClient = useQueryClient();
-  const [selectedOpp, setSelectedOpp] = useState<SelectedOpportunity | null>(null);
-  const handleSelectOpp = useCallback((opp: SelectedOpportunity | null) => {
-    setSelectedOpp(opp);
-  }, []);
+  const { opportunity: selectedOpp, setOpportunity: handleSelectOpp } =
+    useCurrentOpportunity(projectId);
 
   const campaign = useQuery({
     queryKey: ['campaign', projectId, campaignId],
@@ -137,12 +133,14 @@ export function CampaignDetailPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <CurrentOpportunityBanner projectId={projectId} />
           <OpportunitySelector
             projectId={projectId}
             selectedId={selectedOpp?.id ?? null}
             onSelect={handleSelectOpp}
             mode="content"
-            showTable={false}
+            showTable={!selectedOpp}
+            allowClear
           />
           <Button disabled={!selectedOpp || attach.isPending} onClick={() => attach.mutate()}>
             Attach

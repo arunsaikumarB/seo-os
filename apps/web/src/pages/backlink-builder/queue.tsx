@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -9,10 +9,9 @@ import { Badge } from '@/components/ui/badge';
 import { useApi } from '@/hooks/use-api';
 import { PageTransition } from '@/components/demo/page-transition';
 import { QUEUE_STAGES } from './queue-constants';
-import {
-  OpportunitySelector,
-  type SelectedOpportunity,
-} from '@/components/opportunities/opportunity-selector';
+import { OpportunitySelector } from '@/components/opportunities/opportunity-selector';
+import { CurrentOpportunityBanner } from '@/components/opportunities/current-opportunity-banner';
+import { useCurrentOpportunity } from '@/hooks/use-current-opportunity';
 
 type SubItem = {
   id: string;
@@ -26,10 +25,8 @@ export function SubmissionQueuePage() {
   const qc = useQueryClient();
   const [historyOppId, setHistoryOppId] = useState<string | null>(null);
   const [historyLabel, setHistoryLabel] = useState<string | null>(null);
-  const [selectedOpp, setSelectedOpp] = useState<SelectedOpportunity | null>(null);
-  const handleSelectOpp = useCallback((opp: SelectedOpportunity | null) => {
-    setSelectedOpp(opp);
-  }, []);
+  const { opportunity: selectedOpp, setOpportunity: handleSelectOpp } =
+    useCurrentOpportunity(projectId);
 
   const board = useQuery({
     queryKey: ['v11-queue', projectId],
@@ -97,7 +94,8 @@ export function SubmissionQueuePage() {
             Filter the queue by approved website. Leave empty to see all cards.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-3">
+          <CurrentOpportunityBanner projectId={projectId} />
           <OpportunitySelector
             projectId={projectId}
             selectedId={selectedOpp?.id ?? null}

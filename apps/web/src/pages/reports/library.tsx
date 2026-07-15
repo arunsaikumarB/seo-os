@@ -1,6 +1,6 @@
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 import {
   FileBarChart,
   Plus,
@@ -24,10 +24,8 @@ import { useAuth } from '@/providers/auth-provider';
 import { useAppStore } from '@/stores/app-store';
 import { getApiErrorMessage } from '@/lib/api';
 import { toast } from 'sonner';
-import {
-  OpportunitySelector,
-  type SelectedOpportunity,
-} from '@/components/opportunities/opportunity-selector';
+import { OpportunitySelector } from '@/components/opportunities/opportunity-selector';
+import { useCurrentOpportunity } from '@/hooks/use-current-opportunity';
 
 type ReportTypeMeta = { type: string; label: string; description: string };
 type ReportRow = {
@@ -72,10 +70,8 @@ export function ReportsLibraryPage() {
   const [brandName, setBrandName] = useState('Agency Brand');
   const [primaryColor, setPrimaryColor] = useState('#0d9488');
   const [emailTo, setEmailTo] = useState('');
-  const [selectedOpp, setSelectedOpp] = useState<SelectedOpportunity | null>(null);
-  const handleSelectOpp = useCallback((opp: SelectedOpportunity | null) => {
-    setSelectedOpp(opp);
-  }, []);
+  const { opportunity: selectedOpp, setOpportunity: handleSelectOpp } =
+    useCurrentOpportunity(projectId);
 
   const types = useQuery({
     queryKey: ['report-types', projectId],

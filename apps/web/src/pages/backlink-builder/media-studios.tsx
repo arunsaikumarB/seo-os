@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -7,12 +7,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useApi } from '@/hooks/use-api';
 import { PageTransition } from '@/components/demo/page-transition';
-import {
-  OpportunitySelector,
-  type SelectedOpportunity,
-} from '@/components/opportunities/opportunity-selector';
+import { OpportunitySelector } from '@/components/opportunities/opportunity-selector';
+import { CurrentOpportunityBanner } from '@/components/opportunities/current-opportunity-banner';
+import { useCurrentOpportunity } from '@/hooks/use-current-opportunity';
 import {
   ImageGenerationReadinessPanel,
   useImageGenerationReadiness,
@@ -31,14 +31,22 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
   const { projectId = '' } = useParams();
   const { request } = useApi();
   const qc = useQueryClient();
-  const [selectedOpp, setSelectedOpp] = useState<SelectedOpportunity | null>(null);
+  const { opportunity: selectedOpp, setOpportunity } = useCurrentOpportunity(projectId);
   const [imageType, setImageType] = useState('blog_hero');
-  const handleSelect = useCallback((opp: SelectedOpportunity | null) => {
-    setSelectedOpp(opp);
-  }, []);
+  const autoBriefRef = useRef<string | null>(null);
 
   const readiness = useImageGenerationReadiness(projectId, selectedOpp?.id);
   const ready = readiness.data?.data;
+
+  // When selection changes, refresh readiness + related resources immediately (no page reload)
+  useEffect(() => {
+    if (!selectedOpp?.id) return;
+    void qc.invalidateQueries({ queryKey: ['image-readiness', projectId] });
+    void qc.invalidateQueries({ queryKey: ['media-briefs', projectId, kind] });
+    void qc.invalidateQueries({ queryKey: ['content-packs', projectId] });
+    void qc.invalidateQueries({ queryKey: ['iie-images', projectId] });
+    void qc.invalidateQueries({ queryKey: ['image-jobs', projectId] });
+  }, [selectedOpp?.id, projectId, kind, qc]);
 
   const list = useQuery({
     queryKey: ['media-briefs', projectId, kind],
@@ -46,12 +54,29 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
       request<{
         data: Array<{
           id: string;
+          opportunity_id?: string;
           review_status: string;
           brief: { suggestions?: unknown[]; note?: string; generationStatus?: string };
           opportunities?: { title?: string; domain?: string };
         }>;
       }>(`/v1/projects/${projectId}/backlink-builder/media-briefs?kind=${kind}`),
     enabled: !!projectId,
+    refetchInterval: selectedOpp ? 5_000 : false,
+  });
+
+  const contentPacks = useQuery({
+    queryKey: ['content-packs', projectId],
+    queryFn: () =>
+      request<{
+        data: Array<{
+          id: string;
+          opportunity_id?: string;
+          status?: string;
+          pack_type?: string;
+          pack?: Record<string, unknown>;
+        }>;
+      }>(`/v1/projects/${projectId}/backlink-builder/content-packs`),
+    enabled: !!projectId && !!selectedOpp,
   });
 
   const jobs = useQuery({
@@ -146,7 +171,10 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
         method: 'PATCH',
         body: JSON.stringify({ reviewStatus }),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['media-briefs', projectId, kind] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['media-briefs', projectId, kind] });
+      qc.invalidateQueries({ queryKey: ['image-readiness', projectId] });
+    },
   });
 
   const reviewAsset = useMutation({
@@ -163,8 +191,10 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
   });
 
   const Icon = kind === 'image' ? ImageIcon : VideoIcon;
+
   const briefs = (list.data?.data ?? []).filter((b) => {
     if (!selectedOpp) return true;
+    if (b.opportunity_id && b.opportunity_id === selectedOpp.id) return true;
     const domain = b.opportunities?.domain?.toLowerCase();
     const title = b.opportunities?.title?.toLowerCase();
     return (
@@ -173,6 +203,28 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
       title === selectedOpp.title?.toLowerCase()
     );
   });
+
+  const oppBrief = selectedOpp ? briefs[0] : null;
+  const briefExists = Boolean(oppBrief);
+  const relatedPack = useMemo(() => {
+    if (!selectedOpp) return null;
+    return (
+      (contentPacks.data?.data ?? []).find((p) => p.opportunity_id === selectedOpp.id) ?? null
+    );
+  }, [contentPacks.data?.data, selectedOpp]);
+
+  // Auto-queue image brief once when opportunity is active and no brief exists
+  useEffect(() => {
+    if (kind !== 'image') return;
+    if (!selectedOpp?.id || list.isLoading || create.isPending) return;
+    if (briefExists) {
+      autoBriefRef.current = selectedOpp.id;
+      return;
+    }
+    if (autoBriefRef.current === selectedOpp.id) return;
+    autoBriefRef.current = selectedOpp.id;
+    create.mutate();
+  }, [kind, selectedOpp?.id, briefExists, list.isLoading, create.isPending]);
 
   const relatedAssets = useMemo(() => {
     const rows = assets.data?.data ?? [];
@@ -183,11 +235,15 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
   const recentJobs = (jobs.data?.data ?? []).slice(0, 8);
   const generateDisabledReason = !selectedOpp
     ? 'Select an approved website first'
-    : !ready?.imageGenerationReady
-      ? ready?.primaryBlocker?.reason ?? 'Image generation is not ready'
-      : generateAsset.isPending
-        ? 'Queuing…'
-        : null;
+    : !briefExists && !create.isPending
+      ? 'Waiting for Image Brief — Generate Brief First'
+      : create.isPending
+        ? 'Generating image brief…'
+        : !ready?.imageGenerationReady
+          ? ready?.primaryBlocker?.reason ?? 'Image generation is not ready'
+          : generateAsset.isPending
+            ? 'Queuing…'
+            : null;
 
   return (
     <PageTransition className="space-y-6">
@@ -197,27 +253,32 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
           {kind === 'image'
-            ? 'Select website → generate brief → generate asset → quality review → approve.'
-            : 'Select an approved website to generate video metadata briefs.'}
+            ? 'Uses the shared current opportunity — brief → generate asset → quality review → approve.'
+            : 'Uses the shared current opportunity for video metadata briefs.'}
         </p>
       </div>
 
+      <CurrentOpportunityBanner projectId={projectId} />
+
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">1. Select website & generate brief</CardTitle>
+          <CardTitle className="text-base">1. Current website</CardTitle>
           <CardDescription>
-            Opportunity context loads automatically. Queue a brief before generating assets.
+            Selection syncs across Content Studio, Browser Assistant, Submission Center, and
+            Execution Center. Persists until you change it.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <OpportunitySelector
             projectId={projectId}
             selectedId={selectedOpp?.id ?? null}
-            onSelect={handleSelect}
+            onSelect={setOpportunity}
             mode="content"
-            showTable={false}
+            showTable={!selectedOpp}
+            allowClear
+            label={selectedOpp ? 'Change website' : 'Select approved website'}
           />
-          {kind === 'image' && (
+          {kind === 'image' && selectedOpp && (
             <div className="space-y-1">
               <Label htmlFor="image-type">Image type</Label>
               <select
@@ -234,14 +295,103 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
               </select>
             </div>
           )}
-          <Button disabled={!selectedOpp || create.isPending} onClick={() => create.mutate()}>
-            Queue {kind} brief
-            {selectedOpp ? ` for ${selectedOpp.website}` : ''}
-          </Button>
         </CardContent>
       </Card>
 
-      {kind === 'image' && (
+      {selectedOpp && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Loaded context</CardTitle>
+            <CardDescription>
+              Project metadata, business details, content pack, and image requirements for{' '}
+              {selectedOpp.website}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
+            <div>
+              <p className="text-xs text-muted-foreground">Website / Domain</p>
+              <p className="font-medium">
+                {selectedOpp.website}
+                {selectedOpp.domain ? ` · ${selectedOpp.domain}` : ''}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Backlink type</p>
+              <p className="font-medium capitalize">
+                {(selectedOpp.backlink_type ?? selectedOpp.opportunity_type).replace(/_/g, ' ')}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Business / scores</p>
+              <p className="font-medium tabular-nums">
+                DR {selectedOpp.domain_rating ?? '—'} · traffic{' '}
+                {selectedOpp.monthly_traffic != null
+                  ? selectedOpp.monthly_traffic.toLocaleString()
+                  : '—'}{' '}
+                · score {selectedOpp.score}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Content pack</p>
+              <p className="font-medium">
+                {contentPacks.isLoading
+                  ? 'Loading…'
+                  : relatedPack
+                    ? `${relatedPack.pack_type ?? 'pack'} · ${relatedPack.status ?? 'ready'}`
+                    : selectedOpp.has_content_pack
+                      ? 'Linked'
+                      : 'Not generated yet'}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Image requirements</p>
+              <p className="font-medium">
+                {(selectedOpp.required_fields?.length ?? 0) > 0
+                  ? selectedOpp.required_fields!.slice(0, 4).join(', ')
+                  : 'Default image pack'}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Image brief</p>
+              <p className="font-medium">
+                {list.isLoading
+                  ? 'Checking…'
+                  : briefExists
+                    ? `${oppBrief?.review_status ?? 'ready'}`
+                    : create.isPending
+                      ? 'Generating…'
+                      : 'Missing'}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Readiness</p>
+              <p className="font-medium">
+                {readiness.isLoading
+                  ? 'Checking…'
+                  : ready?.imageGenerationReady
+                    ? 'READY'
+                    : ready?.overallStatus ?? 'NOT READY'}
+              </p>
+            </div>
+          </CardContent>
+          {kind === 'image' && !briefExists && (
+            <CardContent className="pt-0">
+              <Button disabled={create.isPending} onClick={() => create.mutate()}>
+                {create.isPending ? 'Generating brief…' : 'Generate Image Brief'}
+              </Button>
+            </CardContent>
+          )}
+          {kind === 'video' && (
+            <CardContent className="pt-0">
+              <Button disabled={create.isPending} onClick={() => create.mutate()}>
+                {create.isPending ? 'Queuing…' : `Generate Video Brief for ${selectedOpp.website}`}
+              </Button>
+            </CardContent>
+          )}
+        </Card>
+      )}
+
+      {kind === 'image' && selectedOpp && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">2. Image generation readiness</CardTitle>
@@ -250,11 +400,20 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <ImageGenerationReadinessPanel
-              projectId={projectId}
-              opportunityId={selectedOpp?.id}
-            />
+            {readiness.isLoading ? (
+              <Skeleton className="h-40 w-full" />
+            ) : (
+              <ImageGenerationReadinessPanel
+                projectId={projectId}
+                opportunityId={selectedOpp.id}
+              />
+            )}
             <div className="flex flex-wrap items-center gap-2">
+              {!briefExists && (
+                <Button variant="secondary" disabled={create.isPending} onClick={() => create.mutate()}>
+                  {create.isPending ? 'Generating brief…' : 'Generate Image Brief'}
+                </Button>
+              )}
               <Button
                 disabled={Boolean(generateDisabledReason)}
                 title={generateDisabledReason ?? 'Generate Image Asset'}
@@ -271,6 +430,11 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
             </div>
             {generateDisabledReason && (
               <p className="text-xs text-amber-700">{generateDisabledReason}</p>
+            )}
+            {ready?.imageGenerationReady && briefExists && (
+              <p className="text-sm text-emerald-700 font-medium">
+                Image Provider Ready — Generate Image Asset is enabled
+              </p>
             )}
           </CardContent>
         </Card>
@@ -354,7 +518,7 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
       )}
 
       <div className="grid gap-3">
-        <p className="text-sm font-medium">Image briefs</p>
+        <p className="text-sm font-medium">{kind === 'image' ? 'Image' : 'Video'} briefs</p>
         {briefs.map((b) => (
           <Card key={b.id}>
             <CardContent className="pt-4 space-y-2">
@@ -370,7 +534,10 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
               </pre>
               {b.review_status === 'queued' && (
                 <div className="flex gap-2">
-                  <Button size="sm" onClick={() => review.mutate({ id: b.id, reviewStatus: 'approved' })}>
+                  <Button
+                    size="sm"
+                    onClick={() => review.mutate({ id: b.id, reviewStatus: 'approved' })}
+                  >
                     Approve brief
                   </Button>
                   <Button
@@ -389,7 +556,7 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
           <p className="text-sm text-muted-foreground">
             {selectedOpp
               ? `No ${kind} briefs yet for ${selectedOpp.website}.`
-              : `No ${kind} briefs yet.`}
+              : `Select an approved website to load ${kind} briefs.`}
           </p>
         )}
       </div>

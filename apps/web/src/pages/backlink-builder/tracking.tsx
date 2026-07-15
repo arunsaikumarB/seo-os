@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -11,10 +11,9 @@ import { OpportunityLogo } from '@/components/backlink-builder/opportunity-logo'
 import { formatType, scoreBadgeClass } from '@/components/backlink-builder/types';
 import { PageTransition } from '@/components/demo/page-transition';
 import { ClipboardList, Send, CheckCircle, XCircle, Clock } from 'lucide-react';
-import {
-  OpportunitySelector,
-  type SelectedOpportunity,
-} from '@/components/opportunities/opportunity-selector';
+import { OpportunitySelector } from '@/components/opportunities/opportunity-selector';
+import { CurrentOpportunityBanner } from '@/components/opportunities/current-opportunity-banner';
+import { useCurrentOpportunity } from '@/hooks/use-current-opportunity';
 
 const STATUS_FILTERS = [
   'all',
@@ -59,10 +58,8 @@ export function BacklinkTrackingPage() {
   const { request } = useApi();
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<string>('all');
-  const [selectedOpp, setSelectedOpp] = useState<SelectedOpportunity | null>(null);
-  const handleSelectOpp = useCallback((opp: SelectedOpportunity | null) => {
-    setSelectedOpp(opp);
-  }, []);
+  const { opportunity: selectedOpp, setOpportunity: handleSelectOpp } =
+    useCurrentOpportunity(projectId);
 
   const tracking = useQuery({
     queryKey: ['automation-tracking', projectId],
@@ -129,6 +126,7 @@ export function BacklinkTrackingPage() {
   return (
     <PageTransition className="space-y-6">
       <BacklinkBuilderNav />
+      <CurrentOpportunityBanner projectId={projectId} />
 
       <div>
         <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
