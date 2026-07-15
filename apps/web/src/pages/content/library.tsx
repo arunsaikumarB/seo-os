@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -12,6 +12,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/demo/empty-state';
 import { useApi } from '@/hooks/use-api';
 import { ImageIntelligencePanel } from '@/pages/content/image-intelligence';
+import {
+  ApprovedOpportunityPicker,
+  type ApprovedOpportunity,
+} from '@/components/opportunities/approved-opportunity-picker';
 
 type DraftRow = {
   id: string;
@@ -41,9 +45,25 @@ const PACK_TYPES = [
   'press_release',
   'resource_page',
   'broken_link',
+  'citation',
+  'digital_pr',
+  'web2',
+  'infographic',
+  'partnership',
 ];
 
 type StudioTab = 'articles' | 'images' | 'videos' | 'metadata' | 'templates';
+
+function resolvePackType(opportunityType: string): string {
+  if (PACK_TYPES.includes(opportunityType)) return opportunityType;
+  const aliases: Record<string, string> = {
+    business_listing: 'directory',
+    citation: 'citation',
+    image_submission: 'infographic',
+    web_2_0: 'web2',
+  };
+  return aliases[opportunityType] ?? opportunityType ?? 'guest_post';
+}
 
 export function ContentLibraryPage() {
   const { projectId = '' } = useParams();
@@ -53,10 +73,15 @@ export function ContentLibraryPage() {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [showCreate, setShowCreate] = useState(false);
-  const [oppId, setOppId] = useState('');
+  const [selectedOpp, setSelectedOpp] = useState<ApprovedOpportunity | null>(null);
   const [packType, setPackType] = useState('guest_post');
   const [editingPackId, setEditingPackId] = useState<string | null>(null);
   const [packJson, setPackJson] = useState('');
+
+  const handleSelectOpp = useCallback((opp: ApprovedOpportunity | null) => {
+    setSelectedOpp(opp);
+    if (opp) setPackType(resolvePackType(String(opp.opportunity_type)));
+  }, []);
 
   const drafts = useQuery({
     queryKey: ['content-drafts', projectId],
@@ -104,14 +129,20 @@ export function ContentLibraryPage() {
   });
 
   const generatePack = useMutation({
-    mutationFn: () =>
-      request(`/v1/projects/${projectId}/backlink-builder/opportunities/${oppId.trim()}/content-pack`, {
-        method: 'POST',
-        body: JSON.stringify({ type: packType }),
-      }),
+    mutationFn: () => {
+      if (!selectedOpp) throw new Error('Select an approved opportunity first');
+      return request(
+        `/v1/projects/${projectId}/backlink-builder/opportunities/${selectedOpp.id}/content-pack`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ type: packType }),
+        }
+      );
+    },
     onSuccess: () => {
-      toast.success('Content pack generated');
+      toast.success(`Content pack generated for ${selectedOpp?.website ?? 'opportunity'}`);
       queryClient.invalidateQueries({ queryKey: ['content-packs', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['approved-opportunities', projectId] });
     },
     onError: (err: Error) => toast.error(err.message || 'Pack generation failed'),
   });
@@ -268,46 +299,51 @@ export function ContentLibraryPage() {
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Generate content pack</CardTitle>
           <CardDescription>
-            Pick an opportunity ID and type, then edit the pack before submission approval.
+            Select an approved website. Content type and required fields are detected automatically.
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-wrap gap-3 items-end">
-          <div className="space-y-1 min-w-[220px] flex-1">
-            <Label htmlFor="opp-id">Opportunity ID</Label>
-            <Input
-              id="opp-id"
-              value={oppId}
-              onChange={(e) => setOppId(e.target.value)}
-              placeholder="uuid"
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="pack-type">Type</Label>
-            <select
-              id="pack-type"
-              className="flex h-9 rounded-md border border-input bg-transparent px-3 text-sm"
-              value={packType}
-              onChange={(e) => setPackType(e.target.value)}
-            >
-              {PACK_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t.replace(/_/g, ' ')}
-                </option>
-              ))}
-            </select>
-          </div>
-          <Button
-            disabled={!oppId.trim() || generatePack.isPending}
-            onClick={() => generatePack.mutate()}
-          >
-            {generatePack.isPending ? 'Generating…' : 'Generate pack'}
-          </Button>
-          <Button variant="outline" size="sm" asChild>
-            <Link to={`/projects/${projectId}/backlink-builder/image-studio`}>Image Studio</Link>
-          </Button>
-          <Button variant="outline" size="sm" asChild>
-            <Link to={`/projects/${projectId}/backlink-builder/video-studio`}>Video Studio</Link>
-          </Button>
+        <CardContent className="space-y-4">
+          <ApprovedOpportunityPicker
+            projectId={projectId}
+            selectedId={selectedOpp?.id ?? null}
+            onSelect={handleSelectOpp}
+            mode="content"
+          />
+
+          {selectedOpp && (
+            <div className="flex flex-wrap gap-3 items-end">
+              <div className="space-y-1">
+                <Label htmlFor="pack-type">Content type</Label>
+                <select
+                  id="pack-type"
+                  className="flex h-9 rounded-md border border-input bg-transparent px-3 text-sm capitalize"
+                  value={packType}
+                  onChange={(e) => setPackType(e.target.value)}
+                >
+                  {!PACK_TYPES.includes(packType) && (
+                    <option value={packType}>{packType.replace(/_/g, ' ')}</option>
+                  )}
+                  {PACK_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t.replace(/_/g, ' ')}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <Button
+                disabled={!selectedOpp || generatePack.isPending}
+                onClick={() => generatePack.mutate()}
+              >
+                {generatePack.isPending ? 'Generating…' : 'Generate Content Pack'}
+              </Button>
+              <Button variant="outline" size="sm" asChild>
+                <Link to={`/projects/${projectId}/backlink-builder/image-studio`}>Image Studio</Link>
+              </Button>
+              <Button variant="outline" size="sm" asChild>
+                <Link to={`/projects/${projectId}/backlink-builder/video-studio`}>Video Studio</Link>
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 

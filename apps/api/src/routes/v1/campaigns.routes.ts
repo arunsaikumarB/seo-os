@@ -23,6 +23,7 @@ import {
   reviewOpportunity,
   updateOpportunityPriority,
 } from '../../modules/campaigns/opportunity-queue.service.js';
+import { listApprovedOpportunities } from '../../modules/campaigns/approved-opportunities.service.js';
 import {
   createContentDraft,
   createEmailDraft,
@@ -134,6 +135,22 @@ campaignsRouter.get(
         campaignType,
       });
       res.json({ data: queue });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/** Shared approved-opportunity picker (Content Studio, Execution Center consumers) */
+campaignsRouter.get(
+  '/approved-opportunities',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      res.json({
+        data: await listApprovedOpportunities(param(req.params.projectId)),
+      });
     } catch (err) {
       next(err);
     }

@@ -12,7 +12,13 @@ import {
 import { DEFAULT_FEATURE_FLAGS } from '@seo-os/shared';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { enqueueJob, QUEUES } from '../../jobs/boss.js';
+import {
+  listApprovedOpportunities,
+  type OpportunityReadiness,
+} from '../campaigns/approved-opportunities.service.js';
 import { getBrandContextForBee } from './bee-assets.js';
+
+export type ExecutionReadiness = OpportunityReadiness;
 
 function beeEnabled(): boolean {
   return DEFAULT_FEATURE_FLAGS.bee_enabled !== false;
@@ -321,135 +327,12 @@ export async function listJobs(workspaceId: string, status?: string) {
   return data ?? [];
 }
 
-const ACTIVE_JOB_STATUSES = new Set([
-  'queued',
-  'preparing',
-  'running',
-  'paused',
-  'needs_approval',
-  'ready_for_review',
-  'ready_to_continue',
-  'watching_captcha',
-  'watching_login',
-  'watching_mfa',
-  'watching_email',
-  'watching_phone',
-  'blocked_captcha',
-  'blocked_mfa',
-]);
-
-export type ExecutionReadiness =
-  | 'ready'
-  | 'in_progress'
-  | 'needs_approval'
-  | 'completed'
-  | 'failed'
-  | 'needs_domain'
-  | 'not_ready';
-
 /**
  * Approved / campaign-ready opportunities for the Execution Center picker.
- * Internal UUIDs stay in API responses for selection; UI must not surface them as inputs.
+ * Delegates to the shared loader used by Content Studio and other workflows.
  */
 export async function listExecutionReadyOpportunities(workspaceId: string) {
-  const { data: opps, error } = await getSupabaseAdmin()
-    .from('opportunities')
-    .select(
-      'id, title, domain, website_name, url, opportunity_type, score, status, queue_status, pipeline_stage, automation_status, metadata, created_at, updated_at'
-    )
-    .eq('workspace_id', workspaceId)
-    .or(
-      'queue_status.eq.approved,status.eq.approved,pipeline_stage.eq.campaign_ready,pipeline_stage.eq.outreach'
-    )
-    .order('score', { ascending: false })
-    .limit(200);
-  if (error) throw error;
-
-  const ids = (opps ?? []).map((o) => o.id);
-  const jobsByOpp = new Map<
-    string,
-    { id: string; status: string; created_at: string; site_domain?: string | null }
-  >();
-
-  if (ids.length) {
-    const { data: jobs } = await getSupabaseAdmin()
-      .from('execution_jobs')
-      .select('id, opportunity_id, status, created_at, site_domain')
-      .eq('workspace_id', workspaceId)
-      .in('opportunity_id', ids)
-      .is('deleted_at', null)
-      .order('created_at', { ascending: false });
-
-    for (const job of jobs ?? []) {
-      const oppId = String(job.opportunity_id);
-      if (!jobsByOpp.has(oppId)) {
-        jobsByOpp.set(oppId, {
-          id: String(job.id),
-          status: String(job.status),
-          created_at: String(job.created_at),
-          site_domain: job.site_domain as string | null,
-        });
-      }
-    }
-  }
-
-  return (opps ?? []).map((opp) => {
-    const meta = (opp.metadata as Record<string, unknown>) ?? {};
-    const workflow =
-      typeof meta.workflow === 'object' && meta.workflow
-        ? (meta.workflow as Record<string, unknown>)
-        : {};
-    const latestJob = jobsByOpp.get(String(opp.id)) ?? null;
-    const website = String(opp.website_name || opp.domain || opp.title || 'Unknown site');
-    const hasDomain = Boolean(opp.domain || opp.url);
-    const campaignEligible =
-      workflow.campaign_eligible === true ||
-      workflow.execution_ready === true ||
-      opp.pipeline_stage === 'campaign_ready' ||
-      opp.pipeline_stage === 'outreach' ||
-      opp.queue_status === 'approved';
-
-    let readiness: ExecutionReadiness = 'not_ready';
-    if (latestJob) {
-      const st = latestJob.status;
-      if (st === 'completed') readiness = 'completed';
-      else if (st === 'failed' || st === 'cancelled') readiness = 'failed';
-      else if (st === 'needs_approval' || st === 'ready_for_review') readiness = 'needs_approval';
-      else if (ACTIVE_JOB_STATUSES.has(st)) readiness = 'in_progress';
-      else readiness = 'ready';
-    } else if (!hasDomain) {
-      readiness = 'needs_domain';
-    } else if (campaignEligible) {
-      readiness = 'ready';
-    }
-
-    const selectable =
-      readiness === 'ready' || readiness === 'failed' || readiness === 'completed';
-
-    return {
-      id: opp.id,
-      website,
-      domain: opp.domain ?? null,
-      title: opp.title,
-      score: Number(opp.score ?? 0),
-      opportunity_type: opp.opportunity_type,
-      status: opp.queue_status || opp.status,
-      pipeline_stage: opp.pipeline_stage,
-      readiness,
-      selectable,
-      has_submission: Boolean(meta.submission_id || workflow.submission_id),
-      has_content_draft: Boolean(
-        meta.content_studio_draft_id || workflow.content_studio_draft_id
-      ),
-      latest_job: latestJob
-        ? {
-            id: latestJob.id,
-            status: latestJob.status,
-            created_at: latestJob.created_at,
-          }
-        : null,
-    };
-  });
+  return listApprovedOpportunities(workspaceId);
 }
 
 export async function startExecutionsForOpportunities(params: {

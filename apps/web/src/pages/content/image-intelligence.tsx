@@ -1,15 +1,18 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Image as ImageIcon, Sparkles } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useApi } from '@/hooks/use-api';
+import {
+  ApprovedOpportunityPicker,
+  type ApprovedOpportunity,
+} from '@/components/opportunities/approved-opportunity-picker';
 
 type ImageAsset = {
   id: string;
@@ -37,8 +40,11 @@ export function ImageIntelligencePanel({ embedded = false }: { embedded?: boolea
   const { projectId = '' } = useParams();
   const { request } = useApi();
   const qc = useQueryClient();
-  const [oppId, setOppId] = useState('');
+  const [selectedOpp, setSelectedOpp] = useState<ApprovedOpportunity | null>(null);
   const [imageType, setImageType] = useState('blog_hero');
+  const handleSelectOpp = useCallback((opp: ApprovedOpportunity | null) => {
+    setSelectedOpp(opp);
+  }, []);
 
   const meta = useQuery({
     queryKey: ['iie-images', projectId],
@@ -73,12 +79,16 @@ export function ImageIntelligencePanel({ embedded = false }: { embedded?: boolea
         method: 'POST',
         body: JSON.stringify({
           imageType,
-          opportunityId: oppId.trim() || undefined,
+          opportunityId: selectedOpp?.id,
           count: 1,
         }),
       }),
     onSuccess: () => {
-      toast.success('Image generation queued');
+      toast.success(
+        selectedOpp
+          ? `Image generation queued for ${selectedOpp.website}`
+          : 'Image generation queued'
+      );
       qc.invalidateQueries({ queryKey: ['iie-images', projectId] });
       qc.invalidateQueries({ queryKey: ['iie-stats', projectId] });
     },
@@ -162,31 +172,39 @@ export function ImageIntelligencePanel({ embedded = false }: { embedded?: boolea
           </CardTitle>
           <CardDescription>Prompts are auto-built from domain style profile — no manual prompt required</CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-wrap gap-3 items-end">
-          <div className="space-y-1 min-w-[200px] flex-1">
-            <Label>Opportunity ID (optional)</Label>
-            <Input value={oppId} onChange={(e) => setOppId(e.target.value)} placeholder="uuid" />
-          </div>
-          <div className="space-y-1">
-            <Label>Type</Label>
-            <select
-              className="flex h-9 rounded-md border border-input bg-transparent px-3 text-sm"
-              value={imageType}
-              onChange={(e) => setImageType(e.target.value)}
+        <CardContent className="space-y-4">
+          <ApprovedOpportunityPicker
+            projectId={projectId}
+            selectedId={selectedOpp?.id ?? null}
+            onSelect={handleSelectOpp}
+            mode="content"
+            showTable={false}
+          />
+          <div className="flex flex-wrap gap-3 items-end">
+            <div className="space-y-1">
+              <Label>Image type</Label>
+              <select
+                className="flex h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+                value={imageType}
+                onChange={(e) => setImageType(e.target.value)}
+              >
+                {TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t.replace(/_/g, ' ')}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <Button
+              disabled={!enabled || !selectedOpp || generate.isPending}
+              onClick={() => generate.mutate()}
             >
-              {TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t.replace(/_/g, ' ')}
-                </option>
-              ))}
-            </select>
+              {generate.isPending ? 'Queuing…' : 'Generate'}
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <Link to={`/projects/${projectId}/backlink-builder/image-studio`}>Media Studio</Link>
+            </Button>
           </div>
-          <Button disabled={!enabled || generate.isPending} onClick={() => generate.mutate()}>
-            {generate.isPending ? 'Queuing…' : 'Generate'}
-          </Button>
-          <Button variant="outline" size="sm" asChild>
-            <Link to={`/projects/${projectId}/backlink-builder/image-studio`}>Media Studio</Link>
-          </Button>
         </CardContent>
       </Card>
 
