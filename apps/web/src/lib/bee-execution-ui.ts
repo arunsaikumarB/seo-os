@@ -45,23 +45,19 @@ export function executionStatusLabel(
   if (s === 'retry_scheduled') return 'Retrying';
   if (s === 'queued') return 'Queued';
   if (
-    s.startsWith('watching_login') ||
-    s === 'authenticating' ||
-    p === 'login' ||
-    (s === 'awaiting_user' && p === 'login')
-  ) {
-    return 'Waiting Login';
-  }
-  if (s.includes('mfa') || p === 'mfa') return 'Waiting MFA';
-  if (
+    s.startsWith('watching_') ||
+    s.startsWith('blocked_') ||
+    s === 'paused' ||
     s === 'needs_approval' ||
     s === 'ready_for_review' ||
-    s.startsWith('watching_captcha') ||
-    s.startsWith('blocked_captcha') ||
-    p === 'human_approval' ||
-    p === 'captcha'
+    s === 'awaiting_user' ||
+    s === 'authenticating' ||
+    s === 'ready_to_continue'
   ) {
-    return 'Waiting Approval';
+    return 'Waiting for User';
+  }
+  if (p === 'login' || p === 'captcha' || p === 'mfa' || p === 'human_approval') {
+    return 'Waiting for User';
   }
   if (s === 'waiting_verification') return 'Waiting Verification';
   if (s === 'submitted' || s === 'completed' || s === 'verified') return 'Submitted';
@@ -75,13 +71,9 @@ export function executionStatusLabel(
       'uploading_assets',
       'validating',
       'submitting',
-      'ready_to_continue',
     ].includes(s)
   ) {
     return 'Running';
-  }
-  if (s.startsWith('watching') || s.startsWith('blocked_') || s === 'paused') {
-    return 'Waiting Approval';
   }
   return s.replace(/_/g, ' ');
 }
@@ -112,11 +104,7 @@ export function pipelineStageIndex(
     return 0;
   }
   if (s === 'preparing' || s === 'queued' || s === 'retry_scheduled') return 0;
-  if (
-    executionStatusLabel(s, { pauseReason: opts?.pauseReason }) === 'Waiting Login' ||
-    executionStatusLabel(s, { pauseReason: opts?.pauseReason }) === 'Waiting MFA' ||
-    executionStatusLabel(s, { pauseReason: opts?.pauseReason }) === 'Waiting Approval'
-  ) {
+  if (executionStatusLabel(s, { pauseReason: opts?.pauseReason }) === 'Waiting for User') {
     return 5; // gates typically appear around submit / auth
   }
   // Detecting type sits between open and form find

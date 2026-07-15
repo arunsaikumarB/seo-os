@@ -23,6 +23,11 @@ import {
   statusDisplayLabel,
 } from '@/components/browser/bee-ops-panel';
 import { formatEta, pipelineStagesForJob } from '@/lib/bee-execution-ui';
+import {
+  ActionRequiredCard,
+  NeedsYourActionQueue,
+  useInterventions,
+} from '@/components/browser/needs-your-action-queue';
 
 type BeeJob = {
   id: string;
@@ -365,26 +370,34 @@ export function BrowserExecutionCenterPage() {
   const selected = jobDetail.data?.data;
 
   const statusBadge = useMemo(() => {
+    const waitingUser = 'bg-amber-500/15 text-amber-800';
     const map: Record<string, string> = {
-      needs_approval: 'bg-amber-500/15 text-amber-700',
-      blocked_captcha: 'bg-red-500/15 text-red-700',
-      blocked_mfa: 'bg-red-500/15 text-red-700',
-      watching_captcha: 'bg-sky-500/15 text-sky-700',
-      watching_login: 'bg-sky-500/15 text-sky-700',
-      watching_mfa: 'bg-sky-500/15 text-sky-700',
-      watching_email: 'bg-sky-500/15 text-sky-700',
-      watching_phone: 'bg-sky-500/15 text-sky-700',
+      needs_approval: waitingUser,
+      ready_for_review: waitingUser,
+      paused: waitingUser,
+      awaiting_user: waitingUser,
+      blocked_captcha: waitingUser,
+      blocked_mfa: waitingUser,
+      blocked_email_verify: waitingUser,
+      blocked_phone_verify: waitingUser,
+      watching_captcha: waitingUser,
+      watching_login: waitingUser,
+      watching_mfa: waitingUser,
+      watching_email: waitingUser,
+      watching_phone: waitingUser,
       ready_to_continue: 'bg-emerald-500/15 text-emerald-700',
       completed: 'bg-emerald-500/15 text-emerald-700',
       failed: 'bg-red-500/15 text-red-700',
       retry_scheduled: 'bg-violet-500/15 text-violet-700',
-      awaiting_user: 'bg-amber-500/15 text-amber-700',
       ready: 'bg-emerald-500/15 text-emerald-700',
       in_progress: 'bg-sky-500/15 text-sky-700',
       needs_domain: 'bg-amber-500/15 text-amber-700',
       not_ready: 'bg-muted text-muted-foreground',
     };
-    return (status: string) => map[status] ?? '';
+    return (status: string) => {
+      if (status.startsWith('watching_') || status.startsWith('blocked_')) return waitingUser;
+      return map[status] ?? '';
+    };
   }, []);
 
   const toggleOpp = (id: string, selectable: boolean) => {
@@ -464,6 +477,8 @@ export function BrowserExecutionCenterPage() {
   const showExecutionSummary = Boolean(
     s?.executionComplete || ((s?.totalJobs ?? 0) > 0 && (s?.remainingJobs ?? 0) === 0)
   );
+  const interventions = useInterventions(projectId);
+  const actionItems = interventions.data?.data.items ?? [];
 
   return (
     <div className="space-y-6">
@@ -471,16 +486,18 @@ export function BrowserExecutionCenterPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Browser Execution</h1>
           <p className="text-muted-foreground">
-            Browser Execution Engine — approved opportunities load automatically. CAPTCHA, MFA,
-            and email/phone verification always pause; watchers auto-resume after you complete them.
+            Monitor progress, running jobs, and completed submissions. When login, CAPTCHA, MFA, or
+            verification is needed, open Browser Assistant — AI resumes automatically when you finish.
           </p>
         </div>
         <Button variant="outline" size="sm" asChild>
           <Link to={`/projects/${projectId}/backlink-builder/browser-assistant`}>
-            Browser Intelligence
+            Browser Assistant
           </Link>
         </Button>
       </div>
+
+      <NeedsYourActionQueue projectId={projectId} />
 
       <CurrentOpportunityBanner projectId={projectId} />
       {currentOpp ? (
@@ -506,16 +523,19 @@ export function BrowserExecutionCenterPage() {
 
       {tab === 'dashboard' && (
         <>
+          {actionItems.length > 0 ? (
+            <div className="grid gap-3 lg:grid-cols-2">
+              {actionItems.slice(0, 4).map((item) => (
+                <ActionRequiredCard key={item.jobId} projectId={projectId} item={item} />
+              ))}
+            </div>
+          ) : null}
+
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Overview</CardTitle>
               <CardDescription>
-                Live from execution engine ·{' '}
-                {s?.executionComplete
-                  ? 'All jobs finished'
-                  : totalJobs > 0
-                    ? `${completedJobs}/${totalJobs} jobs finished`
-                    : 'No jobs yet'}
+                Progress · running jobs · completed · needs your action · ETA
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -524,11 +544,10 @@ export function BrowserExecutionCenterPage() {
                   [
                     ['Queued', s?.queued ?? 0],
                     ['Running', s?.running ?? 0],
+                    ['Needs Your Action', actionItems.length],
                     ['Submitted', s?.submitted ?? 0],
+                    ['Completed', s?.completed ?? 0],
                     ['Failed', s?.failed ?? 0],
-                    ['Waiting Login', s?.waitingLogin ?? 0],
-                    ['Waiting MFA', s?.waitingMfa ?? 0],
-                    ['Waiting Approval', s?.waitingApproval ?? 0],
                     ['Retrying', s?.retrying ?? 0],
                     ['Workers', s?.workerUsage ?? (maxWorkers ? `0/${maxWorkers}` : '—')],
                     ['ETA', formatEta(s?.etaSeconds)],
@@ -540,6 +559,7 @@ export function BrowserExecutionCenterPage() {
                       'Success Rate',
                       s?.successRate != null ? `${s.successRate}%` : '—',
                     ],
+                    ['Waiting Verification', s?.waitingVerification ?? 0],
                   ] as const
                 ).map(([label, value]) => (
                   <div key={label}>
@@ -868,7 +888,18 @@ export function BrowserExecutionCenterPage() {
                           {new Date(j.created_at).toLocaleString()}
                         </p>
                       </button>
-                      <Badge className={`text-[10px] ${statusBadge(j.status)}`}>{label}</Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge className={`text-[10px] ${statusBadge(j.status)}`}>{label}</Badge>
+                        {label === 'Waiting for User' ? (
+                          <Button size="sm" variant="default" asChild>
+                            <Link
+                              to={`/projects/${projectId}/backlink-builder/browser-assistant?jobId=${j.id}`}
+                            >
+                              Open Browser Assistant
+                            </Link>
+                          </Button>
+                        ) : null}
+                      </div>
                     </div>
                     <div className="flex flex-wrap gap-1">
                       {stages.map((stage) => (

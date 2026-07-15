@@ -162,9 +162,10 @@ async function pauseForGate(params: {
     pausedAt: new Date().toISOString(),
     pauseContext: params.context ?? {},
   });
-  await appendLog(workspaceId, jobId, 'warn', `Paused for ${gate} — user intervention required`, {
+  await appendLog(workspaceId, jobId, 'warn', `Waiting for User — ${gate}`, {
     nonNegotiable: true,
-    note: 'Never bypassed — watcher will auto-resume after user completes this step',
+    displayStatus: 'Waiting for User',
+    note: 'Open Browser Assistant to finish this step. AI auto-resumes — never bypassed.',
     ...params.context,
   });
 

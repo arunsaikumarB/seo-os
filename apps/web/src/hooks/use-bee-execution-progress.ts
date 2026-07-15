@@ -15,6 +15,7 @@ export type BeeExecutionProgress = {
   waitingVerification: number;
   waitingLogin: number;
   waitingMfa: number;
+  needsYourAction: number;
   workerUsage: string;
   maxParallelSessions: number;
   activeWorkerCount: number;
@@ -37,6 +38,7 @@ const EMPTY: BeeExecutionProgress = {
   waitingVerification: 0,
   waitingLogin: 0,
   waitingMfa: 0,
+  needsYourAction: 0,
   workerUsage: '0/0',
   maxParallelSessions: 0,
   activeWorkerCount: 0,
@@ -73,6 +75,12 @@ export function useBeeExecutionProgress(projectId: string, refetchInterval = 2_0
         waitingVerification: Number(d.waitingVerification ?? 0),
         waitingLogin: Number(d.waitingLogin ?? 0),
         waitingMfa: Number(d.waitingMfa ?? 0),
+        needsYourAction: Number(
+          (d as { needsYourAction?: number }).needsYourAction ??
+            Number(d.waitingLogin ?? 0) +
+              Number(d.waitingMfa ?? 0) +
+              Number(d.waitingApproval ?? 0)
+        ),
         maxParallelSessions: max,
         activeWorkerCount: active,
         workerUsage: d.workerUsage ?? `${active}/${max}`,

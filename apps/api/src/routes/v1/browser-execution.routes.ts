@@ -44,6 +44,12 @@ import {
   verifyBrowserRuntime,
 } from '../../modules/browser-execution/browser-runtime-manager.service.js';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
+import {
+  captureInterventionView,
+  checkInterventionCleared,
+  getIntervention,
+  listInterventions,
+} from '../../modules/browser-execution/bee-intervention.service.js';
 
 function param(value: string | string[]): string {
   return Array.isArray(value) ? value[0] : value;
@@ -281,6 +287,73 @@ browserExecutionRouter.get(
 );
 
 browserExecutionRouter.get(
+  '/browser/interventions',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      res.json({ data: await listInterventions(param(req.params.projectId)) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.get(
+  '/browser/jobs/:jobId/intervention',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      const data = await getIntervention(param(req.params.projectId), param(req.params.jobId));
+      if (!data) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Job not found');
+      res.json({ data });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.post(
+  '/browser/jobs/:jobId/intervention/capture',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      const data = await captureInterventionView(
+        param(req.params.projectId),
+        param(req.params.jobId)
+      );
+      if (!data) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Job not found');
+      res.json({ data });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.post(
+  '/browser/jobs/:jobId/intervention/check',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      const data = await checkInterventionCleared(
+        param(req.params.projectId),
+        param(req.params.jobId)
+      );
+      res.json({ data });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.get(
   '/browser/readiness',
   authMiddleware,
   requireRole('viewer'),
@@ -398,8 +471,15 @@ browserExecutionRouter.post(
   async (req, res, next) => {
     try {
       requireBee();
-      const body = z.object({ jobId: z.string().uuid() }).parse(req.body);
-      res.json({ data: await cancelJob(param(req.params.projectId), body.jobId) });
+      const body = z
+        .object({
+          jobId: z.string().uuid(),
+          reason: z.string().max(200).optional(),
+        })
+        .parse(req.body);
+      res.json({
+        data: await cancelJob(param(req.params.projectId), body.jobId, body.reason),
+      });
     } catch (err) {
       next(err);
     }

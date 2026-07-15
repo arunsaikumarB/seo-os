@@ -776,7 +776,7 @@ export async function getExecutionReport(workspaceId: string, jobId: string) {
   };
 }
 
-export async function cancelJob(workspaceId: string, jobId: string) {
+export async function cancelJob(workspaceId: string, jobId: string, reason?: string) {
   await setJobStatus(workspaceId, jobId, 'cancelled', {
     finished_at: new Date().toISOString(),
   });
@@ -787,7 +787,9 @@ export async function cancelJob(workspaceId: string, jobId: string) {
       .update({ status: 'closed', closed_at: new Date().toISOString() })
       .eq('id', job.session_id);
   }
-  await appendLog(workspaceId, jobId, 'warn', 'Execution cancelled');
+  await appendLog(workspaceId, jobId, 'warn', reason === 'skipped_by_user' ? 'Website skipped by user' : 'Execution cancelled', {
+    reason: reason ?? null,
+  });
   await recordHistory(workspaceId, jobId, 'cancelled');
   return getJob(workspaceId, jobId);
 }
@@ -1317,6 +1319,7 @@ export async function getStatistics(workspaceId: string) {
     estimatedFinishAt: etaMs > 0 ? new Date(Date.now() + etaMs).toISOString() : null,
     estimatedApprovalTime: '7–14 days',
     current,
+    needsYourAction: waitingUser,
     metricsSource: 'live' as const,
   };
 }
