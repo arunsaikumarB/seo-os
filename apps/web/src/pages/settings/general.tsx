@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -9,6 +9,8 @@ import {
   Copy,
   RotateCcw,
   Trash2,
+  MonitorSmartphone,
+  ArrowRight,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -21,6 +23,7 @@ import {
   ProjectDangerDialog,
   type ProjectDangerMode,
 } from '@/components/projects/project-danger-dialog';
+import { ProjectSettingsNav } from '@/components/settings/project-settings-nav';
 import type { Project } from '@seo-os/shared';
 
 export function ProjectSettingsPage() {
@@ -127,7 +130,8 @@ export function ProjectSettingsPage() {
   });
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto max-w-3xl space-y-6 p-6">
+      <ProjectSettingsNav projectId={projectId} />
       <div>
         <h1 className="text-2xl font-semibold flex items-center gap-2">
           <Settings className="h-6 w-6" /> Project settings
@@ -231,6 +235,24 @@ export function ProjectSettingsPage() {
               </Button>
             </>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <MonitorSmartphone className="h-4 w-4" /> Browser Runtime
+          </CardTitle>
+          <CardDescription>
+            Playwright / Chromium health for Browser Execution. Reinstall, repair, and run diagnostics.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button asChild variant="outline" size="sm">
+            <Link to={`/projects/${projectId}/settings/browser-runtime`}>
+              Open Browser Runtime <ArrowRight className="h-3.5 w-3.5 ml-1" />
+            </Link>
+          </Button>
         </CardContent>
       </Card>
 

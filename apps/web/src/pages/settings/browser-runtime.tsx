@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useApi } from '@/hooks/use-api';
+import { ProjectSettingsNav } from '@/components/settings/project-settings-nav';
 
 type RuntimeStatus = {
   playwright_installed: boolean;
@@ -119,6 +120,7 @@ export function BrowserRuntimePage() {
 
   return (
     <div className="space-y-6 p-6 max-w-5xl mx-auto">
+      <ProjectSettingsNav projectId={projectId} />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
