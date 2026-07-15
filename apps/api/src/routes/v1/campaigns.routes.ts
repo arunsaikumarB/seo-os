@@ -179,15 +179,16 @@ campaignsRouter.post(
   requireRole('member'),
   async (req, res, next) => {
     try {
-      const { userId } = (req as AuthenticatedRequest).auth;
+      const { userId, orgId } = (req as AuthenticatedRequest).auth;
       const { opportunityIds, action } = bulkReviewSchema.parse(req.body);
-      const results = await bulkReviewOpportunities(
+      const outcome = await bulkReviewOpportunities(
         param(req.params.projectId),
         userId,
         opportunityIds,
-        action
+        action,
+        orgId
       );
-      res.json({ data: results });
+      res.json({ data: outcome });
     } catch (err) {
       next(err);
     }
@@ -200,14 +201,15 @@ campaignsRouter.patch(
   requireRole('member'),
   async (req, res, next) => {
     try {
-      const { userId } = (req as AuthenticatedRequest).auth;
+      const { userId, orgId } = (req as AuthenticatedRequest).auth;
       const { action, notes } = reviewSchema.parse(req.body);
       const opp = await reviewOpportunity(
         param(req.params.opportunityId),
         param(req.params.projectId),
         userId,
         action,
-        notes
+        notes,
+        orgId
       );
       res.json({ data: opp });
     } catch (err) {

@@ -29,7 +29,9 @@ import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { logRelationshipTimeline } from '../relationships/relationship-intelligence.service.js';
 import { listProspectsByStatus } from '../intelligence/prospect.service.js';
 import { attachOpportunitiesToCampaign, listCampaigns } from '../campaigns/campaign.service.js';
+import { approveOpportunityWorkflow } from '../campaigns/opportunity-queue.service.js';
 import { getProjectById } from '../projects/project.service.js';
+import { AppError } from '@seo-os/shared';
 
 export interface ExplorerFilters {
   category?: BacklinkCategory;
@@ -333,35 +335,62 @@ export async function bulkOpportunityAction(
   workspaceId: string,
   opportunityIds: string[],
   action: 'approve' | 'reject' | 'move',
-  payload?: { stage?: PipelineStage; actorId?: string }
+  payload?: { stage?: PipelineStage; actorId?: string; orgId?: string }
 ) {
-  const results = [];
+  const results: Array<{ id: string; status: string }> = [];
+  const errors: Array<{ id: string; message: string }> = [];
   for (const id of opportunityIds) {
-    if (action === 'approve') {
-      await getSupabaseAdmin()
-        .from('opportunities')
-        .update({ queue_status: 'approved', pipeline_stage: 'approved' })
-        .eq('id', id);
-      await logHistory(
-        workspaceId,
+    try {
+      if (action === 'approve') {
+        if (!payload?.actorId) {
+          throw new AppError(400, 'VALIDATION_ERROR', 'actorId required to approve opportunities');
+        }
+        await approveOpportunityWorkflow(
+          id,
+          workspaceId,
+          payload.actorId,
+          undefined,
+          payload.orgId
+        );
+        results.push({ id, status: 'approved' });
+      } else if (action === 'reject') {
+        await getSupabaseAdmin()
+          .from('opportunities')
+          .update({
+            queue_status: 'rejected',
+            status: 'dismissed',
+            pipeline_stage: 'lost',
+            automation_status: 'rejected',
+          })
+          .eq('id', id)
+          .eq('workspace_id', workspaceId);
+        await logHistory(
+          workspaceId,
+          id,
+          'opportunity.rejected',
+          'Rejected via bulk action',
+          payload?.actorId
+        );
+        results.push({ id, status: 'rejected' });
+      } else if (action === 'move' && payload?.stage) {
+        await moveOpportunityStage(id, workspaceId, payload.stage, payload.actorId);
+        results.push({ id, status: payload.stage });
+      }
+    } catch (err) {
+      errors.push({
         id,
-        'opportunity.approved',
-        'Approved via bulk action',
-        payload?.actorId
-      );
-      results.push({ id, status: 'approved' });
-    } else if (action === 'reject') {
-      await getSupabaseAdmin()
-        .from('opportunities')
-        .update({ queue_status: 'rejected', pipeline_stage: 'lost' })
-        .eq('id', id);
-      results.push({ id, status: 'rejected' });
-    } else if (action === 'move' && payload?.stage) {
-      await moveOpportunityStage(id, workspaceId, payload.stage, payload.actorId);
-      results.push({ id, status: payload.stage });
+        message: err instanceof Error ? err.message : String(err),
+      });
     }
   }
-  return results;
+  if (errors.length && results.length === 0) {
+    throw new AppError(
+      500,
+      'INTERNAL_ERROR',
+      `All bulk actions failed: ${errors.map((e) => e.message).join('; ')}`
+    );
+  }
+  return { results, errors };
 }
 
 export async function enrichOpportunityScoring(workspaceId: string, orgId?: string) {

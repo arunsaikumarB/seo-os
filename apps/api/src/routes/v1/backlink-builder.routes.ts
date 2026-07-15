@@ -167,12 +167,12 @@ backlinkBuilderRouter.post(
   async (req, res, next) => {
     try {
       const body = bulkSchema.parse(req.body);
-      const { userId } = (req as AuthenticatedRequest).auth;
+      const { userId, orgId } = (req as AuthenticatedRequest).auth;
       const result = await bulkOpportunityAction(
         param(req.params.projectId),
         body.opportunityIds,
         body.action,
-        { stage: body.stage, actorId: userId }
+        { stage: body.stage, actorId: userId, orgId }
       );
       res.json({ data: result });
     } catch (err) {

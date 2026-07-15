@@ -40,15 +40,35 @@ export function BacklinkExplorerPage() {
 
   const bulk = useMutation({
     mutationFn: (body: { opportunityIds: string[]; action: string; stage?: string }) =>
-      request(`/v1/projects/${projectId}/backlink-builder/opportunities/bulk`, {
+      request<{
+        data: {
+          results: Array<{ id: string; status: string }>;
+          errors: Array<{ id: string; message: string }>;
+        };
+      }>(`/v1/projects/${projectId}/backlink-builder/opportunities/bulk`, {
         method: 'POST',
         body: JSON.stringify(body),
       }),
-    onSuccess: () => {
-      toast.success('Bulk action completed');
+    onSuccess: (res, vars) => {
+      const { results = [], errors = [] } = res.data ?? {};
+      if (errors.length) {
+        toast.error(
+          `${errors.length} failed${results.length ? `, ${results.length} succeeded` : ''}: ${errors[0]?.message ?? 'Unknown error'}`
+        );
+      } else if (vars.action === 'approve') {
+        toast.success(
+          `Approved ${results.length} — moved to Submission Queue with linked drafts`
+        );
+      } else {
+        toast.success('Bulk action completed');
+      }
       queryClient.invalidateQueries({ queryKey: ['backlink-explorer', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['opportunity-queue', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['submissions', projectId] });
       setSelected(new Set());
     },
+    onError: (err: Error) =>
+      toast.error(err.message || 'Bulk action failed — items left in previous state'),
   });
 
   const approveOne = useCallback(
