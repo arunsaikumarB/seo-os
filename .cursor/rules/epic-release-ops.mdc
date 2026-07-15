@@ -1,19 +1,33 @@
 ---
-description: After epic completion, always migrate, deploy, and tag without asking
+description: After shipping code, always commit, push, and deploy without asking
 alwaysApply: true
 ---
 
-# Release Ops After Epics
+# Release Ops — Standing Approval
 
-When an epic or version milestone is completed for this SEO OS project:
+The user has standing approval. **Do not ask** for commit / push / deploy confirmation after finishing a feature, fix, or epic.
 
-1. **Do not ask** for "migration + deploy + tag" confirmation. The user has standing approval.
-2. Automatically, in order:
-   - Apply pending Supabase migrations (`npx supabase db push`)
-   - Commit epic changes (if uncommitted) with a conventional message
-   - Push to `origin` (`master`)
-   - Deploy API to Railway (`railway up --service api --detach`)
-   - Build web (`apps/web` production build) and deploy to Netlify production (`npx netlify deploy --prod --no-build` with absolute `--dir` to `apps/web/dist`, site `4f188617-1f1e-4583-be2d-772c353b4869`)
-   - Create and push an annotated git tag + GitHub prerelease/release via `gh release create`
-3. Report the release URL, API version check, and Netlify URL when done.
-4. Still wait for explicit approval before starting the **next** feature epic when the user asked to wait (e.g. Reports Engine).
+## After every meaningful code change
+
+Automatically, in order:
+
+1. Commit with a conventional message (PowerShell here-string; never bash heredoc on Windows)
+2. Push to `origin` (`master`)
+3. Deploy API: `railway up --service api --detach`
+4. Build web in `apps/web` (`npm run build`)
+5. Deploy Netlify production: `npx netlify deploy --prod --no-build` with absolute `--dir` to `apps/web/dist`, site `4f188617-1f1e-4583-be2d-772c353b4869`
+6. Report commit hash, Railway status, and Netlify production URL
+
+## After epic / version milestones (extra)
+
+Also:
+
+- Apply pending Supabase migrations (`npx supabase db push`) when schema changed
+- Create and push an annotated git tag + GitHub release via `gh release create`
+- Report API `/v1/version` check
+
+## Still wait when
+
+- The user explicitly asked to wait before the **next** feature epic
+- Secrets / `.env` / credentials would be committed
+- Destructive git ops (force push, hard reset) are needed
