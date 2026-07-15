@@ -3,7 +3,7 @@ import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { logger } from '../../lib/logger.js';
 import { ensureProfile } from '../organizations/member.service.js';
 
-function mapWorkspace(row: Record<string, unknown>): Project {
+export function mapWorkspaceRow(row: Record<string, unknown>): Project {
   return {
     id: row.id as string,
     orgId: row.org_id as string,
@@ -19,13 +19,24 @@ function mapWorkspace(row: Record<string, unknown>): Project {
   };
 }
 
-export async function listProjectsByOrg(orgId: string): Promise<Project[]> {
-  const { data, error } = await getSupabaseAdmin()
+/** @deprecated prefer mapWorkspaceRow */
+function mapWorkspace(row: Record<string, unknown>): Project {
+  return mapWorkspaceRow(row);
+}
+
+export async function listProjectsByOrg(
+  orgId: string,
+  opts: { includeArchived?: boolean } = {}
+): Promise<Project[]> {
+  let q = getSupabaseAdmin()
     .from('workspaces')
     .select('*')
     .eq('org_id', orgId)
-    .neq('status', 'archived')
     .order('updated_at', { ascending: false });
+  if (!opts.includeArchived) {
+    q = q.neq('status', 'archived');
+  }
+  const { data, error } = await q;
 
   if (error) throw error;
   return (data ?? []).map(mapWorkspace);

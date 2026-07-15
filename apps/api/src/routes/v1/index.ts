@@ -30,6 +30,13 @@ import {
   listProjectsByOrg,
   updateProject,
 } from '../../modules/projects/project.service.js';
+import {
+  deleteProject,
+  duplicateProject,
+  getProjectImpact,
+  resetProject,
+  restoreProject,
+} from '../../modules/projects/project-lifecycle.service.js';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import {
   createAgentRun,
@@ -202,7 +209,10 @@ v1Router.get(
   requireRole('viewer'),
   async (req, res, next) => {
     try {
-      const projects = await listProjectsByOrg(param(req.params.orgId));
+      const includeArchived =
+        String(req.query.includeArchived ?? '') === '1' ||
+        String(req.query.includeArchived ?? '').toLowerCase() === 'true';
+      const projects = await listProjectsByOrg(param(req.params.orgId), { includeArchived });
       res.json({
         data: projects,
         pagination: { nextCursor: null, prevCursor: null, limit: 50, hasMore: false },
@@ -305,6 +315,66 @@ projectScopeRouter.post('/archive', requireRole('manager'), async (req, res, nex
     const { orgId } = (req as AuthenticatedRequest).auth;
     const project = await archiveProject(param(req.params.projectId), orgId);
     res.json({ data: project });
+  } catch (err) {
+    next(err);
+  }
+});
+
+projectScopeRouter.post('/restore', requireRole('manager'), async (req, res, next) => {
+  try {
+    const { orgId } = (req as AuthenticatedRequest).auth;
+    const project = await restoreProject(param(req.params.projectId), orgId);
+    res.json({ data: project });
+  } catch (err) {
+    next(err);
+  }
+});
+
+projectScopeRouter.post('/duplicate', requireRole('member'), async (req, res, next) => {
+  try {
+    const body = z
+      .object({ name: z.string().min(2).max(100).optional() })
+      .parse(req.body ?? {});
+    const { orgId, userId } = (req as AuthenticatedRequest).auth;
+    const project = await duplicateProject(param(req.params.projectId), orgId, userId, body);
+    res.status(201).json({ data: project });
+  } catch (err) {
+    next(err);
+  }
+});
+
+projectScopeRouter.get('/impact', requireRole('viewer'), async (req, res, next) => {
+  try {
+    const { orgId } = (req as AuthenticatedRequest).auth;
+    const impact = await getProjectImpact(param(req.params.projectId), orgId);
+    res.json({ data: impact });
+  } catch (err) {
+    next(err);
+  }
+});
+
+projectScopeRouter.post('/reset', requireRole('manager'), async (req, res, next) => {
+  try {
+    const body = z
+      .object({
+        confirm: z.literal('RESET'),
+        clearAiLearning: z.boolean().optional(),
+      })
+      .parse(req.body ?? {});
+    const { orgId } = (req as AuthenticatedRequest).auth;
+    const result = await resetProject(param(req.params.projectId), orgId, body);
+    res.json({ data: result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+projectScopeRouter.delete('/', requireRole('manager'), async (req, res, next) => {
+  try {
+    const body = z.object({ confirm: z.literal('DELETE') }).parse(req.body ?? {});
+    const { orgId } = (req as AuthenticatedRequest).auth;
+    const result = await deleteProject(param(req.params.projectId), orgId, body);
+    res.json({ data: result });
   } catch (err) {
     next(err);
   }

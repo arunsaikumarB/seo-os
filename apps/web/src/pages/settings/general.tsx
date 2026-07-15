@@ -2,7 +2,14 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Settings, Archive } from 'lucide-react';
+import {
+  Settings,
+  Archive,
+  ArchiveRestore,
+  Copy,
+  RotateCcw,
+  Trash2,
+} from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,12 +17,24 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useApi } from '@/hooks/use-api';
+import {
+  ProjectDangerDialog,
+  type ProjectDangerMode,
+} from '@/components/projects/project-danger-dialog';
 import type { Project } from '@seo-os/shared';
 
 export function ProjectSettingsPage() {
   const { projectId = '' } = useParams();
   const navigate = useNavigate();
-  const { request, updateProject, archiveProject } = useApi();
+  const {
+    request,
+    updateProject,
+    archiveProject,
+    restoreProject,
+    duplicateProject,
+    resetProject,
+    deleteProject,
+  } = useApi();
   const queryClient = useQueryClient();
 
   const [name, setName] = useState('');
@@ -23,6 +42,7 @@ export function ProjectSettingsPage() {
   const [url, setUrl] = useState('');
   const [industry, setIndustry] = useState('');
   const [description, setDescription] = useState('');
+  const [dangerMode, setDangerMode] = useState<ProjectDangerMode | null>(null);
 
   const project = useQuery({
     queryKey: ['project', projectId],
@@ -31,6 +51,7 @@ export function ProjectSettingsPage() {
   });
 
   const p = project.data?.data;
+  const isArchived = p?.status === 'archived';
 
   useEffect(() => {
     if (!p) return;
@@ -40,6 +61,13 @@ export function ProjectSettingsPage() {
     setIndustry(p.industry ?? '');
     setDescription(p.description ?? '');
   }, [p?.id, p?.name, p?.domain, p?.url, p?.industry, p?.description]);
+
+  const invalidateAll = () => {
+    queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+    queryClient.invalidateQueries({ queryKey: ['projects'] });
+    queryClient.invalidateQueries({ queryKey: ['mission-control-summary'] });
+    queryClient.invalidateQueries({ queryKey: ['project-impact', projectId] });
+  };
 
   const save = useMutation({
     mutationFn: () =>
@@ -52,20 +80,50 @@ export function ProjectSettingsPage() {
       }),
     onSuccess: () => {
       toast.success('Project updated');
-      queryClient.invalidateQueries({ queryKey: ['project', projectId] });
-      queryClient.invalidateQueries({ queryKey: ['projects'] });
+      invalidateAll();
     },
     onError: (err: Error) => toast.error(err.message || 'Failed to update project'),
   });
 
-  const archive = useMutation({
-    mutationFn: () => archiveProject(projectId),
-    onSuccess: () => {
-      toast.success('Project archived');
-      queryClient.invalidateQueries({ queryKey: ['projects'] });
-      navigate('/projects');
+  const quick = useMutation({
+    mutationFn: async (action: 'restore' | 'duplicate') => {
+      if (action === 'restore') return restoreProject(projectId);
+      return duplicateProject(projectId);
     },
-    onError: (err: Error) => toast.error(err.message || 'Failed to archive project'),
+    onSuccess: (res, action) => {
+      toast.success(action === 'restore' ? 'Project restored' : 'Project duplicated');
+      invalidateAll();
+      if (action === 'duplicate' && res.data?.id) {
+        navigate(`/projects/${res.data.id}/settings/general`);
+      }
+    },
+    onError: (err: Error) => toast.error(err.message || 'Action failed'),
+  });
+
+  const danger = useMutation({
+    mutationFn: async (opts: { mode: ProjectDangerMode; clearAiLearning?: boolean }) => {
+      if (opts.mode === 'archive') return archiveProject(projectId);
+      if (opts.mode === 'reset')
+        return resetProject(projectId, {
+          confirm: 'RESET',
+          clearAiLearning: opts.clearAiLearning,
+        });
+      return deleteProject(projectId, { confirm: 'DELETE' });
+    },
+    onSuccess: (_data, vars) => {
+      toast.success(
+        vars.mode === 'archive'
+          ? 'Project archived'
+          : vars.mode === 'reset'
+            ? 'Project reset'
+            : 'Project deleted'
+      );
+      setDangerMode(null);
+      invalidateAll();
+      if (vars.mode === 'delete') navigate('/projects');
+      if (vars.mode === 'archive') navigate('/projects');
+    },
+    onError: (err: Error) => toast.error(err.message || 'Action failed'),
   });
 
   return (
@@ -74,8 +132,25 @@ export function ProjectSettingsPage() {
         <h1 className="text-2xl font-semibold flex items-center gap-2">
           <Settings className="h-6 w-6" /> Project settings
         </h1>
-        <p className="text-muted-foreground">Website details and workspace configuration</p>
+        <p className="text-muted-foreground">Website details and enterprise project lifecycle</p>
       </div>
+
+      {isArchived && (
+        <Card className="border-amber-500/40 bg-amber-500/5">
+          <CardContent className="pt-4 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm">
+              This project is <strong>archived</strong> and read-only. Restore it to resume work.
+            </p>
+            <Button
+              size="sm"
+              disabled={quick.isPending}
+              onClick={() => quick.mutate('restore')}
+            >
+              <ArchiveRestore className="h-4 w-4 mr-1" /> Restore
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
@@ -84,9 +159,7 @@ export function ProjectSettingsPage() {
               <CardTitle className="text-base">General</CardTitle>
               <CardDescription>Name, domain, and description for this project</CardDescription>
             </div>
-            {p?.status && (
-              <Badge className="capitalize text-[10px]">{p.status}</Badge>
-            )}
+            {p?.status && <Badge className="capitalize text-[10px]">{p.status}</Badge>}
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -98,7 +171,12 @@ export function ProjectSettingsPage() {
             <>
               <div className="space-y-2">
                 <Label htmlFor="proj-name">Name</Label>
-                <Input id="proj-name" value={name} onChange={(e) => setName(e.target.value)} />
+                <Input
+                  id="proj-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  disabled={isArchived}
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="proj-domain">Domain</Label>
@@ -107,6 +185,7 @@ export function ProjectSettingsPage() {
                   value={domain}
                   onChange={(e) => setDomain(e.target.value)}
                   placeholder="example.com"
+                  disabled={isArchived}
                 />
               </div>
               <div className="space-y-2">
@@ -116,6 +195,7 @@ export function ProjectSettingsPage() {
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   placeholder="https://example.com"
+                  disabled={isArchived}
                 />
               </div>
               <div className="space-y-2">
@@ -124,21 +204,28 @@ export function ProjectSettingsPage() {
                   id="proj-industry"
                   value={industry}
                   onChange={(e) => setIndustry(e.target.value)}
+                  disabled={isArchived}
                 />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="proj-desc">Description</Label>
                 <textarea
                   id="proj-desc"
-                  className="flex min-h-[100px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="flex min-h-[100px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
+                  disabled={isArchived}
                 />
               </div>
               <p className="text-xs text-muted-foreground font-mono">Project ID: {projectId}</p>
               <Button
                 onClick={() => save.mutate()}
-                disabled={save.isPending || name.trim().length < 2 || domain.trim().length < 3}
+                disabled={
+                  isArchived ||
+                  save.isPending ||
+                  name.trim().length < 2 ||
+                  domain.trim().length < 3
+                }
               >
                 {save.isPending ? 'Saving…' : 'Save changes'}
               </Button>
@@ -147,26 +234,83 @@ export function ProjectSettingsPage() {
         </CardContent>
       </Card>
 
-      <Card className="border-destructive/30">
+      <Card>
         <CardHeader>
-          <CardTitle className="text-base text-destructive">Danger zone</CardTitle>
-          <CardDescription>Archive removes this project from active workspaces</CardDescription>
+          <CardTitle className="text-base">Project actions</CardTitle>
+          <CardDescription>
+            Duplicate copies settings, business profile, providers, and campaign templates — never
+            reports or execution history.
+          </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex flex-wrap gap-2">
           <Button
             variant="outline"
-            className="text-destructive"
-            disabled={archive.isPending || !p || p.status === 'archived'}
-            onClick={() => {
-              if (window.confirm('Archive this project? You can contact support to restore later.')) {
-                archive.mutate();
-              }
-            }}
+            disabled={!p || quick.isPending || isArchived}
+            onClick={() => quick.mutate('duplicate')}
           >
-            <Archive className="h-4 w-4 mr-1" /> Archive project
+            <Copy className="h-4 w-4 mr-1" /> Duplicate project
           </Button>
         </CardContent>
       </Card>
+
+      <Card className="border-destructive/30">
+        <CardHeader>
+          <CardTitle className="text-base text-destructive">Danger zone</CardTitle>
+          <CardDescription>
+            Archive (read-only), reset operational data, or permanently delete this project
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-2">
+          {!isArchived ? (
+            <Button
+              variant="outline"
+              className="text-destructive"
+              disabled={!p || danger.isPending}
+              onClick={() => setDangerMode('archive')}
+            >
+              <Archive className="h-4 w-4 mr-1" /> Archive
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              disabled={!p || quick.isPending}
+              onClick={() => quick.mutate('restore')}
+            >
+              <ArchiveRestore className="h-4 w-4 mr-1" /> Restore
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            className="text-destructive"
+            disabled={!p || danger.isPending || isArchived}
+            onClick={() => setDangerMode('reset')}
+          >
+            <RotateCcw className="h-4 w-4 mr-1" /> Reset
+          </Button>
+          <Button
+            variant="outline"
+            className="text-destructive"
+            disabled={!p || danger.isPending}
+            onClick={() => setDangerMode('delete')}
+          >
+            <Trash2 className="h-4 w-4 mr-1" /> Delete
+          </Button>
+        </CardContent>
+      </Card>
+
+      {dangerMode && p && (
+        <ProjectDangerDialog
+          open={!!dangerMode}
+          onOpenChange={(o) => !o && setDangerMode(null)}
+          mode={dangerMode}
+          projectId={projectId}
+          projectName={p.name}
+          pending={danger.isPending}
+          onConfirm={async ({ clearAiLearning }) => {
+            await danger.mutateAsync({ mode: dangerMode, clearAiLearning });
+          }}
+        />
+      )}
     </div>
   );
 }

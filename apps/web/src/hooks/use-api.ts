@@ -39,8 +39,10 @@ export function useApi() {
   const fetchMe = useCallback(() => request<MeResponse>('/v1/me'), [request]);
 
   const fetchProjects = useCallback(
-    (orgId: string) =>
-      request<ApiData<Project[]>>(`/v1/organizations/${orgId}/projects`, { orgId }),
+    (orgId: string, opts?: { includeArchived?: boolean }) => {
+      const q = opts?.includeArchived ? '?includeArchived=1' : '';
+      return request<ApiData<Project[]>>(`/v1/organizations/${orgId}/projects${q}`, { orgId });
+    },
     [request]
   );
 
@@ -79,6 +81,39 @@ export function useApi() {
     [request]
   );
 
+  const restoreProject = useCallback(
+    (projectId: string) =>
+      request<ApiData<Project>>(`/v1/projects/${projectId}/restore`, { method: 'POST' }),
+    [request]
+  );
+
+  const duplicateProject = useCallback(
+    (projectId: string, body?: { name?: string }) =>
+      request<ApiData<Project>>(`/v1/projects/${projectId}/duplicate`, {
+        method: 'POST',
+        body: JSON.stringify(body ?? {}),
+      }),
+    [request]
+  );
+
+  const resetProject = useCallback(
+    (projectId: string, body: { confirm: 'RESET'; clearAiLearning?: boolean }) =>
+      request<ApiData<unknown>>(`/v1/projects/${projectId}/reset`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    [request]
+  );
+
+  const deleteProject = useCallback(
+    (projectId: string, body: { confirm: 'DELETE' }) =>
+      request<ApiData<unknown>>(`/v1/projects/${projectId}`, {
+        method: 'DELETE',
+        body: JSON.stringify(body),
+      }),
+    [request]
+  );
+
   const fetchMembers = useCallback(
     (orgId: string) => request<ApiData<unknown[]>>(`/v1/organizations/${orgId}/members`, { orgId }),
     [request]
@@ -92,6 +127,10 @@ export function useApi() {
     createProject,
     updateProject,
     archiveProject,
+    restoreProject,
+    duplicateProject,
+    resetProject,
+    deleteProject,
     fetchMembers,
   };
 }
