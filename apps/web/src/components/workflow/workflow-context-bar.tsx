@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 import { useWorkflow } from '@/hooks/use-workflow';
+import { useBeeExecutionProgress } from '@/hooks/use-bee-execution-progress';
+import { formatEta } from '@/lib/bee-execution-ui';
 import { cn } from '@/lib/utils';
 
 type Props = {
@@ -20,8 +22,14 @@ export function WorkflowContextBar({ projectId, className }: Props) {
     steps,
     completedSteps,
   } = useWorkflow(projectId);
+  const bee = useBeeExecutionProgress(projectId);
+  const hasJobs = (bee.data?.totalJobs ?? 0) > 0;
+  const jobsOpen = hasJobs && !bee.data?.executionComplete;
+  const showComplete = allComplete && !jobsOpen;
 
-  const pct = Math.round((completedCount / Math.max(totalSteps, 1)) * 100);
+  const pct = hasJobs
+    ? Math.round(bee.data?.progressPercent ?? 0)
+    : Math.round((completedCount / Math.max(totalSteps, 1)) * 100);
   const estRemaining = steps
     .filter((s) => !completedSteps.has(s.id))
     .reduce((sum, s) => sum + (s.estimatedMinutes ?? 5), 0);
@@ -36,12 +44,20 @@ export function WorkflowContextBar({ projectId, className }: Props) {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 space-y-1">
           <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
-            {allComplete ? 'Workflow complete' : 'Current stage'}
+            {showComplete
+              ? 'Workflow complete'
+              : jobsOpen
+                ? 'Browser Execution'
+                : 'Current stage'}
           </p>
           <p className="font-medium truncate">
-            {allComplete ? 'All steps finished' : currentStep.title}
+            {showComplete
+              ? 'All steps finished'
+              : jobsOpen
+                ? `${bee.data!.completedJobs}/${bee.data!.totalJobs} jobs · Workers ${bee.data!.workerUsage}`
+                : currentStep.title}
           </p>
-          {!allComplete && nextStep.id !== currentStep.id ? (
+          {!showComplete && !jobsOpen && nextStep.id !== currentStep.id ? (
             <p className="text-xs text-muted-foreground flex items-center gap-1">
               Next <ArrowRight className="h-3 w-3" /> {nextStep.title}
             </p>
@@ -56,19 +72,27 @@ export function WorkflowContextBar({ projectId, className }: Props) {
             <div className="h-1.5 rounded-full bg-muted overflow-hidden">
               <div
                 className="h-full rounded-full bg-primary transition-all duration-500"
-                style={{ width: `${pct}%` }}
+                style={{ width: `${Math.min(100, pct)}%` }}
               />
             </div>
           </div>
           <div className="text-xs text-muted-foreground tabular-nums">
-            {completedCount}/{totalSteps}
-            {!allComplete && estRemaining > 0 ? (
+            {hasJobs
+              ? `${bee.data!.completedJobs}/${bee.data!.totalJobs}`
+              : `${completedCount}/${totalSteps}`}
+            {jobsOpen && bee.data!.etaSeconds > 0 ? (
+              <span className="ml-2">· ETA {formatEta(bee.data!.etaSeconds)}</span>
+            ) : !showComplete && !hasJobs && estRemaining > 0 ? (
               <span className="ml-2">· ~{estRemaining} min left</span>
             ) : null}
           </div>
-          {!allComplete ? (
+          {!showComplete ? (
             <Link
-              to={getStepHref(currentStep)}
+              to={
+                jobsOpen
+                  ? `/projects/${projectId}/backlink-builder/execution`
+                  : getStepHref(currentStep)
+              }
               className="text-xs font-medium text-primary hover:underline"
             >
               Continue

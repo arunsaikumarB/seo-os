@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useWorkflow } from '@/hooks/use-workflow';
+import { useBeeExecutionProgress } from '@/hooks/use-bee-execution-progress';
 
 interface NextActionPanelProps {
   projectId: string;
@@ -15,8 +16,11 @@ interface NextActionPanelProps {
 export function NextActionPanel({ projectId, title, className }: NextActionPanelProps) {
   const { nextStep, currentStep, completedSteps, allComplete, getStepHref } =
     useWorkflow(projectId);
+  const bee = useBeeExecutionProgress(projectId);
+  const jobsOpen = (bee.data?.totalJobs ?? 0) > 0 && !bee.data?.executionComplete;
 
-  if (allComplete) {
+  // Never show Workflow Complete while Browser Execution jobs are still open
+  if (allComplete && !jobsOpen) {
     return (
       <motion.div
         initial={{ opacity: 0, y: 8 }}
@@ -37,6 +41,40 @@ export function NextActionPanel({ projectId, title, className }: NextActionPanel
             <Button asChild size="sm">
               <Link to={`/projects/${projectId}/reports/library`}>
                 Open Reports
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </motion.div>
+    );
+  }
+
+  if (jobsOpen) {
+    const p = bee.data!;
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        className={className}
+      >
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Browser Execution in progress</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              {p.completedJobs}/{p.totalJobs} jobs finished · Workers {p.workerUsage}
+            </p>
+            <div className="h-2 rounded-full bg-muted overflow-hidden">
+              <div
+                className="h-full bg-primary transition-all"
+                style={{ width: `${Math.min(100, p.progressPercent)}%` }}
+              />
+            </div>
+            <Button asChild size="sm">
+              <Link to={`/projects/${projectId}/backlink-builder/execution`}>
+                Open Execution Center
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Link>
             </Button>

@@ -1,0 +1,156 @@
+/** Shared Browser Execution status / pipeline helpers — labels mirror backend job state. */
+
+export const EXECUTION_PIPELINE_STAGES = [
+  'Opening Website',
+  'Detecting Type',
+  'Finding Form',
+  'Filling Form',
+  'Uploading Assets',
+  'Submitting',
+  'Waiting Verification',
+  'Completed',
+] as const;
+
+export type ExecutionPipelineStage = (typeof EXECUTION_PIPELINE_STAGES)[number];
+
+const TERMINAL = new Set([
+  'submitted',
+  'completed',
+  'verified',
+  'waiting_verification',
+  'failed',
+  'cancelled',
+]);
+
+export function isTerminalJobStatus(status: string): boolean {
+  return TERMINAL.has(status);
+}
+
+/** Concise badge labels for Active Jobs (user-facing vocabulary). */
+export function executionStatusLabel(
+  status: string,
+  opts?: { pauseReason?: string | null; errorCode?: string | null; errorMessage?: string | null }
+): string {
+  const s = status;
+  const p = String(opts?.pauseReason ?? '');
+  if (s === 'waiting_infrastructure' || opts?.errorCode === 'BROWSER_RUNTIME_MISSING') {
+    return 'Queued';
+  }
+  if (s === 'failed') {
+    return opts?.errorMessage?.startsWith('Temporary Failure')
+      ? 'Failed'
+      : opts?.errorMessage || opts?.errorCode?.replace(/_/g, ' ') || 'Failed';
+  }
+  if (s === 'cancelled') return 'Cancelled';
+  if (s === 'retry_scheduled') return 'Retrying';
+  if (s === 'queued') return 'Queued';
+  if (
+    s.startsWith('watching_login') ||
+    s === 'authenticating' ||
+    p === 'login' ||
+    (s === 'awaiting_user' && p === 'login')
+  ) {
+    return 'Waiting Login';
+  }
+  if (s.includes('mfa') || p === 'mfa') return 'Waiting MFA';
+  if (
+    s === 'needs_approval' ||
+    s === 'ready_for_review' ||
+    s.startsWith('watching_captcha') ||
+    s.startsWith('blocked_captcha') ||
+    p === 'human_approval' ||
+    p === 'captcha'
+  ) {
+    return 'Waiting Approval';
+  }
+  if (s === 'waiting_verification') return 'Waiting Verification';
+  if (s === 'submitted' || s === 'completed' || s === 'verified') return 'Submitted';
+  if (
+    [
+      'preparing',
+      'launching_browser',
+      'navigating',
+      'analyzing_form',
+      'filling_fields',
+      'uploading_assets',
+      'validating',
+      'submitting',
+      'ready_to_continue',
+    ].includes(s)
+  ) {
+    return 'Running';
+  }
+  if (s.startsWith('watching') || s.startsWith('blocked_') || s === 'paused') {
+    return 'Waiting Approval';
+  }
+  return s.replace(/_/g, ' ');
+}
+
+/** Map job status (+ optional step action) to pipeline stage index. */
+export function pipelineStageIndex(
+  status: string,
+  opts?: { pauseReason?: string | null; stepAction?: string | null }
+): number {
+  const s = status;
+  const action = String(opts?.stepAction ?? '');
+  if (s === 'failed' || s === 'cancelled') return -1;
+  if (s === 'completed' || s === 'verified' || s === 'submitted') return 7;
+  if (s === 'waiting_verification') return 6;
+  if (s === 'submitting' || action === 'submit') return 5;
+  if (
+    s === 'uploading_assets' ||
+    action.startsWith('upload')
+  ) {
+    return 4;
+  }
+  if (s === 'filling_fields' || s === 'validating' || action === 'fill' || action === 'select') {
+    return 3;
+  }
+  if (s === 'analyzing_form' || action === 'analyze_form') return 2;
+  if (s === 'navigating' || s === 'launching_browser' || action === 'open' || action === 'navigate') {
+    if (action === 'analyze_form') return 2;
+    return 0;
+  }
+  if (s === 'preparing' || s === 'queued' || s === 'retry_scheduled') return 0;
+  if (
+    executionStatusLabel(s, { pauseReason: opts?.pauseReason }) === 'Waiting Login' ||
+    executionStatusLabel(s, { pauseReason: opts?.pauseReason }) === 'Waiting MFA' ||
+    executionStatusLabel(s, { pauseReason: opts?.pauseReason }) === 'Waiting Approval'
+  ) {
+    return 5; // gates typically appear around submit / auth
+  }
+  // Detecting type sits between open and form find
+  if (s === 'ready_to_continue') return 2;
+  return 1;
+}
+
+export function pipelineStagesForJob(status: string, opts?: {
+  pauseReason?: string | null;
+  stepAction?: string | null;
+}): Array<{ label: ExecutionPipelineStage; state: 'done' | 'current' | 'pending' | 'failed' }> {
+  const idx = pipelineStageIndex(status, opts);
+  if (status === 'failed') {
+    return EXECUTION_PIPELINE_STAGES.map((label, i) => ({
+      label,
+      state: i === 0 ? 'failed' : 'pending',
+    }));
+  }
+  if (status === 'cancelled') {
+    return EXECUTION_PIPELINE_STAGES.map((label) => ({
+      label,
+      state: 'pending' as const,
+    }));
+  }
+  return EXECUTION_PIPELINE_STAGES.map((label, i) => ({
+    label,
+    state: idx < 0 ? 'pending' : i < idx ? 'done' : i === idx ? 'current' : 'pending',
+  }));
+}
+
+export function formatEta(seconds: number | null | undefined): string {
+  if (seconds == null || seconds <= 0) return '—';
+  if (seconds < 60) return `~${Math.round(seconds)}s`;
+  const mins = Math.round(seconds / 60);
+  if (mins < 60) return `~${mins} min`;
+  return `~${Math.round(mins / 60)}h ${mins % 60}m`;
+}

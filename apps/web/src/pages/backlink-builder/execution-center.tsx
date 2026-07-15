@@ -22,6 +22,7 @@ import {
   BeeOpsPanel,
   statusDisplayLabel,
 } from '@/components/browser/bee-ops-panel';
+import { formatEta, pipelineStagesForJob } from '@/lib/bee-execution-ui';
 
 type BeeJob = {
   id: string;
@@ -53,17 +54,28 @@ type BeeStats = {
   completed: number;
   failed: number;
   blocked: number;
+  cancelled?: number;
   watching?: number;
-  auto_resumed?: number;
-  completed_after_captcha?: number;
-  completed_after_login?: number;
+  submitted?: number;
+  waitingApproval?: number;
+  waitingVerification?: number;
+  waitingLogin?: number;
+  waitingMfa?: number;
+  retrying?: number;
   successRate: number | null;
   avgRuntimeMs: number | null;
   avgSubmissionMs?: number | null;
   etaSeconds: number;
   estimatedFinishAt?: string | null;
+  estimatedApprovalTime?: string;
   workerUsage?: string;
   maxParallelSessions?: number;
+  activeWorkerCount?: number;
+  totalJobs?: number;
+  completedJobs?: number;
+  remainingJobs?: number;
+  progressPercent?: number;
+  executionComplete?: boolean;
   workers?: Array<{
     workerId: number;
     status: 'idle' | 'busy';
@@ -226,7 +238,8 @@ export function BrowserExecutionCenterPage() {
           queue_auto_continue?: boolean;
         };
       }>(`/v1/projects/${projectId}/browser/policies`),
-    enabled: !!projectId && tab === 'policies',
+    enabled: !!projectId,
+    refetchInterval: 30_000,
   });
 
   const oppList = opportunities.data?.data ?? [];
@@ -425,6 +438,33 @@ export function BrowserExecutionCenterPage() {
     return { total, started, failed, active };
   }, [bulkProgress]);
 
+  const totalJobs = s?.totalJobs ?? jobList.length;
+  const completedJobs = s?.completedJobs ?? 0;
+  const progressPercent =
+    s?.progressPercent ??
+    (totalJobs > 0 ? Math.round((completedJobs / totalJobs) * 1000) / 10 : 0);
+  const maxWorkers =
+    s?.maxParallelSessions ?? policy.data?.data.max_parallel_sessions ?? 0;
+  const workerSlots =
+    s?.workers?.length === maxWorkers && maxWorkers > 0
+      ? s.workers
+      : Array.from({ length: Math.max(0, maxWorkers) }, (_, i) => {
+          const fromApi = s?.workers?.[i];
+          return (
+            fromApi ?? {
+              workerId: i + 1,
+              status: 'idle' as const,
+              website: null,
+              step: null,
+              elapsedMs: 0,
+              etaMs: null,
+            }
+          );
+        });
+  const showExecutionSummary = Boolean(
+    s?.executionComplete || ((s?.totalJobs ?? 0) > 0 && (s?.remainingJobs ?? 0) === 0)
+  );
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -466,77 +506,106 @@ export function BrowserExecutionCenterPage() {
 
       {tab === 'dashboard' && (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {(
-              [
-                ['Queued', s?.queued],
-                ['Running', s?.running],
-                ['Completed', s?.completed],
-                [
-                  'Avg Runtime',
-                  s?.avgRuntimeMs != null ? `${Math.round(s.avgRuntimeMs / 1000)}s` : '—',
-                ],
-                [
-                  'Avg Submission',
-                  s?.avgSubmissionMs != null ? `${Math.round(s.avgSubmissionMs / 1000)}s` : '—',
-                ],
-                ['Est. Finish', s?.etaSeconds != null ? `~${Math.round(s.etaSeconds / 60)} min` : '—'],
-                ['Workers', s?.workerUsage ?? '—'],
-                ['Watching', s?.watching],
-                ['Failed', s?.failed],
-                ['Success Rate', s?.successRate != null ? `${s.successRate}%` : '—'],
-              ] as const
-            ).map(([label, value]) => (
-              <Card key={label}>
-                <CardContent className="pt-4">
-                  <p className="text-xs text-muted-foreground">{label}</p>
-                  <p className="text-2xl font-semibold tabular-nums">{value ?? 0}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Overview</CardTitle>
+              <CardDescription>
+                Live from execution engine ·{' '}
+                {s?.executionComplete
+                  ? 'All jobs finished'
+                  : totalJobs > 0
+                    ? `${completedJobs}/${totalJobs} jobs finished`
+                    : 'No jobs yet'}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
+                {(
+                  [
+                    ['Queued', s?.queued ?? 0],
+                    ['Running', s?.running ?? 0],
+                    ['Submitted', s?.submitted ?? 0],
+                    ['Failed', s?.failed ?? 0],
+                    ['Waiting Login', s?.waitingLogin ?? 0],
+                    ['Waiting MFA', s?.waitingMfa ?? 0],
+                    ['Waiting Approval', s?.waitingApproval ?? 0],
+                    ['Retrying', s?.retrying ?? 0],
+                    ['Workers', s?.workerUsage ?? (maxWorkers ? `0/${maxWorkers}` : '—')],
+                    ['ETA', formatEta(s?.etaSeconds)],
+                    [
+                      'Avg Runtime',
+                      s?.avgRuntimeMs != null ? `${Math.round(s.avgRuntimeMs / 1000)}s` : '—',
+                    ],
+                    [
+                      'Success Rate',
+                      s?.successRate != null ? `${s.successRate}%` : '—',
+                    ],
+                  ] as const
+                ).map(([label, value]) => (
+                  <div key={label}>
+                    <p className="text-xs text-muted-foreground">{label}</p>
+                    <p className="text-xl font-semibold tabular-nums">{value}</p>
+                  </div>
+                ))}
+              </div>
+              <div>
+                <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+                  <span>Progress</span>
+                  <span className="tabular-nums">
+                    {completedJobs}/{totalJobs} ({progressPercent}%)
+                  </span>
+                </div>
+                <div className="h-2 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full bg-primary transition-all"
+                    style={{
+                      width: `${totalJobs === 0 ? 0 : Math.min(100, progressPercent)}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Live Workers</CardTitle>
               <CardDescription>
-                Parallel browsers · CAPTCHA/Login pauses release workers · ETA ~
-                {Math.round((s?.etaSeconds ?? 0) / 60)} min
+                Configured pool {maxWorkers || '—'}/workers · active{' '}
+                {s?.activeWorkerCount ?? 0} · ETA {formatEta(s?.etaSeconds)}
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 text-sm">
-              {(s?.workers?.length
-                ? s.workers
-                : Array.from({ length: s?.maxParallelSessions ?? 4 }, (_, i) => ({
-                    workerId: i + 1,
-                    status: 'idle' as const,
-                    website: null,
-                    step: null,
-                    elapsedMs: 0,
-                    etaMs: null,
-                  }))
-              ).map((w) => (
-                <div key={w.workerId} className="rounded-md border px-3 py-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="font-medium">Worker {w.workerId}</p>
-                    <Badge
-                      className={
-                        w.status === 'busy'
-                          ? 'border-transparent bg-foreground text-background'
-                          : 'bg-muted text-muted-foreground'
-                      }
-                    >
-                      {w.status === 'busy' ? 'Busy' : 'Idle'}
-                    </Badge>
+              {maxWorkers === 0 ? (
+                <p className="text-sm text-muted-foreground col-span-full">
+                  Loading worker policy…
+                </p>
+              ) : (
+                workerSlots.map((w) => (
+                  <div key={w.workerId} className="rounded-md border px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-medium">Worker {w.workerId}</p>
+                      <Badge
+                        className={
+                          w.status === 'busy'
+                            ? 'border-transparent bg-foreground text-background'
+                            : 'bg-muted text-muted-foreground'
+                        }
+                      >
+                        {w.status === 'busy' ? 'Busy' : 'Idle'}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 truncate text-xs text-muted-foreground">
+                      {w.website || '—'}
+                    </p>
+                    <p className="text-xs">{w.step || 'Idle'}</p>
+                    <p className="mt-1 text-[10px] text-muted-foreground tabular-nums">
+                      Elapsed {Math.round((w.elapsedMs || 0) / 1000)}s
+                      {w.etaMs != null ? ` · ETA ${Math.round(w.etaMs / 1000)}s` : ''}
+                    </p>
                   </div>
-                  <p className="mt-1 truncate text-xs text-muted-foreground">{w.website || '—'}</p>
-                  <p className="text-xs">{w.step || 'Idle'}</p>
-                  <p className="mt-1 text-[10px] text-muted-foreground tabular-nums">
-                    Elapsed {Math.round((w.elapsedMs || 0) / 1000)}s
-                    {w.etaMs != null ? ` · ETA ${Math.round(w.etaMs / 1000)}s` : ''}
-                  </p>
-                </div>
-              ))}
+                ))
+              )}
             </CardContent>
           </Card>
 
@@ -683,50 +752,27 @@ export function BrowserExecutionCenterPage() {
                 </div>
               )}
 
-              {(startExecutions.isPending || progressCounts.total > 0) && (
+              {(startExecutions.isPending || progressCounts.total > 0) &&
+              !(s?.totalJobs && s.totalJobs > 0) ? (
                 <div className="rounded-md border p-3 space-y-2">
                   <div className="flex items-center justify-between gap-2 text-sm">
-                    <p className="font-medium">Execution progress</p>
+                    <p className="font-medium">Starting jobs…</p>
                     <p className="text-xs text-muted-foreground tabular-nums">
                       {progressCounts.started + progressCounts.failed}/{progressCounts.total}
-                      {progressCounts.active > 0 ? ' · running…' : ''}
                     </p>
                   </div>
-                  <div className="h-2 rounded-full bg-muted overflow-hidden">
-                    <div
-                      className="h-full bg-primary transition-all"
-                      style={{
-                        width:
-                          progressCounts.total === 0
-                            ? '0%'
-                            : `${Math.round(
-                                ((progressCounts.started + progressCounts.failed) /
-                                  progressCounts.total) *
-                                  100
-                              )}%`,
-                      }}
-                    />
-                  </div>
-                  <ul className="space-y-1 max-h-40 overflow-auto text-xs">
+                  <ul className="space-y-1 max-h-32 overflow-auto text-xs">
                     {bulkProgress.map((item) => (
                       <li
                         key={item.opportunityId}
                         className="flex items-center justify-between gap-2"
                       >
                         <span className="truncate">{item.website}</span>
-                        <span
-                          className={
-                            item.phase === 'failed'
-                              ? 'text-red-600'
-                              : item.phase === 'started'
-                                ? 'text-emerald-700'
-                                : 'text-muted-foreground'
-                          }
-                        >
+                        <span className="text-muted-foreground">
                           {item.phase === 'failed'
                             ? item.message || 'Failed'
                             : item.phase === 'started'
-                              ? 'Started'
+                              ? 'Queued'
                               : item.phase === 'starting'
                                 ? 'Starting…'
                                 : 'Queued'}
@@ -735,10 +781,158 @@ export function BrowserExecutionCenterPage() {
                     ))}
                   </ul>
                 </div>
-              )}
+              ) : null}
             </CardContent>
           </Card>
+
+          {showExecutionSummary ? (
+            <Card className="border-emerald-500/30">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Execution Summary</CardTitle>
+                <CardDescription>
+                  {s?.executionComplete
+                    ? 'All jobs reached Submitted, Failed, or Cancelled'
+                    : 'Current batch snapshot'}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
+                {(
+                  [
+                    ['Total Jobs', s?.totalJobs ?? 0],
+                    ['Submitted', s?.submitted ?? 0],
+                    ['Waiting Approval', s?.waitingApproval ?? 0],
+                    ['Waiting Verification', s?.waitingVerification ?? 0],
+                    ['Failed', s?.failed ?? 0],
+                    [
+                      'Success Rate',
+                      s?.successRate != null ? `${s.successRate}%` : '—',
+                    ],
+                    [
+                      'Estimated Approval Time',
+                      s?.estimatedApprovalTime ?? '7–14 days',
+                    ],
+                    ['Cancelled', s?.cancelled ?? 0],
+                  ] as const
+                ).map(([label, value]) => (
+                  <div key={label}>
+                    <p className="text-xs text-muted-foreground">{label}</p>
+                    <p className="text-lg font-semibold tabular-nums">{value}</p>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          ) : null}
         </>
+      )}
+
+      {(tab === 'dashboard' || tab === 'timeline' || tab === 'logs' || tab === 'replay') && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Active Jobs</CardTitle>
+            <CardDescription>
+              Live pipeline per website · {completedJobs}/{totalJobs} finished
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {jobs.isLoading ? (
+              <Skeleton className="h-20 w-full" />
+            ) : jobList.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No execution jobs yet.</p>
+            ) : (
+              jobList.map((j) => {
+                const label = statusDisplayLabel(
+                  j.status,
+                  j.error_code,
+                  j.error_message,
+                  j.pause_reason
+                );
+                const stages = pipelineStagesForJob(j.status, {
+                  pauseReason: j.pause_reason,
+                });
+                return (
+                  <div
+                    key={j.id}
+                    className={`rounded-md border p-3 space-y-2 ${selectedJobId === j.id ? 'ring-1 ring-primary' : ''}`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        className="text-left"
+                        onClick={() => {
+                          setSelectedJobId(j.id);
+                          if (tab === 'dashboard') setTab('timeline');
+                        }}
+                      >
+                        <p className="text-sm font-medium">{j.site_domain ?? 'Execution job'}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(j.created_at).toLocaleString()}
+                        </p>
+                      </button>
+                      <Badge className={`text-[10px] ${statusBadge(j.status)}`}>{label}</Badge>
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {stages.map((stage) => (
+                        <span
+                          key={stage.label}
+                          className={
+                            stage.state === 'done'
+                              ? 'text-[10px] text-emerald-700'
+                              : stage.state === 'current'
+                                ? 'text-[10px] font-medium text-foreground'
+                                : stage.state === 'failed'
+                                  ? 'text-[10px] text-red-600'
+                                  : 'text-[10px] text-muted-foreground/60'
+                          }
+                        >
+                          {stage.state === 'done' ? '✓ ' : stage.state === 'current' ? '→ ' : ''}
+                          {stage.label}
+                          {stage.label !== 'Completed' ? (
+                            <span className="text-muted-foreground/40"> · </span>
+                          ) : null}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1">
+                      <Button
+                        size="sm"
+                        disabled={!runtimeHealthy || act.isPending}
+                        onClick={() => act.mutate({ action: 'start', jobId: j.id })}
+                      >
+                        <Play className="h-3 w-3 mr-1" /> Start
+                      </Button>
+                      <details className="relative">
+                        <summary className="list-none cursor-pointer inline-flex h-8 items-center rounded-md border border-input px-3 text-xs font-medium hover:bg-accent">
+                          More ▾
+                        </summary>
+                        <div className="absolute right-0 z-20 mt-1 min-w-[160px] rounded-lg border bg-card p-1 shadow-md">
+                          {(
+                            [
+                              ['pause', 'Pause'],
+                              ['resume', 'Resume'],
+                              ['approve', 'Approve'],
+                              ['retry', 'Retry'],
+                              ['cancel', 'Cancel'],
+                              ...(tab === 'replay' ? [['replay', 'Replay'] as const] : []),
+                            ] as const
+                          ).map(([action, actionLabel]) => (
+                            <button
+                              key={action}
+                              type="button"
+                              className="flex w-full rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent"
+                              onClick={() => act.mutate({ action, jobId: j.id })}
+                            >
+                              {actionLabel}
+                            </button>
+                          ))}
+                        </div>
+                      </details>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </CardContent>
+        </Card>
       )}
 
       {(tab === 'dashboard' || tab === 'timeline' || tab === 'logs') && (
@@ -747,100 +941,6 @@ export function BrowserExecutionCenterPage() {
           selectedJobId={selectedJobId}
           onSelectJob={setSelectedJobId}
         />
-      )}
-
-      {(tab === 'dashboard' || tab === 'timeline' || tab === 'logs' || tab === 'replay') && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Jobs</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {jobs.isLoading ? (
-              <Skeleton className="h-20 w-full" />
-            ) : jobList.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No execution jobs yet.</p>
-            ) : (
-              jobList.map((j) => (
-                <div
-                  key={j.id}
-                  className={`rounded-md border p-3 space-y-2 ${selectedJobId === j.id ? 'ring-1 ring-primary' : ''}`}
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <button
-                      type="button"
-                      className="text-left"
-                      onClick={() => {
-                        setSelectedJobId(j.id);
-                        if (tab === 'dashboard') setTab('timeline');
-                      }}
-                    >
-                      <p className="text-sm font-medium">{j.site_domain ?? 'Execution job'}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {j.mode} · {new Date(j.created_at).toLocaleString()}
-                      </p>
-                    </button>
-                    <Badge
-                      className={`text-[10px] capitalize ${statusBadge(j.status)}`}
-                      title={
-                        j.status === 'failed'
-                          ? `${j.error_code ?? ''} ${j.error_message ?? ''}`.trim() ||
-                            'Failed'
-                          : j.pause_reason
-                            ? `Paused: ${j.pause_reason}`
-                            : statusDisplayLabel(j.status, j.error_code, j.error_message)
-                      }
-                    >
-                      {statusDisplayLabel(j.status, j.error_code, j.error_message)}
-                    </Badge>
-                  </div>
-                  {j.status === 'failed' && (j.error_message || j.error_code) && (
-                    <p className="text-xs text-destructive">
-                      {j.error_message || j.error_code}
-                    </p>
-                  )}
-                  <div className="flex flex-wrap items-center gap-1">
-                    <Button
-                      size="sm"
-                      disabled={!runtimeHealthy || act.isPending}
-                      title={
-                        runtimeHealthy ? undefined : 'Browser Runtime Missing — Install Required'
-                      }
-                      onClick={() => act.mutate({ action: 'start', jobId: j.id })}
-                    >
-                      <Play className="h-3 w-3 mr-1" /> Start Execution
-                    </Button>
-                    <details className="relative">
-                      <summary className="list-none cursor-pointer inline-flex h-8 items-center rounded-md border border-input px-3 text-xs font-medium hover:bg-accent">
-                        More ▾
-                      </summary>
-                      <div className="absolute right-0 z-20 mt-1 min-w-[160px] rounded-lg border bg-card p-1 shadow-md">
-                        {(
-                          [
-                            ['pause', 'Pause'],
-                            ['resume', 'Resume'],
-                            ['approve', 'Approve'],
-                            ['retry', 'Retry'],
-                            ['cancel', 'Cancel'],
-                            ...(tab === 'replay' ? [['replay', 'Replay'] as const] : []),
-                          ] as const
-                        ).map(([action, label]) => (
-                          <button
-                            key={action}
-                            type="button"
-                            className="flex w-full rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent"
-                            onClick={() => act.mutate({ action, jobId: j.id })}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </details>
-                  </div>
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
       )}
 
       {tab === 'timeline' && selected && (

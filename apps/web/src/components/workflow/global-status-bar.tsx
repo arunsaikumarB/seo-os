@@ -4,6 +4,8 @@ import { Bell, Loader2 } from 'lucide-react';
 import { useApi } from '@/hooks/use-api';
 import { useAppStore } from '@/stores/app-store';
 import { useWorkflow } from '@/hooks/use-workflow';
+import { useBeeExecutionProgress } from '@/hooks/use-bee-execution-progress';
+import { formatEta } from '@/lib/bee-execution-ui';
 import { cn } from '@/lib/utils';
 
 type Props = {
@@ -14,7 +16,9 @@ type Props = {
 export function GlobalStatusBar({ projectId, className }: Props) {
   const { request, fetchProjects } = useApi();
   const currentOrgId = useAppStore((s) => s.currentOrgId);
-  const { completedCount, totalSteps, currentStep } = useWorkflow(projectId);
+  const { completedCount, totalSteps, currentStep, allComplete: guideAllComplete } =
+    useWorkflow(projectId);
+  const bee = useBeeExecutionProgress(projectId, 2_000);
 
   const project = useQuery({
     queryKey: ['projects', currentOrgId],
@@ -22,17 +26,6 @@ export function GlobalStatusBar({ projectId, className }: Props) {
     enabled: !!currentOrgId,
   });
   const name = project.data?.data.find((p) => p.id === projectId)?.name ?? 'Project';
-
-  const stats = useQuery({
-    queryKey: ['bee-stats-status', projectId],
-    queryFn: () =>
-      request<{
-        data: { queued?: number; running?: number; watching?: number };
-      }>(`/v1/projects/${projectId}/browser/statistics`).catch(() => ({ data: {} })),
-    enabled: !!projectId,
-    refetchInterval: 20_000,
-    retry: false,
-  });
 
   const notifications = useQuery({
     queryKey: ['notifications-count', currentOrgId],
@@ -45,28 +38,36 @@ export function GlobalStatusBar({ projectId, className }: Props) {
     retry: false,
   });
 
-  const bee = (stats.data?.data ?? {}) as {
-    queued?: number;
-    running?: number;
-    watching?: number;
-  };
-  const queued = Number(bee.queued ?? 0);
-  const running = Number(bee.running ?? 0);
-  const watching = Number(bee.watching ?? 0);
+  const p = bee.data;
+  const hasJobs = (p?.totalJobs ?? 0) > 0;
   const unread = Array.isArray(notifications.data?.data)
     ? 0
     : Number((notifications.data?.data as { unread?: number })?.unread ?? 0);
 
-  const aiTask =
-    running > 0
+  const aiTask = !p
+    ? currentStep.title
+    : p.running > 0
       ? 'Browser submitting…'
-      : watching > 0
-        ? 'Waiting for your approval…'
-        : queued > 0
-          ? 'Jobs queued…'
-          : currentStep.title;
+      : p.waitingLogin > 0
+        ? 'Waiting Login…'
+        : p.waitingMfa > 0
+          ? 'Waiting MFA…'
+          : p.waitingApproval > 0
+            ? 'Waiting Approval…'
+            : p.queued > 0
+              ? 'Jobs queued…'
+              : p.executionComplete
+                ? 'Execution idle'
+                : currentStep.title;
 
-  const pct = Math.round((completedCount / Math.max(totalSteps, 1)) * 100);
+  // Prefer live job progress over visit-based guide % when any execution jobs exist
+  const pct = hasJobs
+    ? Math.round(p?.progressPercent ?? 0)
+    : Math.round((completedCount / Math.max(totalSteps, 1)) * 100);
+  const progressLabel = hasJobs
+    ? `Execution ${p?.completedJobs ?? 0}/${p?.totalJobs ?? 0}`
+    : `Workflow ${pct}%`;
+  const showSpin = Boolean(p && (p.running > 0 || p.waitingLogin > 0 || p.waitingMfa > 0));
 
   return (
     <div
@@ -81,14 +82,22 @@ export function GlobalStatusBar({ projectId, className }: Props) {
       >
         {name}
       </Link>
-      <span className="text-muted-foreground tabular-nums">Workflow {pct}%</span>
+      <span className="text-muted-foreground tabular-nums">
+        {progressLabel}
+        {hasJobs ? ` (${pct}%)` : ''}
+        {hasJobs && p && !p.executionComplete && p.etaSeconds > 0
+          ? ` · ETA ${formatEta(p.etaSeconds)}`
+          : ''}
+        {hasJobs && p ? ` · Workers ${p.workerUsage}` : ''}
+      </span>
       <span className="inline-flex items-center gap-1.5 text-muted-foreground min-w-0">
-        {(running > 0 || watching > 0) && (
-          <Loader2 className="h-3 w-3 animate-spin text-primary shrink-0" />
-        )}
+        {showSpin && <Loader2 className="h-3 w-3 animate-spin text-primary shrink-0" />}
         <span className="truncate">AI: {aiTask}</span>
       </span>
-      <span className="text-muted-foreground tabular-nums">Queued {queued}</span>
+      <span className="text-muted-foreground tabular-nums">Queued {p?.queued ?? 0}</span>
+      {guideAllComplete && hasJobs && !p?.executionComplete ? (
+        <span className="text-amber-700 tabular-nums">Execution still running</span>
+      ) : null}
       <Link
         to={`/org/settings/notifications`}
         className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground ml-auto"

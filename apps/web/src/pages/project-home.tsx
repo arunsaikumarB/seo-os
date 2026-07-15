@@ -5,6 +5,7 @@ import { ArrowRight } from 'lucide-react';
 import { useApi } from '@/hooks/use-api';
 import { useAppStore } from '@/stores/app-store';
 import { useWorkflow } from '@/hooks/use-workflow';
+import { useBeeExecutionProgress } from '@/hooks/use-bee-execution-progress';
 import { WorkflowRoadmap } from '@/components/workflow/workflow-roadmap';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -29,6 +30,10 @@ export function ProjectHomePage() {
   const { currentOrgId } = useAppStore();
   const { fetchProjects, request } = useApi();
   const { currentStep, getStepHref, allComplete } = useWorkflow(projectId);
+  const beeProgress = useBeeExecutionProgress(projectId);
+  const jobsOpen =
+    (beeProgress.data?.totalJobs ?? 0) > 0 && !beeProgress.data?.executionComplete;
+  const showComplete = allComplete && !jobsOpen;
 
   const { data } = useQuery({
     queryKey: ['projects', currentOrgId],
@@ -46,24 +51,9 @@ export function ProjectHomePage() {
     retry: false,
   });
 
-  const bee = useQuery({
-    queryKey: ['bee-stats-dashboard', projectId],
-    queryFn: () =>
-      request<{
-        data: {
-          queued?: number;
-          failed?: number;
-          completed?: number;
-          successRate?: number | null;
-        };
-      }>(`/v1/projects/${projectId}/browser/statistics`).catch(() => ({ data: {} })),
-    enabled: !!projectId,
-    retry: false,
-  });
-
   const project = data?.data.find((p) => p.id === projectId);
   const s = (summary.data?.data ?? {}) as Record<string, unknown>;
-  const b = (bee.data?.data ?? {}) as Record<string, unknown>;
+  const b = (beeProgress.data ?? {}) as Record<string, unknown>;
 
   const num = (...vals: unknown[]) => {
     for (const v of vals) {
@@ -108,18 +98,34 @@ export function ProjectHomePage() {
       <Card className="border-border/40 shadow-sm rounded-2xl">
         <CardHeader className="pb-2">
           <CardTitle className="text-base">
-            {allComplete ? 'Workflow complete' : 'Continue where you left off'}
+            {showComplete
+              ? 'Workflow complete'
+              : jobsOpen
+                ? 'Browser Execution in progress'
+                : 'Continue where you left off'}
           </CardTitle>
           <CardDescription>
-            {allComplete
+            {showComplete
               ? 'Review reports or import more websites anytime.'
-              : currentStep.purpose}
+              : jobsOpen
+                ? `${beeProgress.data!.completedJobs}/${beeProgress.data!.totalJobs} jobs finished · Workers ${beeProgress.data!.workerUsage}`
+                : currentStep.purpose}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <Button asChild size="lg">
-            <Link to={getStepHref(currentStep)}>
-              {allComplete ? 'Open Reports' : currentStep.title}
+            <Link
+              to={
+                jobsOpen
+                  ? `/projects/${projectId}/backlink-builder/execution`
+                  : getStepHref(currentStep)
+              }
+            >
+              {showComplete
+                ? 'Open Reports'
+                : jobsOpen
+                  ? 'Open Execution Center'
+                  : currentStep.title}
               <ArrowRight className="ml-2 h-4 w-4" />
             </Link>
           </Button>

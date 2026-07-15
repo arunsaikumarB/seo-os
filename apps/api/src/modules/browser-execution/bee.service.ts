@@ -1157,19 +1157,81 @@ export async function getStatistics(workspaceId: string) {
     topFailureReasons[code] = (topFailureReasons[code] ?? 0) + 1;
   }
 
-  const done = counts.completed + counts.failed;
-  const successRate = done > 0 ? Math.round((counts.completed / done) * 1000) / 10 : null;
+  const submitted =
+    jobs.filter((j) =>
+      ['submitted', 'completed', 'verified', 'waiting_verification'].includes(String(j.status))
+    ).length;
+  const waitingLogin = jobs.filter((j) => {
+    const s = String(j.status);
+    const p = String(j.pause_reason ?? '');
+    return (
+      s.startsWith('watching_login') ||
+      s === 'authenticating' ||
+      p === 'login' ||
+      (s === 'awaiting_user' && p === 'login')
+    );
+  }).length;
+  const waitingMfa = jobs.filter((j) => {
+    const s = String(j.status);
+    const p = String(j.pause_reason ?? '');
+    return s.includes('mfa') || p === 'mfa';
+  }).length;
+  const waitingApproval = jobs.filter((j) => {
+    const s = String(j.status);
+    const p = String(j.pause_reason ?? '');
+    return (
+      s === 'needs_approval' ||
+      s === 'ready_for_review' ||
+      s.startsWith('watching_captcha') ||
+      s.startsWith('blocked_captcha') ||
+      p === 'human_approval' ||
+      p === 'captcha'
+    );
+  }).length;
+  const waitingVerification = jobs.filter(
+    (j) => String(j.status) === 'waiting_verification'
+  ).length;
+
+  const totalJobs = jobs.length;
+  // Terminal for workflow progress: Submitted / Failed / Cancelled (+ verified/completed aliases)
+  const terminalStatuses = new Set([
+    'submitted',
+    'completed',
+    'verified',
+    'waiting_verification',
+    'failed',
+    'cancelled',
+  ]);
+  const completedJobs = jobs.filter((j) => terminalStatuses.has(String(j.status))).length;
+  const progressPercent =
+    totalJobs > 0 ? Math.round((completedJobs / totalJobs) * 1000) / 10 : 0;
+  const executionComplete = totalJobs > 0 && completedJobs >= totalJobs;
+
+  const successDenom = submitted + counts.failed;
+  const successRate =
+    successDenom > 0 ? Math.round((submitted / successDenom) * 1000) / 10 : null;
   const avgMs = runtimeN ? Math.round(runtimeSum / runtimeN) : 90_000;
   const avgSubmitMs = submitN ? Math.round(submitSum / submitN) : null;
-  // Parallel ETA: remaining work divided by active capacity (exclude CAPTCHA watchers from worker slots)
-  const remaining = counts.queued;
-  const effectiveWorkers = Math.max(1, Math.min(maxWorkers, Math.max(counts.running, 1)));
-  const etaMs = remaining > 0 ? Math.ceil(remaining / effectiveWorkers) * avgMs : 0;
-  current.queueProgress = `${counts.completed}/${counts.completed + counts.queued + counts.running + counts.watching}`;
 
+  // ETA from remaining automation work ÷ active worker capacity
+  const remainingJobs = Math.max(0, totalJobs - completedJobs);
+  const activeWorkerCount = Math.min(maxWorkers, Math.max(counts.running, 0));
+  const effectiveWorkers = Math.max(1, activeWorkerCount || (remainingJobs > 0 ? 1 : 1));
   for (const w of runningJobs) {
     w.etaMs = Math.max(0, avgMs - w.elapsedMs);
   }
+  const inFlightRemainingAvg =
+    runningJobs.length > 0
+      ? Math.round(
+          runningJobs.reduce((sum, w) => sum + (w.etaMs ?? avgMs), 0) / runningJobs.length
+        )
+      : 0;
+  const queuedRemaining = counts.queued + retrying;
+  const etaMs =
+    remainingJobs <= 0
+      ? 0
+      : inFlightRemainingAvg + Math.ceil(queuedRemaining / effectiveWorkers) * avgMs;
+  current.queueProgress = `${completedJobs}/${totalJobs}`;
 
   const workers = Array.from({ length: maxWorkers }, (_, i) => {
     const job = runningJobs[i];
@@ -1215,9 +1277,13 @@ export async function getStatistics(workspaceId: string) {
       meta: {
         ready_to_continue: counts.ready_to_continue,
         current,
-        workerUsage: `${counts.running}/${maxWorkers}`,
+        workerUsage: `${activeWorkerCount}/${maxWorkers}`,
         avgSubmissionMs: avgSubmitMs,
         pool: poolStats,
+        totalJobs,
+        completedJobs,
+        progressPercent,
+        executionComplete,
       },
       updated_at: new Date().toISOString(),
     },
@@ -1226,6 +1292,11 @@ export async function getStatistics(workspaceId: string) {
 
   return {
     ...counts,
+    submitted,
+    waitingLogin,
+    waitingMfa,
+    waitingApproval,
+    waitingVerification,
     retrying,
     waitingUser,
     topFailureReasons,
@@ -1233,11 +1304,18 @@ export async function getStatistics(workspaceId: string) {
     avgRuntimeMs: runtimeN ? Math.round(runtimeSum / runtimeN) : null,
     avgSubmissionMs: avgSubmitMs,
     maxParallelSessions: maxWorkers,
-    workerUsage: `${Math.min(counts.running, maxWorkers)}/${maxWorkers}`,
+    activeWorkerCount,
+    workerUsage: `${activeWorkerCount}/${maxWorkers}`,
     workers,
     browserPool: poolStats,
+    totalJobs,
+    completedJobs,
+    remainingJobs,
+    progressPercent,
+    executionComplete,
     etaSeconds: Math.round(etaMs / 1000),
     estimatedFinishAt: etaMs > 0 ? new Date(Date.now() + etaMs).toISOString() : null,
+    estimatedApprovalTime: '7–14 days',
     current,
     metricsSource: 'live' as const,
   };

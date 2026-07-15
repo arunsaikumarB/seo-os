@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Download, RefreshCw } from 'lucide-react';
+import { ChevronDown, Download, RefreshCw } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useApi } from '@/hooks/use-api';
 import { useAuth } from '@/providers/auth-provider';
 import { useAppStore } from '@/stores/app-store';
+import { executionStatusLabel, formatEta } from '@/lib/bee-execution-ui';
 
 type HealthIndicator = {
   key: string;
@@ -77,46 +78,53 @@ type JobDetails = {
   logs: Array<{ id: string; level: string; message: string; created_at: string; data?: unknown }>;
 };
 
-const STATUS_LABEL: Record<string, string> = {
-  queued: 'Queued',
-  preparing: 'Preparing',
-  launching_browser: 'Launching Browser',
-  authenticating: 'Waiting Login',
-  navigating: 'Opening Website',
-  analyzing_form: 'Finding Form',
-  uploading_assets: 'Uploading Assets',
-  filling_fields: 'Filling Company Info',
-  validating: 'Detecting Fields',
-  submitting: 'Submitting',
-  waiting_verification: 'Verification Scheduled',
-  retry_scheduled: 'Retrying',
-  awaiting_user: 'Waiting Login',
-  needs_approval: 'Needs your approval',
-  paused: 'Paused',
-  ready_for_review: 'Ready for Review',
-  watching_captcha: 'Waiting CAPTCHA',
-  watching_login: 'Waiting Login',
-  watching_email: 'Waiting Email Verification',
-  watching_phone: 'Waiting Phone Verification',
-  watching_mfa: 'Waiting MFA',
-  blocked_captcha: 'Waiting CAPTCHA',
-  blocked_mfa: 'Waiting MFA',
-  waiting_infrastructure: 'Waiting for browser setup',
-  completed: 'Submitted',
-  verified: 'Verified',
-  submitted: 'Submitted',
-  failed: 'Temporary Failure',
-  cancelled: 'Cancelled',
-};
+export function statusDisplayLabel(
+  status: string,
+  errorCode?: string | null,
+  errorMessage?: string | null,
+  pauseReason?: string | null
+) {
+  return executionStatusLabel(status, { errorCode, errorMessage, pauseReason });
+}
 
-export function statusDisplayLabel(status: string, errorCode?: string | null, errorMessage?: string | null) {
-  if (status === 'waiting_infrastructure' || errorCode === 'BROWSER_RUNTIME_MISSING') {
-    return 'Waiting Infrastructure — Browser Runtime Missing';
-  }
-  if (status === 'failed') {
-    return errorMessage || errorCode?.replace(/_/g, ' ') || 'Failed';
-  }
-  return STATUS_LABEL[status] ?? status.replace(/_/g, ' ');
+function ExpandableSection({
+  title,
+  description,
+  defaultOpen = false,
+  actions,
+  children,
+}: {
+  title: string;
+  description?: string;
+  defaultOpen?: boolean;
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <button
+            type="button"
+            className="flex items-start gap-2 text-left min-w-0 flex-1"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+          >
+            <ChevronDown
+              className={`h-4 w-4 mt-0.5 shrink-0 transition-transform ${open ? 'rotate-0' : '-rotate-90'}`}
+            />
+            <div className="min-w-0">
+              <CardTitle className="text-base">{title}</CardTitle>
+              {description ? <CardDescription>{description}</CardDescription> : null}
+            </div>
+          </button>
+          {actions}
+        </div>
+      </CardHeader>
+      {open ? <CardContent className="space-y-3">{children}</CardContent> : null}
+    </Card>
+  );
 }
 
 function Dot({ status }: { status: 'green' | 'red' | 'yellow' }) {
@@ -131,7 +139,7 @@ type Props = {
   onSelectJob?: (id: string) => void;
 };
 
-export function BeeOpsPanel({ projectId, selectedJobId, onSelectJob }: Props) {
+export function BeeOpsPanel({ projectId, selectedJobId, onSelectJob: _onSelectJob }: Props) {
   const { request } = useApi();
   const qc = useQueryClient();
   const [reasonFilter, setReasonFilter] = useState('');
@@ -269,147 +277,101 @@ export function BeeOpsPanel({ projectId, selectedJobId, onSelectJob }: Props) {
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader className="pb-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <CardTitle className="text-base">Worker Health</CardTitle>
-              <CardDescription>
-                Browser Runtime · Playwright · Worker · Queue · Redis · Database · Storage · Providers
-              </CardDescription>
-            </div>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={runDiagnostics.isPending}
-              onClick={() => runDiagnostics.mutate()}
-            >
-              <RefreshCw className="h-3.5 w-3.5 mr-1" /> Run Diagnostics
-            </Button>
+      <ExpandableSection
+        title="Worker Health & Diagnostics"
+        description="Browser Runtime · Playwright · Worker · Queue · Redis · Database"
+        defaultOpen={runtimeIndicator?.status === 'red'}
+        actions={
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={runDiagnostics.isPending}
+            onClick={() => runDiagnostics.mutate()}
+          >
+            <RefreshCw className="h-3.5 w-3.5 mr-1" /> Run Diagnostics
+          </Button>
+        }
+      >
+        {runtimeIndicator?.status === 'red' ? (
+          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+            <p className="font-medium">Browser Runtime Missing — Install Required</p>
+            <p className="mt-0.5">{runtimeIndicator.detail}</p>
           </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {runtimeIndicator?.status === 'red' ? (
-            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
-              <p className="font-medium">Browser Runtime Missing — Install Required</p>
-              <p className="mt-0.5">{runtimeIndicator.detail}</p>
-            </div>
-          ) : null}
-          {health.isLoading ? (
-            <Skeleton className="h-16 w-full" />
-          ) : (
-            <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-4 text-sm">
-              {indicators.map((i) => (
-                <div key={i.key} className="flex items-start gap-2 rounded-md border px-2 py-1.5">
-                  <Dot status={i.status} />
-                  <div>
-                    <p className="font-medium leading-tight">{i.label}</p>
-                    <p className="text-[10px] text-muted-foreground line-clamp-2">{i.detail}</p>
-                  </div>
+        ) : null}
+        {health.isLoading ? (
+          <Skeleton className="h-16 w-full" />
+        ) : (
+          <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-4 text-sm">
+            {indicators.map((i) => (
+              <div key={i.key} className="flex items-start gap-2 rounded-md border px-2 py-1.5">
+                <Dot status={i.status} />
+                <div>
+                  <p className="font-medium leading-tight">{i.label}</p>
+                  <p className="text-[10px] text-muted-foreground line-clamp-2">{i.detail}</p>
                 </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Queue Monitor</CardTitle>
-          <CardDescription>
-            Live every second · Workers continue while CAPTCHA/Login wait in background
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-4 lg:grid-cols-5 text-sm">
-            {(
-              [
-                ['Queued', q?.queued],
-                ['Running', q?.running],
-                ['Completed', q?.completed],
-                [
-                  'Avg Runtime',
-                  q?.averageRuntimeMs != null ? `${Math.round(q.averageRuntimeMs / 1000)}s` : '—',
-                ],
-                [
-                  'Avg Submission',
-                  q?.averageSubmissionMs != null
-                    ? `${Math.round(q.averageSubmissionMs / 1000)}s`
-                    : '—',
-                ],
-                [
-                  'ETA',
-                  q?.etaSeconds != null ? `~${Math.round(q.etaSeconds / 60)} min` : '—',
-                ],
-                ['Workers', q?.workerUsage ?? '—'],
-                ['Waiting User', q?.waitingUser],
-                ['Failed', q?.failed],
-                ['Success Rate', q?.successRate != null ? `${q.successRate}%` : '—'],
-              ] as const
-            ).map(([label, val]) => (
-              <div key={label}>
-                <p className="text-[10px] text-muted-foreground">{label}</p>
-                <p className="font-medium tabular-nums">{val ?? 0}</p>
               </div>
             ))}
           </div>
-          {(q?.workers?.length ?? 0) > 0 ? (
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-              {q!.workers!.map((w) => (
-                <div
-                  key={w.workerId}
-                  className="rounded-md border px-3 py-2 text-sm"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="font-medium">Worker {w.workerId}</p>
-                    <Badge
-                      className={
-                        w.status === 'busy'
-                          ? 'border-transparent bg-foreground text-background'
-                          : 'bg-muted text-muted-foreground'
-                      }
-                    >
-                      {w.status === 'busy' ? 'Busy' : 'Idle'}
-                    </Badge>
-                  </div>
-                  <p className="mt-1 truncate text-xs text-muted-foreground">
-                    {w.website || '—'}
-                  </p>
-                  <p className="text-xs">{w.step || 'Idle'}</p>
-                  <p className="mt-1 text-[10px] text-muted-foreground tabular-nums">
-                    Elapsed {Math.round((w.elapsedMs || 0) / 1000)}s
-                    {w.etaMs != null ? ` · ETA ${Math.round(w.etaMs / 1000)}s` : ''}
-                  </p>
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </CardContent>
-      </Card>
+        )}
+      </ExpandableSection>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <CardTitle className="text-base">Bulk Retry & Reports</CardTitle>
-              <CardDescription>Retry failed jobs and download execution reports</CardDescription>
+      <ExpandableSection
+        title="Queue metrics detail"
+        description={`ETA ${formatEta(q?.etaSeconds)} · Workers ${q?.workerUsage ?? '—'}`}
+        defaultOpen={false}
+      >
+        <div className="grid gap-3 sm:grid-cols-4 lg:grid-cols-5 text-sm">
+          {(
+            [
+              ['Queued', q?.queued],
+              ['Running', q?.running],
+              ['Completed', q?.completed],
+              [
+                'Avg Runtime',
+                q?.averageRuntimeMs != null ? `${Math.round(q.averageRuntimeMs / 1000)}s` : '—',
+              ],
+              [
+                'Avg Submission',
+                q?.averageSubmissionMs != null
+                  ? `${Math.round(q.averageSubmissionMs / 1000)}s`
+                  : '—',
+              ],
+              ['ETA', formatEta(q?.etaSeconds)],
+              ['Workers', q?.workerUsage ?? '—'],
+              ['Waiting User', q?.waitingUser],
+              ['Failed', q?.failed],
+              ['Success Rate', q?.successRate != null ? `${q.successRate}%` : '—'],
+            ] as const
+          ).map(([label, val]) => (
+            <div key={label}>
+              <p className="text-[10px] text-muted-foreground">{label}</p>
+              <p className="font-medium tabular-nums">{val ?? 0}</p>
             </div>
-            <div className="flex flex-wrap gap-1">
-              {reportLinks.map((r) => (
-                <Button
-                  key={r.format}
-                  size="sm"
-                  variant="outline"
-                  onClick={() => downloadReport(r.format)}
-                >
-                  <Download className="h-3.5 w-3.5 mr-1" />
-                  {r.label}
-                </Button>
-              ))}
-            </div>
+          ))}
+        </div>
+      </ExpandableSection>
+
+      <ExpandableSection
+        title="Retry tools & reports"
+        description="Bulk retry failed jobs and download execution reports"
+        defaultOpen={false}
+        actions={
+          <div className="flex flex-wrap gap-1">
+            {reportLinks.map((r) => (
+              <Button
+                key={r.format}
+                size="sm"
+                variant="outline"
+                onClick={() => downloadReport(r.format)}
+              >
+                <Download className="h-3.5 w-3.5 mr-1" />
+                {r.label}
+              </Button>
+            ))}
           </div>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-2 items-end">
+        }
+      >
+        <div className="flex flex-wrap gap-2 items-end">
           <Button
             size="sm"
             variant="outline"
@@ -462,168 +424,107 @@ export function BeeOpsPanel({ projectId, selectedJobId, onSelectJob }: Props) {
               Retry Selected
             </Button>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </ExpandableSection>
 
-      {selectedJobId && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">
-              Job details ·{' '}
-              {d?.failure.label ||
-                statusDisplayLabel(
-                  d?.job.status ?? '',
-                  d?.job.error_code,
-                  d?.job.error_message
-                )}
-            </CardTitle>
-            <CardDescription>
-              Failure reason · Timeline · Screenshots · Live logs · AI analysis · Retry history
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {details.isLoading ? (
-              <Skeleton className="h-40 w-full" />
-            ) : d ? (
-              <>
-                <div className="rounded-md border p-3 space-y-2 text-sm">
-                  <div className="flex flex-wrap gap-2 items-center">
-                    <Badge className="text-[10px]">{d.failure.label}</Badge>
-                    {d.job.error_code && (
-                      <Badge className="text-[10px] font-mono bg-transparent">{d.job.error_code}</Badge>
-                    )}
-                    <span className="text-xs text-muted-foreground">
-                      Retries: {d.job.retry_count ?? 0}
-                    </span>
-                  </div>
-                  <p>
-                    <span className="text-muted-foreground">Reason: </span>
-                    {d.failure.message || d.job.error_message || '—'}
-                  </p>
-                  <p>
-                    <span className="text-muted-foreground">AI analysis: </span>
-                    {d.failure.analysis.summary}
-                  </p>
-                  <p>
-                    <span className="text-muted-foreground">Suggested fix: </span>
-                    {d.failure.suggestedFix || d.failure.analysis.suggestedAction}
-                  </p>
-                  {d.failure.stack && (
-                    <pre className="max-h-28 overflow-auto rounded bg-muted/40 p-2 text-[10px] whitespace-pre-wrap">
-                      {d.failure.stack}
-                    </pre>
+      {selectedJobId ? (
+        <ExpandableSection
+          title={`Job details · ${
+            d?.failure.label ||
+            statusDisplayLabel(
+              d?.job.status ?? '',
+              d?.job.error_code,
+              d?.job.error_message,
+              d?.job.pause_reason
+            )
+          }`}
+          description="Failure reason · Timeline · Screenshots · Live logs"
+          defaultOpen={false}
+        >
+          {details.isLoading ? (
+            <Skeleton className="h-40 w-full" />
+          ) : d ? (
+            <>
+              <div className="rounded-md border p-3 space-y-2 text-sm">
+                <div className="flex flex-wrap gap-2 items-center">
+                  <Badge className="text-[10px]">{d.failure.label}</Badge>
+                  {d.job.error_code && (
+                    <Badge className="text-[10px] font-mono bg-transparent">{d.job.error_code}</Badge>
                   )}
-                  {Array.isArray(d.failure.retryHistory) && d.failure.retryHistory.length > 0 && (
-                    <div>
-                      <p className="text-xs font-medium mb-1">Retry history</p>
-                      <ul className="text-xs text-muted-foreground space-y-0.5">
-                        {d.failure.retryHistory.map((h, idx) => (
-                          <li key={idx}>{JSON.stringify(h)}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
+                  <span className="text-xs text-muted-foreground">
+                    Retries: {d.job.retry_count ?? 0}
+                  </span>
                 </div>
+                <p>
+                  <span className="text-muted-foreground">Reason: </span>
+                  {d.failure.message || d.job.error_message || '—'}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">AI analysis: </span>
+                  {d.failure.analysis.summary}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Suggested fix: </span>
+                  {d.failure.suggestedFix || d.failure.analysis.suggestedAction}
+                </p>
+              </div>
 
-                <div>
-                  <p className="text-xs font-medium mb-2">Execution timeline</p>
-                  <ul className="space-y-1 text-sm">
-                    {d.timeline.map((t) => (
-                      <li key={t.stepIndex} className="flex gap-2 items-start">
-                        <span className="tabular-nums text-muted-foreground w-6">
-                          {t.status === 'done' ? '✓' : t.status === 'failed' ? '✗' : '·'}
+              <div>
+                <p className="text-xs font-medium mb-2">Execution timeline</p>
+                <ul className="space-y-1 text-sm">
+                  {d.timeline.map((t) => (
+                    <li key={t.stepIndex} className="flex gap-2 items-start">
+                      <span className="tabular-nums text-muted-foreground w-6">
+                        {t.status === 'done' ? '✓' : t.status === 'failed' ? '✗' : '·'}
+                      </span>
+                      <div>
+                        <p className="capitalize">
+                          {String(t.action).replace(/_/g, ' ')}{' '}
+                          <span className="text-[10px] text-muted-foreground">{t.status}</span>
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium mb-2">Live logs</p>
+                <div className="max-h-56 overflow-y-auto rounded border font-mono text-[11px] divide-y">
+                  {logLines.length === 0 ? (
+                    <p className="p-2 text-muted-foreground">No logs yet…</p>
+                  ) : (
+                    logLines.map((l) => (
+                      <div key={l.id} className="px-2 py-1 flex gap-2">
+                        <span className="text-muted-foreground shrink-0 tabular-nums">
+                          {new Date(l.created_at).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit',
+                          })}
                         </span>
-                        <div>
-                          <p className="capitalize">
-                            {String(t.action).replace(/_/g, ' ')}{' '}
-                            <span className="text-[10px] text-muted-foreground">{t.status}</span>
-                          </p>
-                          {(t.durationMs != null || t.error) && (
-                            <p className="text-[10px] text-muted-foreground">
-                              {t.durationMs != null ? `${t.durationMs}ms` : ''}
-                              {t.error ? ` · ${t.error}` : ''}
-                            </p>
-                          )}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
+                        <span
+                          className={
+                            l.level === 'error'
+                              ? 'text-red-600'
+                              : l.level === 'warn'
+                                ? 'text-amber-700'
+                                : ''
+                          }
+                        >
+                          {l.message}
+                        </span>
+                      </div>
+                    ))
+                  )}
                 </div>
-
-                {d.screenshots.length > 0 && (
-                  <div>
-                    <p className="text-xs font-medium mb-2">Screenshots</p>
-                    <div className="flex gap-2 overflow-x-auto pb-1">
-                      {d.screenshots.map((s) =>
-                        s.url ? (
-                          <a
-                            key={s.id}
-                            href={s.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="shrink-0 w-36 space-y-1"
-                          >
-                            <img
-                              src={s.url}
-                              alt={s.label}
-                              className="h-24 w-36 object-cover rounded border"
-                            />
-                            <p className="text-[10px] text-muted-foreground truncate">{s.label}</p>
-                          </a>
-                        ) : (
-                          <div key={s.id} className="text-[10px] text-muted-foreground">
-                            {s.label} (path only)
-                          </div>
-                        )
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                <div>
-                  <p className="text-xs font-medium mb-2">Live logs</p>
-                  <div className="max-h-56 overflow-y-auto rounded border font-mono text-[11px] divide-y">
-                    {logLines.length === 0 ? (
-                      <p className="p-2 text-muted-foreground">No logs yet…</p>
-                    ) : (
-                      logLines.map((l) => (
-                        <div key={l.id} className="px-2 py-1 flex gap-2">
-                          <span className="text-muted-foreground shrink-0 tabular-nums">
-                            {new Date(l.created_at).toLocaleTimeString([], {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                              second: '2-digit',
-                            })}
-                          </span>
-                          <span
-                            className={
-                              l.level === 'error'
-                                ? 'text-red-600'
-                                : l.level === 'warn'
-                                  ? 'text-amber-700'
-                                  : ''
-                            }
-                          >
-                            {l.message}
-                          </span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                {onSelectJob && (
-                  <Button size="sm" variant="ghost" onClick={() => onSelectJob(selectedJobId)}>
-                    Focus job in list
-                  </Button>
-                )}
-              </>
-            ) : (
-              <p className="text-sm text-muted-foreground">Unable to load job details.</p>
-            )}
-          </CardContent>
-        </Card>
-      )}
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">Unable to load job details.</p>
+          )}
+        </ExpandableSection>
+      ) : null}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { PartyPopper, Sparkles } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useWorkflow } from '@/hooks/use-workflow';
+import { useBeeExecutionProgress } from '@/hooks/use-bee-execution-progress';
 
 interface WorkflowCelebrationProps {
   projectId: string;
@@ -11,8 +12,10 @@ interface WorkflowCelebrationProps {
 
 export function WorkflowCelebration({ projectId }: WorkflowCelebrationProps) {
   const { allComplete, completedCount, totalSteps } = useWorkflow(projectId);
+  const bee = useBeeExecutionProgress(projectId);
+  const jobsOpen = (bee.data?.totalJobs ?? 0) > 0 && !bee.data?.executionComplete;
 
-  if (!allComplete) return null;
+  if (!allComplete || jobsOpen) return null;
 
   return (
     <motion.div
