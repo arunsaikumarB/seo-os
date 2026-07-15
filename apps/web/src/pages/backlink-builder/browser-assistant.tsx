@@ -3,7 +3,6 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
-  Camera,
   CheckCircle2,
   Globe,
   Loader2,
@@ -25,6 +24,7 @@ import {
   NeedsYourActionQueue,
   useInterventions,
 } from '@/components/browser/needs-your-action-queue';
+import { LiveBrowserView } from '@/components/browser/live-browser-view';
 
 type InterventionDetail = {
   jobId: string;
@@ -67,7 +67,6 @@ export function BrowserAssistantPage() {
   const { opportunity: selectedOpp, setOpportunity } = useCurrentOpportunity(projectId);
   const [planId, setPlanId] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(!jobId);
-  const [liveUrl, setLiveUrl] = useState<string | null>(null);
   const interventions = useInterventions(projectId, 2_000);
 
   const intervention = useQuery({
@@ -79,23 +78,6 @@ export function BrowserAssistantPage() {
     enabled: !!projectId && !!jobId,
     refetchInterval: 2_000,
   });
-
-  const capture = useQuery({
-    queryKey: ['bee-intervention-live', projectId, jobId],
-    queryFn: () =>
-      request<{
-        data: { ok: boolean; live: boolean; url: string | null; pageUrl: string | null };
-      }>(`/v1/projects/${projectId}/browser/jobs/${jobId}/intervention/capture`, {
-        method: 'POST',
-      }),
-    enabled: !!projectId && !!jobId && Boolean(intervention.data?.data.needsAction),
-    refetchInterval: 2_500,
-  });
-
-  useEffect(() => {
-    const url = capture.data?.data.url ?? intervention.data?.data.screenshot?.url ?? null;
-    if (url) setLiveUrl(url);
-  }, [capture.data?.data.url, intervention.data?.data.screenshot?.url]);
 
   const checkClear = useMutation({
     mutationFn: () =>
@@ -327,63 +309,11 @@ export function BrowserAssistantPage() {
                       </p>
                     </div>
 
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-sm font-medium flex items-center gap-2">
-                          Live browser
-                          {capture.data?.data.live ? (
-                            <Badge className="text-[10px] bg-emerald-500/15 text-emerald-700 border-transparent">
-                              Live
-                            </Badge>
-                          ) : (
-                            <Badge className="text-[10px] bg-muted text-muted-foreground">
-                              Session view
-                            </Badge>
-                          )}
-                          {capture.isFetching ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-                          ) : null}
-                        </p>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() =>
-                            qc.invalidateQueries({
-                              queryKey: ['bee-intervention-live', projectId, jobId],
-                            })
-                          }
-                        >
-                          <Camera className="h-3.5 w-3.5 mr-1" /> Take Screenshot
-                        </Button>
-                      </div>
-                      <div className="relative rounded-lg border bg-black/90 overflow-hidden min-h-[280px] flex items-center justify-center">
-                        {liveUrl ? (
-                          <img
-                            src={liveUrl}
-                            alt={`Live view of ${d.website}`}
-                            className="max-h-[420px] w-full object-contain"
-                          />
-                        ) : (
-                          <p className="text-sm text-muted-foreground p-6 text-center">
-                            Connecting to the Playwright session…
-                            <br />
-                            <span className="text-xs">
-                              Cookies, filled forms, and uploads are preserved — nothing is lost.
-                            </span>
-                          </p>
-                        )}
-                      </div>
-                      {d.liveUrl ? (
-                        <p className="text-[11px] text-muted-foreground truncate">
-                          Page: {d.pageTitle || d.liveUrl}
-                        </p>
-                      ) : null}
-                      <p className="text-xs text-muted-foreground">
-                        Complete {d.reason.toLowerCase()} in the live Playwright session for this job
-                        (same cookies, forms, and uploads). AI watches and resumes automatically —
-                        no Resume or Retry button.
-                      </p>
-                    </div>
+                    <LiveBrowserView
+                      projectId={projectId}
+                      jobId={jobId}
+                      website={d.website}
+                    />
 
                     <div className="flex flex-wrap gap-2">
                       {d.gate === 'human_approval' ? (
@@ -426,7 +356,7 @@ export function BrowserAssistantPage() {
                         }
                         disabled={checkClear.isPending}
                       >
-                        <Camera className="h-3.5 w-3.5 mr-1" /> Refresh status
+                        Refresh status
                       </Button>
                     </div>
                   </CardContent>

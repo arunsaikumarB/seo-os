@@ -47,7 +47,9 @@ import { getSupabaseAdmin } from '../../lib/supabase.js';
 import {
   captureInterventionView,
   checkInterventionCleared,
+  dispatchInterventionInput,
   getIntervention,
+  getInterventionFrame,
   listInterventions,
 } from '../../modules/browser-execution/bee-intervention.service.js';
 
@@ -345,6 +347,70 @@ browserExecutionRouter.post(
       const data = await checkInterventionCleared(
         param(req.params.projectId),
         param(req.params.jobId)
+      );
+      res.json({ data });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.post(
+  '/browser/jobs/:jobId/intervention/frame',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      const data = await getInterventionFrame(
+        param(req.params.projectId),
+        param(req.params.jobId)
+      );
+      if (!data) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Job not found');
+      res.json({ data });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.post(
+  '/browser/jobs/:jobId/intervention/input',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      const body = z
+        .object({
+          type: z.enum([
+            'click',
+            'dblclick',
+            'mousemove',
+            'mousedown',
+            'mouseup',
+            'scroll',
+            'keydown',
+            'keyup',
+            'type',
+          ]),
+          x: z.number().finite().optional(),
+          y: z.number().finite().optional(),
+          button: z.enum(['left', 'right', 'middle']).optional(),
+          deltaX: z.number().finite().optional(),
+          deltaY: z.number().finite().optional(),
+          key: z.string().max(40).optional(),
+          text: z.string().max(500).optional(),
+          modifiers: z
+            .array(z.enum(['Alt', 'Control', 'Meta', 'Shift']))
+            .max(4)
+            .optional(),
+        })
+        .parse(req.body);
+      const data = await dispatchInterventionInput(
+        param(req.params.projectId),
+        param(req.params.jobId),
+        body
       );
       res.json({ data });
     } catch (err) {

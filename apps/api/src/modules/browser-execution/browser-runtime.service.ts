@@ -187,6 +187,10 @@ export class BrowserExecutionService {
     return this.capture('navigated');
   }
 
+  hasLivePage(): boolean {
+    return Boolean(this.page && !this.page.isClosed());
+  }
+
   async capture(_label: string): Promise<PageCapture> {
     if (!this.page) throw new Error('No page');
     const html = await this.page.content();
@@ -214,6 +218,104 @@ export class BrowserExecutionService {
       title: await this.page.title(),
       detectedGates,
     };
+  }
+
+  /** Lightweight frame for interactive remote control (no HTML scrape). */
+  async captureFrame(quality = 55): Promise<{
+    screenshotBase64: string;
+    url: string;
+    title: string;
+    viewport: { width: number; height: number };
+  }> {
+    if (!this.page || this.page.isClosed()) throw new Error('No live page');
+    const viewport = this.page.viewportSize() ?? { width: 1280, height: 720 };
+    const buf = await this.page.screenshot({ type: 'jpeg', quality, fullPage: false });
+    return {
+      screenshotBase64: buf.toString('base64'),
+      url: this.page.url(),
+      title: await this.page.title().catch(() => ''),
+      viewport,
+    };
+  }
+
+  async dispatchRemoteInput(event: {
+    type:
+      | 'click'
+      | 'dblclick'
+      | 'mousemove'
+      | 'mousedown'
+      | 'mouseup'
+      | 'scroll'
+      | 'keydown'
+      | 'keyup'
+      | 'type';
+    x?: number;
+    y?: number;
+    button?: 'left' | 'right' | 'middle';
+    deltaX?: number;
+    deltaY?: number;
+    key?: string;
+    text?: string;
+    modifiers?: Array<'Alt' | 'Control' | 'Meta' | 'Shift'>;
+  }): Promise<void> {
+    if (!this.page || this.page.isClosed()) throw new Error('No live page');
+    const page = this.page;
+    const button = event.button ?? 'left';
+    const mods = event.modifiers ?? [];
+
+    switch (event.type) {
+      case 'click': {
+        if (event.x == null || event.y == null) throw new Error('click requires x,y');
+        await page.mouse.click(event.x, event.y, { button });
+        break;
+      }
+      case 'dblclick': {
+        if (event.x == null || event.y == null) throw new Error('dblclick requires x,y');
+        await page.mouse.dblclick(event.x, event.y, { button });
+        break;
+      }
+      case 'mousemove': {
+        if (event.x == null || event.y == null) throw new Error('mousemove requires x,y');
+        await page.mouse.move(event.x, event.y);
+        break;
+      }
+      case 'mousedown': {
+        if (event.x == null || event.y == null) throw new Error('mousedown requires x,y');
+        await page.mouse.move(event.x, event.y);
+        await page.mouse.down({ button });
+        break;
+      }
+      case 'mouseup': {
+        if (event.x != null && event.y != null) await page.mouse.move(event.x, event.y);
+        await page.mouse.up({ button });
+        break;
+      }
+      case 'scroll': {
+        if (event.x != null && event.y != null) await page.mouse.move(event.x, event.y);
+        await page.mouse.wheel(event.deltaX ?? 0, event.deltaY ?? 0);
+        break;
+      }
+      case 'type': {
+        const text = event.text ?? '';
+        if (!text) return;
+        await page.keyboard.insertText(text);
+        break;
+      }
+      case 'keydown': {
+        if (!event.key) throw new Error('keydown requires key');
+        for (const m of mods) await page.keyboard.down(m);
+        await page.keyboard.down(event.key);
+        break;
+      }
+      case 'keyup': {
+        if (!event.key) throw new Error('keyup requires key');
+        await page.keyboard.up(event.key);
+        for (const m of [...mods].reverse()) await page.keyboard.up(m);
+        break;
+      }
+      default:
+        throw new Error(`Unsupported remote input: ${(event as { type: string }).type}`);
+    }
   }
 
   async fillFields(mapping: Record<string, unknown>): Promise<{ filled: string[]; missing: string[] }> {

@@ -157,10 +157,23 @@ async function pauseForGate(params: {
     pause_reason: gate,
     current_step_index: stepIndex,
   });
+  let pageUrl: string | undefined;
+  try {
+    if (sessionId) {
+      const runtime = getSessionRuntime(sessionId);
+      if (runtime.hasLivePage()) {
+        const snap = await runtime.captureFrame(40);
+        pageUrl = snap.url;
+      }
+    }
+  } catch {
+    /* optional */
+  }
   await mergeJobMetrics(workspaceId, jobId, {
     pauseReason: gate,
     pausedAt: new Date().toISOString(),
-    pauseContext: params.context ?? {},
+    lastUrl: pageUrl ?? params.context?.url ?? null,
+    pauseContext: { ...(params.context ?? {}), url: pageUrl ?? params.context?.url },
   });
   await appendLog(workspaceId, jobId, 'warn', `Waiting for User — ${gate}`, {
     nonNegotiable: true,

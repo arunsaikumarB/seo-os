@@ -6,10 +6,14 @@ import { randomUUID } from 'node:crypto';
 import { isWatchableGate, type ExecutionGate } from '@seo-os/backlink-builder';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { logger } from '../../lib/logger.js';
+import { DEFAULT_FEATURE_FLAGS } from '@seo-os/shared';
 import { getSessionRuntime } from './browser-runtime.service.js';
 import { autoResumeJob, getJob, listJobs, resumeJob } from './bee.service.js';
 import { PageWatcher } from './page-watcher.js';
-import { persistSessionStorageState } from './bee-session.js';
+import {
+  loadStorageStateFromSession,
+  persistSessionStorageState,
+} from './bee-session.js';
 
 export type InterventionGate =
   | 'login'
@@ -317,11 +321,157 @@ export async function getIntervention(workspaceId: string, jobId: string) {
   };
 }
 
+/** Reattach / relaunch Playwright so the user can interact with the same session. */
+async function ensureLiveInterventionSession(
+  workspaceId: string,
+  job: Record<string, unknown>
+): Promise<{ ok: boolean; sessionId: string; restored: boolean; message?: string }> {
+  const sessionId = String(job.session_id ?? '');
+  if (!sessionId) {
+    return { ok: false, sessionId: '', restored: false, message: 'No browser session on this job' };
+  }
+  const runtime = getSessionRuntime(sessionId);
+  if (runtime.hasLivePage()) {
+    return { ok: true, sessionId, restored: false };
+  }
+
+  const { data: sess } = await getSupabaseAdmin()
+    .from('browser_sessions')
+    .select('*')
+    .eq('id', sessionId)
+    .maybeSingle();
+  const storageState = sess ? await loadStorageStateFromSession(sess) : null;
+  const metrics = (job.metrics as { pauseContext?: { url?: string }; lastUrl?: string } | null) ?? null;
+  const site = String(job.site_domain ?? '');
+  const targetUrl =
+    metrics?.pauseContext?.url ||
+    metrics?.lastUrl ||
+    (site ? (site.startsWith('http') ? site : `https://${site}`) : '');
+
+  try {
+    await runtime.launch({
+      mode: DEFAULT_FEATURE_FLAGS.bee_headed_debug ? 'headed' : 'headless',
+      storageState: storageState ?? undefined,
+    });
+    if (targetUrl) {
+      await runtime.navigate(targetUrl, 25_000).catch((err) => {
+        logger.warn({ err, sessionId, targetUrl }, 'Intervention restore navigate soft-failed');
+      });
+    }
+    await getSupabaseAdmin()
+      .from('browser_sessions')
+      .update({ status: 'paused', updated_at: new Date().toISOString() })
+      .eq('id', sessionId);
+    logger.info({ workspaceId, sessionId, targetUrl }, 'Restored live browser for intervention');
+    return { ok: true, sessionId, restored: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Could not restore browser session';
+    logger.warn({ err, sessionId }, 'Failed to restore intervention browser');
+    return { ok: false, sessionId, restored: false, message };
+  }
+}
+
+export async function getInterventionFrame(workspaceId: string, jobId: string) {
+  const job = await getJob(workspaceId, jobId);
+  if (!job) return null;
+  const ensured = await ensureLiveInterventionSession(workspaceId, job as Record<string, unknown>);
+  if (!ensured.ok) {
+    return {
+      ok: false,
+      live: false,
+      interactive: false,
+      restored: ensured.restored,
+      message: ensured.message ?? 'Browser session unavailable',
+      dataUrl: null as string | null,
+      pageUrl: null as string | null,
+      title: null as string | null,
+      viewport: null as { width: number; height: number } | null,
+    };
+  }
+  try {
+    const runtime = getSessionRuntime(ensured.sessionId);
+    const frame = await runtime.captureFrame(52);
+    return {
+      ok: true,
+      live: true,
+      interactive: true,
+      restored: ensured.restored,
+      message: ensured.restored ? 'Session restored — you can interact now' : 'Connected',
+      dataUrl: `data:image/jpeg;base64,${frame.screenshotBase64}`,
+      pageUrl: frame.url,
+      title: frame.title,
+      viewport: frame.viewport,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      live: false,
+      interactive: false,
+      restored: ensured.restored,
+      message: err instanceof Error ? err.message : 'Frame capture failed',
+      dataUrl: null,
+      pageUrl: null,
+      title: null,
+      viewport: null,
+    };
+  }
+}
+
+export async function dispatchInterventionInput(
+  workspaceId: string,
+  jobId: string,
+  event: {
+    type:
+      | 'click'
+      | 'dblclick'
+      | 'mousemove'
+      | 'mousedown'
+      | 'mouseup'
+      | 'scroll'
+      | 'keydown'
+      | 'keyup'
+      | 'type';
+    x?: number;
+    y?: number;
+    button?: 'left' | 'right' | 'middle';
+    deltaX?: number;
+    deltaY?: number;
+    key?: string;
+    text?: string;
+    modifiers?: Array<'Alt' | 'Control' | 'Meta' | 'Shift'>;
+  }
+) {
+  const job = await getJob(workspaceId, jobId);
+  if (!job) return { ok: false, message: 'Job not found' };
+  if (!isInterventionStatus(String(job.status))) {
+    return { ok: false, message: 'Job is no longer waiting for user action' };
+  }
+  const ensured = await ensureLiveInterventionSession(workspaceId, job as Record<string, unknown>);
+  if (!ensured.ok) {
+    return { ok: false, message: ensured.message ?? 'No live session' };
+  }
+  try {
+    const runtime = getSessionRuntime(ensured.sessionId);
+    await runtime.dispatchRemoteInput(event);
+    // Soft persist cookies after auth-critical interactions so refresh never loses login progress
+    if (event.type === 'click' || event.type === 'type' || event.type === 'keydown') {
+      void persistSessionStorageState(ensured.sessionId).catch(() => undefined);
+    }
+    return { ok: true, message: 'ok', restored: ensured.restored };
+  } catch (err) {
+    return {
+      ok: false,
+      message: err instanceof Error ? err.message : 'Input failed',
+    };
+  }
+}
+
 export async function captureInterventionView(workspaceId: string, jobId: string) {
   const job = await getJob(workspaceId, jobId);
   if (!job) return null;
-  const sessionId = String(job.session_id ?? '');
-  if (sessionId) {
+  const ensured = await ensureLiveInterventionSession(workspaceId, job as Record<string, unknown>);
+  const sessionId = ensured.sessionId;
+  if (sessionId && ensured.ok) {
     try {
       const runtime = getSessionRuntime(sessionId);
       const cap = await runtime.capture('intervention_live');
@@ -330,6 +480,8 @@ export async function captureInterventionView(workspaceId: string, jobId: string
         return {
           ok: true,
           live: true,
+          interactive: true,
+          restored: ensured.restored,
           url: uploaded.url,
           pageUrl: cap.url,
           title: cap.title,
