@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useMemo, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { FileText, Image as ImageIcon, Plus, Send, Video } from 'lucide-react';
+import { FileText, Image as ImageIcon, Plus, Send, Sparkles, Video } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -35,37 +35,157 @@ type ContentPackRow = {
   opportunities?: { id: string; title: string; domain: string; opportunity_type: string } | null;
 };
 
-const PACK_TYPES = [
-  'guest_post',
-  'directory',
-  'profile',
-  'forum',
-  'qa_site',
-  'press_release',
-  'resource_page',
-  'broken_link',
-  'citation',
-  'digital_pr',
-  'web2',
-  'infographic',
-  'partnership',
-];
+type ContentIntelligence = {
+  opportunityId: string;
+  domain?: string | null;
+  websiteName?: string | null;
+  plan: {
+    mode: string;
+    modeLabel: string;
+    detectedType: string;
+    detectedTypeLabel: string;
+    storageType: string;
+    sections: string[];
+    requirements: {
+      requiredFields: string[];
+      mediaRequirements: { images: boolean; videos: boolean; imageNotes?: string; videoNotes?: string };
+      loginRequired: boolean;
+      captchaRequired: boolean;
+    };
+    openImageStudio: boolean;
+    openVideoStudio: boolean;
+    confidence: number;
+    reason: string;
+  };
+  quality: {
+    seoScore: number;
+    readabilityScore: number;
+    uniquenessScore: number;
+    eeatScore: number;
+    overall: number;
+    recommendations: string[];
+  } | null;
+  latestPackId: string | null;
+  packStatus: string | null;
+  imagesReady: boolean;
+  videoReady: boolean;
+  submissionReady: boolean;
+  estimatedApprovalProbability: number;
+  estimatedReviewHours: number;
+  reusedLearning: boolean;
+  requiredAssets: {
+    fields: string[];
+    images: boolean;
+    videos: boolean;
+  };
+};
+
+const MODE_HINTS: Record<string, string> = {
+  guest_post: 'Blog editor with SEO metadata, author bio, FAQs, and featured image fields.',
+  article: 'Article submission package with headings, body, references, and meta tags.',
+  directory: 'Business listing fields — NAP, descriptions, category, logo, hours.',
+  profile: 'Company profile — about, services, founder, social links, cover.',
+  forum: 'Natural discussion opener, helpful reply, and anchor placement.',
+  qa: 'Question, answer, supporting explanation, and reference links.',
+  press: 'Press release — headline, quotes, boilerplate, media contact.',
+  image: 'Image submission metadata — redirecting Image Studio for assets.',
+  infographic: 'Infographic package — Image Studio generates the visual.',
+  video: 'Video metadata package — titles, tags, transcript, chapters.',
+  resource: 'Resource page suggestion with description and anchors.',
+  outreach: 'Outreach-ready replacement or partnership content.',
+  generic: 'General submission fields detected from the destination site.',
+};
 
 type StudioTab = 'articles' | 'images' | 'videos' | 'metadata' | 'templates';
 
-function resolvePackType(opportunityType: string): string {
-  if (PACK_TYPES.includes(opportunityType)) return opportunityType;
-  const aliases: Record<string, string> = {
-    business_listing: 'directory',
-    citation: 'citation',
-    image_submission: 'infographic',
-    web_2_0: 'web2',
-  };
-  return aliases[opportunityType] ?? opportunityType ?? 'guest_post';
+function PreviewField({ label, value }: { label: string; value: unknown }) {
+  if (value == null || value === '') return null;
+  const text =
+    typeof value === 'string'
+      ? value
+      : Array.isArray(value)
+        ? JSON.stringify(value, null, 2)
+        : typeof value === 'object'
+          ? JSON.stringify(value, null, 2)
+          : String(value);
+  return (
+    <div className="space-y-0.5">
+      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="text-sm whitespace-pre-wrap break-words">{text}</p>
+    </div>
+  );
+}
+
+function ContentPackPreview({ pack, mode }: { pack: Record<string, unknown>; mode: string }) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 rounded-md border p-3 bg-muted/20">
+      {(mode === 'directory' || mode === 'profile') && (
+        <>
+          <PreviewField label="Business name" value={pack.businessName} />
+          <PreviewField label="Category" value={(pack.categorySuggestions as string[])?.[0]} />
+          <PreviewField label="Short description" value={pack.shortDescription} />
+          <PreviewField label="Long description" value={pack.longDescription} />
+          <PreviewField label="Address" value={pack.address} />
+          <PreviewField label="Phone" value={pack.phone} />
+          <PreviewField label="Email" value={pack.email} />
+          <PreviewField label="Hours" value={pack.businessHours} />
+          <PreviewField label="Social links" value={pack.socialLinks} />
+          <PreviewField label="Services" value={pack.services} />
+        </>
+      )}
+      {(mode === 'guest_post' || mode === 'article' || mode === 'resource') && (
+        <>
+          <PreviewField label="SEO title" value={pack.seoTitle ?? pack.title} />
+          <PreviewField label="Slug" value={pack.slug} />
+          <PreviewField label="Meta description" value={pack.metaDescription} />
+          <PreviewField label="Excerpt" value={pack.excerpt} />
+          <PreviewField label="Author bio" value={pack.authorBio} />
+          <PreviewField label="CTA" value={pack.cta} />
+          <PreviewField label="H2 outline" value={pack.h2} />
+          <PreviewField label="FAQs" value={pack.faq} />
+        </>
+      )}
+      {mode === 'forum' && <PreviewField label="Discussion" value={pack.discussionPosts} />}
+      {mode === 'qa' && (
+        <>
+          <PreviewField label="Question" value={pack.question} />
+          <PreviewField label="Answer" value={pack.answer} />
+        </>
+      )}
+      {mode === 'press' && (
+        <>
+          <PreviewField label="Headline" value={pack.headline} />
+          <PreviewField label="Subheading" value={pack.subheading} />
+          <PreviewField label="Quotes" value={pack.quotes} />
+          <PreviewField label="Boilerplate" value={pack.boilerplate} />
+        </>
+      )}
+      {(mode === 'image' || mode === 'infographic') && (
+        <PreviewField label="Image metadata" value={pack.imageMetadata} />
+      )}
+      {mode === 'video' && <PreviewField label="Video metadata" value={pack.videoMetadata} />}
+      <PreviewField label="Internal links" value={pack.internalLinks} />
+      <PreviewField label="External links" value={pack.externalLinks ?? pack.suggestedLinks} />
+      <PreviewField label="Body" value={pack.body} />
+      <PreviewField label="Schema" value={pack.schemaJsonLd ?? pack.schema} />
+      {typeof pack.quality === 'object' && pack.quality != null ? (
+        <PreviewField
+          label="Quality scores"
+          value={{
+            overall: (pack.quality as Record<string, unknown>).overall,
+            seo: (pack.quality as Record<string, unknown>).seoScore,
+            readability: (pack.quality as Record<string, unknown>).readabilityScore,
+            eeat: (pack.quality as Record<string, unknown>).eeatScore,
+          }}
+        />
+      ) : null}
+    </div>
+  );
 }
 
 export function ContentLibraryPage() {
   const { projectId = '' } = useParams();
+  const navigate = useNavigate();
   const { request } = useApi();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<StudioTab>('articles');
@@ -73,18 +193,28 @@ export function ContentLibraryPage() {
   const [body, setBody] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const { opportunity: selectedOpp, setOpportunity } = useCurrentOpportunity(projectId);
-  const [packType, setPackType] = useState('guest_post');
   const [editingPackId, setEditingPackId] = useState<string | null>(null);
   const [packJson, setPackJson] = useState('');
+  const [showRawJson, setShowRawJson] = useState(false);
 
   const handleSelectOpp = (opp: typeof selectedOpp) => {
     setOpportunity(opp);
-    if (opp) setPackType(resolvePackType(String(opp.opportunity_type)));
+    setEditingPackId(null);
   };
 
-  useEffect(() => {
-    if (selectedOpp) setPackType(resolvePackType(String(selectedOpp.opportunity_type)));
-  }, [selectedOpp?.id, selectedOpp?.opportunity_type]);
+  const intelligence = useQuery({
+    queryKey: ['content-intelligence', projectId, selectedOpp?.id],
+    queryFn: () =>
+      request<{ data: ContentIntelligence }>(
+        `/v1/projects/${projectId}/backlink-builder/opportunities/${selectedOpp!.id}/content-intelligence`
+      ),
+    enabled: !!projectId && !!selectedOpp?.id,
+  });
+
+  const intel = intelligence.data?.data;
+  const studioMode = intel?.plan.mode ?? selectedOpp?.studio_mode ?? 'generic';
+  const modeLabel =
+    intel?.plan.modeLabel ?? selectedOpp?.studio_mode_label ?? 'General Submission Mode';
 
   const drafts = useQuery({
     queryKey: ['content-drafts', projectId],
@@ -134,18 +264,25 @@ export function ContentLibraryPage() {
   const generatePack = useMutation({
     mutationFn: () => {
       if (!selectedOpp) throw new Error('Select an approved opportunity first');
-      return request(
+      return request<{ data: ContentPackRow & { intelligence?: Record<string, unknown> } }>(
         `/v1/projects/${projectId}/backlink-builder/opportunities/${selectedOpp.id}/content-pack`,
-        {
-          method: 'POST',
-          body: JSON.stringify({ type: packType }),
-        }
+        { method: 'POST', body: JSON.stringify({}) }
       );
     },
-    onSuccess: () => {
-      toast.success(`Content pack generated for ${selectedOpp?.website ?? 'opportunity'}`);
+    onSuccess: (res) => {
+      const mode = String(res.data?.intelligence?.modeLabel ?? modeLabel);
+      toast.success(`Generated ${mode} package for ${selectedOpp?.website ?? 'opportunity'}`);
       queryClient.invalidateQueries({ queryKey: ['content-packs', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['content-intelligence', projectId, selectedOpp?.id] });
       queryClient.invalidateQueries({ queryKey: ['approved-opportunities', projectId] });
+      if (res.data?.id) {
+        setEditingPackId(res.data.id);
+        setPackJson(JSON.stringify(res.data.pack ?? {}, null, 2));
+      }
+      const openImage = Boolean(res.data?.intelligence?.openImageStudio);
+      const openVideo = Boolean(res.data?.intelligence?.openVideoStudio);
+      if (openImage) navigate(`/projects/${projectId}/backlink-builder/image-studio`);
+      else if (openVideo) navigate(`/projects/${projectId}/backlink-builder/video-studio`);
     },
     onError: (err: Error) => toast.error(err.message || 'Pack generation failed'),
   });
@@ -159,9 +296,10 @@ export function ContentLibraryPage() {
       });
     },
     onSuccess: () => {
-      toast.success('Content pack saved');
+      toast.success('Content pack approved & saved');
       setEditingPackId(null);
       queryClient.invalidateQueries({ queryKey: ['content-packs', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['content-intelligence', projectId, selectedOpp?.id] });
     },
     onError: (err: Error) => toast.error(err.message || 'Save failed'),
   });
@@ -173,6 +311,16 @@ export function ContentLibraryPage() {
     () => packList.find((p) => p.id === editingPackId) ?? null,
     [packList, editingPackId]
   );
+  const previewPack = useMemo(() => {
+    if (editingPack) {
+      try {
+        return JSON.parse(packJson) as Record<string, unknown>;
+      } catch {
+        return editingPack.pack ?? {};
+      }
+    }
+    return null;
+  }, [editingPack, packJson]);
 
   const tabs: { id: StudioTab; label: string; icon: typeof FileText }[] = [
     { id: 'articles', label: 'Articles', icon: FileText },
@@ -182,15 +330,18 @@ export function ContentLibraryPage() {
     { id: 'templates', label: 'Templates', icon: FileText },
   ];
 
+  const sections = intel?.plan.sections ?? [];
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <FileText className="h-6 w-6" /> Content Studio 2.0
+            <Sparkles className="h-6 w-6" /> Intelligent Content Studio
           </h1>
           <p className="text-muted-foreground">
-            Articles, Image Intelligence, video metadata, and reusable templates for backlink campaigns.
+            Auto-detects the destination backlink type and builds the exact submission package — no
+            manual content type selection.
           </p>
         </div>
         <div className="flex gap-2">
@@ -269,272 +420,410 @@ export function ContentLibraryPage() {
       {tab === 'templates' && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Templates</CardTitle>
+            <CardTitle className="text-base">Adaptive studio modes</CardTitle>
             <CardDescription>
-              Content pack types and image types reused across campaigns.
+              Modes switch automatically from destination website analysis — not user selection.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            <div>
-              <p className="font-medium mb-1">Article pack types</p>
-              <div className="flex flex-wrap gap-1">
-                {PACK_TYPES.map((t) => (
-                  <Badge key={t} className="text-[10px] capitalize">
-                    {t.replace(/_/g, ' ')}
-                  </Badge>
-                ))}
+          <CardContent className="space-y-2 text-sm">
+            {Object.entries(MODE_HINTS).map(([k, v]) => (
+              <div key={k} className="flex gap-2">
+                <Badge className="text-[10px] capitalize shrink-0">{k.replace(/_/g, ' ')}</Badge>
+                <p className="text-muted-foreground text-xs">{v}</p>
               </div>
-            </div>
-            <div>
-              <p className="font-medium mb-1">Image types</p>
-              <p className="text-muted-foreground text-xs">
-                Blog hero, featured, Open Graph, social covers, directory logos, infographics, and more —
-                powered by Image Intelligence.
-              </p>
-            </div>
+            ))}
           </CardContent>
         </Card>
       )}
 
       {tab === 'articles' && (
         <>
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Generate content pack</CardTitle>
-          <CardDescription>
-            Select an approved website. Content type and required fields are detected automatically.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <CurrentOpportunityBanner projectId={projectId} />
-          <OpportunitySelector
-            projectId={projectId}
-            selectedId={selectedOpp?.id ?? null}
-            onSelect={handleSelectOpp}
-            mode="content"
-            showTable={!selectedOpp}
-            allowClear
-          />
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Generate submission package</CardTitle>
+              <CardDescription>
+                Select an opportunity. AI studies the destination site, detects backlink type, and
+                generates only the required fields.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <CurrentOpportunityBanner projectId={projectId} />
+              <OpportunitySelector
+                projectId={projectId}
+                selectedId={selectedOpp?.id ?? null}
+                onSelect={handleSelectOpp}
+                mode="content"
+                showTable={!selectedOpp}
+                allowClear
+              />
 
-          {selectedOpp && (
-            <div className="flex flex-wrap gap-3 items-end">
-              <div className="space-y-1">
-                <Label htmlFor="pack-type">Content type</Label>
-                <select
-                  id="pack-type"
-                  className="flex h-9 rounded-md border border-input bg-transparent px-3 text-sm capitalize"
-                  value={packType}
-                  onChange={(e) => setPackType(e.target.value)}
-                >
-                  {!PACK_TYPES.includes(packType) && (
-                    <option value={packType}>{packType.replace(/_/g, ' ')}</option>
+              {selectedOpp && (
+                <div className="space-y-3">
+                  {intelligence.isLoading ? (
+                    <Skeleton className="h-28 w-full" />
+                  ) : intel ? (
+                    <div className="rounded-md border p-3 space-y-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge className="capitalize">{modeLabel}</Badge>
+                        <Badge className="capitalize bg-transparent">{intel.plan.detectedTypeLabel}</Badge>
+                        {intel.reusedLearning ? (
+                          <Badge className="text-[10px]">Learned requirements</Badge>
+                        ) : null}
+                        <span className="text-xs text-muted-foreground">
+                          Confidence {Math.round(intel.plan.confidence || 0)}%
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">{intel.plan.reason}</p>
+                      <p className="text-xs">{MODE_HINTS[studioMode] ?? MODE_HINTS.generic}</p>
+
+                      <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-5 text-sm">
+                        <div>
+                          <p className="text-[10px] text-muted-foreground">Quality</p>
+                          <p className="font-medium tabular-nums">
+                            {intel.quality?.overall ?? '—'}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground">SEO</p>
+                          <p className="font-medium tabular-nums">
+                            {intel.quality?.seoScore ?? '—'}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground">Images</p>
+                          <p className="font-medium">{intel.imagesReady ? 'Ready' : 'Pending'}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground">Video</p>
+                          <p className="font-medium">{intel.videoReady ? 'Ready' : 'N/A'}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground">Submission</p>
+                          <p className="font-medium">
+                            {intel.submissionReady ? 'Ready' : 'Draft needed'}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground">Est. approval</p>
+                          <p className="font-medium tabular-nums">
+                            {intel.estimatedApprovalProbability}%
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground">Est. review</p>
+                          <p className="font-medium tabular-nums">
+                            {intel.estimatedReviewHours}h
+                          </p>
+                        </div>
+                      </div>
+
+                      <div>
+                        <p className="text-xs font-medium mb-1">Required assets / fields</p>
+                        <div className="flex flex-wrap gap-1">
+                          {intel.requiredAssets.fields.slice(0, 24).map((f) => (
+                            <Badge key={f} className="text-[10px] bg-transparent">
+                              {f}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+
+                      {sections.length > 0 && (
+                        <div>
+                          <p className="text-xs font-medium mb-1">Studio sections</p>
+                          <div className="flex flex-wrap gap-1">
+                            {sections.map((s) => (
+                              <Badge key={s} className="text-[10px] capitalize">
+                                {s.replace(/_/g, ' ')}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Intelligence will load for this opportunity…
+                    </p>
                   )}
-                  {PACK_TYPES.map((t) => (
-                    <option key={t} value={t}>
-                      {t.replace(/_/g, ' ')}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <Button
-                disabled={!selectedOpp || generatePack.isPending}
-                onClick={() => generatePack.mutate()}
-              >
-                {generatePack.isPending ? 'Generating…' : 'Generate Content Pack'}
-              </Button>
-              <Button variant="outline" size="sm" asChild>
-                <Link to={`/projects/${projectId}/backlink-builder/image-studio`}>Image Studio</Link>
-              </Button>
-              <Button variant="outline" size="sm" asChild>
-                <Link to={`/projects/${projectId}/backlink-builder/video-studio`}>Video Studio</Link>
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Content packs</CardTitle>
-          <CardDescription>{packList.length} pack(s) — Estimated AI output until edited</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {packs.isLoading ? (
-            <Skeleton className="h-24 w-full" />
-          ) : packList.length === 0 ? (
-            <EmptyState
-              icon={FileText}
-              title="No content packs yet"
-              description="Generate a pack from an opportunity to start Content Studio 2.0."
-            />
-          ) : (
-            packList.map((p) => (
-              <div key={p.id} className="rounded-md border p-3 space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-medium">
-                      {p.opportunities?.title ?? p.backlink_type} · {p.opportunities?.domain ?? '—'}
-                    </p>
-                    <p className="text-xs text-muted-foreground capitalize">
-                      {p.backlink_type.replace(/_/g, ' ')} · {p.status}
-                    </p>
+                  {(intel?.plan.openImageStudio || intel?.plan.openVideoStudio) && (
+                    <div className="rounded-md border border-dashed p-3 text-sm space-y-2">
+                      <p>
+                        {intel.plan.openImageStudio
+                          ? 'This site requires image assets. Generate the metadata pack, then continue in Image Studio.'
+                          : 'This site requires video assets. Generate the metadata pack, then continue in Video Studio.'}
+                      </p>
+                      <Button
+                        size="sm"
+                        onClick={() =>
+                          navigate(
+                            intel.plan.openImageStudio
+                              ? `/projects/${projectId}/backlink-builder/image-studio`
+                              : `/projects/${projectId}/backlink-builder/video-studio`
+                          )
+                        }
+                      >
+                        Open {intel.plan.openImageStudio ? 'Image' : 'Video'} Studio
+                      </Button>
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      disabled={!selectedOpp || generatePack.isPending || intelligence.isLoading}
+                      onClick={() => generatePack.mutate()}
+                    >
+                      {generatePack.isPending
+                        ? 'Generating package…'
+                        : `Generate ${modeLabel.replace(/ Mode$/, '')} Package`}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!selectedOpp || intelligence.isFetching}
+                      onClick={() =>
+                        request<{ data: ContentIntelligence }>(
+                          `/v1/projects/${projectId}/backlink-builder/opportunities/${selectedOpp!.id}/content-intelligence?refresh=1`
+                        ).then(() => {
+                          intelligence.refetch();
+                          toast.success('Re-analyzed destination');
+                        })
+                      }
+                    >
+                      Re-analyze site
+                    </Button>
+                    <Button variant="outline" size="sm" asChild>
+                      <Link to={`/projects/${projectId}/backlink-builder/image-studio`}>
+                        Image Studio
+                      </Link>
+                    </Button>
+                    <Button variant="outline" size="sm" asChild>
+                      <Link to={`/projects/${projectId}/backlink-builder/video-studio`}>
+                        Video Studio
+                      </Link>
+                    </Button>
                   </div>
-                  <Badge className="text-[10px]">Estimated</Badge>
                 </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setEditingPackId(p.id);
-                    setPackJson(JSON.stringify(p.pack ?? {}, null, 2));
-                  }}
-                >
-                  Edit pack
-                </Button>
-              </div>
-            ))
-          )}
+              )}
+            </CardContent>
+          </Card>
 
-          {editingPack && (
-            <div className="space-y-2 rounded-md border p-3">
-              <Label htmlFor="pack-json">Editable pack JSON</Label>
-              <textarea
-                id="pack-json"
-                className="flex min-h-[220px] w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                value={packJson}
-                onChange={(e) => setPackJson(e.target.value)}
-              />
-              <div className="flex gap-2">
-                <Button disabled={savePack.isPending} onClick={() => savePack.mutate()}>
-                  {savePack.isPending ? 'Saving…' : 'Save / mark ready'}
-                </Button>
-                <Button variant="ghost" onClick={() => setEditingPackId(null)}>
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Content packs</CardTitle>
+              <CardDescription>
+                {packList.length} pack(s) — each opportunity gets its own detected submission package
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {packs.isLoading ? (
+                <Skeleton className="h-24 w-full" />
+              ) : packList.length === 0 ? (
+                <EmptyState
+                  icon={FileText}
+                  title="No content packs yet"
+                  description="Select an approved opportunity and generate an intelligent submission package."
+                />
+              ) : (
+                packList.map((p) => {
+                  const packMode = String((p.pack as { studioMode?: string })?.studioMode ?? '');
+                  const q = (p.pack as { quality?: { overall?: number } })?.quality;
+                  return (
+                    <div key={p.id} className="rounded-md border p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-medium">
+                            {p.opportunities?.title ?? p.backlink_type} ·{' '}
+                            {p.opportunities?.domain ?? '—'}
+                          </p>
+                          <p className="text-xs text-muted-foreground capitalize">
+                            {packMode
+                              ? packMode.replace(/_/g, ' ')
+                              : p.backlink_type.replace(/_/g, ' ')}{' '}
+                            · {p.status}
+                            {q?.overall != null ? ` · Quality ${q.overall}` : ''}
+                          </p>
+                        </div>
+                        <Badge className="text-[10px]">
+                          {(p.pack as { intelligence?: { detectedTypeLabel?: string } })?.intelligence
+                            ?.detectedTypeLabel ?? 'Auto'}
+                        </Badge>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setEditingPackId(p.id);
+                          setPackJson(JSON.stringify(p.pack ?? {}, null, 2));
+                          setShowRawJson(false);
+                        }}
+                      >
+                        Preview / edit
+                      </Button>
+                    </div>
+                  );
+                })
+              )}
 
-      {showCreate && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">New content draft</CardTitle>
-            <CardDescription>Legacy draft body stored in the project workspace</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="space-y-2">
-              <Label htmlFor="draft-title">Title</Label>
-              <Input
-                id="draft-title"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Guest post outline"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="draft-body">Body</Label>
-              <textarea
-                id="draft-body"
-                className="flex min-h-[140px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                value={body}
-                onChange={(e) => setBody(e.target.value)}
-                placeholder="Write or paste draft content…"
-              />
-            </div>
-            <Button
-              disabled={create.isPending || title.trim().length < 1 || body.trim().length < 1}
-              onClick={() => create.mutate()}
-            >
-              {create.isPending ? 'Saving…' : 'Save draft'}
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Content drafts</CardTitle>
-          <CardDescription>{contentDrafts.length} item(s)</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {drafts.isLoading ? (
-            <Skeleton className="h-24 w-full" />
-          ) : contentDrafts.length === 0 ? (
-            <EmptyState
-              icon={FileText}
-              title="No content drafts yet"
-              description="Create a draft to start the content → approval workflow."
-              actionLabel="New draft"
-              onAction={() => setShowCreate(true)}
-            />
-          ) : (
-            contentDrafts.map((d) => (
-              <div key={d.id} className="rounded-md border p-3 space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-medium">{d.title ?? 'Untitled'}</p>
-                  <Badge className="text-[10px] capitalize">{d.status ?? 'draft'}</Badge>
-                </div>
-                {d.body && (
-                  <p className="text-xs text-muted-foreground line-clamp-3 whitespace-pre-wrap">
-                    {d.body}
-                  </p>
-                )}
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-muted-foreground">
-                    {new Date(d.created_at).toLocaleString()}
-                  </span>
-                  {(!d.status || d.status === 'draft') && (
+              {editingPack && previewPack && (
+                <div className="space-y-3 rounded-md border p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label>Submission package preview</Label>
                     <Button
                       size="sm"
-                      variant="outline"
-                      disabled={submit.isPending}
-                      onClick={() => submit.mutate(d.id)}
+                      variant="ghost"
+                      onClick={() => setShowRawJson((v) => !v)}
                     >
-                      <Send className="h-3.5 w-3.5 mr-1" /> Submit for approval
+                      {showRawJson ? 'Hide JSON' : 'Edit JSON'}
                     </Button>
+                  </div>
+                  <ContentPackPreview
+                    pack={previewPack}
+                    mode={String(previewPack.studioMode ?? studioMode)}
+                  />
+                  {showRawJson && (
+                    <>
+                      <Label htmlFor="pack-json">Editable pack JSON</Label>
+                      <textarea
+                        id="pack-json"
+                        className="flex min-h-[220px] w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        value={packJson}
+                        onChange={(e) => setPackJson(e.target.value)}
+                      />
+                    </>
                   )}
+                  <div className="flex gap-2">
+                    <Button disabled={savePack.isPending} onClick={() => savePack.mutate()}>
+                      {savePack.isPending ? 'Saving…' : 'Approve / mark ready'}
+                    </Button>
+                    <Button variant="ghost" onClick={() => setEditingPackId(null)}>
+                      Cancel
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
+              )}
+            </CardContent>
+          </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Email drafts</CardTitle>
-          <CardDescription>
-            {emailDrafts.length} email draft(s) — manage in Outreach Studio
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {emailDrafts.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No email drafts yet.{' '}
-              <Link className="underline" to={`/projects/${projectId}/outreach/studio`}>
-                Open Outreach Studio
-              </Link>
-            </p>
-          ) : (
-            emailDrafts.map((d) => (
-              <div
-                key={d.id}
-                className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"
-              >
-                <div>
-                  <p className="font-medium">{d.subject ?? d.title ?? 'Email draft'}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {new Date(d.created_at).toLocaleString()}
-                  </p>
+          {showCreate && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">New content draft</CardTitle>
+                <CardDescription>Legacy draft body stored in the project workspace</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="space-y-2">
+                  <Label htmlFor="draft-title">Title</Label>
+                  <Input
+                    id="draft-title"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="Guest post outline"
+                  />
                 </div>
-                <Badge className="text-[10px] capitalize">{d.status ?? 'draft'}</Badge>
-              </div>
-            ))
+                <div className="space-y-2">
+                  <Label htmlFor="draft-body">Body</Label>
+                  <textarea
+                    id="draft-body"
+                    className="flex min-h-[140px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    value={body}
+                    onChange={(e) => setBody(e.target.value)}
+                    placeholder="Write or paste draft content…"
+                  />
+                </div>
+                <Button
+                  disabled={create.isPending || title.trim().length < 1 || body.trim().length < 1}
+                  onClick={() => create.mutate()}
+                >
+                  {create.isPending ? 'Saving…' : 'Save draft'}
+                </Button>
+              </CardContent>
+            </Card>
           )}
-        </CardContent>
-      </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Content drafts</CardTitle>
+              <CardDescription>{contentDrafts.length} item(s)</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {drafts.isLoading ? (
+                <Skeleton className="h-24 w-full" />
+              ) : contentDrafts.length === 0 ? (
+                <EmptyState
+                  icon={FileText}
+                  title="No content drafts yet"
+                  description="Create a draft to start the content → approval workflow."
+                  actionLabel="New draft"
+                  onAction={() => setShowCreate(true)}
+                />
+              ) : (
+                contentDrafts.map((d) => (
+                  <div key={d.id} className="rounded-md border p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium">{d.title ?? 'Untitled'}</p>
+                      <Badge className="text-[10px] capitalize">{d.status ?? 'draft'}</Badge>
+                    </div>
+                    {d.body && (
+                      <p className="text-xs text-muted-foreground line-clamp-3 whitespace-pre-wrap">
+                        {d.body}
+                      </p>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-muted-foreground">
+                        {new Date(d.created_at).toLocaleString()}
+                      </span>
+                      {(!d.status || d.status === 'draft') && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={submit.isPending}
+                          onClick={() => submit.mutate(d.id)}
+                        >
+                          <Send className="h-3.5 w-3.5 mr-1" /> Submit for approval
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Email drafts</CardTitle>
+              <CardDescription>
+                {emailDrafts.length} email draft(s) — manage in Outreach Studio
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {emailDrafts.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No email drafts yet.{' '}
+                  <Link className="underline" to={`/projects/${projectId}/outreach/studio`}>
+                    Open Outreach Studio
+                  </Link>
+                </p>
+              ) : (
+                emailDrafts.map((d) => (
+                  <div
+                    key={d.id}
+                    className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"
+                  >
+                    <div>
+                      <p className="font-medium">{d.subject ?? d.title ?? 'Email draft'}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {new Date(d.created_at).toLocaleString()}
+                      </p>
+                    </div>
+                    <Badge className="text-[10px] capitalize">{d.status ?? 'draft'}</Badge>
+                  </div>
+                ))
+              )}
+            </CardContent>
+          </Card>
         </>
       )}
     </div>

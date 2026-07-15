@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   buildBrowserActionPlan,
+  buildIntelligentContentPlan,
   buildPrefillPayload,
   canTransitionQueueStage,
   detectSubmissionRequirements,
@@ -20,6 +21,12 @@ import { publishPlatformEvent, fireAndForget } from '../platform/event-bus.servi
 import { enqueueJob, QUEUES } from '../../jobs/boss.js';
 import { runVerificationCheck } from './automation.service.js';
 import { logger } from '../../lib/logger.js';
+import {
+  analyzeOpportunityForContent,
+  rememberSiteRequirements,
+} from './content-intelligence.service.js';
+
+export { analyzeOpportunityForContent };
 
 async function brandFor(workspaceId: string, orgId?: string) {
   const project = orgId ? await getProjectById(workspaceId, orgId) : null;
@@ -316,18 +323,37 @@ export async function createContentPack(
     .eq('workspace_id', workspaceId)
     .single();
   if (!opp) throw new Error('Opportunity not found');
+
+  // Always auto-detect — ignore manual type override from the client
+  const intelligence = await analyzeOpportunityForContent(workspaceId, opportunityId);
+  const plan = intelligence.plan;
+  const storageType = plan.storageType || backlinkType || String(opp.opportunity_type);
+
   const brand = await brandFor(workspaceId, orgId);
   const pack = generateContentPack(
-    backlinkType || String(opp.opportunity_type),
+    storageType,
     {
       title: String(opp.title),
       domain: opp.domain as string | null,
-      opportunity_type: String(opp.opportunity_type),
+      opportunity_type: storageType,
       score: Number(opp.score ?? 0),
       website_name: opp.website_name as string | null,
     },
-    brand
+    brand,
+    {
+      classificationId: plan.detectedType,
+      classificationLabel: plan.detectedTypeLabel,
+      workflowQueue: null,
+      confidence: plan.confidence,
+      reason: plan.reason,
+    }
   );
+
+  // Align estimates from live intelligence
+  pack.estimatedApprovalProbability = intelligence.estimatedApprovalProbability;
+  pack.estimatedReviewHours = intelligence.estimatedReviewHours;
+  pack.requiredFields = plan.requirements.requiredFields;
+
   const id = randomUUID();
   const { data, error } = await getSupabaseAdmin()
     .from('content_packs')
@@ -335,14 +361,43 @@ export async function createContentPack(
       id,
       workspace_id: workspaceId,
       opportunity_id: opportunityId,
-      backlink_type: backlinkType || String(opp.opportunity_type),
+      backlink_type: storageType,
       pack,
       status: 'draft',
     })
     .select('*')
     .single();
   if (error) throw error;
-  return data;
+
+  const domain = String(opp.domain ?? '')
+    .toLowerCase()
+    .replace(/^www\./, '');
+  if (domain) {
+    await rememberSiteRequirements({
+      workspaceId,
+      domain,
+      storageType,
+      classificationId: plan.detectedType,
+      requirements: plan.requirements,
+    }).catch(() => undefined);
+  }
+
+  return {
+    ...data,
+    intelligence: {
+      mode: plan.mode,
+      modeLabel: plan.modeLabel,
+      detectedType: plan.detectedType,
+      detectedTypeLabel: plan.detectedTypeLabel,
+      sections: plan.sections,
+      openImageStudio: plan.openImageStudio,
+      openVideoStudio: plan.openVideoStudio,
+      requiredAssets: intelligence.requiredAssets,
+      estimatedApprovalProbability: intelligence.estimatedApprovalProbability,
+      estimatedReviewHours: intelligence.estimatedReviewHours,
+      quality: pack.quality,
+    },
+  };
 }
 
 export async function updateContentPack(
@@ -364,6 +419,40 @@ export async function updateContentPack(
     .select('*')
     .single();
   if (error || !data) throw new Error('Content pack not found');
+
+  if (status === 'ready' && data.opportunity_id) {
+    const { data: opp } = await getSupabaseAdmin()
+      .from('opportunities')
+      .select('domain, opportunity_type, metadata')
+      .eq('id', data.opportunity_id)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle();
+    const domain = String(opp?.domain ?? '')
+      .toLowerCase()
+      .replace(/^www\./, '');
+    if (domain) {
+      const meta = (opp?.metadata ?? {}) as Record<string, unknown>;
+      const ci = (meta.contentIntelligence ?? {}) as Record<string, unknown>;
+      const plan = buildIntelligentContentPlan({
+        classificationId: (ci.detectedType as string) ?? null,
+        opportunityType: String(data.backlink_type || opp?.opportunity_type || 'guest_post'),
+        domain,
+      });
+      await rememberSiteRequirements({
+        workspaceId,
+        domain,
+        storageType: plan.storageType,
+        classificationId: plan.detectedType,
+        requirements: {
+          requiredFields: Array.isArray(pack.requiredFields)
+            ? (pack.requiredFields as string[])
+            : plan.requirements.requiredFields,
+        },
+        success: true,
+      }).catch(() => undefined);
+    }
+  }
+
   return data;
 }
 

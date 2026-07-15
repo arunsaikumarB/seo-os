@@ -13,6 +13,15 @@ export type SelectedOpportunity = {
   title: string;
   score: number;
   opportunity_type: string;
+  storage_type?: string;
+  classification_id?: string | null;
+  classification_label?: string | null;
+  studio_mode?: string;
+  studio_mode_label?: string;
+  workflow_queue?: string | null;
+  classification_confidence?: number;
+  open_image_studio?: boolean;
+  open_video_studio?: boolean;
   backlink_type?: string;
   category?: string;
   domain_rating?: number | null;

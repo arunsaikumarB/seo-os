@@ -121,6 +121,9 @@ export async function getMissionControlSummary(workspaceId: string) {
   const { getProviderHealthSnapshot } = await import('../providers/pif.service.js');
   const { getEnterpriseHealthSnapshot } = await import('../../routes/health.js');
   const { getClassificationAnalytics } = await import('../backlinks/classification.service.js');
+  const { getContentIntelligenceAnalytics } = await import(
+    '../backlinks/content-intelligence.service.js'
+  );
   const [
     workforceStrip,
     queueBoard,
@@ -129,6 +132,7 @@ export async function getMissionControlSummary(workspaceId: string) {
     providerFramework,
     enterpriseHealth,
     opportunityClassification,
+    contentIntelligence,
   ] = await Promise.all([
     getWorkforceStrip(workspaceId).catch(() => null),
     getQueueBoard(workspaceId, 'kanban').catch(() => null),
@@ -137,6 +141,7 @@ export async function getMissionControlSummary(workspaceId: string) {
     getProviderHealthSnapshot(workspaceId).catch(() => null),
     getEnterpriseHealthSnapshot().catch(() => null),
     getClassificationAnalytics(workspaceId).catch(() => null),
+    getContentIntelligenceAnalytics(workspaceId).catch(() => null),
   ]);
 
   const stageCounts: Record<string, number> = {};
@@ -162,6 +167,7 @@ export async function getMissionControlSummary(workspaceId: string) {
     browserExecution,
     imageIntelligence,
     opportunityClassification,
+    contentIntelligence,
     providerFramework,
     enterpriseHealth,
     intelligence,

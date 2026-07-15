@@ -93,6 +93,17 @@ type MissionSummary = {
       unknown?: number;
     };
   };
+  contentIntelligence?: {
+    packs?: number;
+    learnedSites?: number;
+    avgQualityScore?: number | null;
+    avgSeoScore?: number | null;
+    imagesReady?: number;
+    videoReady?: number;
+    submissionReady?: number;
+    estimatedApprovalProbability?: number;
+    estimatedReviewHours?: number;
+  };
   providerFramework?: {
     connected?: number;
     healthy?: number;
@@ -470,6 +481,83 @@ export function MissionControlPage() {
             <Link to={`/projects/${projectId}/backlink-builder/classification`}>
               Classification dashboard
             </Link>
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Content Intelligence</CardTitle>
+          <CardDescription>
+            Detected packs · Quality · SEO · Assets · Submission ready · Approval probability · Review
+            time
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            <div>
+              <p className="text-xs text-muted-foreground">Content Packs</p>
+              <p className="font-medium tabular-nums">{data?.contentIntelligence?.packs ?? 0}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Learned Sites</p>
+              <p className="font-medium tabular-nums">
+                {data?.contentIntelligence?.learnedSites ?? 0}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Quality Score</p>
+              <p className="font-medium tabular-nums">
+                {data?.contentIntelligence?.avgQualityScore != null
+                  ? `${data.contentIntelligence.avgQualityScore}`
+                  : '—'}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">SEO Score</p>
+              <p className="font-medium tabular-nums">
+                {data?.contentIntelligence?.avgSeoScore != null
+                  ? `${data.contentIntelligence.avgSeoScore}`
+                  : '—'}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Images Ready</p>
+              <p className="font-medium tabular-nums">
+                {data?.contentIntelligence?.imagesReady ?? 0}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Video Ready</p>
+              <p className="font-medium tabular-nums">
+                {data?.contentIntelligence?.videoReady ?? 0}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Submission Ready</p>
+              <p className="font-medium tabular-nums">
+                {data?.contentIntelligence?.submissionReady ?? 0}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Est. Approval</p>
+              <p className="font-medium tabular-nums">
+                {data?.contentIntelligence?.estimatedApprovalProbability != null
+                  ? `${data.contentIntelligence.estimatedApprovalProbability}%`
+                  : '—'}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Est. Review</p>
+              <p className="font-medium tabular-nums">
+                {data?.contentIntelligence?.estimatedReviewHours != null
+                  ? `${data.contentIntelligence.estimatedReviewHours}h`
+                  : '—'}
+              </p>
+            </div>
+          </div>
+          <Button variant="outline" size="sm" asChild>
+            <Link to={`/projects/${projectId}/content/library`}>Open Content Studio</Link>
           </Button>
         </CardContent>
       </Card>

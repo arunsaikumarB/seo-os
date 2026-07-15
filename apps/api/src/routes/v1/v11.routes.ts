@@ -5,6 +5,7 @@ import { QUEUE_STAGES } from '@seo-os/backlink-builder';
 import { authMiddleware, type AuthenticatedRequest } from '../../middleware/auth.js';
 import { requireRole } from '../../middleware/rbac.js';
 import {
+  analyzeOpportunityForContent,
   approveSubmission,
   createBrowserPlan,
   createContentPack,
@@ -192,19 +193,40 @@ v11Router.get('/content-packs', authMiddleware, requireRole('viewer'), async (re
   }
 });
 
+v11Router.get(
+  '/opportunities/:opportunityId/content-intelligence',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const refreshLive = String(req.query.refresh ?? '') === '1';
+      res.json({
+        data: await analyzeOpportunityForContent(
+          param(req.params.projectId),
+          param(req.params.opportunityId),
+          { refreshLive }
+        ),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 v11Router.post(
   '/opportunities/:opportunityId/content-pack',
   authMiddleware,
   requireRole('member'),
   async (req, res, next) => {
     try {
-      const body = z.object({ type: z.string().optional() }).parse(req.body);
+      // type is ignored — AI auto-detects backlink type from the destination site
+      z.object({ type: z.string().optional() }).parse(req.body ?? {});
       const { orgId } = (req as AuthenticatedRequest).auth;
       res.status(201).json({
         data: await createContentPack(
           param(req.params.projectId),
           param(req.params.opportunityId),
-          body.type ?? '',
+          '',
           orgId
         ),
       });

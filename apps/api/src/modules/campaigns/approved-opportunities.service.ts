@@ -1,5 +1,6 @@
 import {
   BACKLINK_TYPES,
+  buildIntelligentContentPlan,
   detectSubmissionRequirements,
 } from '@seo-os/backlink-builder';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
@@ -106,9 +107,46 @@ export async function listApprovedOpportunities(workspaceId: string) {
     const hasDomain = Boolean(opp.domain || opp.url);
     const typeInfo = typeMeta(String(opp.opportunity_type));
     const category = String(opp.backlink_category || typeInfo.category);
-    const requirements = detectSubmissionRequirements(String(opp.opportunity_type), {
+    const classification =
+      typeof meta.classification === 'object' && meta.classification
+        ? (meta.classification as Record<string, unknown>)
+        : {};
+    const contentIntel =
+      typeof meta.contentIntelligence === 'object' && meta.contentIntelligence
+        ? (meta.contentIntelligence as Record<string, unknown>)
+        : {};
+    const classificationId =
+      (classification.id as string) ||
+      (classification.type as string) ||
+      (contentIntel.detectedType as string) ||
+      null;
+    const plan = buildIntelligentContentPlan({
+      classificationId,
+      classificationLabel:
+        (classification.displayName as string) ||
+        (classification.label as string) ||
+        (contentIntel.detectedTypeLabel as string) ||
+        null,
+      opportunityType: String(
+        contentIntel.storageType || classification.storageType || opp.opportunity_type
+      ),
+      workflowQueue:
+        (classification.workflowQueue as string) ||
+        (meta.workflowQueue as string) ||
+        null,
+      confidence: Number(classification.confidence ?? contentIntel.confidence ?? 0),
+      reason: String(classification.reason ?? contentIntel.reason ?? ''),
+      domain: opp.domain as string | null,
+      websiteName: opp.website_name as string | null,
+    });
+    const requirements = detectSubmissionRequirements(plan.storageType, {
       url: opp.url ? String(opp.url) : undefined,
     });
+    if (Array.isArray(plan.requirements.requiredFields) && plan.requirements.requiredFields.length) {
+      requirements.requiredFields = [
+        ...new Set([...requirements.requiredFields, ...plan.requirements.requiredFields]),
+      ];
+    }
 
     const campaignEligible =
       workflow.campaign_eligible === true ||
@@ -141,7 +179,16 @@ export async function listApprovedOpportunities(workspaceId: string) {
       title: opp.title,
       score: Number(opp.score ?? 0),
       opportunity_type: opp.opportunity_type,
-      backlink_type: typeInfo.displayName,
+      storage_type: plan.storageType,
+      classification_id: plan.detectedType,
+      classification_label: plan.detectedTypeLabel,
+      studio_mode: plan.mode,
+      studio_mode_label: plan.modeLabel,
+      workflow_queue: classification.workflowQueue ?? meta.workflowQueue ?? plan.mode,
+      classification_confidence: plan.confidence,
+      open_image_studio: plan.openImageStudio,
+      open_video_studio: plan.openVideoStudio,
+      backlink_type: plan.detectedTypeLabel || typeInfo.displayName,
       category,
       domain_rating: opp.domain_rating != null ? Number(opp.domain_rating) : null,
       monthly_traffic: opp.monthly_traffic != null ? Number(opp.monthly_traffic) : null,
