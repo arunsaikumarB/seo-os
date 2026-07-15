@@ -688,6 +688,38 @@ export async function runBeeExecutionJob(data: {
     };
     await mergeJobMetrics(workspaceId, jobId, metricsPatch);
 
+    // Browser-missing must park as Waiting Infrastructure — never Failed
+    {
+      const {
+        parkJobWaitingInfrastructure,
+        ensureBrowserRuntimeReady,
+        friendlyRuntimeError,
+        resumeWaitingInfrastructureJobs,
+      } = await import('./browser-runtime-manager.service.js');
+      const friendly = friendlyRuntimeError(err);
+      const rawBlob = `${friendly} ${classified.failureMessage} ${err instanceof Error ? err.message : ''}`;
+      const isRuntimeMissing =
+        classified.failureCode === 'BROWSER_RUNTIME_MISSING' ||
+        /Browser Runtime Missing|executable doesn't exist|could not find browser|playwright.*install chromium/i.test(
+          rawBlob
+        );
+      if (isRuntimeMissing) {
+        await parkJobWaitingInfrastructure(workspaceId, jobId, friendly);
+        await appendLog(workspaceId, jobId, 'warn', 'Browser Runtime Missing — Waiting Infrastructure', {
+          failureCode: 'BROWSER_RUNTIME_MISSING',
+          suggestedFix: 'Install Chromium',
+        });
+        if (sessionId) {
+          await disposeSessionRuntime(sessionId).catch(() => undefined);
+        }
+        const healed = await ensureBrowserRuntimeReady();
+        if (healed.ready) {
+          await resumeWaitingInfrastructureJobs().catch(() => undefined);
+        }
+        return;
+      }
+    }
+
     await updateJob(jobId, {
       status: 'failed',
       error_code: classified.failureCode,

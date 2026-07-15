@@ -28,6 +28,12 @@ jobs:
       - name: Migration sequence check
         run: node scripts/check-migrations.mjs
 
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium
+
+      - name: Assert Playwright Chromium present
+        run: node scripts/check-playwright-chromium.mjs
+
       - name: Lint
         run: npm run lint
 

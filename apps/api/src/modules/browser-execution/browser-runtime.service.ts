@@ -76,17 +76,34 @@ export class BrowserExecutionService {
   async launch(opts: LaunchOptions): Promise<void> {
     const pw = await loadPlaywright();
     if (!pw) {
-      throw Object.assign(new Error('Playwright unavailable — install playwright browsers to execute'), {
-        code: 'PLAYWRIGHT_UNAVAILABLE',
+      throw Object.assign(
+        new Error(
+          'Browser Runtime Missing — Administrator Action Required. Suggested Fix: Install Chromium.'
+        ),
+        {
+        code: 'BROWSER_RUNTIME_MISSING',
       });
     }
     await this.close();
     this.mode = opts.mode;
     this.consoleLogs = [];
-    this.browser = await pw.chromium.launch({
-      headless: opts.mode === 'headless',
-      timeout: opts.timeoutMs ?? 60_000,
-    });
+    try {
+      this.browser = await pw.chromium.launch({
+        headless: opts.mode === 'headless',
+        timeout: opts.timeoutMs ?? 60_000,
+      });
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : String(err);
+      if (/executable doesn't exist|could not find browser|browserType\.launch/i.test(raw)) {
+        throw Object.assign(
+          new Error(
+            'Browser Runtime Missing — Administrator Action Required. Suggested Fix: Install Chromium.'
+          ),
+          { code: 'BROWSER_RUNTIME_MISSING', cause: err }
+        );
+      }
+      throw err;
+    }
     this.context = await this.browser.newContext({
       storageState: opts.storageState as never,
       acceptDownloads: true,
@@ -415,7 +432,14 @@ const sessionRuntimes = new Map<string, BrowserExecutionService>();
 
 export async function isPlaywrightAvailable(): Promise<boolean> {
   const pw = await loadPlaywright();
-  return Boolean(pw);
+  if (!pw) return false;
+  try {
+    const { access } = await import('node:fs/promises');
+    await access(pw.chromium.executablePath());
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function getSessionRuntime(sessionId: string): BrowserExecutionService {

@@ -22,6 +22,10 @@ import {
   retryJob,
 } from './bee.service.js';
 import { isPlaywrightAvailable } from './browser-runtime.service.js';
+import {
+  getBrowserRuntimeStatus,
+  verifyBrowserRuntime,
+} from './browser-runtime-manager.service.js';
 
 export type HealthIndicator = {
   key: string;
@@ -34,15 +38,36 @@ export async function getBeeWorkerHealth(workspaceId: string): Promise<{
   indicators: HealthIndicator[];
   healthy: boolean;
   overall: 'green' | 'yellow' | 'red';
+  browserRuntime?: Awaited<ReturnType<typeof getBrowserRuntimeStatus>>;
 }> {
   const indicators: HealthIndicator[] = [];
 
-  const playwrightOk = await isPlaywrightAvailable().catch(() => false);
+  let runtime = await getBrowserRuntimeStatus().catch(() => null);
+  if (!runtime?.last_verification_at) {
+    runtime = await verifyBrowserRuntime({ autoInstall: false, probeLaunch: false }).catch(
+      () => null
+    );
+  }
+  const runtimeHealthy = runtime?.health === 'healthy' && runtime.launch_ok;
+
+  const playwrightOk =
+    (await isPlaywrightAvailable().catch(() => false)) && Boolean(runtime?.playwright_installed);
   indicators.push({
     key: 'playwright',
     label: 'Playwright',
     status: playwrightOk ? 'green' : 'red',
-    detail: playwrightOk ? 'Installed' : 'Not available on this worker',
+    detail: playwrightOk
+      ? `Installed${runtime?.playwright_version ? ` · v${runtime.playwright_version}` : ''}`
+      : 'Not available on this worker',
+  });
+
+  indicators.push({
+    key: 'browser_runtime',
+    label: 'Browser Runtime',
+    status: runtimeHealthy ? 'green' : runtime?.health === 'installing' ? 'yellow' : 'red',
+    detail: runtimeHealthy
+      ? `Healthy${runtime?.browser_version ? ` · Chromium ${runtime.browser_version}` : ''}`
+      : runtime?.last_error || 'Browser Runtime Missing',
   });
 
   let queueOk = false;
@@ -77,7 +102,7 @@ export async function getBeeWorkerHealth(workspaceId: string): Promise<{
   indicators.push({
     key: 'worker',
     label: 'Worker',
-    status: playwrightOk && queueOk ? 'green' : 'red',
+    status: playwrightOk && queueOk && runtimeHealthy ? 'green' : 'red',
     detail: DEFAULT_FEATURE_FLAGS.bee_enabled ? 'BEE enabled' : 'BEE disabled',
   });
 
@@ -157,7 +182,12 @@ export async function getBeeWorkerHealth(workspaceId: string): Promise<{
   const yellows = indicators.filter((i) => i.status === 'yellow').length;
   const overall = reds > 0 ? 'red' : yellows > 0 ? 'yellow' : 'green';
 
-  return { indicators, healthy: reds === 0, overall };
+  return {
+    indicators,
+    healthy: reds === 0,
+    overall,
+    browserRuntime: runtime ?? undefined,
+  };
 }
 
 export async function validateExecutionReadiness(
@@ -171,10 +201,19 @@ export async function validateExecutionReadiness(
   const health = await getBeeWorkerHealth(workspaceId);
 
   const playwright = health.indicators.find((i) => i.key === 'playwright');
+  const browserRuntime = health.indicators.find((i) => i.key === 'browser_runtime');
   checks.push({
     key: 'playwright',
     ok: playwright?.status === 'green',
     message: playwright?.detail ?? 'Playwright check',
+  });
+  checks.push({
+    key: 'browser_runtime',
+    ok: browserRuntime?.status === 'green',
+    message:
+      browserRuntime?.status === 'green'
+        ? 'Browser Runtime Healthy'
+        : 'Browser Runtime Missing — Install Required',
   });
   checks.push({
     key: 'worker',
@@ -182,9 +221,15 @@ export async function validateExecutionReadiness(
     message: 'Worker online',
   });
   checks.push({
+    key: 'queue',
+    ok: health.indicators.find((i) => i.key === 'queue')?.status === 'green',
+    message: health.indicators.find((i) => i.key === 'queue')?.detail ?? 'Queue online',
+  });
+  checks.push({
     key: 'browser',
-    ok: playwright?.status === 'green',
-    message: 'Browser available',
+    ok: browserRuntime?.status === 'green' && playwright?.status === 'green',
+    message:
+      browserRuntime?.status === 'green' ? 'Browser launches successfully' : 'Browser unavailable',
   });
   checks.push({
     key: 'storage',

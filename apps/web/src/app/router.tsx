@@ -251,6 +251,9 @@ const ContentLibraryPage = lazy(() =>
 const ProjectSettingsPage = lazy(() =>
   import('@/pages/settings/general').then((m) => ({ default: m.ProjectSettingsPage }))
 );
+const BrowserRuntimePage = lazy(() =>
+  import('@/pages/settings/browser-runtime').then((m) => ({ default: m.BrowserRuntimePage }))
+);
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -482,6 +485,7 @@ export function AppRouter() {
                     <Route path="agents/catalog" element={lazyEl(AgentsCatalogPage)} />
                     <Route path="content/library" element={lazyEl(ContentLibraryPage)} />
                     <Route path="settings/general" element={lazyEl(ProjectSettingsPage)} />
+                    <Route path="settings/browser-runtime" element={lazyEl(BrowserRuntimePage)} />
                     <Route path="search" element={lazyEl(SearchPage)} />
                   </Route>
 

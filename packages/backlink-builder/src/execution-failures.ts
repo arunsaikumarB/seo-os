@@ -21,6 +21,7 @@ export const EXECUTION_FAILURE_CODES = [
   'SUBMIT_BUTTON_MISSING',
   'SUBMIT_FAILED',
   'PLAYWRIGHT_LAUNCH_FAILED',
+  'BROWSER_RUNTIME_MISSING',
   'BROWSER_CLOSED',
   'WORKER_OFFLINE',
   'QUEUE_TIMEOUT',
@@ -65,6 +66,7 @@ const LABELS: Record<ExecutionFailureCode, string> = {
   SUBMIT_BUTTON_MISSING: 'Submit Button Missing',
   SUBMIT_FAILED: 'Submit Failed',
   PLAYWRIGHT_LAUNCH_FAILED: 'Playwright Launch Failed',
+  BROWSER_RUNTIME_MISSING: 'Browser Runtime Missing',
   BROWSER_CLOSED: 'Browser Closed',
   WORKER_OFFLINE: 'Worker Offline',
   QUEUE_TIMEOUT: 'Queue Timeout',
@@ -95,6 +97,7 @@ const RETRY_CLASS: Record<ExecutionFailureCode, FailureRetryClass> = {
   SUBMIT_BUTTON_MISSING: 'permanent',
   SUBMIT_FAILED: 'permanent',
   PLAYWRIGHT_LAUNCH_FAILED: 'auto_retry',
+  BROWSER_RUNTIME_MISSING: 'needs_user',
   BROWSER_CLOSED: 'auto_retry',
   WORKER_OFFLINE: 'auto_retry',
   QUEUE_TIMEOUT: 'auto_retry',
@@ -124,7 +127,10 @@ const FIXES: Record<ExecutionFailureCode, string> = {
   FORM_CHANGED: 'Destination form layout changed. Re-analyze the page and update field mapping.',
   SUBMIT_BUTTON_MISSING: 'Submit control not found. Re-scan the form or submit manually.',
   SUBMIT_FAILED: 'Submit did not complete. Inspect the screenshot and validation messages, then retry manually.',
-  PLAYWRIGHT_LAUNCH_FAILED: 'Browser failed to launch. Ensure Playwright browsers are installed and worker is online.',
+  PLAYWRIGHT_LAUNCH_FAILED:
+    'Browser failed to launch. Install Chromium (`npx playwright install chromium`) or use Repair Browser on the Browser Runtime page.',
+  BROWSER_RUNTIME_MISSING:
+    'Browser Runtime Missing — Administrator Action Required. Suggested Fix: Install Chromium. Jobs wait for infrastructure and resume automatically.',
   BROWSER_CLOSED: 'Browser closed unexpectedly. Auto-retry with a fresh session.',
   WORKER_OFFLINE: 'Execution worker is offline. Restore worker health, then retry.',
   QUEUE_TIMEOUT: 'Job waited too long in queue. Check worker capacity and retry.',
@@ -191,8 +197,13 @@ export function classifyExecutionError(
   else if (/network|net::err|fetch failed/.test(blob)) code = 'NETWORK_FAILURE';
   else if (/browser.?closed|target closed|session closed|context.?closed/.test(blob))
     code = 'BROWSER_CLOSED';
-  else if (/playwright|browserType\.launch|executable doesn't exist|chromium/.test(blob))
-    code = 'PLAYWRIGHT_LAUNCH_FAILED';
+  else if (
+    /executable doesn't exist|could not find browser|browser.*missing|playwright.*install chromium/.test(
+      blob
+    )
+  )
+    code = 'BROWSER_RUNTIME_MISSING';
+  else if (/playwright|browserType\.launch|chromium/.test(blob)) code = 'PLAYWRIGHT_LAUNCH_FAILED';
   else if (/selector.?not.?found|waiting for selector|no element|strict mode violation/.test(blob))
     code = 'SELECTOR_NOT_FOUND';
   else if (/form changed|stale element|detached/.test(blob)) code = 'FORM_CHANGED';

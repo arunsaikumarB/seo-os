@@ -51,6 +51,25 @@ async function main() {
     logger.info('Background job workers disabled (ENABLE_WORKERS=false)');
   }
 
+  // Browser runtime + infrastructure startup health (auto-install Chromium if missing)
+  try {
+    const { runStartupHealthChecks } = await import(
+      './modules/browser-execution/browser-runtime-manager.service.js'
+    );
+    const startup = await runStartupHealthChecks();
+    logger.info(
+      {
+        ok: startup.ok,
+        browserRuntime: startup.runtime.health,
+        path: startup.runtime.executable_path,
+        version: startup.runtime.browser_version,
+      },
+      'Browser runtime startup validation finished'
+    );
+  } catch (err) {
+    logger.warn({ err }, 'Browser runtime startup validation failed — continuing with degraded Start guards');
+  }
+
   server = app.listen(env.PORT, '0.0.0.0', () => {
     logger.info({ port: env.PORT, host: '0.0.0.0', env: env.NODE_ENV }, 'SEO OS API started');
   });

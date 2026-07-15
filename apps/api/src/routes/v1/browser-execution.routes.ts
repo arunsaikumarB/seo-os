@@ -35,6 +35,14 @@ import {
   getWorkspaceExecutionReportExcel,
   validateExecutionReadiness,
 } from '../../modules/browser-execution/bee-diagnostics.service.js';
+import {
+  getBrowserRuntimeStatus,
+  installChromium,
+  repairBrowserRuntime,
+  resumeWaitingInfrastructureJobs,
+  runBrowserDiagnostics,
+  verifyBrowserRuntime,
+} from '../../modules/browser-execution/browser-runtime-manager.service.js';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 
 function param(value: string | string[]): string {
@@ -655,6 +663,103 @@ browserExecutionRouter.get(
         .order('updated_at', { ascending: false })
         .limit(100);
       res.json({ data: data ?? [] });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.get(
+  '/browser/runtime',
+  authMiddleware,
+  requireRole('viewer'),
+  async (_req, res, next) => {
+    try {
+      requireBee();
+      res.json({ data: await getBrowserRuntimeStatus() });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.post(
+  '/browser/runtime/verify',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      const body = z
+        .object({ autoInstall: z.boolean().optional() })
+        .optional()
+        .parse(req.body ?? {});
+      res.json({
+        data: await verifyBrowserRuntime({
+          autoInstall: body?.autoInstall !== false,
+          probeLaunch: true,
+        }),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.post(
+  '/browser/runtime/install',
+  authMiddleware,
+  requireRole('admin'),
+  async (_req, res, next) => {
+    try {
+      requireBee();
+      const ok = await installChromium();
+      const status = await verifyBrowserRuntime({ autoInstall: false, probeLaunch: true });
+      let resumed = 0;
+      if (status.health === 'healthy') {
+        resumed = await resumeWaitingInfrastructureJobs().catch(() => 0);
+      }
+      res.json({
+        data: {
+          installed: ok,
+          status,
+          resumedJobs: resumed,
+          workerRestart: ok ? 'signaled' : 'skipped',
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.post(
+  '/browser/runtime/repair',
+  authMiddleware,
+  requireRole('admin'),
+  async (_req, res, next) => {
+    try {
+      requireBee();
+      const status = await repairBrowserRuntime();
+      let resumed = 0;
+      if (status.health === 'healthy') {
+        resumed = await resumeWaitingInfrastructureJobs().catch(() => 0);
+      }
+      res.json({ data: { status, resumedJobs: resumed } });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.post(
+  '/browser/runtime/diagnostics',
+  authMiddleware,
+  requireRole('member'),
+  async (_req, res, next) => {
+    try {
+      requireBee();
+      res.json({ data: await runBrowserDiagnostics() });
     } catch (err) {
       next(err);
     }

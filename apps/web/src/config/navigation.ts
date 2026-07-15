@@ -24,6 +24,7 @@ import {
   FileBarChart,
   Radar,
   HeartPulse,
+  MonitorSmartphone,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -102,6 +103,12 @@ export const projectNav: NavItem[] = [
   { label: 'Content Studio', href: 'content/library', icon: FileText },
   { label: 'Providers', href: 'providers', icon: Plug, featureFlag: 'integrations' },
   { label: 'Diagnostics', href: 'diagnostics', icon: HeartPulse },
+  {
+    label: 'Browser Runtime',
+    href: 'settings/browser-runtime',
+    icon: MonitorSmartphone,
+    featureFlag: 'backlink_builder',
+  },
   {
     label: 'Submission Center',
     href: 'backlink-builder/tracking',

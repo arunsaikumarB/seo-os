@@ -135,6 +135,18 @@ export function BrowserExecutionCenterPage() {
     qc.invalidateQueries({ queryKey: ['bee-opportunities', projectId] });
   };
 
+  const runtime = useQuery({
+    queryKey: ['browser-runtime', projectId],
+    queryFn: () =>
+      request<{
+        data: { health: string; last_error?: string | null; launch_ok?: boolean };
+      }>(`/v1/projects/${projectId}/browser/runtime`),
+    enabled: !!projectId,
+    refetchInterval: 10_000,
+  });
+  const runtimeHealthy =
+    runtime.data?.data.health === 'healthy' && runtime.data?.data.launch_ok !== false;
+
   const stats = useQuery({
     queryKey: ['bee-stats', projectId],
     queryFn: () =>
@@ -512,11 +524,17 @@ export function BrowserExecutionCenterPage() {
                   <Button
                     size="sm"
                     disabled={
+                      !runtimeHealthy ||
                       selectedOppIds.size === 0 ||
                       startExecutions.isPending ||
                       selectableOpps.length === 0
                     }
                     onClick={() => startExecutions.mutate([...selectedOppIds])}
+                    title={
+                      runtimeHealthy
+                        ? undefined
+                        : 'Browser Runtime Missing — Install Required'
+                    }
                   >
                     <Play className="h-3 w-3 mr-1" />
                     Start Execution
@@ -524,6 +542,21 @@ export function BrowserExecutionCenterPage() {
                   </Button>
                 </div>
               </div>
+              {!runtimeHealthy ? (
+                <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+                  <p className="font-medium">Browser Runtime Missing — Install Required</p>
+                  <p className="mt-0.5">
+                    {runtime.data?.data.last_error ||
+                      'Administrator Action Required. Suggested Fix: Install Chromium.'}{' '}
+                    <Link
+                      className="underline font-medium"
+                      to={`/projects/${projectId}/settings/browser-runtime`}
+                    >
+                      Open Browser Runtime
+                    </Link>
+                  </p>
+                </div>
+              ) : null}
             </CardHeader>
             <CardContent className="space-y-3">
               {opportunities.isLoading ? (
@@ -599,7 +632,14 @@ export function BrowserExecutionCenterPage() {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                disabled={!opp.selectable || startExecutions.isPending}
+                                disabled={
+                                  !runtimeHealthy || !opp.selectable || startExecutions.isPending
+                                }
+                                title={
+                                  runtimeHealthy
+                                    ? undefined
+                                    : 'Browser Runtime Missing — Install Required'
+                                }
                                 onClick={() => startExecutions.mutate([opp.id])}
                               >
                                 <Play className="h-3 w-3 mr-1" /> Start
@@ -732,6 +772,10 @@ export function BrowserExecutionCenterPage() {
                     <Button
                       size="sm"
                       variant="outline"
+                      disabled={!runtimeHealthy || act.isPending}
+                      title={
+                        runtimeHealthy ? undefined : 'Browser Runtime Missing — Install Required'
+                      }
                       onClick={() => act.mutate({ action: 'start', jobId: j.id })}
                     >
                       <Play className="h-3 w-3 mr-1" /> Start

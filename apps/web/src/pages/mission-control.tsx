@@ -62,6 +62,11 @@ type MissionSummary = {
     etaSeconds?: number;
     estimatedFinishAt?: string | null;
     current?: { website?: string; step?: string; browser?: string; queueProgress?: string };
+    health?: {
+      indicators?: Array<{ key?: string; label: string; status: string; detail?: string }>;
+      overall?: string;
+      browserRuntime?: { health?: string };
+    };
   };
   imageIntelligence?: {
     generated?: number;
@@ -316,18 +321,41 @@ export function MissionControlPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 sm:grid-cols-4 text-sm">
-          {Array.isArray(
-            (data?.browserExecution as { health?: { indicators?: Array<{ label: string; status: string }> } })
-              ?.health?.indicators
-          ) && (
+          {(() => {
+            const runtimeInd = data?.browserExecution?.health?.indicators?.find(
+              (i) => i.key === 'browser_runtime' || i.label === 'Browser Runtime'
+            );
+            const runtimeOk =
+              runtimeInd?.status === 'green' ||
+              data?.browserExecution?.health?.browserRuntime?.health === 'healthy';
+            return (
+              <div className="sm:col-span-4 flex flex-wrap items-center gap-2">
+                <span
+                  className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium ${
+                    runtimeOk
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                      : 'border-red-200 bg-red-50 text-red-800'
+                  }`}
+                >
+                  <span
+                    className={`h-2 w-2 rounded-full ${runtimeOk ? 'bg-emerald-500' : 'bg-red-500'}`}
+                  />
+                  {runtimeOk ? 'Browser Runtime Healthy' : 'Browser Runtime Missing'}
+                </span>
+                {!runtimeOk ? (
+                  <Link
+                    className="text-xs underline text-muted-foreground"
+                    to={`/projects/${projectId}/settings/browser-runtime`}
+                  >
+                    Install Required
+                  </Link>
+                ) : null}
+              </div>
+            );
+          })()}
+          {Array.isArray(data?.browserExecution?.health?.indicators) && (
             <div className="sm:col-span-4 flex flex-wrap gap-2">
-              {(
-                (
-                  data?.browserExecution as {
-                    health?: { indicators?: Array<{ label: string; status: string }> };
-                  }
-                )?.health?.indicators ?? []
-              ).map((i) => (
+              {(data?.browserExecution?.health?.indicators ?? []).map((i) => (
                 <span
                   key={i.label}
                   className="inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px]"

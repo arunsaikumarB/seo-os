@@ -434,6 +434,23 @@ export async function startJob(workspaceId: string, jobId: string, userId?: stri
   const job = await getJob(workspaceId, jobId);
   if (!job) throw Object.assign(new Error('Job not found'), { status: 404 });
 
+  // Browser runtime guard — never start without healthy Chromium
+  const {
+    ensureBrowserRuntimeReady,
+    parkJobWaitingInfrastructure,
+  } = await import('./browser-runtime-manager.service.js');
+  const runtime = await ensureBrowserRuntimeReady();
+  if (!runtime.ready) {
+    const msg =
+      runtime.message ||
+      'Browser Runtime Missing — Install Required. Administrator Action Required. Suggested Fix: Install Chromium.';
+    await parkJobWaitingInfrastructure(workspaceId, jobId, msg);
+    throw Object.assign(new Error(msg), {
+      status: 503,
+      code: 'BROWSER_RUNTIME_MISSING',
+    });
+  }
+
   // Readiness gate — prevent silent start failures
   const { validateExecutionReadiness } = await import('./bee-diagnostics.service.js');
   const readiness = await validateExecutionReadiness(
@@ -441,11 +458,31 @@ export async function startJob(workspaceId: string, jobId: string, userId?: stri
     job.opportunity_id ? String(job.opportunity_id) : undefined
   );
   const hardFails = readiness.checks.filter(
-    (c) => !c.ok && ['playwright', 'worker', 'browser', 'opportunity', 'domain'].includes(c.key)
+    (c) =>
+      !c.ok &&
+      ['playwright', 'worker', 'browser', 'browser_runtime', 'queue', 'opportunity', 'domain'].includes(
+        c.key
+      )
   );
   if (hardFails.length) {
+    const runtimeFail = hardFails.some((c) =>
+      ['playwright', 'browser', 'browser_runtime'].includes(c.key)
+    );
     const msg = hardFails.map((c) => `${c.key}: ${c.message}`).join('; ');
-    await appendLog(workspaceId, jobId, 'error', 'Readiness validation failed', { checks: readiness.checks });
+    await appendLog(workspaceId, jobId, 'error', 'Readiness validation failed', {
+      checks: readiness.checks,
+    });
+    if (runtimeFail) {
+      await parkJobWaitingInfrastructure(
+        workspaceId,
+        jobId,
+        'Browser Runtime Missing — Install Required'
+      );
+      throw Object.assign(
+        new Error('Browser Runtime Missing — Install Required. Suggested Fix: Install Chromium.'),
+        { status: 503, code: 'BROWSER_RUNTIME_MISSING' }
+      );
+    }
     throw Object.assign(new Error(`Cannot start execution — ${msg}`), { status: 400 });
   }
 
@@ -997,7 +1034,8 @@ export async function getStatistics(workspaceId: string) {
           browser: String(j.session_id ?? ''),
         };
       }
-    } else if (s === 'queued' || s === 'retry_scheduled') counts.queued++;
+    } else if (s === 'queued' || s === 'retry_scheduled' || s === 'waiting_infrastructure')
+      counts.queued++;
     else if (s === 'paused' || s === 'awaiting_user' || s === 'ready_for_review') counts.paused++;
     else if (s === 'needs_approval') counts.needs_approval++;
     else if (s === 'completed' || s === 'verified') {

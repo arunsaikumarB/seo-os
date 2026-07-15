@@ -356,6 +356,7 @@ export const EXECUTION_JOB_STATUSES = [
   'ready_to_continue',
   'submitted',
   'verified',
+  'waiting_infrastructure',
 ] as const;
 
 export type ExecutionJobStatus = (typeof EXECUTION_JOB_STATUSES)[number];
