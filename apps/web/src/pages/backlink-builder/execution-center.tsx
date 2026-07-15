@@ -58,6 +58,30 @@ type BeeStats = {
   current?: { website?: string; step?: string; browser?: string; queueProgress?: string };
 };
 
+type ExecutionOpportunity = {
+  id: string;
+  website: string;
+  domain: string | null;
+  title: string;
+  score: number;
+  opportunity_type: string;
+  status: string;
+  pipeline_stage?: string | null;
+  readiness: 'ready' | 'in_progress' | 'needs_approval' | 'completed' | 'failed' | 'needs_domain' | 'not_ready';
+  selectable: boolean;
+  has_submission: boolean;
+  has_content_draft: boolean;
+  latest_job: { id: string; status: string; created_at: string } | null;
+};
+
+type BulkProgressItem = {
+  opportunityId: string;
+  website: string;
+  phase: 'queued' | 'starting' | 'started' | 'failed';
+  message?: string;
+  jobId?: string;
+};
+
 const TABS = [
   'dashboard',
   'timeline',
@@ -68,6 +92,16 @@ const TABS = [
   'replay',
 ] as const;
 
+const READINESS_LABEL: Record<ExecutionOpportunity['readiness'], string> = {
+  ready: 'Ready',
+  in_progress: 'In progress',
+  needs_approval: 'Needs approval',
+  completed: 'Completed',
+  failed: 'Failed — retryable',
+  needs_domain: 'Needs domain',
+  not_ready: 'Not ready',
+};
+
 export function BrowserExecutionCenterPage() {
   const { projectId = '' } = useParams();
   const { request } = useApi();
@@ -75,10 +109,18 @@ export function BrowserExecutionCenterPage() {
   const [params, setParams] = useSearchParams();
   const tab = (params.get('tab') as (typeof TABS)[number]) || 'dashboard';
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
-  const [opportunityId, setOpportunityId] = useState('');
+  const [selectedOppIds, setSelectedOppIds] = useState<Set<string>>(new Set());
+  const [bulkProgress, setBulkProgress] = useState<BulkProgressItem[]>([]);
 
   const setTab = (t: (typeof TABS)[number]) => {
     setParams({ tab: t });
+  };
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['bee-jobs', projectId] });
+    qc.invalidateQueries({ queryKey: ['bee-stats', projectId] });
+    qc.invalidateQueries({ queryKey: ['bee-job', projectId] });
+    qc.invalidateQueries({ queryKey: ['bee-opportunities', projectId] });
   };
 
   const stats = useQuery({
@@ -87,6 +129,16 @@ export function BrowserExecutionCenterPage() {
       request<{ data: BeeStats }>(`/v1/projects/${projectId}/browser/statistics`),
     enabled: !!projectId,
     refetchInterval: 10_000,
+  });
+
+  const opportunities = useQuery({
+    queryKey: ['bee-opportunities', projectId],
+    queryFn: () =>
+      request<{ data: ExecutionOpportunity[] }>(
+        `/v1/projects/${projectId}/browser/opportunities`
+      ),
+    enabled: !!projectId,
+    refetchInterval: 12_000,
   });
 
   const jobs = useQuery({
@@ -146,25 +198,96 @@ export function BrowserExecutionCenterPage() {
     enabled: !!projectId && tab === 'policies',
   });
 
-  const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ['bee-jobs', projectId] });
-    qc.invalidateQueries({ queryKey: ['bee-stats', projectId] });
-    qc.invalidateQueries({ queryKey: ['bee-job', projectId] });
-  };
+  const oppList = opportunities.data?.data ?? [];
+  const selectableOpps = useMemo(
+    () => oppList.filter((o) => o.selectable),
+    [oppList]
+  );
 
-  const createMut = useMutation({
-    mutationFn: () =>
-      request<{ data: BeeJob }>(`/v1/projects/${projectId}/browser/executions`, {
-        method: 'POST',
-        body: JSON.stringify({ opportunityId: opportunityId.trim(), mode: 'prepare' }),
-      }),
-    onSuccess: (res) => {
-      toast.success('Execution plan created');
-      setSelectedJobId(res.data.id);
-      invalidate();
-      setTab('timeline');
+  const startExecutions = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const byId = new Map(oppList.map((o) => [o.id, o]));
+      setBulkProgress(
+        ids.map((id) => ({
+          opportunityId: id,
+          website: byId.get(id)?.website ?? 'Opportunity',
+          phase: 'queued',
+        }))
+      );
+
+      const results: Array<{ opportunityId: string; jobId: string; status: string }> = [];
+      const errors: Array<{ opportunityId: string; message: string }> = [];
+
+      for (const opportunityId of ids) {
+        setBulkProgress((prev) =>
+          prev.map((p) =>
+            p.opportunityId === opportunityId ? { ...p, phase: 'starting' } : p
+          )
+        );
+        try {
+          const res = await request<{
+            data: BeeJob;
+          }>(`/v1/projects/${projectId}/browser/executions`, {
+            method: 'POST',
+            body: JSON.stringify({
+              opportunityId,
+              mode: 'prepare',
+              startImmediately: true,
+            }),
+          });
+          results.push({
+            opportunityId,
+            jobId: res.data.id,
+            status: res.data.status,
+          });
+          setBulkProgress((prev) =>
+            prev.map((p) =>
+              p.opportunityId === opportunityId
+                ? { ...p, phase: 'started', jobId: res.data.id }
+                : p
+            )
+          );
+          if (!selectedJobId) setSelectedJobId(res.data.id);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Failed to start';
+          errors.push({ opportunityId, message });
+          setBulkProgress((prev) =>
+            prev.map((p) =>
+              p.opportunityId === opportunityId
+                ? { ...p, phase: 'failed', message }
+                : p
+            )
+          );
+        }
+      }
+
+      return { results, errors };
     },
-    onError: (e: Error) => toast.error(e.message),
+    onSuccess: (outcome) => {
+      const { results, errors } = outcome;
+      setSelectedOppIds(new Set());
+      invalidate();
+      if (errors.length && !results.length) {
+        toast.error(`All executions failed: ${errors[0]?.message ?? 'Unknown error'}`);
+        return;
+      }
+      if (errors.length) {
+        toast.error(
+          `${results.length} started, ${errors.length} failed: ${errors[0]?.message ?? ''}`
+        );
+      } else {
+        toast.success(
+          results.length === 1
+            ? 'Execution started'
+            : `Started ${results.length} executions`
+        );
+      }
+      if (results[0]?.jobId) {
+        setSelectedJobId(results[0].jobId);
+        setTab('timeline');
+      }
+    },
+    onError: (e: Error) => toast.error(e.message || 'Could not start executions'),
   });
 
   const act = useMutation({
@@ -210,9 +333,44 @@ export function BrowserExecutionCenterPage() {
       ready_to_continue: 'bg-emerald-500/15 text-emerald-700',
       completed: 'bg-emerald-500/15 text-emerald-700',
       failed: 'bg-red-500/15 text-red-700',
+      ready: 'bg-emerald-500/15 text-emerald-700',
+      in_progress: 'bg-sky-500/15 text-sky-700',
+      needs_domain: 'bg-amber-500/15 text-amber-700',
+      not_ready: 'bg-muted text-muted-foreground',
     };
     return (status: string) => map[status] ?? '';
   }, []);
+
+  const toggleOpp = (id: string, selectable: boolean) => {
+    if (!selectable) return;
+    setSelectedOppIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const allSelectableSelected =
+    selectableOpps.length > 0 && selectableOpps.every((o) => selectedOppIds.has(o.id));
+
+  const toggleAll = () => {
+    if (allSelectableSelected) {
+      setSelectedOppIds(new Set());
+      return;
+    }
+    setSelectedOppIds(new Set(selectableOpps.map((o) => o.id)));
+  };
+
+  const progressCounts = useMemo(() => {
+    const total = bulkProgress.length;
+    const started = bulkProgress.filter((p) => p.phase === 'started').length;
+    const failed = bulkProgress.filter((p) => p.phase === 'failed').length;
+    const active = bulkProgress.filter(
+      (p) => p.phase === 'queued' || p.phase === 'starting'
+    ).length;
+    return { total, started, failed, active };
+  }, [bulkProgress]);
 
   return (
     <div className="space-y-6">
@@ -220,8 +378,8 @@ export function BrowserExecutionCenterPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Execution Center</h1>
           <p className="text-muted-foreground">
-            Browser Execution Engine — user-authorized Playwright workflows. CAPTCHA, MFA, and
-            email/phone verification always pause; watchers auto-resume after you complete them.
+            Browser Execution Engine — approved opportunities load automatically. CAPTCHA, MFA,
+            and email/phone verification always pause; watchers auto-resume after you complete them.
           </p>
         </div>
         <Button variant="outline" size="sm" asChild>
@@ -298,26 +456,173 @@ export function BrowserExecutionCenterPage() {
           </Card>
 
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Create execution</CardTitle>
-              <CardDescription>Builds a plan from Website Requirement Library + form intelligence</CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-2 items-end">
-              <div className="space-y-1 flex-1 min-w-[220px]">
-                <Label htmlFor="opp">Opportunity ID</Label>
-                <Input
-                  id="opp"
-                  value={opportunityId}
-                  onChange={(e) => setOpportunityId(e.target.value)}
-                  placeholder="uuid"
-                />
+            <CardHeader className="pb-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <CardTitle className="text-base">Approved opportunities</CardTitle>
+                  <CardDescription>
+                    Loaded from this project workspace. Select sites and start execution — no manual
+                    IDs required.
+                  </CardDescription>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    disabled={
+                      selectedOppIds.size === 0 ||
+                      startExecutions.isPending ||
+                      selectableOpps.length === 0
+                    }
+                    onClick={() => startExecutions.mutate([...selectedOppIds])}
+                  >
+                    <Play className="h-3 w-3 mr-1" />
+                    Start Execution
+                    {selectedOppIds.size > 0 ? ` (${selectedOppIds.size})` : ''}
+                  </Button>
+                </div>
               </div>
-              <Button
-                disabled={!opportunityId.trim() || createMut.isPending}
-                onClick={() => createMut.mutate()}
-              >
-                Prepare plan
-              </Button>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {opportunities.isLoading ? (
+                <Skeleton className="h-32 w-full" />
+              ) : oppList.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No approved opportunities yet. Approve items in Opportunity Queue first.
+                </p>
+              ) : (
+                <div className="overflow-x-auto rounded-md border">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
+                      <tr>
+                        <th className="px-3 py-2 w-10">
+                          <input
+                            type="checkbox"
+                            aria-label="Select all ready opportunities"
+                            checked={allSelectableSelected}
+                            onChange={toggleAll}
+                            disabled={selectableOpps.length === 0 || startExecutions.isPending}
+                          />
+                        </th>
+                        <th className="px-3 py-2 font-medium">Website</th>
+                        <th className="px-3 py-2 font-medium">Score</th>
+                        <th className="px-3 py-2 font-medium">Type</th>
+                        <th className="px-3 py-2 font-medium">Status</th>
+                        <th className="px-3 py-2 font-medium">Readiness</th>
+                        <th className="px-3 py-2 font-medium text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {oppList.map((opp) => {
+                        const checked = selectedOppIds.has(opp.id);
+                        return (
+                          <tr key={opp.id} className="border-t">
+                            <td className="px-3 py-2">
+                              <input
+                                type="checkbox"
+                                aria-label={`Select ${opp.website}`}
+                                checked={checked}
+                                disabled={!opp.selectable || startExecutions.isPending}
+                                onChange={() => toggleOpp(opp.id, opp.selectable)}
+                              />
+                            </td>
+                            <td className="px-3 py-2">
+                              <p className="font-medium">{opp.website}</p>
+                              {opp.domain && opp.domain !== opp.website && (
+                                <p className="text-xs text-muted-foreground">{opp.domain}</p>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 tabular-nums">{opp.score}</td>
+                            <td className="px-3 py-2 capitalize">
+                              {String(opp.opportunity_type).replace(/_/g, ' ')}
+                            </td>
+                            <td className="px-3 py-2">
+                              <Badge className="text-[10px] capitalize">
+                                {String(opp.status).replace(/_/g, ' ')}
+                              </Badge>
+                            </td>
+                            <td className="px-3 py-2">
+                              <Badge
+                                className={`text-[10px] ${statusBadge(opp.readiness)}`}
+                              >
+                                {READINESS_LABEL[opp.readiness]}
+                              </Badge>
+                              {opp.latest_job && (
+                                <p className="text-[10px] text-muted-foreground mt-1 capitalize">
+                                  Job: {opp.latest_job.status.replace(/_/g, ' ')}
+                                </p>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={!opp.selectable || startExecutions.isPending}
+                                onClick={() => startExecutions.mutate([opp.id])}
+                              >
+                                <Play className="h-3 w-3 mr-1" /> Start
+                              </Button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {(startExecutions.isPending || progressCounts.total > 0) && (
+                <div className="rounded-md border p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2 text-sm">
+                    <p className="font-medium">Execution progress</p>
+                    <p className="text-xs text-muted-foreground tabular-nums">
+                      {progressCounts.started + progressCounts.failed}/{progressCounts.total}
+                      {progressCounts.active > 0 ? ' · running…' : ''}
+                    </p>
+                  </div>
+                  <div className="h-2 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className="h-full bg-primary transition-all"
+                      style={{
+                        width:
+                          progressCounts.total === 0
+                            ? '0%'
+                            : `${Math.round(
+                                ((progressCounts.started + progressCounts.failed) /
+                                  progressCounts.total) *
+                                  100
+                              )}%`,
+                      }}
+                    />
+                  </div>
+                  <ul className="space-y-1 max-h-40 overflow-auto text-xs">
+                    {bulkProgress.map((item) => (
+                      <li
+                        key={item.opportunityId}
+                        className="flex items-center justify-between gap-2"
+                      >
+                        <span className="truncate">{item.website}</span>
+                        <span
+                          className={
+                            item.phase === 'failed'
+                              ? 'text-red-600'
+                              : item.phase === 'started'
+                                ? 'text-emerald-700'
+                                : 'text-muted-foreground'
+                          }
+                        >
+                          {item.phase === 'failed'
+                            ? item.message || 'Failed'
+                            : item.phase === 'started'
+                              ? 'Started'
+                              : item.phase === 'starting'
+                                ? 'Starting…'
+                                : 'Queued'}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </CardContent>
           </Card>
         </>
@@ -348,7 +653,7 @@ export function BrowserExecutionCenterPage() {
                         if (tab === 'dashboard') setTab('timeline');
                       }}
                     >
-                      <p className="text-sm font-medium">{j.site_domain ?? j.id}</p>
+                      <p className="text-sm font-medium">{j.site_domain ?? 'Execution job'}</p>
                       <p className="text-xs text-muted-foreground">
                         {j.mode} · {new Date(j.created_at).toLocaleString()}
                       </p>
@@ -478,7 +783,7 @@ export function BrowserExecutionCenterPage() {
             {(history.data?.data as Array<Record<string, unknown>> | undefined)?.map((h) => (
               <div key={String(h.id)} className="rounded-md border px-3 py-2 text-sm flex justify-between">
                 <div>
-                  <p className="font-medium">{String(h.domain ?? h.job_id)}</p>
+                  <p className="font-medium">{String(h.domain ?? 'Site')}</p>
                   <p className="text-xs text-muted-foreground capitalize">{String(h.result)}</p>
                 </div>
                 <span className="text-[10px] text-muted-foreground">

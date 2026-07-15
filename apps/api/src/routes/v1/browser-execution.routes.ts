@@ -11,6 +11,7 @@ import {
   getJob,
   getOrCreatePolicy,
   getStatistics,
+  listExecutionReadyOpportunities,
   listHistory,
   listJobs,
   listLogs,
@@ -20,6 +21,7 @@ import {
   restartJob,
   resumeJob,
   retryJob,
+  startExecutionsForOpportunities,
   startJob,
   updateJobSteps,
   updatePolicy,
@@ -38,6 +40,22 @@ function requireBee() {
 
 export const browserExecutionRouter = Router({ mergeParams: true });
 
+browserExecutionRouter.get(
+  '/browser/opportunities',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      res.json({
+        data: await listExecutionReadyOpportunities(param(req.params.projectId)),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 browserExecutionRouter.post(
   '/browser/executions',
   authMiddleware,
@@ -51,16 +69,51 @@ browserExecutionRouter.post(
           mode: z.enum(['prepare', 'preview', 'manual', 'automatic_eligible']).optional(),
           htmlSnippet: z.string().optional(),
           mappingOverrides: z.record(z.unknown()).optional(),
+          startImmediately: z.boolean().optional(),
         })
         .parse(req.body);
       const { userId } = (req as AuthenticatedRequest).auth;
-      const data = await createExecution({
-        workspaceId: param(req.params.projectId),
+      const workspaceId = param(req.params.projectId);
+      const job = await createExecution({
+        workspaceId,
         opportunityId: body.opportunityId,
         mode: body.mode,
         userId,
         htmlSnippet: body.htmlSnippet,
         mappingOverrides: body.mappingOverrides,
+      });
+      const data =
+        body.startImmediately === false
+          ? job
+          : ((await startJob(workspaceId, String(job.id), userId)) ?? job);
+      res.status(201).json({ data });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.post(
+  '/browser/executions/bulk',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      const body = z
+        .object({
+          opportunityIds: z.array(z.string().uuid()).min(1).max(50),
+          mode: z.enum(['prepare', 'preview', 'manual', 'automatic_eligible']).optional(),
+          startImmediately: z.boolean().optional(),
+        })
+        .parse(req.body);
+      const { userId } = (req as AuthenticatedRequest).auth;
+      const data = await startExecutionsForOpportunities({
+        workspaceId: param(req.params.projectId),
+        opportunityIds: body.opportunityIds,
+        userId,
+        mode: body.mode,
+        startImmediately: body.startImmediately,
       });
       res.status(201).json({ data });
     } catch (err) {
