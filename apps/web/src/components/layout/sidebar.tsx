@@ -27,6 +27,8 @@ function sectionContainsPath(
   });
 }
 
+const STEP_GLYPH = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨'] as const;
+
 export function Sidebar({ projectId, className }: SidebarProps) {
   const base = `/projects/${projectId}`;
   const location = useLocation();
@@ -45,71 +47,68 @@ export function Sidebar({ projectId, className }: SidebarProps) {
           items: section.items.filter(isItemVisible),
         }))
         .filter((section) => section.items.length > 0),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- isEnabled stable via isItemVisible
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [isEnabled]
   );
 
-  const activeSectionId = useMemo(() => {
-    const match = visibleSections.find((section) =>
-      sectionContainsPath(section.items, base, location.pathname)
-    );
-    // Prefer keeping Backlink Builder open when browsing its routes
-    if (location.pathname.includes('/backlink-builder') || location.pathname.includes('/campaigns') || location.pathname.includes('/outreach') || location.pathname.includes('/relationships') || location.pathname.includes('/reports')) {
-      return 'backlink-builder';
-    }
-    return match?.id ?? 'backlink-builder';
+  const advancedActive = useMemo(() => {
+    const advanced = visibleSections.find((s) => s.advanced);
+    if (!advanced) return false;
+    return sectionContainsPath(advanced.items, base, location.pathname);
   }, [visibleSections, base, location.pathname]);
 
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
-    'backlink-builder': true,
-    home: true,
-  });
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   useEffect(() => {
-    if (!activeSectionId) return;
-    setOpenSections((prev) => {
-      if (prev[activeSectionId]) return prev;
-      return { ...prev, [activeSectionId]: true };
-    });
-  }, [activeSectionId]);
-
-  const toggleSection = (id: string) => {
-    setOpenSections((prev) => ({
-      ...prev,
-      [id]: !(prev[id] ?? id === activeSectionId),
-    }));
-  };
-
-  const isSectionOpen = (id: string) => openSections[id] ?? id === activeSectionId;
+    if (advancedActive) setAdvancedOpen(true);
+  }, [advancedActive]);
 
   return (
-    <aside className={cn('flex h-full w-64 flex-col border-r bg-card', className)}>
-      <div className="flex h-14 items-center border-b px-4">
+    <aside className={cn('flex h-full w-64 flex-col border-r border-border/60 bg-card', className)}>
+      <div className="flex h-14 items-center border-b border-border/60 px-5">
         <div>
           <p className="font-semibold tracking-tight">{APP_NAME}</p>
           <p className="text-[10px] text-muted-foreground leading-tight">{APP_TAGLINE}</p>
         </div>
       </div>
-      <nav className="flex-1 overflow-y-auto p-3">
-        <div className="space-y-1">
+      <nav className="flex-1 overflow-y-auto px-3 py-4">
+        <p className="px-3 mb-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Backlink Builder
+        </p>
+        <div className="space-y-0.5">
           {visibleSections.map((section) => {
-            const open = isSectionOpen(section.id);
-            const isActiveSection = section.id === activeSectionId;
+            if (section.flat) {
+              return (
+                <div key={section.id} className="space-y-0.5">
+                  {section.items.map((item) => {
+                    const to = item.absolute ? item.href : `${base}/${item.href}`;
+                    return (
+                      <div key={`${section.id}-${item.label}`}>
+                        {item.dividerBefore ? (
+                          <div className="my-3 mx-3 border-t border-border/50" />
+                        ) : null}
+                        <NavItemLink item={item} to={to} />
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            }
 
+            const open = advancedOpen;
             return (
-              <div key={section.id} className="rounded-md">
+              <div key={section.id} className="mt-4 pt-3 border-t border-border/50">
                 <button
                   type="button"
-                  onClick={() => toggleSection(section.id)}
+                  onClick={() => setAdvancedOpen((v) => !v)}
                   aria-expanded={open}
                   className={cn(
-                    'flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors',
-                    isActiveSection
-                      ? 'bg-accent/60 text-foreground font-medium'
-                      : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                    'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors',
+                    advancedActive
+                      ? 'bg-accent/50 text-foreground font-medium'
+                      : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground'
                   )}
                 >
-                  <span className="text-sm leading-none">{section.emoji}</span>
                   <span className="flex-1 truncate font-medium">{section.label}</span>
                   <ChevronDown
                     className={cn(
@@ -118,7 +117,6 @@ export function Sidebar({ projectId, className }: SidebarProps) {
                     )}
                   />
                 </button>
-
                 <div
                   className={cn(
                     'grid transition-[grid-template-rows] duration-200 ease-out',
@@ -126,7 +124,7 @@ export function Sidebar({ projectId, className }: SidebarProps) {
                   )}
                 >
                   <div className="overflow-hidden">
-                    <div className="mt-0.5 space-y-0.5 border-l border-border/60 ml-3 pl-2 pb-1">
+                    <div className="mt-0.5 space-y-0.5 pl-1 pb-1">
                       {section.items.map((item) => {
                         const to = item.absolute ? item.href : `${base}/${item.href}`;
                         return (
@@ -157,20 +155,32 @@ function NavItemLink({
   to: string;
 }) {
   const Icon = item.icon;
+  const stepNumber = 'stepNumber' in item ? item.stepNumber : undefined;
   return (
     <NavLink
       to={to}
-      end={!to.includes('backlink-builder/') && !to.includes('outreach/') && !to.includes('campaigns/')}
+      end={
+        !to.includes('backlink-builder/') &&
+        !to.includes('outreach/') &&
+        !to.includes('campaigns/') &&
+        !to.includes('settings/')
+      }
       className={({ isActive }) =>
         cn(
-          'flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
+          'flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors',
           isActive
             ? 'bg-primary/10 text-primary font-medium'
-            : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+            : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
         )
       }
     >
-      <Icon className="h-4 w-4 shrink-0" />
+      {stepNumber != null && stepNumber >= 1 && stepNumber <= 9 ? (
+        <span className="w-5 shrink-0 text-center text-[13px] tabular-nums opacity-80">
+          {STEP_GLYPH[stepNumber - 1]}
+        </span>
+      ) : (
+        <Icon className="h-4 w-4 shrink-0 opacity-70" />
+      )}
       <span className="flex-1 truncate">{item.label}</span>
       {'badge' in item && item.badge && (
         <Badge className="text-[9px] px-1 py-0 border-primary/30 text-primary">{item.badge}</Badge>

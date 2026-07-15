@@ -2,7 +2,6 @@ import { useEffect, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { WORKFLOW_STEPS, type WorkflowStep } from '@/config/workflow-steps';
 import { useAppStore, WORKFLOW_GLOBAL_KEY } from '@/stores/app-store';
-import { useActiveOrg } from '@/hooks/use-active-org';
 
 function stepMatchesPath(step: WorkflowStep, path: string, projectId: string): boolean {
   if (step.orgLevel) return false;
@@ -24,16 +23,14 @@ export function useWorkflow(projectId: string) {
     expertMode,
     learningMode,
   } = useAppStore();
-  const { hasOrganizations } = useActiveOrg();
 
   const completedSteps = useMemo(() => {
     const projectCompleted = workflowProgress[projectId] ?? [];
     const globalCompleted = workflowProgress[WORKFLOW_GLOBAL_KEY] ?? [];
     const set = new Set([...projectCompleted, ...globalCompleted]);
-    if (hasOrganizations) set.add('create-org');
     if (projectId) set.add('create-project');
     return set;
-  }, [workflowProgress, hasOrganizations, projectId]);
+  }, [workflowProgress, projectId]);
 
   useEffect(() => {
     const path = location.pathname;
@@ -45,10 +42,6 @@ export function useWorkflow(projectId: string) {
       }
     }
   }, [location.pathname, projectId, markStepComplete]);
-
-  useEffect(() => {
-    if (hasOrganizations) markGlobalStepComplete('create-org');
-  }, [hasOrganizations, markGlobalStepComplete]);
 
   useEffect(() => {
     if (projectId) markGlobalStepComplete('create-project');

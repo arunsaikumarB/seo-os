@@ -1,8 +1,7 @@
 import { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useApi } from '@/hooks/use-api';
@@ -24,6 +23,9 @@ type Opportunity = {
   priority: number;
   domain?: string | null;
   pipeline_stage?: string | null;
+  monthly_traffic?: number | null;
+  difficulty?: string | number | null;
+  estimated_approval?: string | null;
   metadata?: {
     submission_id?: string;
     content_studio_draft_id?: string;
@@ -38,12 +40,13 @@ type QueueFilter = 'pending_review' | 'approved';
 
 export function OpportunityQueuePage() {
   const { projectId = '' } = useParams();
+  const navigate = useNavigate();
   const { request } = useApi();
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<QueueFilter>('pending_review');
   const setSharedOpportunity = useCurrentOpportunityStore((s) => s.setOpportunity);
-  useCurrentOpportunity(projectId); // hydrate shared context while on queue
+  useCurrentOpportunity(projectId);
 
   const invalidateDownstream = () => {
     queryClient.invalidateQueries({ queryKey: ['opportunity-queue', projectId] });
@@ -95,7 +98,7 @@ export function OpportunityQueuePage() {
       }),
     onSuccess: (_data, vars) => {
       if (vars.action === 'approve') {
-        toast.success('Approved — available as current opportunity across modules');
+        toast.success('Approved — ready for Content Studio');
         const row = (queue.data?.data ?? []).find((o) => o.id === vars.id);
         if (row) setSharedOpportunity(projectId, toShared(row));
       } else {
@@ -126,7 +129,7 @@ export function OpportunityQueuePage() {
           `${errors.length} failed${results.length ? `, ${results.length} succeeded` : ''}: ${errors[0]?.message ?? 'Unknown error'}`
         );
       } else if (action === 'approve') {
-        toast.success(`Approved ${results.length} — shared current opportunity updated`);
+        toast.success(`Approved ${results.length}`);
         const last = results[results.length - 1];
         if (last) setSharedOpportunity(projectId, toShared(last));
       } else {
@@ -147,6 +150,15 @@ export function OpportunityQueuePage() {
     });
   };
 
+  const openWithWorkingSet = (row: Opportunity, dest: 'content' | 'execute') => {
+    setSharedOpportunity(projectId, toShared(row));
+    navigate(
+      dest === 'content'
+        ? `/projects/${projectId}/content/library`
+        : `/projects/${projectId}/backlink-builder/execution`
+    );
+  };
+
   const items = queue.data?.data ?? [];
   const isPending = filter === 'pending_review';
 
@@ -156,11 +168,10 @@ export function OpportunityQueuePage() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <ListChecks className="h-6 w-6" /> Opportunity Queue
+            <ListChecks className="h-6 w-6" /> Opportunity Review
           </h1>
           <p className="text-muted-foreground">
-            Review, prioritize, and approve discovered opportunities. Approving sets the shared
-            current opportunity for Image Studio and other modules.
+            Approve the strongest sites. AI already detected the submission type.
           </p>
         </div>
         <Button
@@ -169,7 +180,7 @@ export function OpportunityQueuePage() {
           onClick={() => enrich.mutate()}
           disabled={enrich.isPending}
         >
-          <Sparkles className="h-3 w-3 mr-1" /> AI Recommendations
+          <Sparkles className="h-3 w-3 mr-1" /> Refresh AI tips
         </Button>
       </div>
 
@@ -216,84 +227,115 @@ export function OpportunityQueuePage() {
         </div>
       )}
 
-      <div className="space-y-2">
-        {items.map((opp) => {
-          const submissionId =
-            opp.metadata?.workflow?.submission_id ?? opp.metadata?.submission_id;
-          return (
-            <Card key={opp.id}>
-              <CardContent className="pt-4 flex items-start gap-3">
-                {isPending && (
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    checked={selected.has(opp.id)}
-                    onChange={() => toggle(opp.id)}
-                  />
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="font-medium">{opp.title}</p>
-                    <Badge className="text-[10px]">Score {opp.score}</Badge>
-                    <Badge className="text-[10px] capitalize">
-                      {opp.opportunity_type.replace(/_/g, ' ')}
-                    </Badge>
-                    {!isPending && (
+      <div className="overflow-x-auto rounded-2xl border border-border/40 shadow-sm">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
+            <tr>
+              {isPending ? <th className="px-3 py-2.5 w-10" /> : null}
+              <th className="px-3 py-2.5 font-medium">Website</th>
+              <th className="px-3 py-2.5 font-medium">Type</th>
+              <th className="px-3 py-2.5 font-medium">Score</th>
+              <th className="px-3 py-2.5 font-medium">Traffic</th>
+              <th className="px-3 py-2.5 font-medium">Difficulty</th>
+              <th className="px-3 py-2.5 font-medium">Est. Approval</th>
+              <th className="px-3 py-2.5 font-medium">Status</th>
+              <th className="px-3 py-2.5 font-medium text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((opp) => (
+              <tr key={opp.id} className="border-t border-border/40 hover:bg-muted/20">
+                {isPending ? (
+                  <td className="px-3 py-3">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(opp.id)}
+                      onChange={() => toggle(opp.id)}
+                      aria-label={`Select ${opp.title}`}
+                    />
+                  </td>
+                ) : null}
+                <td className="px-3 py-3">
+                  <p className="font-medium">{opp.title}</p>
+                  {opp.domain ? (
+                    <p className="text-xs text-muted-foreground">{opp.domain}</p>
+                  ) : null}
+                </td>
+                <td className="px-3 py-3 capitalize">
+                  {opp.opportunity_type.replace(/_/g, ' ')}
+                </td>
+                <td className="px-3 py-3 tabular-nums font-medium">{opp.score}</td>
+                <td className="px-3 py-3 tabular-nums text-muted-foreground">
+                  {opp.monthly_traffic != null ? opp.monthly_traffic.toLocaleString() : '—'}
+                </td>
+                <td className="px-3 py-3 text-muted-foreground">
+                  {opp.difficulty != null ? String(opp.difficulty) : '—'}
+                </td>
+                <td className="px-3 py-3 text-muted-foreground">
+                  {opp.estimated_approval ?? '7–14 days'}
+                </td>
+                <td className="px-3 py-3">
+                  <Badge className="text-[10px] capitalize">
+                    {isPending
+                      ? 'Pending'
+                      : (opp.pipeline_stage ?? 'approved').replace(/_/g, ' ')}
+                  </Badge>
+                </td>
+                <td className="px-3 py-3 text-right">
+                  <div className="flex flex-wrap justify-end gap-1">
+                    {isPending ? (
                       <>
-                        <Badge className="text-[10px] capitalize">
-                          {opp.pipeline_stage?.replace(/_/g, ' ') ?? 'campaign ready'}
-                        </Badge>
-                        {submissionId && (
-                          <Badge className="text-[10px] border-emerald-500/40 text-emerald-700 dark:text-emerald-300">
-                            Submission linked
-                          </Badge>
-                        )}
+                        <Button
+                          size="sm"
+                          disabled={review.isPending}
+                          onClick={() => review.mutate({ id: opp.id, action: 'approve' })}
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={review.isPending}
+                          onClick={() => review.mutate({ id: opp.id, action: 'reject' })}
+                        >
+                          Reject
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openWithWorkingSet(opp, 'content')}
+                        >
+                          Generate
+                        </Button>
+                        <Button size="sm" onClick={() => openWithWorkingSet(opp, 'execute')}>
+                          Execute
+                        </Button>
                       </>
                     )}
                   </div>
-                  {opp.domain && (
-                    <p className="text-xs text-muted-foreground mt-1">{opp.domain}</p>
-                  )}
-                  {opp.ai_recommendation && (
-                    <p className="text-xs text-muted-foreground mt-1">{opp.ai_recommendation}</p>
-                  )}
-                  {!isPending && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Destination: Submission Queue · Campaign & Execution ready
-                    </p>
-                  )}
-                </div>
-                {isPending && (
-                  <div className="flex gap-1 shrink-0">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={review.isPending}
-                      onClick={() => review.mutate({ id: opp.id, action: 'approve' })}
-                    >
-                      Approve
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={review.isPending}
-                      onClick={() => review.mutate({ id: opp.id, action: 'reject' })}
-                    >
-                      Reject
-                    </Button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          );
-        })}
-        {items.length === 0 && (
-          <p className="text-sm text-muted-foreground">
-            {isPending
-              ? 'No opportunities pending review. Run discovery first.'
-              : 'No approved opportunities yet. Approve from the Pending queue to hand them off.'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {items.length === 0 ? (
+          <p className="text-sm text-muted-foreground p-6">
+            {isPending ? (
+              <>
+                No opportunities pending review.{' '}
+                <Link className="text-primary underline" to={`/projects/${projectId}/backlink-builder/import`}>
+                  Import websites
+                </Link>{' '}
+                first.
+              </>
+            ) : (
+              'No approved opportunities yet. Approve from the Pending tab.'
+            )}
           </p>
-        )}
+        ) : null}
       </div>
     </div>
   );

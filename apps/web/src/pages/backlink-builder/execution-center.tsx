@@ -4,11 +4,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   Play,
-  Pause,
-  RotateCcw,
-  Square,
-  CheckCircle2,
-  History,
   Settings2,
   Monitor,
   ScrollText,
@@ -423,7 +418,7 @@ export function BrowserExecutionCenterPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Execution Center</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Browser Execution</h1>
           <p className="text-muted-foreground">
             Browser Execution Engine — approved opportunities load automatically. CAPTCHA, MFA,
             and email/phone verification always pause; watchers auto-resume after you complete them.
@@ -768,62 +763,43 @@ export function BrowserExecutionCenterPage() {
                       {j.error_message || j.error_code}
                     </p>
                   )}
-                  <div className="flex flex-wrap gap-1">
+                  <div className="flex flex-wrap items-center gap-1">
                     <Button
                       size="sm"
-                      variant="outline"
                       disabled={!runtimeHealthy || act.isPending}
                       title={
                         runtimeHealthy ? undefined : 'Browser Runtime Missing — Install Required'
                       }
                       onClick={() => act.mutate({ action: 'start', jobId: j.id })}
                     >
-                      <Play className="h-3 w-3 mr-1" /> Start
+                      <Play className="h-3 w-3 mr-1" /> Start Execution
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => act.mutate({ action: 'pause', jobId: j.id })}
-                    >
-                      <Pause className="h-3 w-3 mr-1" /> Pause
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => act.mutate({ action: 'resume', jobId: j.id })}
-                    >
-                      Resume
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => act.mutate({ action: 'approve', jobId: j.id })}
-                    >
-                      <CheckCircle2 className="h-3 w-3 mr-1" /> Approve
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => act.mutate({ action: 'retry', jobId: j.id })}
-                    >
-                      <RotateCcw className="h-3 w-3 mr-1" /> Retry
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => act.mutate({ action: 'cancel', jobId: j.id })}
-                    >
-                      <Square className="h-3 w-3 mr-1" /> Cancel
-                    </Button>
-                    {tab === 'replay' && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => act.mutate({ action: 'replay', jobId: j.id })}
-                      >
-                        <History className="h-3 w-3 mr-1" /> Replay
-                      </Button>
-                    )}
+                    <details className="relative">
+                      <summary className="list-none cursor-pointer inline-flex h-8 items-center rounded-md border border-input px-3 text-xs font-medium hover:bg-accent">
+                        More ▾
+                      </summary>
+                      <div className="absolute right-0 z-20 mt-1 min-w-[160px] rounded-lg border bg-card p-1 shadow-md">
+                        {(
+                          [
+                            ['pause', 'Pause'],
+                            ['resume', 'Resume'],
+                            ['approve', 'Approve'],
+                            ['retry', 'Retry'],
+                            ['cancel', 'Cancel'],
+                            ...(tab === 'replay' ? [['replay', 'Replay'] as const] : []),
+                          ] as const
+                        ).map(([action, label]) => (
+                          <button
+                            key={action}
+                            type="button"
+                            className="flex w-full rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent"
+                            onClick={() => act.mutate({ action, jobId: j.id })}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </details>
                   </div>
                 </div>
               ))

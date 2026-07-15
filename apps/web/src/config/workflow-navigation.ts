@@ -3,7 +3,6 @@ import {
   Settings,
   Link2,
   Upload,
-  Search,
   Sparkles,
   ListChecks,
   Target,
@@ -13,69 +12,126 @@ import {
   CheckCircle2,
   FileBarChart,
   Radar,
-  Kanban,
   Image,
   Video,
   Globe,
   Lightbulb,
-  Mail,
   Layers,
+  HeartPulse,
+  MonitorSmartphone,
+  Plug,
+  GraduationCap,
+  Search,
+  FolderPlus,
 } from 'lucide-react';
 import type { NavItem } from './navigation';
 
 export interface WorkflowNavSection {
   id: string;
   label: string;
-  emoji: string;
+  emoji?: string;
+  /** When true, section starts collapsed and is labeled Advanced */
+  advanced?: boolean;
+  /** When true, render items without a collapsible header (primary pipeline) */
+  flat?: boolean;
   items: WorkflowNavItem[];
 }
 
 export interface WorkflowNavItem extends NavItem {
   absolute?: boolean;
+  /** Shown as ①…⑧ in primary pipeline */
+  stepNumber?: number;
+  dividerBefore?: boolean;
 }
 
-/** V1.1 Backlink Operations — additive IA over V1.0 */
+/** V2 guided IA — primary pipeline + collapsible Advanced */
 export const workflowNavSections: WorkflowNavSection[] = [
   {
-    id: 'dashboard',
-    label: 'Dashboard',
-    emoji: '📊',
+    id: 'primary',
+    label: 'Backlink Builder',
+    flat: true,
     items: [
       {
         label: 'Dashboard',
-        href: 'mission-control',
+        href: 'home',
         icon: LayoutDashboard,
-        featureFlag: 'mission_control',
+      },
+      {
+        label: 'Create Project',
+        href: 'settings/general',
+        icon: FolderPlus,
+        stepNumber: 1,
+        dividerBefore: true,
+      },
+      {
+        label: 'Import Websites',
+        href: 'backlink-builder/import',
+        icon: Upload,
+        featureFlag: 'backlink_builder',
+        stepNumber: 2,
+      },
+      {
+        label: 'AI Discovery & Qualification',
+        href: 'backlink-builder/classification',
+        icon: Sparkles,
+        featureFlag: 'backlink_builder',
+        stepNumber: 3,
+      },
+      {
+        label: 'Opportunity Review',
+        href: 'campaigns/queue',
+        icon: ListChecks,
+        featureFlag: 'backlink_builder',
+        stepNumber: 4,
+      },
+      {
+        label: 'Content Studio',
+        href: 'content/library',
+        icon: FileText,
+        featureFlag: 'v11_content_studio_v2',
+        stepNumber: 5,
+      },
+      {
+        label: 'Browser Execution',
+        href: 'backlink-builder/execution',
+        icon: Link2,
+        featureFlag: 'bee_enabled',
+        stepNumber: 6,
+      },
+      {
+        label: 'Verification',
+        href: 'backlink-builder/pending',
+        icon: CheckCircle2,
+        featureFlag: 'backlink_builder',
+        stepNumber: 7,
+      },
+      {
+        label: 'Reports',
+        href: 'reports/library',
+        icon: FileBarChart,
+        featureFlag: 'reports',
+        stepNumber: 8,
       },
     ],
   },
   {
-    id: 'backlink-builder',
-    label: 'Backlink Builder',
-    emoji: '🔗',
+    id: 'advanced',
+    label: 'Advanced',
+    advanced: true,
     items: [
-      { label: 'Dashboard', href: 'backlink-builder', icon: Link2, featureFlag: 'backlink_builder' },
-      { label: 'Import Websites', href: 'backlink-builder/import', icon: Upload, featureFlag: 'backlink_builder' },
-      { label: 'Classification', href: 'backlink-builder/classification', icon: Layers, featureFlag: 'backlink_builder' },
-      { label: 'Discover Websites', href: 'backlink-builder/discover', icon: Radar, featureFlag: 'backlink_builder' },
-      { label: 'Explorer', href: 'backlink-builder/explorer', icon: Search, featureFlag: 'backlink_builder' },
-      { label: 'AI Analysis', href: 'backlink-builder/automation', icon: Sparkles, featureFlag: 'backlink_builder' },
-      {
-        label: 'Submission Queue',
-        href: 'backlink-builder/queue',
-        icon: Kanban,
-        featureFlag: 'v11_submission_queue',
-      },
-      { label: 'Opportunity Queue', href: 'campaigns/queue', icon: ListChecks, featureFlag: 'backlink_builder' },
       { label: 'Campaigns', href: 'campaigns', icon: Target, featureFlag: 'backlink_builder' },
-      { label: 'Content Studio', href: 'content/library', icon: FileText, featureFlag: 'v11_content_studio_v2' },
-      { label: 'Image Studio', href: 'backlink-builder/image-studio', icon: Image, featureFlag: 'v11_media_studios' },
-      { label: 'Video Studio', href: 'backlink-builder/video-studio', icon: Video, featureFlag: 'v11_media_studios' },
+      { label: 'Relationship Hub', href: 'relationships', icon: Handshake },
       {
-        label: 'Submission Center',
-        href: 'backlink-builder/tracking',
-        icon: ClipboardList,
-        featureFlag: 'v11_submission_assistant',
+        label: 'Image Studio',
+        href: 'backlink-builder/image-studio',
+        icon: Image,
+        featureFlag: 'v11_media_studios',
+      },
+      {
+        label: 'Video Studio',
+        href: 'backlink-builder/video-studio',
+        icon: Video,
+        featureFlag: 'v11_media_studios',
       },
       {
         label: 'Browser Assistant',
@@ -84,29 +140,54 @@ export const workflowNavSections: WorkflowNavSection[] = [
         featureFlag: 'v11_browser_assistant',
       },
       {
-        label: 'Execution Center',
-        href: 'backlink-builder/execution',
-        icon: Kanban,
-        featureFlag: 'bee_enabled',
-      },
-      {
         label: 'Recommendations',
         href: 'backlink-builder/recommendations',
         icon: Lightbulb,
         featureFlag: 'v11_recommendations',
       },
-      { label: 'Relationship Hub', href: 'relationships', icon: Handshake },
-      { label: 'Verification', href: 'backlink-builder/pending', icon: CheckCircle2, featureFlag: 'backlink_builder' },
-      { label: 'Reports', href: 'reports/library', icon: FileBarChart, featureFlag: 'reports' },
-    ],
-  },
-  {
-    id: 'workspace',
-    label: 'Workspace',
-    emoji: '⚙️',
-    items: [
-      { label: 'Unified Inbox', href: 'outreach/inbox', icon: Mail, featureFlag: 'outreach' },
-      { label: 'Integrations', href: 'integrations/hub', icon: Settings, featureFlag: 'integrations' },
+      {
+        label: 'Discover Websites',
+        href: 'backlink-builder/discover',
+        icon: Radar,
+        featureFlag: 'backlink_builder',
+      },
+      {
+        label: 'Explorer',
+        href: 'backlink-builder/explorer',
+        icon: Search,
+        featureFlag: 'backlink_builder',
+      },
+      {
+        label: 'Submission Center',
+        href: 'backlink-builder/tracking',
+        icon: ClipboardList,
+        featureFlag: 'v11_submission_assistant',
+      },
+      {
+        label: 'AI Analysis',
+        href: 'backlink-builder/automation',
+        icon: Layers,
+        featureFlag: 'backlink_builder',
+      },
+      { label: 'Provider Settings', href: 'providers', icon: Plug, featureFlag: 'integrations' },
+      { label: 'Runtime Diagnostics', href: 'diagnostics', icon: HeartPulse },
+      {
+        label: 'Browser Runtime',
+        href: 'settings/browser-runtime',
+        icon: MonitorSmartphone,
+        featureFlag: 'backlink_builder',
+      },
+      {
+        label: 'Mission Control',
+        href: 'mission-control',
+        icon: LayoutDashboard,
+        featureFlag: 'mission_control',
+      },
+      {
+        label: 'Learning',
+        href: 'command-center',
+        icon: GraduationCap,
+      },
       { label: 'Settings', href: 'settings/general', icon: Settings },
     ],
   },

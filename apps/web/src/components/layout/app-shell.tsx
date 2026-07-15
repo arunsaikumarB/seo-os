@@ -10,6 +10,8 @@ import { HelpDrawer } from '@/components/workflow/help-drawer';
 import { AiCoachPanel } from '@/components/workflow/ai-coach-panel';
 import { LearningModeBanner } from '@/components/workflow/learning-mode-banner';
 import { NextActionStrip } from '@/components/workflow/next-action-strip';
+import { WorkflowContextBar } from '@/components/workflow/workflow-context-bar';
+import { GlobalStatusBar } from '@/components/workflow/global-status-bar';
 import { OfflineBanner } from '@/components/beta/offline-banner';
 import { BetaAnnouncementBar } from '@/components/beta/beta-announcement-bar';
 import { useAppStore } from '@/stores/app-store';
@@ -40,8 +42,9 @@ export function AppShell({ projectId }: AppShellProps) {
         <OfflineBanner />
         <BetaAnnouncementBar />
         <Topbar projectId={projectId} showProjectSwitcher />
+        <GlobalStatusBar projectId={projectId} />
         <LearningModeBanner projectId={projectId} />
-        <div className="flex items-center justify-between gap-3 border-b px-4 py-2 md:px-6">
+        <div className="flex items-center justify-between gap-3 border-b border-border/50 px-4 py-2 md:px-6">
           <Breadcrumbs items={breadcrumbs} className="min-w-0 flex-1" />
           <div className="flex shrink-0 items-center gap-2">
             <HelpDrawer projectId={projectId} />
@@ -49,6 +52,7 @@ export function AppShell({ projectId }: AppShellProps) {
           </div>
         </div>
         <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto p-4 pb-20 md:p-6 md:pb-6">
+          <WorkflowContextBar projectId={projectId} />
           <NextActionStrip projectId={projectId} />
           <Outlet />
         </main>

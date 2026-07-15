@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Globe, Link2, Mail, Target } from 'lucide-react';
+import { LayoutDashboard, Upload, ListChecks, Link2, FileBarChart } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface MobileNavProps {
@@ -8,10 +8,10 @@ interface MobileNavProps {
 
 const workflowMobileItems = (projectId: string) => [
   { label: 'Home', href: `/projects/${projectId}/home`, icon: LayoutDashboard },
-  { label: 'Analyze', href: `/projects/${projectId}/intelligence/browser`, icon: Globe },
-  { label: 'Backlinks', href: `/projects/${projectId}/backlink-builder`, icon: Link2 },
-  { label: 'Outreach', href: `/projects/${projectId}/outreach/inbox`, icon: Mail },
-  { label: 'Mission', href: `/projects/${projectId}/mission-control`, icon: Target },
+  { label: 'Import', href: `/projects/${projectId}/backlink-builder/import`, icon: Upload },
+  { label: 'Review', href: `/projects/${projectId}/campaigns/queue`, icon: ListChecks },
+  { label: 'Execute', href: `/projects/${projectId}/backlink-builder/execution`, icon: Link2 },
+  { label: 'Reports', href: `/projects/${projectId}/reports/library`, icon: FileBarChart },
 ];
 
 export function MobileNav({ projectId }: MobileNavProps) {

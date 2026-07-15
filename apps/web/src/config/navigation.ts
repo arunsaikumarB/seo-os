@@ -125,9 +125,9 @@ export const projectNav: NavItem[] = [
 ];
 
 export const mobileNavItems = (projectId: string): NavItem[] => [
-  { label: 'Home', href: `/projects/${projectId}/mission-control`, icon: LayoutDashboard },
-  { label: 'Builder', href: `/projects/${projectId}/backlink-builder`, icon: Link2 },
+  { label: 'Home', href: `/projects/${projectId}/home`, icon: LayoutDashboard },
+  { label: 'Import', href: `/projects/${projectId}/backlink-builder/import`, icon: Link2 },
   { label: 'Projects', href: '/projects', icon: Building2 },
-  { label: 'Queue', href: `/projects/${projectId}/campaigns/queue`, icon: ListChecks },
+  { label: 'Review', href: `/projects/${projectId}/campaigns/queue`, icon: ListChecks },
   { label: 'Settings', href: `/projects/${projectId}/settings/general`, icon: Settings },
 ];

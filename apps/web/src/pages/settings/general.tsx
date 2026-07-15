@@ -221,7 +221,6 @@ export function ProjectSettingsPage() {
                   disabled={isArchived}
                 />
               </div>
-              <p className="text-xs text-muted-foreground font-mono">Project ID: {projectId}</p>
               <Button
                 onClick={() => save.mutate()}
                 disabled={

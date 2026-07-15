@@ -33,6 +33,7 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
   const qc = useQueryClient();
   const { opportunity: selectedOpp, setOpportunity } = useCurrentOpportunity(projectId);
   const [imageType, setImageType] = useState('blog_hero');
+  const [showAdvancedDiagnostics, setShowAdvancedDiagnostics] = useState(false);
   const autoBriefRef = useRef<string | null>(null);
 
   const readiness = useImageGenerationReadiness(projectId, selectedOpp?.id);
@@ -249,23 +250,24 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
     <PageTransition className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2 capitalize">
-          <Icon className="h-6 w-6" /> {kind} Submission Studio
+          <Icon className="h-6 w-6" /> {kind === 'image' ? 'Image Studio' : 'Video Studio'}
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
           {kind === 'image'
-            ? 'Uses the shared current opportunity — brief → generate asset → quality review → approve.'
-            : 'Uses the shared current opportunity for video metadata briefs.'}
+            ? 'Generate → preview → approve → submit. AI picks formats from the submission type.'
+            : 'Generate → preview → approve → submit video packages for the selected website.'}
         </p>
       </div>
 
       <CurrentOpportunityBanner projectId={projectId} />
 
-      <Card>
+      <Card className="rounded-2xl border-border/40 shadow-sm">
         <CardHeader>
-          <CardTitle className="text-base">1. Current website</CardTitle>
+          <CardTitle className="text-base">Selected website</CardTitle>
           <CardDescription>
-            Selection syncs across Content Studio, Browser Assistant, Submission Center, and
-            Execution Center. Persists until you change it.
+            {selectedOpp
+              ? `${selectedOpp.website}${selectedOpp.domain ? ` · ${selectedOpp.domain}` : ''} · ${(selectedOpp.backlink_type ?? selectedOpp.opportunity_type).replace(/_/g, ' ')}`
+              : 'Choose an approved opportunity to continue'}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -278,9 +280,9 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
             allowClear
             label={selectedOpp ? 'Change website' : 'Select approved website'}
           />
-          {kind === 'image' && selectedOpp && (
+          {kind === 'image' && selectedOpp && showAdvancedDiagnostics && (
             <div className="space-y-1">
-              <Label htmlFor="image-type">Image type</Label>
+              <Label htmlFor="image-type">Image variant (advanced)</Label>
               <select
                 id="image-type"
                 className="flex h-9 rounded-md border border-input bg-transparent px-3 text-sm"
@@ -392,50 +394,57 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
       )}
 
       {kind === 'image' && selectedOpp && (
-        <Card>
+        <Card className="rounded-2xl border-border/40 shadow-sm">
           <CardHeader>
-            <CardTitle className="text-base">2. Image generation readiness</CardTitle>
-            <CardDescription>
-              Generate Image Asset enables automatically when every check passes — no page reload.
-            </CardDescription>
+            <CardTitle className="text-base">Generated images</CardTitle>
+            <CardDescription>Approve or regenerate for {selectedOpp.website}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {readiness.isLoading ? (
-              <Skeleton className="h-40 w-full" />
-            ) : (
-              <ImageGenerationReadinessPanel
-                projectId={projectId}
-                opportunityId={selectedOpp.id}
-              />
-            )}
+            {!ready?.imageGenerationReady && ready?.primaryBlocker ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                <p className="font-medium">
+                  {ready.primaryBlocker.reason?.includes('storage') ||
+                  ready.primaryBlocker.reason?.includes('Storage')
+                    ? 'Storage Missing'
+                    : 'Setup needed'}
+                </p>
+                <p className="text-xs mt-0.5">{ready.primaryBlocker.reason}</p>
+                <Button size="sm" className="mt-2" variant="outline" asChild>
+                  <Link to={`/projects/${projectId}/providers`}>Fix Now</Link>
+                </Button>
+              </div>
+            ) : null}
             <div className="flex flex-wrap items-center gap-2">
               {!briefExists && (
                 <Button variant="secondary" disabled={create.isPending} onClick={() => create.mutate()}>
-                  {create.isPending ? 'Generating brief…' : 'Generate Image Brief'}
+                  {create.isPending ? 'Preparing…' : 'Prepare'}
                 </Button>
               )}
               <Button
                 disabled={Boolean(generateDisabledReason)}
-                title={generateDisabledReason ?? 'Generate Image Asset'}
+                title={generateDisabledReason ?? 'Generate'}
                 onClick={() => generateAsset.mutate()}
               >
-                {generateAsset.isPending ? 'Queuing…' : 'Generate Image Asset'}
+                {generateAsset.isPending ? 'Generating…' : 'Generate'}
               </Button>
-              <Button variant="outline" size="sm" asChild>
-                <Link to={`/projects/${projectId}/providers`}>Open Provider Settings</Link>
-              </Button>
-              <Button variant="outline" size="sm" asChild>
-                <Link to={`/projects/${projectId}/diagnostics`}>Diagnostics</Link>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowAdvancedDiagnostics((v) => !v)}
+              >
+                {showAdvancedDiagnostics ? 'Hide' : 'Advanced'} Diagnostics
               </Button>
             </div>
-            {generateDisabledReason && (
-              <p className="text-xs text-amber-700">{generateDisabledReason}</p>
-            )}
-            {ready?.imageGenerationReady && briefExists && (
-              <p className="text-sm text-emerald-700 font-medium">
-                Image Provider Ready — Generate Image Asset is enabled
-              </p>
-            )}
+            {showAdvancedDiagnostics ? (
+              readiness.isLoading ? (
+                <Skeleton className="h-40 w-full" />
+              ) : (
+                <ImageGenerationReadinessPanel
+                  projectId={projectId}
+                  opportunityId={selectedOpp.id}
+                />
+              )
+            ) : null}
           </CardContent>
         </Card>
       )}

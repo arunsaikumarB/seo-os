@@ -32,11 +32,11 @@ export function NextActionPanel({ projectId, title, className }: NextActionPanel
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              You have completed all 17 steps. Visit Mission Control for your executive summary.
+              You have completed the guided workflow. Open Reports for your executive summary.
             </p>
             <Button asChild size="sm">
-              <Link to={`/projects/${projectId}/mission-control`}>
-                Open Mission Control
+              <Link to={`/projects/${projectId}/reports/library`}>
+                Open Reports
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Link>
             </Button>
