@@ -47,6 +47,14 @@ async function main() {
 
   const app = createApp();
 
+  // Bind early so Railway /health succeeds while workers + Chromium warm up
+  server = app.listen(env.PORT, '0.0.0.0', () => {
+    logger.info({ port: env.PORT, host: '0.0.0.0', env: env.NODE_ENV }, 'SEO OS API started');
+  });
+
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+
   if (env.ENABLE_WORKERS) {
     await startJobInfrastructure();
     logger.info('Background job workers enabled');
@@ -72,13 +80,6 @@ async function main() {
   } catch (err) {
     logger.warn({ err }, 'Browser runtime startup validation failed — continuing with degraded Start guards');
   }
-
-  server = app.listen(env.PORT, '0.0.0.0', () => {
-    logger.info({ port: env.PORT, host: '0.0.0.0', env: env.NODE_ENV }, 'SEO OS API started');
-  });
-
-  process.on('SIGTERM', () => void shutdown('SIGTERM'));
-  process.on('SIGINT', () => void shutdown('SIGINT'));
 }
 
 main().catch((err) => {
