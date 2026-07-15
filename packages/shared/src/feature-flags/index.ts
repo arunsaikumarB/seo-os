@@ -77,7 +77,7 @@ export const DEFAULT_FEATURE_FLAGS: Record<FeatureFlag, boolean> = {
   bee_automatic_submit: false,
   bee_learning: true,
   bee_auto_resume: true,
-  v13_image_generation: false,
+  v13_image_generation: true,
   v13_flux: true,
   v13_sdxl: true,
   v13_comfy: false,

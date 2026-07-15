@@ -29,6 +29,7 @@ import { AnimatedCounter } from '@/components/demo/animated-counter';
 import { PageTransition, StaggerGrid, StaggerItem } from '@/components/demo/page-transition';
 import type { BacklinkSummary, AutomationSummary } from '@/components/backlink-builder/types';
 import type { LucideIcon } from 'lucide-react';
+import { ImageProviderMissionWidget } from '@/components/images/image-provider-mission-widget';
 
 type MissionSummary = {
   backlinkBuilder?: BacklinkSummary;
@@ -381,6 +382,20 @@ export function MissionControlPage() {
               <Link to={`/projects/${projectId}/content/library`}>Content Studio · Images</Link>
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <ImageIcon className="h-4 w-4" /> Image Provider
+          </CardTitle>
+          <CardDescription>
+            Provider · Health · Latency · Queue · Jobs · Generated Today · Rejected · Ready
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <ImageProviderMissionWidget projectId={projectId} summary={data?.imageIntelligence} />
         </CardContent>
       </Card>
 

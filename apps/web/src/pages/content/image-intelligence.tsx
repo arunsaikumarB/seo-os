@@ -13,6 +13,10 @@ import {
   OpportunitySelector,
   type SelectedOpportunity,
 } from '@/components/opportunities/opportunity-selector';
+import {
+  ImageGenerationReadinessPanel,
+  useImageGenerationReadiness,
+} from '@/components/images/image-generation-readiness';
 
 type ImageAsset = {
   id: string;
@@ -71,26 +75,31 @@ export function ImageIntelligencePanel({ embedded = false }: { embedded?: boolea
     enabled: !!projectId,
   });
 
-  const enabled = meta.data?.meta?.generationEnabled === true;
+  const readiness = useImageGenerationReadiness(projectId, selectedOpp?.id);
+  const ready = readiness.data?.data;
 
   const generate = useMutation({
-    mutationFn: () =>
-      request(`/v1/projects/${projectId}/images/generate`, {
+    mutationFn: () => {
+      if (!selectedOpp) throw new Error('Select an approved website first');
+      if (!ready?.imageGenerationReady) {
+        throw new Error(ready?.primaryBlocker?.reason ?? 'Image generation is not ready');
+      }
+      return request(`/v1/projects/${projectId}/images/generate`, {
         method: 'POST',
         body: JSON.stringify({
           imageType,
-          opportunityId: selectedOpp?.id,
+          opportunityId: selectedOpp.id,
           count: 1,
+          providerKey: ready.defaultProviderKey ?? undefined,
         }),
-      }),
+      });
+    },
     onSuccess: () => {
-      toast.success(
-        selectedOpp
-          ? `Image generation queued for ${selectedOpp.website}`
-          : 'Image generation queued'
-      );
+      toast.success(`Image generation queued for ${selectedOpp?.website ?? 'website'}`);
       qc.invalidateQueries({ queryKey: ['iie-images', projectId] });
       qc.invalidateQueries({ queryKey: ['iie-stats', projectId] });
+      qc.invalidateQueries({ queryKey: ['image-jobs', projectId] });
+      qc.invalidateQueries({ queryKey: ['image-readiness', projectId] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -134,18 +143,7 @@ export function ImageIntelligencePanel({ embedded = false }: { embedded?: boolea
         </div>
       )}
 
-      {!enabled && (
-        <Card className="border-amber-500/40">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Generation is off</CardTitle>
-            <CardDescription>
-              Enable feature flag <code>v13_image_generation</code> and set{' '}
-              <code>IMAGE_FLUX_URL</code> or <code>IMAGE_SDXL_URL</code> for live raster generation.
-              Style profiles and library browsing still work.
-            </CardDescription>
-          </CardHeader>
-        </Card>
-      )}
+      <ImageGenerationReadinessPanel projectId={projectId} opportunityId={selectedOpp?.id} />
 
       <div className="grid gap-3 sm:grid-cols-4">
         {(
@@ -196,13 +194,23 @@ export function ImageIntelligencePanel({ embedded = false }: { embedded?: boolea
               </select>
             </div>
             <Button
-              disabled={!enabled || !selectedOpp || generate.isPending}
+              disabled={!ready?.imageGenerationReady || !selectedOpp || generate.isPending}
+              title={
+                !selectedOpp
+                  ? 'Select an approved website first'
+                  : !ready?.imageGenerationReady
+                    ? ready?.primaryBlocker?.reason ?? 'Not ready'
+                    : 'Generate Image Asset'
+              }
               onClick={() => generate.mutate()}
             >
-              {generate.isPending ? 'Queuing…' : 'Generate'}
+              {generate.isPending ? 'Queuing…' : 'Generate Image Asset'}
             </Button>
             <Button variant="outline" size="sm" asChild>
-              <Link to={`/projects/${projectId}/backlink-builder/image-studio`}>Media Studio</Link>
+              <Link to={`/projects/${projectId}/backlink-builder/image-studio`}>Image Studio</Link>
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <Link to={`/projects/${projectId}/providers`}>Provider Settings</Link>
             </Button>
           </div>
         </CardContent>

@@ -25,10 +25,11 @@ function requireIie() {
 }
 
 function providerAllowed(key: string): boolean {
-  if (key === 'flux') return DEFAULT_FEATURE_FLAGS.v13_flux;
-  if (key === 'sdxl') return DEFAULT_FEATURE_FLAGS.v13_sdxl;
-  if (key === 'comfy') return DEFAULT_FEATURE_FLAGS.v13_comfy;
-  return false;
+  if (key === 'flux') return DEFAULT_FEATURE_FLAGS.v13_flux !== false;
+  if (key === 'sdxl') return DEFAULT_FEATURE_FLAGS.v13_sdxl !== false;
+  if (key === 'comfy') return DEFAULT_FEATURE_FLAGS.v13_comfy !== false;
+  // Future registry providers (OpenAI Images, Firefly, Gemini, …) follow master flag
+  return DEFAULT_FEATURE_FLAGS.v13_image_generation === true;
 }
 
 export async function listImageProviders() {
@@ -263,6 +264,322 @@ export async function listImageJobs(workspaceId: string) {
     .order('created_at', { ascending: false })
     .limit(50);
   return data ?? [];
+}
+
+export type ReadinessCheckKey =
+  | 'opportunity'
+  | 'brief'
+  | 'project'
+  | 'provider_configured'
+  | 'provider_healthy'
+  | 'feature_flag'
+  | 'storage'
+  | 'worker'
+  | 'credentials';
+
+export type ReadinessCheck = {
+  key: ReadinessCheckKey;
+  label: string;
+  ok: boolean;
+  reason: string;
+  fixLabel?: string;
+  fixHref?: string;
+};
+
+/**
+ * Image generation readiness — never silently fails. Explains why Generate is blocked.
+ * Supports every registered provider (no hardcoding to a single vendor).
+ */
+export async function getImageGenerationReadiness(params: {
+  workspaceId: string;
+  opportunityId?: string;
+  projectId?: string;
+}) {
+  const workspaceId = params.workspaceId;
+  const opportunityId = params.opportunityId;
+
+  const { data: project } = await getSupabaseAdmin()
+    .from('workspaces')
+    .select('id, name, domain')
+    .eq('id', workspaceId)
+    .maybeSingle();
+
+  let opportunityOk = Boolean(opportunityId);
+  let opportunityLabel = 'No opportunity selected';
+  if (opportunityId) {
+    const { data: opp } = await getSupabaseAdmin()
+      .from('opportunities')
+      .select('id, title, domain, website_name')
+      .eq('id', opportunityId)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle();
+    opportunityOk = Boolean(opp);
+    opportunityLabel = opp
+      ? `Selected: ${opp.website_name || opp.domain || opp.title}`
+      : 'Opportunity not found in this project';
+  }
+
+  let briefOk = false;
+  let briefLabel = 'Waiting for Image Brief — Generate Brief First';
+  let briefId: string | null = null;
+  if (opportunityId) {
+    const { data: briefs } = await getSupabaseAdmin()
+      .from('media_asset_briefs')
+      .select('id, review_status, brief, created_at')
+      .eq('workspace_id', workspaceId)
+      .eq('opportunity_id', opportunityId)
+      .eq('kind', 'image')
+      .order('created_at', { ascending: false })
+      .limit(1);
+    const brief = briefs?.[0];
+    if (brief) {
+      briefOk = true;
+      briefId = String(brief.id);
+      briefLabel = `Brief ready (${brief.review_status})`;
+    }
+  }
+
+  const flagOk = DEFAULT_FEATURE_FLAGS.v13_image_generation === true;
+  const pifImageOk = DEFAULT_FEATURE_FLAGS.provider_image !== false;
+
+  const providerDescriptors = registry.providers();
+  const providerStates = await Promise.all(
+    providerDescriptors.map(async (p) => {
+      const allowed = providerAllowed(p.key);
+      let health: { status: string; message?: string; latencyMs?: number } = {
+        status: 'down',
+        message: 'unavailable',
+      };
+      try {
+        health = await registry.get(p.key).health();
+      } catch (err) {
+        health = {
+          status: 'down',
+          message: err instanceof Error ? err.message : 'health failed',
+        };
+      }
+      const caps = registry.get(p.key).capabilities();
+      const urlEnvKey = `IMAGE_${p.key.toUpperCase().replace(/-/g, '_')}_URL`;
+      const envConfigured =
+        Boolean(process.env[urlEnvKey]) ||
+        Boolean(caps.freeDefault) ||
+        // Legacy env aliases used in Railway/docs
+        (p.key === 'flux' && Boolean(process.env.IMAGE_FLUX_URL)) ||
+        (p.key === 'sdxl' && Boolean(process.env.IMAGE_SDXL_URL)) ||
+        (p.key === 'comfy' && Boolean(process.env.IMAGE_COMFY_URL));
+      const draftMode = health.status === 'unconfigured' && caps.freeDefault === true;
+      const healthyEnough =
+        health.status === 'healthy' ||
+        health.status === 'degraded' ||
+        draftMode;
+      return {
+        key: p.key,
+        displayName: p.displayName,
+        flagEnabled: allowed,
+        configured: envConfigured,
+        healthy: healthyEnough,
+        draftMode,
+        health,
+        freeDefault: caps.freeDefault === true,
+      };
+    })
+  );
+
+  const usableProviders = providerStates.filter((p) => p.flagEnabled && p.configured);
+  const healthyProviders = usableProviders.filter((p) => p.healthy);
+  const defaultProvider =
+    healthyProviders.find((p) => p.key === (process.env.IMAGE_PROVIDER_DEFAULT ?? 'flux')) ??
+    healthyProviders[0] ??
+    usableProviders[0] ??
+    null;
+
+  const providerConfiguredOk = usableProviders.length > 0;
+  const providerHealthyOk = healthyProviders.length > 0;
+  const credentialsOk =
+    Boolean(defaultProvider) &&
+    (defaultProvider!.draftMode ||
+      Boolean(process.env.IMAGE_PROVIDER_API_KEY) ||
+      defaultProvider!.health.status === 'healthy' ||
+      defaultProvider!.health.status === 'degraded' ||
+      defaultProvider!.freeDefault);
+
+  let storageOk = false;
+  let storageLabel = 'Storage bucket missing';
+  try {
+    const { data: buckets, error } = await getSupabaseAdmin().storage.listBuckets();
+    if (error) {
+      storageLabel = `Storage check failed: ${error.message}`;
+    } else {
+      const hit = (buckets ?? []).find((b) => b.name === 'image-intelligence');
+      storageOk = Boolean(hit);
+      storageLabel = hit
+        ? 'Bucket image-intelligence ready'
+        : 'Storage Bucket Missing — create bucket image-intelligence';
+    }
+  } catch (err) {
+    storageLabel = err instanceof Error ? err.message : 'Storage unreachable';
+  }
+
+  let workerOk = false;
+  let workerLabel = 'Worker unavailable';
+  try {
+    const { getBoss } = await import('../../jobs/boss.js');
+    const { getEnv } = await import('../../config/env.js');
+    const env = getEnv();
+    if (!env.ENABLE_WORKERS) {
+      workerLabel = 'Workers disabled (ENABLE_WORKERS=false)';
+    } else {
+      const boss = await getBoss();
+      workerOk = Boolean(boss);
+      workerLabel = boss ? 'LOW queue worker available' : 'Queue boss not initialized';
+    }
+  } catch (err) {
+    workerLabel = err instanceof Error ? err.message : 'Worker check failed';
+  }
+
+  const checks: ReadinessCheck[] = [
+    {
+      key: 'opportunity',
+      label: 'Opportunity Selected',
+      ok: opportunityOk,
+      reason: opportunityLabel,
+      fixLabel: opportunityOk ? undefined : 'Open Opportunity Queue',
+      fixHref: opportunityOk ? undefined : 'campaigns/queue',
+    },
+    {
+      key: 'brief',
+      label: 'Image Brief Generated',
+      ok: briefOk,
+      reason: briefLabel,
+      fixLabel: briefOk ? undefined : 'Generate Brief First',
+    },
+    {
+      key: 'project',
+      label: 'Project Exists',
+      ok: Boolean(project),
+      reason: project ? `Project: ${project.name}` : 'Project/workspace not found',
+    },
+    {
+      key: 'provider_configured',
+      label: 'Provider Configured',
+      ok: providerConfiguredOk,
+      reason: providerConfiguredOk
+        ? `Configured: ${usableProviders.map((p) => p.displayName).join(', ')}`
+        : 'No Image Generation Provider Configured',
+      fixLabel: providerConfiguredOk ? undefined : 'Configure Provider',
+      fixHref: providerConfiguredOk ? undefined : 'providers',
+    },
+    {
+      key: 'provider_healthy',
+      label: 'Provider Healthy',
+      ok: providerHealthyOk,
+      reason: providerHealthyOk
+        ? healthyProviders
+            .map(
+              (p) =>
+                `${p.displayName}: ${p.draftMode ? 'draft mode' : p.health.status}${
+                  p.health.latencyMs != null ? ` (${p.health.latencyMs}ms)` : ''
+                }`
+            )
+            .join(' · ')
+        : 'Provider Offline or unconfigured',
+      fixLabel: providerHealthyOk ? undefined : 'Retry Health Check',
+      fixHref: providerHealthyOk ? undefined : 'providers',
+    },
+    {
+      key: 'feature_flag',
+      label: 'Feature Enabled',
+      ok: flagOk && pifImageOk,
+      reason: !flagOk
+        ? 'Feature Flag Disabled (v13_image_generation)'
+        : !pifImageOk
+          ? 'Provider image flag disabled (provider_image)'
+          : 'v13_image_generation enabled',
+      fixLabel: flagOk && pifImageOk ? undefined : 'Enable Image Generation',
+      fixHref: flagOk && pifImageOk ? undefined : 'diagnostics',
+    },
+    {
+      key: 'storage',
+      label: 'Storage Ready',
+      ok: storageOk,
+      reason: storageLabel,
+      fixLabel: storageOk ? undefined : 'Create Storage',
+      fixHref: storageOk ? undefined : 'diagnostics',
+    },
+    {
+      key: 'worker',
+      label: 'Worker Ready',
+      ok: workerOk,
+      reason: workerLabel,
+      fixLabel: workerOk ? undefined : 'Check Workers',
+      fixHref: workerOk ? undefined : 'diagnostics',
+    },
+    {
+      key: 'credentials',
+      label: 'Provider Credentials Valid',
+      ok: credentialsOk,
+      reason: credentialsOk
+        ? defaultProvider?.draftMode
+          ? `${defaultProvider.displayName} local draft mode (set IMAGE_*_URL for live raster)`
+          : `${defaultProvider?.displayName ?? 'Provider'} credentials OK`
+        : 'Provider credentials missing or invalid',
+      fixLabel: credentialsOk ? undefined : 'Open Provider Settings',
+      fixHref: credentialsOk ? undefined : 'providers',
+    },
+  ];
+
+  const imageGenerationReady = checks.every((c) => c.ok);
+  const failed = checks.filter((c) => !c.ok);
+  const primaryBlocker = failed[0] ?? null;
+  const readinessScore = Math.round(
+    (checks.filter((c) => c.ok).length / Math.max(checks.length, 1)) * 100
+  );
+
+  const activeJobs = (await listImageJobs(workspaceId)).filter((j) =>
+    ['queued', 'running'].includes(String(j.status))
+  );
+
+  return {
+    imageGenerationReady,
+    overallStatus: imageGenerationReady ? ('READY' as const) : ('NOT READY' as const),
+    readinessScore,
+    checks,
+    primaryBlocker,
+    providers: providerStates,
+    defaultProviderKey: defaultProvider?.key ?? null,
+    briefId,
+    opportunityId: opportunityId ?? null,
+    activeJobs: activeJobs.length,
+    generationStatus: imageGenerationReady
+      ? 'ready'
+      : primaryBlocker?.key === 'feature_flag'
+        ? 'feature_disabled'
+        : primaryBlocker?.key === 'brief'
+          ? 'waiting_for_brief'
+          : primaryBlocker?.key === 'provider_configured' || primaryBlocker?.key === 'provider_healthy'
+            ? 'provider_not_ready'
+            : 'blocked',
+  };
+}
+
+export async function getImageGenerationDiagnostics(workspaceId: string) {
+  const readiness = await getImageGenerationReadiness({ workspaceId });
+  const stats = await getImageStatistics(workspaceId).catch(() => null);
+  const jobs = await listImageJobs(workspaceId);
+  return {
+    ...readiness,
+    currentProvider: readiness.defaultProviderKey,
+    statistics: stats,
+    recentJobs: jobs.slice(0, 10),
+    flags: {
+      v13_image_generation: DEFAULT_FEATURE_FLAGS.v13_image_generation,
+      v13_flux: DEFAULT_FEATURE_FLAGS.v13_flux,
+      v13_sdxl: DEFAULT_FEATURE_FLAGS.v13_sdxl,
+      v13_comfy: DEFAULT_FEATURE_FLAGS.v13_comfy,
+      provider_image: DEFAULT_FEATURE_FLAGS.provider_image,
+    },
+    apiStatus: 'ok',
+  };
 }
 
 export async function getImageStatistics(workspaceId: string) {

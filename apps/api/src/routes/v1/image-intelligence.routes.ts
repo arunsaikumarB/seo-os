@@ -7,6 +7,8 @@ import { requireRole } from '../../middleware/rbac.js';
 import {
   enqueueImageGenerate,
   enqueueImageTransform,
+  getImageGenerationDiagnostics,
+  getImageGenerationReadiness,
   getImageStatistics,
   getOrCreateStyleProfile,
   listImageJobs,
@@ -250,6 +252,42 @@ imageIntelligenceRouter.get(
   async (req, res, next) => {
     try {
       res.json({ data: await listImageJobs(param(req.params.projectId)) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/** Readiness never requires the generation flag — UI must explain blockers. */
+imageIntelligenceRouter.get(
+  '/images/readiness',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const opportunityId =
+        typeof req.query.opportunityId === 'string' ? req.query.opportunityId : undefined;
+      res.json({
+        data: await getImageGenerationReadiness({
+          workspaceId: param(req.params.projectId),
+          opportunityId,
+        }),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+imageIntelligenceRouter.get(
+  '/images/diagnostics',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      res.json({
+        data: await getImageGenerationDiagnostics(param(req.params.projectId)),
+      });
     } catch (err) {
       next(err);
     }

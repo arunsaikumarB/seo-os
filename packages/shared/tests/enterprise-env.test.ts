@@ -8,7 +8,7 @@ describe('enterprise feature flag surface', () => {
     expect(FEATURE_FLAGS).toContain('bee_enabled');
     expect(FEATURE_FLAGS).toContain('v13_image_generation');
     expect(DEFAULT_FEATURE_FLAGS.bee_automatic_submit).toBe(false);
-    expect(DEFAULT_FEATURE_FLAGS.v13_image_generation).toBe(false);
+    expect(DEFAULT_FEATURE_FLAGS.v13_image_generation).toBe(true);
   });
 });
 

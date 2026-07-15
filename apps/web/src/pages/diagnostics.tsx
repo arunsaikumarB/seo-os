@@ -16,6 +16,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useApi } from '@/hooks/use-api';
+import { ImageGenerationReadinessPanel } from '@/components/images/image-generation-readiness';
+
 
 type OpsHealth = {
   status: string;
@@ -66,7 +68,34 @@ export function DiagnosticsPage() {
     queryFn: () => request<{ data: Record<string, boolean> }>('/v1/feature-flags'),
   });
 
+  const imageDiag = useQuery({
+    queryKey: ['image-generation-diagnostics', projectId],
+    queryFn: () =>
+      request<{
+        data: {
+          currentProvider: string | null;
+          overallStatus: string;
+          readinessScore: number;
+          generationStatus: string;
+          activeJobs: number;
+          apiStatus: string;
+          flags: Record<string, boolean>;
+          providers: Array<{
+            key: string;
+            displayName: string;
+            healthy: boolean;
+            health: { status: string; latencyMs?: number; message?: string };
+          }>;
+          checks: Array<{ key: string; label: string; ok: boolean; reason: string }>;
+          primaryBlocker: { reason: string; fixLabel?: string } | null;
+        };
+      }>(`/v1/projects/${projectId}/images/diagnostics`),
+    enabled: !!projectId,
+    refetchInterval: 10_000,
+  });
+
   const d = ops.data;
+  const img = imageDiag.data?.data;
 
   return (
     <div className="space-y-6">
@@ -216,6 +245,104 @@ export function DiagnosticsPage() {
             </CardContent>
           </Card>
         </>
+      )}
+
+      {projectId && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Image Generation Diagnostics</CardTitle>
+            <CardDescription>
+              Current Provider · Health · API · Storage · Flags · Worker · Queue · Readiness · Status
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {imageDiag.isLoading ? (
+              <Skeleton className="h-32 w-full" />
+            ) : img ? (
+              <>
+                <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4 text-sm">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Current Provider</p>
+                    <p className="font-medium capitalize">{img.currentProvider ?? '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Provider Health</p>
+                    <p className="font-medium capitalize">
+                      {img.providers.find((p) => p.key === img.currentProvider)?.health.status ??
+                        '—'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">API Status</p>
+                    <p className="font-medium">{img.apiStatus}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Storage</p>
+                    <p className="font-medium">
+                      {img.checks.find((c) => c.key === 'storage')?.ok ? 'Ready' : 'Missing'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Flags</p>
+                    <p className="font-medium text-xs">
+                      gen:{img.flags?.v13_image_generation ? 'on' : 'off'} · pif:
+                      {img.flags?.provider_image ? 'on' : 'off'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Worker</p>
+                    <p className="font-medium">
+                      {img.checks.find((c) => c.key === 'worker')?.ok ? 'Ready' : 'Unavailable'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Queue</p>
+                    <p className="font-medium tabular-nums">{img.activeJobs} active</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Readiness Score</p>
+                    <p className="font-medium tabular-nums">{img.readinessScore}%</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Generation Status</p>
+                    <p className="font-medium">{img.generationStatus}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Overall</p>
+                    <Badge
+                      className={
+                        img.overallStatus === 'READY'
+                          ? 'bg-emerald-500/15 text-emerald-700'
+                          : 'bg-amber-500/15 text-amber-700'
+                      }
+                    >
+                      {img.overallStatus}
+                    </Badge>
+                  </div>
+                </div>
+                {img.primaryBlocker && (
+                  <p className="text-sm text-amber-700">
+                    Blocker: {img.primaryBlocker.reason}
+                    {img.primaryBlocker.fixLabel ? ` — ${img.primaryBlocker.fixLabel}` : ''}
+                  </p>
+                )}
+                <ImageGenerationReadinessPanel projectId={projectId} />
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" asChild>
+                    <Link to={`/projects/${projectId}/backlink-builder/image-studio`}>
+                      Image Studio
+                    </Link>
+                  </Button>
+                  <Button size="sm" variant="outline" asChild>
+                    <Link to={`/projects/${projectId}/providers`}>Provider Settings</Link>
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">Image diagnostics unavailable.</p>
+            )}
+          </CardContent>
+        </Card>
       )}
     </div>
   );
