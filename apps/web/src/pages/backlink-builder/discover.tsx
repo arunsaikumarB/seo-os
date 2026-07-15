@@ -239,8 +239,10 @@ export function BacklinkDiscoverPage() {
         </CardHeader>
         <CardContent className="space-y-2">
           {(runs.data?.data ?? []).map((r) => (
-            <div key={r.id} className="flex justify-between text-sm border-b py-2">
-              <span className="font-mono text-xs">{r.id.slice(0, 8)}…</span>
+            <div key={r.id} className="flex justify-between text-sm border-b py-2 gap-2">
+              <span className="text-xs text-muted-foreground">
+                {r.created_at ? new Date(r.created_at).toLocaleString() : 'Discovery run'}
+              </span>
               <Badge className="text-[10px] border-muted-foreground/30">{r.status}</Badge>
               <span className="text-muted-foreground">{r.stats?.created ?? 0} created</span>
             </div>

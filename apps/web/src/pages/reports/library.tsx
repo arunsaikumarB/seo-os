@@ -1,6 +1,6 @@
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   FileBarChart,
   Plus,
@@ -24,6 +24,10 @@ import { useAuth } from '@/providers/auth-provider';
 import { useAppStore } from '@/stores/app-store';
 import { getApiErrorMessage } from '@/lib/api';
 import { toast } from 'sonner';
+import {
+  OpportunitySelector,
+  type SelectedOpportunity,
+} from '@/components/opportunities/opportunity-selector';
 
 type ReportTypeMeta = { type: string; label: string; description: string };
 type ReportRow = {
@@ -68,6 +72,10 @@ export function ReportsLibraryPage() {
   const [brandName, setBrandName] = useState('Agency Brand');
   const [primaryColor, setPrimaryColor] = useState('#0d9488');
   const [emailTo, setEmailTo] = useState('');
+  const [selectedOpp, setSelectedOpp] = useState<SelectedOpportunity | null>(null);
+  const handleSelectOpp = useCallback((opp: SelectedOpportunity | null) => {
+    setSelectedOpp(opp);
+  }, []);
 
   const types = useQuery({
     queryKey: ['report-types', projectId],
@@ -105,16 +113,27 @@ export function ReportsLibraryPage() {
   });
 
   const createReport = useMutation({
-    mutationFn: () =>
-      request<{ data: ReportRow }>(`/v1/projects/${projectId}/reports`, {
+    mutationFn: () => {
+      const typeLabel =
+        types.data?.data.find((t) => t.type === selectedType)?.label ?? selectedType;
+      const title = selectedOpp
+        ? `${typeLabel} — ${selectedOpp.website}`
+        : undefined;
+      return request<{ data: ReportRow }>(`/v1/projects/${projectId}/reports`, {
         method: 'POST',
         body: JSON.stringify({
           reportType: selectedType,
           schedule,
+          title,
         }),
-      }),
+      });
+    },
     onSuccess: () => {
-      toast.success('Report created');
+      toast.success(
+        selectedOpp
+          ? `Report created for ${selectedOpp.website}`
+          : 'Report created'
+      );
       void qc.invalidateQueries({ queryKey: ['reports', projectId] });
       void qc.invalidateQueries({ queryKey: ['reports-summary', projectId] });
     },
@@ -290,8 +309,20 @@ export function ReportsLibraryPage() {
                 </Button>
               ))}
             </div>
+            <OpportunitySelector
+              projectId={projectId}
+              selectedId={selectedOpp?.id ?? null}
+              onSelect={handleSelectOpp}
+              mode="content"
+              showTable={false}
+              showRequiredFields={false}
+              allowClear
+              label="Focus website (optional)"
+              emptyMessage="No approved opportunities available. Approve websites in Opportunity Queue first — or create a project-wide report without a website focus."
+            />
             <Button onClick={() => createReport.mutate()} disabled={createReport.isPending}>
               Create {selectedType.replace(/_/g, ' ')} report
+              {selectedOpp ? ` — ${selectedOpp.website}` : ''}
             </Button>
           </CardContent>
         </Card>

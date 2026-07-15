@@ -1,15 +1,18 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Globe } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useApi } from '@/hooks/use-api';
 import { PageTransition } from '@/components/demo/page-transition';
 import { useFeatureFlags } from '@/hooks/use-feature-flags';
+import {
+  OpportunitySelector,
+  type SelectedOpportunity,
+} from '@/components/opportunities/opportunity-selector';
 
 export function BrowserAssistantPage() {
   const { projectId = '' } = useParams();
@@ -17,8 +20,12 @@ export function BrowserAssistantPage() {
   const flags = useFeatureFlags();
   const assistFillEnabled = flags.isEnabled('v11_browser_assist_fill');
   const qc = useQueryClient();
-  const [opportunityId, setOpportunityId] = useState('');
+  const [selectedOpp, setSelectedOpp] = useState<SelectedOpportunity | null>(null);
   const [planId, setPlanId] = useState<string | null>(null);
+  const handleSelect = useCallback((opp: SelectedOpportunity | null) => {
+    setSelectedOpp(opp);
+    setPlanId(null);
+  }, []);
 
   const plan = useQuery({
     queryKey: ['browser-plan', projectId, planId],
@@ -26,7 +33,12 @@ export function BrowserAssistantPage() {
       request<{
         data: {
           id: string;
-          plan_steps: Array<{ order: number; action: string; detail: string; requiresUser: boolean }>;
+          plan_steps: Array<{
+            order: number;
+            action: string;
+            detail: string;
+            requiresUser: boolean;
+          }>;
           blockers: Array<{ type: string; message: string }>;
           status: string;
           metrics_source: string;
@@ -36,14 +48,19 @@ export function BrowserAssistantPage() {
   });
 
   const create = useMutation({
-    mutationFn: () =>
-      request<{ data: { id: string } }>(`/v1/projects/${projectId}/backlink-builder/browser/plans`, {
-        method: 'POST',
-        body: JSON.stringify({ opportunityId }),
-      }),
+    mutationFn: () => {
+      if (!selectedOpp) throw new Error('Select an approved website first');
+      return request<{ data: { id: string } }>(
+        `/v1/projects/${projectId}/backlink-builder/browser/plans`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ opportunityId: selectedOpp.id }),
+        }
+      );
+    },
     onSuccess: (res) => {
       setPlanId(res.data.id);
-      toast.success('Action plan ready');
+      toast.success(`Action plan ready for ${selectedOpp?.website ?? 'website'}`);
       qc.invalidateQueries({ queryKey: ['browser-plan', projectId] });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -75,26 +92,29 @@ export function BrowserAssistantPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Create action plan</CardTitle>
-          <CardDescription>Paste an opportunity UUID from Explorer or Queue.</CardDescription>
+          <CardDescription>
+            Select an approved website — site context and backlink type load automatically.
+          </CardDescription>
         </CardHeader>
-        <CardContent className="flex gap-2 flex-wrap">
-          <Input
-            className="max-w-md"
-            placeholder="Opportunity UUID"
-            value={opportunityId}
-            onChange={(e) => setOpportunityId(e.target.value)}
+        <CardContent className="space-y-4">
+          <OpportunitySelector
+            projectId={projectId}
+            selectedId={selectedOpp?.id ?? null}
+            onSelect={handleSelect}
+            mode="content"
           />
-          <Button disabled={!opportunityId || create.isPending} onClick={() => create.mutate()}>
+          <Button disabled={!selectedOpp || create.isPending} onClick={() => create.mutate()}>
             Generate plan
+            {selectedOpp ? ` for ${selectedOpp.website}` : ''}
           </Button>
         </CardContent>
       </Card>
 
-      {plan.data && (
+      {plan.data && selectedOpp && (
         <div className="grid gap-4 lg:grid-cols-3">
           <Card className="lg:col-span-2">
             <CardHeader>
-              <CardTitle className="text-base">Steps</CardTitle>
+              <CardTitle className="text-base">Steps — {selectedOpp.website}</CardTitle>
               <CardDescription>
                 Source: {plan.data.data.metrics_source} · Status: {plan.data.data.status}
               </CardDescription>
@@ -110,7 +130,11 @@ export function BrowserAssistantPage() {
               ))}
               <Button
                 variant="outline"
-                onClick={() => navigator.clipboard.writeText(steps.map((s) => `${s.order}. ${s.action}: ${s.detail}`).join('\n'))}
+                onClick={() =>
+                  navigator.clipboard.writeText(
+                    steps.map((s) => `${s.order}. ${s.action}: ${s.detail}`).join('\n')
+                  )
+                }
               >
                 Copy plan
               </Button>
@@ -126,7 +150,9 @@ export function BrowserAssistantPage() {
                   {b.type}: {b.message}
                 </Badge>
               ))}
-              {blockers.length === 0 && <p className="text-sm text-muted-foreground">No hard blockers detected.</p>}
+              {blockers.length === 0 && (
+                <p className="text-sm text-muted-foreground">No hard blockers detected.</p>
+              )}
               <Button
                 className="w-full mt-4"
                 disabled={!assistFillEnabled || assist.isPending || !planId}

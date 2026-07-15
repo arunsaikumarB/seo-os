@@ -1,14 +1,18 @@
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { KanbanSquare } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useApi } from '@/hooks/use-api';
 import { PageTransition } from '@/components/demo/page-transition';
 import { QUEUE_STAGES } from './queue-constants';
+import {
+  OpportunitySelector,
+  type SelectedOpportunity,
+} from '@/components/opportunities/opportunity-selector';
 
 type SubItem = {
   id: string;
@@ -20,7 +24,12 @@ export function SubmissionQueuePage() {
   const { projectId = '' } = useParams();
   const { request } = useApi();
   const qc = useQueryClient();
-  const [selectedOpp, setSelectedOpp] = useState<string | null>(null);
+  const [historyOppId, setHistoryOppId] = useState<string | null>(null);
+  const [historyLabel, setHistoryLabel] = useState<string | null>(null);
+  const [selectedOpp, setSelectedOpp] = useState<SelectedOpportunity | null>(null);
+  const handleSelectOpp = useCallback((opp: SelectedOpportunity | null) => {
+    setSelectedOpp(opp);
+  }, []);
 
   const board = useQuery({
     queryKey: ['v11-queue', projectId],
@@ -32,12 +41,12 @@ export function SubmissionQueuePage() {
   });
 
   const history = useQuery({
-    queryKey: ['v11-queue-history', projectId, selectedOpp],
+    queryKey: ['v11-queue-history', projectId, historyOppId],
     queryFn: () =>
-      request<{ data: Array<{ to_stage: string; from_stage?: string; note?: string; created_at: string }> }>(
-        `/v1/projects/${projectId}/backlink-builder/queue/${selectedOpp}/history`
-      ),
-    enabled: !!projectId && !!selectedOpp,
+      request<{
+        data: Array<{ to_stage: string; from_stage?: string; note?: string; created_at: string }>;
+      }>(`/v1/projects/${projectId}/backlink-builder/queue/${historyOppId}/history`),
+    enabled: !!projectId && !!historyOppId,
   });
 
   const move = useMutation({
@@ -53,7 +62,22 @@ export function SubmissionQueuePage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const columns = board.data?.data.columns ?? {};
+  const columns = useMemo(() => {
+    const raw = board.data?.data.columns ?? {};
+    if (!selectedOpp) return raw;
+    const filtered: Record<string, SubItem[]> = {};
+    for (const stage of QUEUE_STAGES) {
+      filtered[stage] = (raw[stage] ?? []).filter((item) => {
+        const opp = item.opportunities;
+        return (
+          opp?.id === selectedOpp.id ||
+          opp?.domain?.toLowerCase() === selectedOpp.domain?.toLowerCase() ||
+          opp?.title?.toLowerCase() === selectedOpp.website.toLowerCase()
+        );
+      });
+    }
+    return filtered;
+  }, [board.data?.data.columns, selectedOpp]);
 
   return (
     <PageTransition className="space-y-6">
@@ -65,6 +89,27 @@ export function SubmissionQueuePage() {
           Production workflow Kanban — approve before external submission.
         </p>
       </div>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Focus website</CardTitle>
+          <CardDescription>
+            Filter the queue by approved website. Leave empty to see all cards.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <OpportunitySelector
+            projectId={projectId}
+            selectedId={selectedOpp?.id ?? null}
+            onSelect={handleSelectOpp}
+            mode="content"
+            showTable={false}
+            showRequiredFields={false}
+            allowClear
+            label="Website filter"
+          />
+        </CardContent>
+      </Card>
 
       <div className="flex gap-3 overflow-x-auto pb-2">
         {QUEUE_STAGES.map((stage) => (
@@ -80,7 +125,12 @@ export function SubmissionQueuePage() {
                   <button
                     type="button"
                     className="text-left w-full font-medium hover:underline"
-                    onClick={() => setSelectedOpp(item.opportunities?.id ?? null)}
+                    onClick={() => {
+                      setHistoryOppId(item.opportunities?.id ?? null);
+                      setHistoryLabel(
+                        item.opportunities?.title ?? item.opportunities?.domain ?? 'Submission'
+                      );
+                    }}
                   >
                     {item.opportunities?.title ?? 'Submission'}
                   </button>
@@ -109,10 +159,13 @@ export function SubmissionQueuePage() {
         ))}
       </div>
 
-      {selectedOpp && (
+      {historyOppId && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">History / Timeline</CardTitle>
+            {historyLabel && (
+              <CardDescription>{historyLabel}</CardDescription>
+            )}
           </CardHeader>
           <CardContent className="space-y-2">
             {(history.data?.data ?? []).map((e, i) => (

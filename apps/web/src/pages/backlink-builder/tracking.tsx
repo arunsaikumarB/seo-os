@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -11,6 +11,10 @@ import { OpportunityLogo } from '@/components/backlink-builder/opportunity-logo'
 import { formatType, scoreBadgeClass } from '@/components/backlink-builder/types';
 import { PageTransition } from '@/components/demo/page-transition';
 import { ClipboardList, Send, CheckCircle, XCircle, Clock } from 'lucide-react';
+import {
+  OpportunitySelector,
+  type SelectedOpportunity,
+} from '@/components/opportunities/opportunity-selector';
 
 const STATUS_FILTERS = [
   'all',
@@ -55,6 +59,10 @@ export function BacklinkTrackingPage() {
   const { request } = useApi();
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<string>('all');
+  const [selectedOpp, setSelectedOpp] = useState<SelectedOpportunity | null>(null);
+  const handleSelectOpp = useCallback((opp: SelectedOpportunity | null) => {
+    setSelectedOpp(opp);
+  }, []);
 
   const tracking = useQuery({
     queryKey: ['automation-tracking', projectId],
@@ -87,12 +95,36 @@ export function BacklinkTrackingPage() {
     },
   });
 
-  const filteredSubs = (submissions.data?.data ?? []).filter((s) => {
-    if (filter === 'all') return true;
-    const st = s.tracking_status ?? s.status;
-    if (filter === 'ready') return st === 'ready' || st === 'prepared';
-    return st === filter;
-  });
+  const filteredSubs = useMemo(() => {
+    return (submissions.data?.data ?? []).filter((s) => {
+      if (selectedOpp) {
+        const oppId = s.opportunities?.id;
+        const domain = s.opportunities?.domain?.toLowerCase();
+        const match =
+          oppId === selectedOpp.id ||
+          domain === selectedOpp.domain?.toLowerCase() ||
+          s.opportunities?.title?.toLowerCase() === selectedOpp.website.toLowerCase();
+        if (!match) return false;
+      }
+      if (filter === 'all') return true;
+      const st = s.tracking_status ?? s.status;
+      if (filter === 'ready') return st === 'ready' || st === 'prepared';
+      return st === filter;
+    });
+  }, [submissions.data?.data, filter, selectedOpp]);
+
+  const filteredTracking = useMemo(() => {
+    const rows = tracking.data?.data ?? [];
+    if (!selectedOpp) return rows.slice(0, 20);
+    return rows
+      .filter(
+        (item) =>
+          item.id === selectedOpp.id ||
+          item.domain?.toLowerCase() === selectedOpp.domain?.toLowerCase() ||
+          item.title?.toLowerCase() === selectedOpp.website.toLowerCase()
+      )
+      .slice(0, 20);
+  }, [tracking.data?.data, selectedOpp]);
 
   return (
     <PageTransition className="space-y-6">
@@ -107,6 +139,27 @@ export function BacklinkTrackingPage() {
           never bypass third-party auth or CAPTCHA.
         </p>
       </div>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Focus website</CardTitle>
+          <CardDescription>
+            Filter submissions by approved website. Leave empty to see all.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <OpportunitySelector
+            projectId={projectId}
+            selectedId={selectedOpp?.id ?? null}
+            onSelect={handleSelectOpp}
+            mode="content"
+            showTable={false}
+            showRequiredFields={false}
+            allowClear
+            label="Website filter"
+          />
+        </CardContent>
+      </Card>
 
       <div className="flex flex-wrap gap-2">
         {STATUS_FILTERS.map((s) => (
@@ -252,7 +305,7 @@ export function BacklinkTrackingPage() {
           <CardTitle className="text-base">Opportunity queue snapshot</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          {(tracking.data?.data ?? []).slice(0, 20).map((item) => (
+          {filteredTracking.map((item) => (
             <Link
               key={item.id}
               to={`/projects/${projectId}/backlink-builder/opportunities/${item.id}`}

@@ -13,9 +13,9 @@ import { EmptyState } from '@/components/demo/empty-state';
 import { useApi } from '@/hooks/use-api';
 import { ImageIntelligencePanel } from '@/pages/content/image-intelligence';
 import {
-  ApprovedOpportunityPicker,
-  type ApprovedOpportunity,
-} from '@/components/opportunities/approved-opportunity-picker';
+  OpportunitySelector,
+  type SelectedOpportunity,
+} from '@/components/opportunities/opportunity-selector';
 
 type DraftRow = {
   id: string;
@@ -73,12 +73,12 @@ export function ContentLibraryPage() {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [showCreate, setShowCreate] = useState(false);
-  const [selectedOpp, setSelectedOpp] = useState<ApprovedOpportunity | null>(null);
+  const [selectedOpp, setSelectedOpp] = useState<SelectedOpportunity | null>(null);
   const [packType, setPackType] = useState('guest_post');
   const [editingPackId, setEditingPackId] = useState<string | null>(null);
   const [packJson, setPackJson] = useState('');
 
-  const handleSelectOpp = useCallback((opp: ApprovedOpportunity | null) => {
+  const handleSelectOpp = useCallback((opp: SelectedOpportunity | null) => {
     setSelectedOpp(opp);
     if (opp) setPackType(resolvePackType(String(opp.opportunity_type)));
   }, []);
@@ -303,7 +303,7 @@ export function ContentLibraryPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <ApprovedOpportunityPicker
+          <OpportunitySelector
             projectId={projectId}
             selectedId={selectedOpp?.id ?? null}
             onSelect={handleSelectOpp}

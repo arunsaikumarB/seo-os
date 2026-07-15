@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,6 +10,10 @@ import { BacklinkBuilderHero } from '@/components/backlink-builder/backlink-buil
 import type { BacklinkRecord } from '@/components/backlink-builder/types';
 import { formatType } from '@/components/backlink-builder/types';
 import { Clock, CheckCircle, RefreshCw, History } from 'lucide-react';
+import {
+  OpportunitySelector,
+  type SelectedOpportunity,
+} from '@/components/opportunities/opportunity-selector';
 
 type CheckRow = {
   id: string;
@@ -24,6 +28,10 @@ export function BacklinkPendingPage() {
   const { request } = useApi();
   const queryClient = useQueryClient();
   const [historyId, setHistoryId] = useState<string | null>(null);
+  const [selectedOpp, setSelectedOpp] = useState<SelectedOpportunity | null>(null);
+  const handleSelectOpp = useCallback((opp: SelectedOpportunity | null) => {
+    setSelectedOpp(opp);
+  }, []);
 
   const pending = useQuery({
     queryKey: ['backlink-pending', projectId],
@@ -69,6 +77,18 @@ export function BacklinkPendingPage() {
     onError: (err: Error) => toast.error(err.message || 'Verification failed'),
   });
 
+  const pendingLinks = useMemo(() => {
+    const rows = pending.data?.data ?? [];
+    if (!selectedOpp) return rows;
+    const domain = selectedOpp.domain?.toLowerCase();
+    return rows.filter(
+      (bl) =>
+        bl.domain?.toLowerCase() === domain ||
+        bl.source_url?.toLowerCase().includes(domain ?? '') ||
+        bl.target_url?.toLowerCase().includes(selectedOpp.website.toLowerCase())
+    );
+  }, [pending.data?.data, selectedOpp]);
+
   return (
     <div className="space-y-6">
       <BacklinkBuilderHero
@@ -78,13 +98,34 @@ export function BacklinkPendingPage() {
 
       <Card>
         <CardHeader className="pb-2">
+          <CardTitle className="text-base">Focus website</CardTitle>
+          <CardDescription>
+            Filter verification work by approved website. Leave empty to see all pending links.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <OpportunitySelector
+            projectId={projectId}
+            selectedId={selectedOpp?.id ?? null}
+            onSelect={handleSelectOpp}
+            mode="content"
+            showTable={false}
+            showRequiredFields={false}
+            allowClear
+            label="Website filter"
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
           <CardTitle className="text-base">Pending links</CardTitle>
           <CardDescription>
             Run automated HTTP verification or mark outcomes manually after review.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3">
-          {(pending.data?.data ?? []).map((bl) => (
+          {pendingLinks.map((bl) => (
             <Card key={bl.id}>
               <CardContent className="pt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="min-w-0 space-y-1">
@@ -147,9 +188,11 @@ export function BacklinkPendingPage() {
               )}
             </Card>
           ))}
-          {(pending.data?.data ?? []).length === 0 && (
+          {pendingLinks.length === 0 && (
             <p className="text-sm text-muted-foreground text-center py-8">
-              No pending verifications.
+              {selectedOpp
+                ? `No pending verifications for ${selectedOpp.website}.`
+                : 'No pending verifications.'}
             </p>
           )}
         </CardContent>

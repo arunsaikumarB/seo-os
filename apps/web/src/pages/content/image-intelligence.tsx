@@ -10,9 +10,9 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useApi } from '@/hooks/use-api';
 import {
-  ApprovedOpportunityPicker,
-  type ApprovedOpportunity,
-} from '@/components/opportunities/approved-opportunity-picker';
+  OpportunitySelector,
+  type SelectedOpportunity,
+} from '@/components/opportunities/opportunity-selector';
 
 type ImageAsset = {
   id: string;
@@ -40,9 +40,9 @@ export function ImageIntelligencePanel({ embedded = false }: { embedded?: boolea
   const { projectId = '' } = useParams();
   const { request } = useApi();
   const qc = useQueryClient();
-  const [selectedOpp, setSelectedOpp] = useState<ApprovedOpportunity | null>(null);
+  const [selectedOpp, setSelectedOpp] = useState<SelectedOpportunity | null>(null);
   const [imageType, setImageType] = useState('blog_hero');
-  const handleSelectOpp = useCallback((opp: ApprovedOpportunity | null) => {
+  const handleSelectOpp = useCallback((opp: SelectedOpportunity | null) => {
     setSelectedOpp(opp);
   }, []);
 
@@ -173,7 +173,7 @@ export function ImageIntelligencePanel({ embedded = false }: { embedded?: boolea
           <CardDescription>Prompts are auto-built from domain style profile — no manual prompt required</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <ApprovedOpportunityPicker
+          <OpportunitySelector
             projectId={projectId}
             selectedId={selectedOpp?.id ?? null}
             onSelect={handleSelectOpp}

@@ -1,20 +1,26 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Image as ImageIcon, Video as VideoIcon } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useApi } from '@/hooks/use-api';
 import { PageTransition } from '@/components/demo/page-transition';
+import {
+  OpportunitySelector,
+  type SelectedOpportunity,
+} from '@/components/opportunities/opportunity-selector';
 
 function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
   const { projectId = '' } = useParams();
   const { request } = useApi();
   const qc = useQueryClient();
-  const [opportunityId, setOpportunityId] = useState('');
+  const [selectedOpp, setSelectedOpp] = useState<SelectedOpportunity | null>(null);
+  const handleSelect = useCallback((opp: SelectedOpportunity | null) => {
+    setSelectedOpp(opp);
+  }, []);
 
   const list = useQuery({
     queryKey: ['media-briefs', projectId, kind],
@@ -31,14 +37,20 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
   });
 
   const create = useMutation({
-    mutationFn: () =>
-      request(`/v1/projects/${projectId}/backlink-builder/opportunities/${opportunityId}/media-briefs`, {
-        method: 'POST',
-        body: JSON.stringify({ kind }),
-      }),
+    mutationFn: () => {
+      if (!selectedOpp) throw new Error('Select an approved website first');
+      return request(
+        `/v1/projects/${projectId}/backlink-builder/opportunities/${selectedOpp.id}/media-briefs`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ kind }),
+        }
+      );
+    },
     onSuccess: () => {
-      toast.success(`${kind} brief queued for review`);
+      toast.success(`${kind} brief queued for ${selectedOpp?.website ?? 'website'}`);
       qc.invalidateQueries({ queryKey: ['media-briefs', projectId, kind] });
+      qc.invalidateQueries({ queryKey: ['approved-opportunities', projectId] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -53,6 +65,16 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
   });
 
   const Icon = kind === 'image' ? ImageIcon : VideoIcon;
+  const briefs = (list.data?.data ?? []).filter((b) => {
+    if (!selectedOpp) return true;
+    const domain = b.opportunities?.domain?.toLowerCase();
+    const title = b.opportunities?.title?.toLowerCase();
+    return (
+      domain === selectedOpp.domain?.toLowerCase() ||
+      title === selectedOpp.website.toLowerCase() ||
+      title === selectedOpp.title?.toLowerCase()
+    );
+  });
 
   return (
     <PageTransition className="space-y-6">
@@ -61,33 +83,39 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
           <Icon className="h-6 w-6" /> {kind} Submission Studio
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Metadata, prompts, and review queue only. Pixel/video render requires a provider (later).
+          Select an approved website to generate metadata briefs. Pixel/video render requires a
+          provider (later).
         </p>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Generate brief</CardTitle>
-          <CardDescription>Creates editable metadata for user review.</CardDescription>
+          <CardDescription>
+            Choose a website — content type and site context load automatically.
+          </CardDescription>
         </CardHeader>
-        <CardContent className="flex gap-2 flex-wrap">
-          <Input
-            className="max-w-md"
-            placeholder="Opportunity UUID"
-            value={opportunityId}
-            onChange={(e) => setOpportunityId(e.target.value)}
+        <CardContent className="space-y-4">
+          <OpportunitySelector
+            projectId={projectId}
+            selectedId={selectedOpp?.id ?? null}
+            onSelect={handleSelect}
+            mode="content"
           />
-          <Button disabled={!opportunityId || create.isPending} onClick={() => create.mutate()}>
-            Queue {kind} brief
-          </Button>
-          <Button disabled title="V1.1 — provider required">
-            Generate {kind} asset
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button disabled={!selectedOpp || create.isPending} onClick={() => create.mutate()}>
+              Queue {kind} brief
+              {selectedOpp ? ` for ${selectedOpp.website}` : ''}
+            </Button>
+            <Button disabled title="V1.1 — provider required">
+              Generate {kind} asset
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
       <div className="grid gap-3">
-        {(list.data?.data ?? []).map((b) => (
+        {briefs.map((b) => (
           <Card key={b.id}>
             <CardContent className="pt-4 space-y-2">
               <div className="flex justify-between gap-2">
@@ -117,6 +145,13 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
             </CardContent>
           </Card>
         ))}
+        {briefs.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            {selectedOpp
+              ? `No ${kind} briefs yet for ${selectedOpp.website}.`
+              : `No ${kind} briefs yet.`}
+          </p>
+        )}
       </div>
     </PageTransition>
   );

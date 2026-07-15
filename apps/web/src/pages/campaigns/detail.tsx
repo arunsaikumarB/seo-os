@@ -1,15 +1,25 @@
+import { useCallback, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { toast } from 'sonner';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useApi } from '@/hooks/use-api';
 import { ArrowLeft } from 'lucide-react';
+import {
+  OpportunitySelector,
+  type SelectedOpportunity,
+} from '@/components/opportunities/opportunity-selector';
 
 export function CampaignDetailPage() {
   const { projectId = '', campaignId = '' } = useParams();
   const { request } = useApi();
   const queryClient = useQueryClient();
+  const [selectedOpp, setSelectedOpp] = useState<SelectedOpportunity | null>(null);
+  const handleSelectOpp = useCallback((opp: SelectedOpportunity | null) => {
+    setSelectedOpp(opp);
+  }, []);
 
   const campaign = useQuery({
     queryKey: ['campaign', projectId, campaignId],
@@ -39,6 +49,24 @@ export function CampaignDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['campaign', projectId, campaignId] });
       queryClient.invalidateQueries({ queryKey: ['campaigns', projectId] });
     },
+  });
+
+  const attach = useMutation({
+    mutationFn: () => {
+      if (!selectedOpp) throw new Error('Select an approved website first');
+      return request(`/v1/projects/${projectId}/campaigns/${campaignId}/opportunities`, {
+        method: 'POST',
+        body: JSON.stringify({ opportunityIds: [selectedOpp.id] }),
+      });
+    },
+    onSuccess: () => {
+      toast.success(`Attached ${selectedOpp?.website ?? 'website'} to campaign`);
+      queryClient.invalidateQueries({ queryKey: ['campaign', projectId, campaignId] });
+      queryClient.invalidateQueries({ queryKey: ['campaign-timeline', projectId, campaignId] });
+      queryClient.invalidateQueries({ queryKey: ['backlink-campaign-associations', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['approved-opportunities', projectId] });
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const c = campaign.data?.data;
@@ -98,6 +126,28 @@ export function CampaignDetailPage() {
             />
           </div>
           <p className="text-sm text-muted-foreground mt-2">{Number(c?.progress ?? 0)}% complete</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Attach approved website</CardTitle>
+          <CardDescription>
+            Select by website name — opportunity context loads automatically.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <OpportunitySelector
+            projectId={projectId}
+            selectedId={selectedOpp?.id ?? null}
+            onSelect={handleSelectOpp}
+            mode="content"
+            showTable={false}
+          />
+          <Button disabled={!selectedOpp || attach.isPending} onClick={() => attach.mutate()}>
+            Attach
+            {selectedOpp ? ` ${selectedOpp.website}` : ' website'}
+          </Button>
         </CardContent>
       </Card>
 
