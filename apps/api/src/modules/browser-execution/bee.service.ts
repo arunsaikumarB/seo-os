@@ -434,6 +434,21 @@ export async function startJob(workspaceId: string, jobId: string, userId?: stri
   const job = await getJob(workspaceId, jobId);
   if (!job) throw Object.assign(new Error('Job not found'), { status: 404 });
 
+  // Readiness gate — prevent silent start failures
+  const { validateExecutionReadiness } = await import('./bee-diagnostics.service.js');
+  const readiness = await validateExecutionReadiness(
+    workspaceId,
+    job.opportunity_id ? String(job.opportunity_id) : undefined
+  );
+  const hardFails = readiness.checks.filter(
+    (c) => !c.ok && ['playwright', 'worker', 'browser', 'opportunity', 'domain'].includes(c.key)
+  );
+  if (hardFails.length) {
+    const msg = hardFails.map((c) => `${c.key}: ${c.message}`).join('; ');
+    await appendLog(workspaceId, jobId, 'error', 'Readiness validation failed', { checks: readiness.checks });
+    throw Object.assign(new Error(`Cannot start execution — ${msg}`), { status: 400 });
+  }
+
   const policy = await getOrCreatePolicy(workspaceId);
   const { count } = await getSupabaseAdmin()
     .from('browser_sessions')
@@ -752,20 +767,89 @@ export async function approveJob(workspaceId: string, jobId: string, userId?: st
   return resumeJob(workspaceId, jobId);
 }
 
-export async function retryJob(workspaceId: string, jobId: string) {
+export async function retryJob(
+  workspaceId: string,
+  jobId: string,
+  opts: { force?: boolean; delaySeconds?: number } = {}
+) {
+  const { retryBackoffSeconds, isAutoRetryable } = await import('@seo-os/backlink-builder');
   const job = await getJob(workspaceId, jobId);
   if (!job) throw Object.assign(new Error('Job not found'), { status: 404 });
+
+  const code = String(job.error_code ?? '');
+  if (!opts.force && code && !isAutoRetryable(code) && String(job.status) === 'failed') {
+    throw Object.assign(
+      new Error(
+        `Failure ${code} is not auto-retryable. Use force retry only after resolving the issue.`
+      ),
+      { status: 400 }
+    );
+  }
+
+  const nextAttempt = Number(job.retry_count ?? 0) + 1;
+  const policy = await getOrCreatePolicy(workspaceId);
+  const maxRetries = Number(policy.retry_count ?? 2);
+  if (nextAttempt > maxRetries && !opts.force) {
+    throw Object.assign(new Error(`Max retries (${maxRetries}) exceeded`), { status: 400 });
+  }
+
+  const delay =
+    opts.delaySeconds ??
+    retryBackoffSeconds(nextAttempt) ??
+    Number(policy.cooldown_seconds ?? 5);
+
+  const metrics = (job.metrics as Record<string, unknown>) ?? {};
+  const history = Array.isArray(metrics.retryHistory) ? [...(metrics.retryHistory as unknown[])] : [];
+  history.push({
+    attempt: nextAttempt,
+    at: new Date().toISOString(),
+    delaySeconds: delay,
+    priorCode: job.error_code,
+    priorMessage: job.error_message,
+  });
+
   await getSupabaseAdmin()
     .from('execution_jobs')
     .update({
       status: 'retry_scheduled',
-      retry_count: Number(job.retry_count ?? 0) + 1,
+      retry_count: nextAttempt,
       error_code: null,
       error_message: null,
+      metrics: { ...metrics, retryHistory: history, nextRetryAt: new Date(Date.now() + delay * 1000).toISOString() },
       updated_at: new Date().toISOString(),
     })
     .eq('id', jobId);
-  return startJob(workspaceId, jobId);
+
+  await appendLog(workspaceId, jobId, 'info', `Retry attempt ${nextAttempt} scheduled`, {
+    delaySeconds: delay,
+    maxRetries,
+  });
+
+  if (delay <= 0) {
+    return startJob(workspaceId, jobId);
+  }
+
+  // Delayed start via queue — job stays retry_scheduled until worker picks up
+  await enqueueJob(
+    QUEUES.PLAYWRIGHT,
+    'bee_execute',
+    {
+      type: 'bee_execute',
+      jobId,
+      workspaceId,
+      action: 'retry_start',
+    },
+    {
+      singletonKey: `bee-retry-${jobId}-${nextAttempt}`,
+      startAfter: delay,
+      retryLimit: 0,
+    }
+  );
+
+  // Also arm a delayed status transition by calling start after wait in background style:
+  // For immediate UX when delay is tiny, schedule setTimeout-less path using startAfter only —
+  // the bee_execute handler will call startJob when action=retry_start.
+  return getJob(workspaceId, jobId);
 }
 
 export async function restartJob(workspaceId: string, jobId: string, userId?: string) {
@@ -944,6 +1028,20 @@ export async function getStatistics(workspaceId: string) {
     }
   }
 
+  const retrying = jobs.filter((j) => String(j.status) === 'retry_scheduled').length;
+  const waitingUser = jobs.filter(
+    (j) =>
+      String(j.status).startsWith('watching') ||
+      String(j.status).startsWith('blocked_') ||
+      ['awaiting_user', 'needs_approval', 'paused', 'ready_for_review'].includes(String(j.status))
+  ).length;
+  const topFailureReasons: Record<string, number> = {};
+  for (const j of jobs) {
+    if (String(j.status) !== 'failed') continue;
+    const code = String(j.error_code ?? 'UNKNOWN_EXCEPTION');
+    topFailureReasons[code] = (topFailureReasons[code] ?? 0) + 1;
+  }
+
   const done = counts.completed + counts.failed;
   const successRate = done > 0 ? Math.round((counts.completed / done) * 1000) / 10 : null;
   const avgMs = runtimeN ? Math.round(runtimeSum / runtimeN) : 120_000;
@@ -979,6 +1077,9 @@ export async function getStatistics(workspaceId: string) {
 
   return {
     ...counts,
+    retrying,
+    waitingUser,
+    topFailureReasons,
     successRate,
     avgRuntimeMs: runtimeN ? Math.round(runtimeSum / runtimeN) : null,
     etaSeconds: Math.round((counts.queued + counts.watching) * (avgMs / 1000)),

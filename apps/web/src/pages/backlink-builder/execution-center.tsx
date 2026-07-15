@@ -23,6 +23,10 @@ import { useApi } from '@/hooks/use-api';
 import { CurrentOpportunityBanner } from '@/components/opportunities/current-opportunity-banner';
 import { useCurrentOpportunity } from '@/hooks/use-current-opportunity';
 import type { SelectedOpportunity } from '@/components/opportunities/opportunity-selector';
+import {
+  BeeOpsPanel,
+  statusDisplayLabel,
+} from '@/components/browser/bee-ops-panel';
 
 type BeeJob = {
   id: string;
@@ -32,6 +36,10 @@ type BeeJob = {
   current_step_index?: number;
   created_at: string;
   opportunity_id?: string;
+  error_code?: string | null;
+  error_message?: string | null;
+  pause_reason?: string | null;
+  retry_count?: number;
   steps?: Array<{
     id: string;
     step_index: number;
@@ -100,7 +108,7 @@ const READINESS_LABEL: Record<ExecutionOpportunity['readiness'], string> = {
   in_progress: 'In progress',
   needs_approval: 'Needs approval',
   completed: 'Completed',
-  failed: 'Failed — retryable',
+  failed: 'Failed',
   needs_domain: 'Needs domain',
   not_ready: 'Not ready',
 };
@@ -171,7 +179,8 @@ export function BrowserExecutionCenterPage() {
       request<{ data: Array<{ id: string; level: string; message: string; created_at: string }> }>(
         `/v1/projects/${projectId}/browser/logs?jobId=${selectedJobId}`
       ),
-    enabled: !!projectId && !!selectedJobId && tab === 'logs',
+    enabled: !!projectId && !!selectedJobId,
+    refetchInterval: selectedJobId ? 2_500 : false,
   });
 
   const sessions = useQuery({
@@ -337,6 +346,8 @@ export function BrowserExecutionCenterPage() {
       ready_to_continue: 'bg-emerald-500/15 text-emerald-700',
       completed: 'bg-emerald-500/15 text-emerald-700',
       failed: 'bg-red-500/15 text-red-700',
+      retry_scheduled: 'bg-violet-500/15 text-violet-700',
+      awaiting_user: 'bg-amber-500/15 text-amber-700',
       ready: 'bg-emerald-500/15 text-emerald-700',
       in_progress: 'bg-sky-500/15 text-sky-700',
       needs_domain: 'bg-amber-500/15 text-amber-700',
@@ -660,6 +671,14 @@ export function BrowserExecutionCenterPage() {
         </>
       )}
 
+      {(tab === 'dashboard' || tab === 'timeline' || tab === 'logs') && (
+        <BeeOpsPanel
+          projectId={projectId}
+          selectedJobId={selectedJobId}
+          onSelectJob={setSelectedJobId}
+        />
+      )}
+
       {(tab === 'dashboard' || tab === 'timeline' || tab === 'logs' || tab === 'replay') && (
         <Card>
           <CardHeader>
@@ -690,10 +709,25 @@ export function BrowserExecutionCenterPage() {
                         {j.mode} · {new Date(j.created_at).toLocaleString()}
                       </p>
                     </button>
-                    <Badge className={`text-[10px] capitalize ${statusBadge(j.status)}`}>
-                      {j.status.replace(/_/g, ' ')}
+                    <Badge
+                      className={`text-[10px] capitalize ${statusBadge(j.status)}`}
+                      title={
+                        j.status === 'failed'
+                          ? `${j.error_code ?? ''} ${j.error_message ?? ''}`.trim() ||
+                            'Failed'
+                          : j.pause_reason
+                            ? `Paused: ${j.pause_reason}`
+                            : statusDisplayLabel(j.status, j.error_code, j.error_message)
+                      }
+                    >
+                      {statusDisplayLabel(j.status, j.error_code, j.error_message)}
                     </Badge>
                   </div>
+                  {j.status === 'failed' && (j.error_message || j.error_code) && (
+                    <p className="text-xs text-destructive">
+                      {j.error_message || j.error_code}
+                    </p>
+                  )}
                   <div className="flex flex-wrap gap-1">
                     <Button
                       size="sm"

@@ -26,6 +26,15 @@ import {
   updateJobSteps,
   updatePolicy,
 } from '../../modules/browser-execution/bee.service.js';
+import {
+  bulkRetryJobs,
+  getBeeWorkerHealth,
+  getFailedJobDetails,
+  getQueueMonitor,
+  getWorkspaceExecutionReport,
+  getWorkspaceExecutionReportExcel,
+  validateExecutionReadiness,
+} from '../../modules/browser-execution/bee-diagnostics.service.js';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 
 function param(value: string | string[]): string {
@@ -199,8 +208,157 @@ browserExecutionRouter.post(
   async (req, res, next) => {
     try {
       requireBee();
-      const body = z.object({ jobId: z.string().uuid() }).parse(req.body);
-      res.json({ data: await retryJob(param(req.params.projectId), body.jobId) });
+      const body = z
+        .object({ jobId: z.string().uuid(), force: z.boolean().optional() })
+        .parse(req.body);
+      res.json({
+        data: await retryJob(param(req.params.projectId), body.jobId, {
+          force: body.force !== false,
+          delaySeconds: 0,
+        }),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.post(
+  '/browser/retry/bulk',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      const body = z
+        .object({
+          mode: z.enum(['all_failed', 'selected', 'by_reason', 'temporary_only']),
+          jobIds: z.array(z.string().uuid()).optional(),
+          reasonCode: z.string().optional(),
+        })
+        .parse(req.body);
+      res.json({ data: await bulkRetryJobs(param(req.params.projectId), body) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.get(
+  '/browser/health',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      res.json({ data: await getBeeWorkerHealth(param(req.params.projectId)) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.get(
+  '/browser/queue-monitor',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      res.json({ data: await getQueueMonitor(param(req.params.projectId)) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.get(
+  '/browser/readiness',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      const opportunityId =
+        typeof req.query.opportunityId === 'string' ? req.query.opportunityId : undefined;
+      res.json({
+        data: await validateExecutionReadiness(param(req.params.projectId), opportunityId),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.get(
+  '/browser/jobs/:jobId/details',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      const details = await getFailedJobDetails(
+        param(req.params.projectId),
+        param(req.params.jobId)
+      );
+      if (!details) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Job not found');
+      res.json({ data: details });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.get(
+  '/browser/workspace-report',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      const format = String(req.query.format ?? 'json');
+      const workspaceId = param(req.params.projectId);
+      if (format === 'csv') {
+        const out = await getWorkspaceExecutionReport(workspaceId, 'csv');
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${out.filename}"`);
+        res.send(out.body);
+        return;
+      }
+      if (format === 'excel' || format === 'xls' || format === 'xlsx') {
+        const out = await getWorkspaceExecutionReportExcel(workspaceId);
+        res.setHeader('Content-Type', out.mimeType);
+        res.setHeader('Content-Disposition', `attachment; filename="${out.filename}"`);
+        res.send(out.body);
+        return;
+      }
+      if (format === 'pdf') {
+        const { report } = await getWorkspaceExecutionReport(workspaceId, 'json');
+        const { PDFDocument, StandardFonts } = await import('pdf-lib');
+        const doc = await PDFDocument.create();
+        const font = await doc.embedFont(StandardFonts.Helvetica);
+        const page = doc.addPage([612, 792]);
+        let y = 750;
+        for (const line of [
+          'SEO OS — Browser Execution Report',
+          `Generated: ${report.generatedAt}`,
+          `Total: ${report.totalJobs} · Completed: ${report.completed} · Failed: ${report.failed}`,
+          `Waiting User: ${report.waitingUser} · CAPTCHA: ${report.captcha} · Login: ${report.loginRequired}`,
+          `Success: ${report.successRate ?? '—'}% · Avg runtime: ${report.averageRuntimeMs ?? '—'}ms`,
+          'Top failure reasons:',
+          ...report.topFailureReasons.map((r) => `  ${r.label}: ${r.count}`),
+        ]) {
+          page.drawText(String(line).slice(0, 95), { x: 40, y, size: 10, font });
+          y -= 14;
+          if (y < 40) break;
+        }
+        const bytes = await doc.save();
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', 'attachment; filename="bee-report.pdf"');
+        res.send(Buffer.from(bytes));
+        return;
+      }
+      res.json({ data: await getWorkspaceExecutionReport(workspaceId, 'json') });
     } catch (err) {
       next(err);
     }

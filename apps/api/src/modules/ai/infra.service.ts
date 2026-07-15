@@ -136,7 +136,13 @@ export async function getMissionControlSummary(workspaceId: string) {
   ] = await Promise.all([
     getWorkforceStrip(workspaceId).catch(() => null),
     getQueueBoard(workspaceId, 'kanban').catch(() => null),
-    getBeeStatistics(workspaceId).catch(() => null),
+    getBeeStatistics(workspaceId)
+      .then(async (stats) => {
+        const { getBeeWorkerHealth } = await import('../browser-execution/bee-diagnostics.service.js');
+        const health = await getBeeWorkerHealth(workspaceId).catch(() => null);
+        return { ...stats, health };
+      })
+      .catch(() => null),
     getImageStatistics(workspaceId).catch(() => null),
     getProviderHealthSnapshot(workspaceId).catch(() => null),
     getEnterpriseHealthSnapshot().catch(() => null),

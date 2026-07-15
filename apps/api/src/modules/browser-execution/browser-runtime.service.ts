@@ -413,6 +413,11 @@ export class BrowserExecutionService {
 /** Process-local session registry (single API instance). Multi-instance: store state in DB only. */
 const sessionRuntimes = new Map<string, BrowserExecutionService>();
 
+export async function isPlaywrightAvailable(): Promise<boolean> {
+  const pw = await loadPlaywright();
+  return Boolean(pw);
+}
+
 export function getSessionRuntime(sessionId: string): BrowserExecutionService {
   let svc = sessionRuntimes.get(sessionId);
   if (!svc) {

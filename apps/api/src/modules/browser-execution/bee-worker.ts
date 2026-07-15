@@ -1,8 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import {
+  analyzeFailureAi,
+  classifyExecutionError,
   detectFormIntelligence,
   gateStatusFromBlocker,
+  isAutoRetryable,
   isWatchableGate,
+  retryBackoffSeconds,
   type ExecutionGate,
 } from '@seo-os/backlink-builder';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
@@ -11,7 +15,13 @@ import {
   disposeSessionRuntime,
   getSessionRuntime,
 } from '../browser-execution/browser-runtime.service.js';
-import { appendLog, recordHistory, mergeJobMetrics } from '../browser-execution/bee.service.js';
+import {
+  appendLog,
+  getOrCreatePolicy,
+  recordHistory,
+  mergeJobMetrics,
+  retryJob,
+} from '../browser-execution/bee.service.js';
 import { enqueueJob, QUEUES } from '../../jobs/boss.js';
 import { DEFAULT_FEATURE_FLAGS } from '@seo-os/shared';
 import {
@@ -198,6 +208,13 @@ export async function runBeeExecutionJob(data: {
       await persistSessionStorageState(data.sessionId);
       await disposeSessionRuntime(data.sessionId);
     }
+    return;
+  }
+
+  // Delayed smart-retry — startAfter elapsed, now start a fresh session
+  if (data.action === 'retry_start') {
+    const { startJob } = await import('./bee.service.js');
+    await startJob(workspaceId, jobId);
     return;
   }
 
@@ -624,20 +641,99 @@ export async function runBeeExecutionJob(data: {
     });
   } catch (err) {
     logger.error({ err, jobId }, 'BEE execution failed');
+
+    const { data: liveJob } = await getSupabaseAdmin()
+      .from('execution_jobs')
+      .select('current_step_index, retry_count, metrics, status')
+      .eq('id', jobId)
+      .maybeSingle();
+
+    const stepAction = String(liveJob?.current_step_index ?? 'unknown');
+    const classified = classifyExecutionError(err, { step: stepAction });
+    const analysis = analyzeFailureAi({
+      failureCode: classified.failureCode,
+      failureMessage: classified.failureMessage,
+      status: 'failed',
+    });
+
+    // Best-effort error screenshot
+    try {
+      if (sessionId) {
+        const runtime = getSessionRuntime(sessionId);
+        const cap = await runtime.capture('on_error');
+        await storeScreenshot(
+          workspaceId,
+          jobId,
+          null,
+          `error_${classified.failureCode.toLowerCase()}`,
+          cap.screenshotBase64
+        );
+      }
+    } catch {
+      /* optional */
+    }
+
+    const metricsPatch = {
+      failure: {
+        failureCode: classified.failureCode,
+        failureMessage: classified.failureMessage,
+        failureStep: classified.failureStep,
+        failureTimestamp: classified.failureTimestamp,
+        retryClass: classified.retryClass,
+        label: classified.label,
+        suggestedFix: classified.suggestedFix,
+        stack: err instanceof Error ? err.stack?.slice(0, 4000) : null,
+        analysis,
+      },
+    };
+    await mergeJobMetrics(workspaceId, jobId, metricsPatch);
+
     await updateJob(jobId, {
       status: 'failed',
-      error_code: 'EXECUTION_ERROR',
-      error_message: err instanceof Error ? err.message : 'Unknown error',
+      error_code: classified.failureCode,
+      error_message: classified.label,
       finished_at: new Date().toISOString(),
     });
-    await appendLog(workspaceId, jobId, 'error', 'Execution failed', {
-      error: err instanceof Error ? err.message : String(err),
+    await appendLog(workspaceId, jobId, 'error', classified.label, {
+      failureCode: classified.failureCode,
+      failureMessage: classified.failureMessage,
+      failureStep: classified.failureStep,
+      failureTimestamp: classified.failureTimestamp,
+      suggestedFix: classified.suggestedFix,
+      analysis,
+      stack: err instanceof Error ? err.stack?.slice(0, 2000) : null,
     });
-    await recordHistory(workspaceId, jobId, 'failed');
+    await recordHistory(workspaceId, jobId, 'failed', {
+      errorCode: classified.failureCode,
+      timing: { failureTimestamp: classified.failureTimestamp },
+    });
+
     if (sessionId) {
       await persistSessionStorageState(sessionId).catch(() => undefined);
       await disposeSessionRuntime(sessionId);
     }
+
+    // Smart auto-retry for temporary failures
+    if (isAutoRetryable(classified.failureCode)) {
+      const policy = await getOrCreatePolicy(workspaceId);
+      const attempt = Number(liveJob?.retry_count ?? 0) + 1;
+      const max = Number(policy.retry_count ?? 2);
+      const delay = retryBackoffSeconds(attempt);
+      if (delay != null && attempt <= max) {
+        await appendLog(
+          workspaceId,
+          jobId,
+          'warn',
+          `Auto-retry ${attempt}/${max} in ${delay}s — ${classified.label}`,
+          { delaySeconds: delay, failureCode: classified.failureCode }
+        );
+        await retryJob(workspaceId, jobId, { delaySeconds: delay }).catch((retryErr) => {
+          logger.warn({ retryErr, jobId }, 'Auto-retry schedule failed');
+        });
+        return;
+      }
+    }
+
     throw err;
   }
 }

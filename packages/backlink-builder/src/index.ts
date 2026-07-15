@@ -19,6 +19,7 @@ export * from './intelligent-content.js';
 export * from './content-packs.js';
 export * from './browser-plans.js';
 export * from './browser-execution.js';
+export * from './execution-failures.js';
 export * from './page-watcher.js';
 export * from './image-intelligence.js';
 export * from './recommendations.js';

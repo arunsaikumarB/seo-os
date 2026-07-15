@@ -312,10 +312,40 @@ export function MissionControlPage() {
             <Activity className="h-4 w-4" /> Browser Execution
           </CardTitle>
           <CardDescription>
-            Running · Queued · Watching · Paused · Auto-resumed · Blocked · ETA
+            Running · Queued · Watching · Paused · Auto-resumed · Blocked · Worker health · ETA
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 sm:grid-cols-4 text-sm">
+          {Array.isArray(
+            (data?.browserExecution as { health?: { indicators?: Array<{ label: string; status: string }> } })
+              ?.health?.indicators
+          ) && (
+            <div className="sm:col-span-4 flex flex-wrap gap-2">
+              {(
+                (
+                  data?.browserExecution as {
+                    health?: { indicators?: Array<{ label: string; status: string }> };
+                  }
+                )?.health?.indicators ?? []
+              ).map((i) => (
+                <span
+                  key={i.label}
+                  className="inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px]"
+                >
+                  <span
+                    className={`h-2 w-2 rounded-full ${
+                      i.status === 'green'
+                        ? 'bg-emerald-500'
+                        : i.status === 'red'
+                          ? 'bg-red-500'
+                          : 'bg-amber-500'
+                    }`}
+                  />
+                  {i.label}
+                </span>
+              ))}
+            </div>
+          )}
           <div>
             <p className="text-xs text-muted-foreground">Running / Queued</p>
             <p className="font-medium">
