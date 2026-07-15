@@ -29,10 +29,14 @@ jobs:
         run: node scripts/check-migrations.mjs
 
       - name: Install Playwright Chromium
-        run: npx playwright install chromium
+        run: node node_modules/playwright/cli.js install chromium
+        env:
+          PLAYWRIGHT_CHROMIUM_USE_HEADLESS_SHELL: '0'
 
       - name: Assert Playwright Chromium present
         run: node scripts/check-playwright-chromium.mjs
+        env:
+          PLAYWRIGHT_CHROMIUM_USE_HEADLESS_SHELL: '0'
 
       - name: Lint
         run: npm run lint

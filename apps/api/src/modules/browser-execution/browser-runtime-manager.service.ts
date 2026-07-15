@@ -5,7 +5,7 @@
 
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
@@ -192,7 +192,12 @@ export async function verifyBrowserRuntime(
 
     if (executableExists && probeLaunch) {
       try {
-        const browser = await pw.chromium.launch({ headless: true, timeout: 45_000 });
+        process.env.PLAYWRIGHT_CHROMIUM_USE_HEADLESS_SHELL ??= '0';
+        const browser = await pw.chromium.launch({
+          headless: true,
+          timeout: 45_000,
+          executablePath: chromePath,
+        });
         browserVersion = browser.version();
         await browser.close();
         launchOk = true;
@@ -295,15 +300,34 @@ export async function installChromium(
     onProgress?.({ phase: 'starting', percent: 0 });
 
     return await new Promise<boolean>((resolve) => {
-      const child = spawn(
-        process.platform === 'win32' ? 'npx.cmd' : 'npx',
-        ['playwright', 'install', 'chromium'],
-        {
-          cwd: process.cwd(),
-          env: process.env,
-          shell: process.platform === 'win32',
-        }
-      );
+      // Prefer package-local CLI so the installed browser revision matches playwright in node_modules
+      const candidates = [
+        path.join(process.cwd(), 'node_modules', 'playwright', 'cli.js'),
+        path.join(process.cwd(), 'apps', 'api', 'node_modules', 'playwright', 'cli.js'),
+        path.resolve(path.dirname(requireFromHere.resolve('playwright/package.json')), 'cli.js'),
+      ];
+      const localCli = candidates.find((p) => existsSync(p));
+
+      const env = {
+        ...process.env,
+        PLAYWRIGHT_CHROMIUM_USE_HEADLESS_SHELL:
+          process.env.PLAYWRIGHT_CHROMIUM_USE_HEADLESS_SHELL ?? '0',
+      };
+      const withDeps = process.platform === 'linux' ? ['--with-deps'] : [];
+      const child = localCli
+        ? spawn(process.execPath, [localCli, 'install', ...withDeps, 'chromium'], {
+            cwd: process.cwd(),
+            env,
+          })
+        : spawn(
+            process.platform === 'win32' ? 'npx.cmd' : 'npx',
+            ['playwright', 'install', ...withDeps, 'chromium'],
+            {
+              cwd: process.cwd(),
+              env,
+              shell: process.platform === 'win32',
+            }
+          );
 
       let log = '';
       child.stdout?.on('data', (buf: Buffer) => {

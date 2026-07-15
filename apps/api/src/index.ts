@@ -35,6 +35,9 @@ async function shutdown(signal: string) {
 }
 
 async function main() {
+  // Prefer full Chromium over chromium_headless_shell (missing on many hosts after PW upgrades)
+  process.env.PLAYWRIGHT_CHROMIUM_USE_HEADLESS_SHELL ??= '0';
+
   const env = getEnv();
   await initSentry({
     dsn: env.SENTRY_DSN || undefined,

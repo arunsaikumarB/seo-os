@@ -88,13 +88,18 @@ export class BrowserExecutionService {
     this.mode = opts.mode;
     this.consoleLogs = [];
     try {
+      // Prefer full Chromium binary (not chromium_headless_shell) — Railway/Linux
+      // often misses the headless-shell package after Playwright upgrades.
+      process.env.PLAYWRIGHT_CHROMIUM_USE_HEADLESS_SHELL ??= '0';
+      const executablePath = pw.chromium.executablePath();
       this.browser = await pw.chromium.launch({
         headless: opts.mode === 'headless',
         timeout: opts.timeoutMs ?? 60_000,
+        executablePath,
       });
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err);
-      if (/executable doesn't exist|could not find browser|browserType\.launch/i.test(raw)) {
+      if (/executable doesn't exist|could not find browser|browserType\.launch|headless_shell/i.test(raw)) {
         throw Object.assign(
           new Error(
             'Browser Runtime Missing — Administrator Action Required. Suggested Fix: Install Chromium.'
