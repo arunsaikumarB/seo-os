@@ -32,6 +32,8 @@ import { uploadDocument } from '../knowledge/document.service.js';
 import { fireAndForget, publishPlatformEvent } from '../platform/event-bus.service.js';
 import { logger } from '../../lib/logger.js';
 import { enqueueJob, QUEUES } from '../../jobs/boss.js';
+import { loadClassificationLearning } from './classification.service.js';
+import { summarizeClassificationCounts } from '@seo-os/backlink-builder';
 
 type WriteResult = { error: unknown; data?: unknown };
 
@@ -392,6 +394,16 @@ export async function runAutomationPipeline(
     let contentGenerated = 0;
     let submissionsCreated = 0;
     let relationshipsCreated = 0;
+    const classificationDecisions: Array<{
+      classificationId: string;
+      displayName?: string;
+      confidence: number;
+      reason: string;
+      domain: string;
+      queue: string;
+      agent: string;
+    }> = [];
+    const learning = await loadClassificationLearning(workspaceId);
 
     const CONCURRENCY = 5;
     for (let i = 0; i < validRows.length; i += CONCURRENCY) {
@@ -408,7 +420,7 @@ export async function runAutomationPipeline(
           try {
             await log('analyze', `Scanning homepage — ${domain}`);
             await log('analyze', `Fetching robots.txt — ${domain}`, { level: 'debug' });
-            const analysis = await analyzeDomainLive(domain, url);
+            const analysis = await analyzeDomainLive(domain, url, fetch, { learning });
             await log(
               'analyze',
               `Analyzed ${domain} (DR ${analysis.domainRating ?? 'n/a'}, robots ${analysis.robotsTxtStatus ?? 'n/a'})`
@@ -444,11 +456,21 @@ export async function runAutomationPipeline(
               projectDomain: brand.projectDomain,
               projectIndustry: brand.industry,
               brandName: brand.brandName,
+              learning,
+            });
+            classificationDecisions.push({
+              classificationId: classification.classificationId,
+              displayName: classification.classificationLabel,
+              confidence: classification.confidence,
+              reason: classification.reason,
+              domain,
+              queue: String(classification.workflowQueue),
+              agent: String(classification.assignedAgent),
             });
             const typeMeta = BACKLINK_TYPES.find((t) => t.id === classification.backlinkType);
             await log(
               'score',
-              `Score ${classification.opportunityScore} · priority ${classification.priority} · ${classification.backlinkType} — ${domain}`
+              `${classification.classificationLabel} (${classification.confidence}%) — ${classification.reason} · Score ${classification.opportunityScore} — ${domain}`
             );
 
             const qualification = qualifyOpportunity(analysis, classification);
@@ -468,6 +490,10 @@ export async function runAutomationPipeline(
                   type: qualification.backlinkType,
                   label: qualification.classificationLabel,
                   signals: qualification.signals,
+                  confidence: classification.confidence,
+                  classificationReason: classification.reason,
+                  workflowQueue: classification.workflowQueue,
+                  assignedAgent: classification.assignedAgent,
                 },
               }
             );
@@ -487,6 +513,8 @@ export async function runAutomationPipeline(
                   score: classification.opportunityScore,
                   qualified: false,
                   reason: qualification.reason,
+                  classification: classification.classificationId,
+                  confidence: classification.confidence,
                 },
               });
               return;
@@ -531,6 +559,21 @@ export async function runAutomationPipeline(
                 estimated: analysis.metricsSource !== 'live',
                 importEnrichment: rich,
                 cms: (analysis.metadata as Record<string, unknown>)?.cms ?? null,
+                websiteSignals: analysis.websiteSignals
+                  ? { ...analysis.websiteSignals, rawSnippet: undefined }
+                  : null,
+                classification: {
+                  id: classification.classificationId,
+                  displayName: classification.classificationLabel,
+                  confidence: classification.confidence,
+                  reason: classification.reason,
+                  evidence: classification.evidence,
+                  workflowQueue: classification.workflowQueue,
+                  assignedAgent: classification.assignedAgent,
+                  alternatives: classification.alternatives,
+                },
+                assignedAgent: classification.assignedAgent,
+                workflowQueue: classification.workflowQueue,
                 qualification: {
                   qualified: true,
                   reason: qualification.reason,
@@ -585,6 +628,10 @@ export async function runAutomationPipeline(
               payload: {
                 domain,
                 type: classification.backlinkType,
+                classificationId: classification.classificationId,
+                confidence: classification.confidence,
+                workflowQueue: classification.workflowQueue,
+                assignedAgent: classification.assignedAgent,
                 priority: classification.priority,
                 score: classification.opportunityScore,
                 qualificationReason: qualification.reason,
@@ -615,15 +662,40 @@ export async function runAutomationPipeline(
           total: validRows.length,
           errors: stageErrors.length,
           logWriteFailures,
+          classificationSummary: summarizeClassificationCounts(classificationDecisions),
         },
       });
     }
 
-    const reportText = formatQualificationReport(qualificationReport);
-    await log('classify', `Qualification report\n\n${reportText}`, {
-      detail: { qualificationReport },
+    const classificationSummary = summarizeClassificationCounts(classificationDecisions);
+    await updateImportStatus(importId, detail.status === 'failed' ? 'failed' : 'analyzing', {
+      metadata: {
+        ...((detail.metadata as Record<string, unknown>) ?? {}),
+        classificationSummary: {
+          imported: validRows.length,
+          classified: classificationDecisions.length,
+          byType: classificationSummary,
+          samples: classificationDecisions.slice(0, 40).map((d) => ({
+            domain: d.domain,
+            type: d.classificationId,
+            label: d.displayName,
+            confidence: d.confidence,
+            reason: d.reason,
+            queue: d.queue,
+            agent: d.agent,
+          })),
+        },
+      },
     });
 
+    const reportText = formatQualificationReport(qualificationReport);
+    await log('classify', `Qualification report\n\n${reportText}`, {
+      detail: { qualificationReport, classificationSummary },
+    });
+    await log(
+      'classify',
+      `Classification summary — ${classificationSummary.map((t) => `${t.label}: ${t.count}`).join(' · ') || 'none'}`
+    );
     if (opportunitiesCreated === 0) {
       const rejectedReasons = qualificationReport
         .filter((r) => !r.qualified)
@@ -915,7 +987,7 @@ export async function runAutomationPipeline(
 
     const partial = stageErrors.length > 0 || opportunitiesCreated < validRows.length;
     const finalStatus = partial ? 'partially_completed' : 'completed';
-    await updateImportStatus(importId, 'completed', {
+    await updateImportStatus(importId, finalStatus === 'partially_completed' ? 'completed' : finalStatus, {
       opportunities_created: opportunitiesCreated,
       content_generated: contentGenerated,
       completed_at: new Date().toISOString(),
@@ -936,6 +1008,7 @@ export async function runAutomationPipeline(
         qualified: qualificationReport.filter((r) => r.qualified).length,
         rejected: qualificationReport.filter((r) => !r.qualified).length,
         qualificationReport,
+        classificationSummary: summarizeClassificationCounts(classificationDecisions),
         errors: stageErrors,
         logWriteFailures,
       },

@@ -45,6 +45,34 @@ function hasPublicSubmissionPath(analysis: DomainAnalysisResult): boolean {
   if (Boolean(analysis.detectedPages.directory) && meta.directoryPathConfirmed === true) return true;
   if (Boolean(analysis.detectedPages.forum) && meta.forumPathConfirmed === true) return true;
   if (Boolean(analysis.detectedPages.qa) && meta.qaPathConfirmed === true) return true;
+  const signals = analysis.websiteSignals;
+  if (signals) {
+    if (
+      signals.hasWriteForUs ||
+      signals.hasSubmitListing ||
+      signals.hasAddBusiness ||
+      signals.hasCreateProfile ||
+      signals.hasVideoUpload ||
+      signals.hasImageGallery ||
+      signals.hasForum ||
+      signals.hasQa ||
+      signals.hasMarketplace ||
+      signals.hasPressRoom ||
+      signals.formActions.length > 0
+    ) {
+      return true;
+    }
+  }
+  const classification = meta.classification as { confidence?: number; id?: string } | undefined;
+  if (
+    classification &&
+    Number(classification.confidence ?? 0) >= 70 &&
+    classification.id &&
+    classification.id !== 'unknown' &&
+    classification.id !== 'outreach_required'
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -68,7 +96,7 @@ export function qualifyOpportunity(
     fetchStatusCode: analysis.fetchStatusCode,
   };
 
-  const label = displayLabel(classification.backlinkType);
+  const label = classification.classificationLabel || displayLabel(classification.backlinkType);
   const base = {
     domain: analysis.domain,
     websiteName: analysis.websiteName,

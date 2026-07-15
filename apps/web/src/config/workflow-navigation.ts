@@ -19,6 +19,7 @@ import {
   Globe,
   Lightbulb,
   Mail,
+  Layers,
 } from 'lucide-react';
 import type { NavItem } from './navigation';
 
@@ -55,6 +56,7 @@ export const workflowNavSections: WorkflowNavSection[] = [
     items: [
       { label: 'Dashboard', href: 'backlink-builder', icon: Link2, featureFlag: 'backlink_builder' },
       { label: 'Import Websites', href: 'backlink-builder/import', icon: Upload, featureFlag: 'backlink_builder' },
+      { label: 'Classification', href: 'backlink-builder/classification', icon: Layers, featureFlag: 'backlink_builder' },
       { label: 'Discover Websites', href: 'backlink-builder/discover', icon: Radar, featureFlag: 'backlink_builder' },
       { label: 'Explorer', href: 'backlink-builder/explorer', icon: Search, featureFlag: 'backlink_builder' },
       { label: 'AI Analysis', href: 'backlink-builder/automation', icon: Sparkles, featureFlag: 'backlink_builder' },

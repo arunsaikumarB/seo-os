@@ -7,6 +7,7 @@ export * from './import-engine.js';
 export * from './domain-analyzer.js';
 export * from './automation-pipeline.js';
 export * from './classification.js';
+export * from './opportunity-classifier.js';
 export * from './qualification.js';
 export * from './content-generator.js';
 export * from './discovery.js';

@@ -27,6 +27,22 @@ type ImportRecord = {
   valid_rows: number;
   opportunities_created: number;
   created_at: string;
+  metadata?: {
+    classificationSummary?: {
+      imported: number;
+      classified: number;
+      byType: Array<{ id: string; label: string; count: number }>;
+      samples?: Array<{
+        domain: string;
+        type: string;
+        label?: string;
+        confidence: number;
+        reason: string;
+        queue: string;
+        agent: string;
+      }>;
+    };
+  };
 };
 
 const SOURCE_TYPES = [
@@ -152,8 +168,9 @@ export function BacklinkImportPage() {
           <Upload className="h-6 w-6" /> Import Websites
         </h1>
         <p className="text-muted-foreground mt-1">
-          Import via CSV, Excel (.xlsx), TXT, or pasted URLs. Domains are validated, then the automation
-          pipeline classifies and scores them into opportunities.
+          Import via CSV, Excel (.xlsx), TXT, or pasted URLs. The AI inspects each website (nav,
+          forms, buttons, metadata, robots/sitemap) and classifies opportunity type before the
+          Opportunity Queue.
         </p>
       </div>
 
@@ -253,10 +270,10 @@ export function BacklinkImportPage() {
             </CardHeader>
             <CardContent className="text-sm space-y-2 text-muted-foreground">
               <p>1. URLs validated & deduplicated</p>
-              <p>2. Automation job enqueued (workers)</p>
-              <p>3. Live fetch + AI classifies & scores</p>
-              <p>4. Content prepared for Content Studio</p>
-              <p>5. Queued for human approval in Submission Center</p>
+              <p>2. AI scans homepage, nav, forms, robots, sitemap</p>
+              <p>3. Classifies type + confidence + reason</p>
+              <p>4. Groups into workflow queues & assigns agents</p>
+              <p>5. Human approval in Opportunity Queue</p>
             </CardContent>
           </Card>
           <Card>
@@ -277,6 +294,46 @@ export function BacklinkImportPage() {
           </Card>
         </div>
       </div>
+
+      {latest?.metadata?.classificationSummary && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Imported Websites — AI classification</CardTitle>
+            <CardDescription>
+              {latest.metadata.classificationSummary.classified} of{' '}
+              {latest.metadata.classificationSummary.imported} inspected ·{' '}
+              <Link
+                className="underline underline-offset-2"
+                to={`/projects/${projectId}/backlink-builder/classification`}
+              >
+                Open classification dashboard
+              </Link>
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {(latest.metadata.classificationSummary.byType ?? []).map((row) => (
+              <div
+                key={row.id}
+                className="flex items-center justify-between border-b border-border/50 py-1.5 last:border-0 text-sm"
+              >
+                <span className="font-medium">{row.label}</span>
+                <span className="tabular-nums font-semibold">{row.count}</span>
+              </div>
+            ))}
+            {(latest.metadata.classificationSummary.samples ?? []).slice(0, 5).length > 0 && (
+              <div className="pt-2 space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">Sample reasons</p>
+                {(latest.metadata.classificationSummary.samples ?? []).slice(0, 5).map((s) => (
+                  <p key={`${s.domain}-${s.type}`} className="text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">{s.domain}</span> —{' '}
+                    {s.label ?? s.type} ({s.confidence}%) · {s.reason}
+                  </p>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

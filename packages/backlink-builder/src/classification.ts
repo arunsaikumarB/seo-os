@@ -1,10 +1,18 @@
-/** AI classification for imported domains — Epic 2 */
+/** AI classification for imported domains — Epic 2 + Classification Engine */
 
 import type { DomainAnalysisResult } from './domain-analyzer.js';
 import { scoreBacklinkOpportunity, getScoreTier } from './scoring.js';
 import { estimateSuccessProbability, predictReplyRate } from './ai-features.js';
 import type { BacklinkTypeId } from './backlink-types.js';
 import { getTypeLabel } from './backlink-types.js';
+import type {
+  ClassificationAgentId,
+  ClassificationDecision,
+  ClassificationQueue,
+  LearningPattern,
+  OpportunityClassificationId,
+} from './opportunity-classifier.js';
+import { classifyFromWebsiteInspection, extractWebsiteSignals } from './opportunity-classifier.js';
 
 export type Priority = 'low' | 'medium' | 'high' | 'urgent';
 
@@ -19,15 +27,24 @@ export interface ClassificationResult {
   difficulty: number;
   recommendedAction: string;
   scoreTier: string;
-  /** Probabilistic fields are heuristic unless a live provider is wired */
   estimated: true;
   metricsSource: 'estimated';
+  /** Extended classification engine fields */
+  classificationId: OpportunityClassificationId | string;
+  classificationLabel: string;
+  confidence: number;
+  reason: string;
+  evidence: string[];
+  workflowQueue: ClassificationQueue | string;
+  assignedAgent: ClassificationAgentId | string;
+  alternatives: ClassificationDecision['alternatives'];
 }
 
 export interface ClassificationContext {
   projectDomain?: string;
   projectIndustry?: string;
   brandName?: string;
+  learning?: LearningPattern[];
 }
 
 function computeRelevance(analysis: DomainAnalysisResult, ctx: ClassificationContext): number {
@@ -58,19 +75,20 @@ function computePriority(score: number, relevance: number, spamRisk: number): Pr
 function recommendAction(
   type: BacklinkTypeId,
   tier: string,
-  analysis: DomainAnalysisResult
+  analysis: DomainAnalysisResult,
+  queue?: string
 ): string {
   const label = getTypeLabel(type);
   if (tier === 'high') {
     return `Prioritize personalized ${label.toLowerCase()} outreach to ${analysis.websiteName}. Generate custom content and assign to active campaign.`;
   }
-  if (type === 'directory') {
+  if (queue === 'directory' || type === 'directory') {
     return `Prepare directory listing for ${analysis.websiteName}. Use assisted submission workflow — human review required before publish.`;
   }
-  if (type === 'forum' || type === 'qa_site') {
+  if (type === 'forum' || type === 'qa_site' || queue === 'forum' || queue === 'qa') {
     return `Draft community response for ${analysis.websiteName}. Platform moderation required — do not auto-post.`;
   }
-  if (type === 'guest_post') {
+  if (type === 'guest_post' || queue === 'guest_post') {
     return `Generate guest post draft and outreach email for ${analysis.websiteName}. Editorial approval required.`;
   }
   return `Queue ${label.toLowerCase()} opportunity for batch outreach. Monitor reply rate and adjust strategy.`;
@@ -80,7 +98,23 @@ export function classifyOpportunity(
   analysis: DomainAnalysisResult,
   ctx: ClassificationContext = {}
 ): ClassificationResult {
-  const backlinkType = analysis.primaryType;
+  const decision =
+    analysis.classificationDecision ??
+    classifyFromWebsiteInspection(
+      analysis.websiteSignals ??
+        extractWebsiteSignals('<html></html>', {
+          fetchOk: analysis.metricsSource === 'live',
+          sitemapFound: analysis.sitemapFound,
+          robotsOk: analysis.robotsTxtStatus === 'found',
+        }),
+      {
+        learning: ctx.learning,
+        domain: analysis.domain,
+        fallbackType: analysis.primaryType,
+      }
+    );
+
+  const backlinkType = decision.backlinkType;
   const opportunityScore = scoreBacklinkOpportunity({
     type: backlinkType,
     title: analysis.websiteName,
@@ -117,9 +151,22 @@ export function classifyOpportunity(
     successProbability,
     replyRate,
     difficulty,
-    recommendedAction: recommendAction(backlinkType, scoreTier, analysis),
+    recommendedAction: recommendAction(
+      backlinkType,
+      scoreTier,
+      analysis,
+      decision.workflowQueue
+    ),
     scoreTier,
     estimated: true,
     metricsSource: 'estimated',
+    classificationId: decision.classificationId,
+    classificationLabel: decision.displayName,
+    confidence: decision.confidence,
+    reason: decision.reason,
+    evidence: decision.evidence,
+    workflowQueue: decision.workflowQueue,
+    assignedAgent: decision.assignedAgent,
+    alternatives: decision.alternatives,
   };
 }

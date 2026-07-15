@@ -856,7 +856,7 @@ export async function exportBacklinkOpsWorkbook(
   const { data: submissions } = await getSupabaseAdmin()
     .from('backlink_submissions')
     .select(
-      'status, tracking_status, queue_stage, submitted_at, verified_at, estimated_review_hours, estimated_approval_hours, notes, opportunities:opportunity_id(title, domain, opportunity_type, priority, automation_status)'
+      'status, tracking_status, queue_stage, submitted_at, verified_at, estimated_review_hours, estimated_approval_hours, notes, opportunities:opportunity_id(title, domain, opportunity_type, priority, automation_status, queue_status, website_name, metadata)'
     )
     .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false })
@@ -864,10 +864,17 @@ export async function exportBacklinkOpsWorkbook(
 
   const header = [
     'Website',
-    'Backlink Type',
-    'Submission Status',
-    'Review Status',
-    'Verification',
+    'Domain',
+    'Detected Type',
+    'Confidence',
+    'Reason',
+    'Status',
+    'Workflow Queue',
+    'Assigned Agent',
+    'Ready',
+    'Submitted',
+    'Verified',
+    'Approval Status',
     'Priority',
     'Est. Review Time (hrs)',
     'Est. Approval Time (hrs)',
@@ -879,16 +886,38 @@ export async function exportBacklinkOpsWorkbook(
     const opp = row.opportunities as {
       title?: string;
       domain?: string;
+      website_name?: string;
       opportunity_type?: string;
       priority?: string;
       automation_status?: string;
+      queue_status?: string;
+      metadata?: {
+        classification?: {
+          id?: string;
+          displayName?: string;
+          confidence?: number;
+          reason?: string;
+          workflowQueue?: string;
+          assignedAgent?: string;
+        };
+        workflowQueue?: string;
+        assignedAgent?: string;
+      } | null;
     } | null;
+    const c = opp?.metadata?.classification;
     rows.push([
-      opp?.domain ?? opp?.title ?? '',
-      opp?.opportunity_type ?? '',
+      opp?.website_name ?? opp?.title ?? '',
+      opp?.domain ?? '',
+      c?.displayName ?? c?.id ?? opp?.opportunity_type ?? '',
+      c?.confidence != null ? String(c.confidence) : '',
+      c?.reason ?? '',
       row.queue_stage ?? row.tracking_status ?? row.status ?? '',
-      row.tracking_status ?? row.status ?? '',
-      row.verified_at ? 'verified' : 'pending',
+      c?.workflowQueue ?? opp?.metadata?.workflowQueue ?? '',
+      c?.assignedAgent ?? opp?.metadata?.assignedAgent ?? '',
+      opp?.queue_status === 'approved' || row.status === 'ready' ? 'yes' : 'no',
+      row.submitted_at ? 'yes' : 'no',
+      row.verified_at ? 'yes' : 'no',
+      opp?.queue_status ?? row.tracking_status ?? '',
       opp?.priority ?? '',
       String(row.estimated_review_hours ?? ''),
       String(row.estimated_approval_hours ?? ''),

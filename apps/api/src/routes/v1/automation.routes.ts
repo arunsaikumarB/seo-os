@@ -25,6 +25,12 @@ import {
   runDiscoverWebsites,
 } from '../../modules/backlinks/discovery.service.js';
 import { listKeywords } from '../../modules/intelligence/keyword.service.js';
+import {
+  getClassificationAnalytics,
+  getClassificationQueues,
+  recordClassificationCorrection,
+} from '../../modules/backlinks/classification.service.js';
+import { OPPORTUNITY_CLASSIFICATION_TYPES } from '@seo-os/backlink-builder';
 
 function param(value: string | string[]): string {
   return Array.isArray(value) ? value[0] : value;
@@ -79,6 +85,82 @@ automationRouter.get('/summary', authMiddleware, requireRole('viewer'), async (r
   }
 });
 
+automationRouter.get(
+  '/classification/analytics',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      res.json({ data: await getClassificationAnalytics(param(req.params.projectId)) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+automationRouter.get(
+  '/classification/queues',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      res.json({ data: await getClassificationQueues(param(req.params.projectId)) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+automationRouter.get(
+  '/classification/types',
+  authMiddleware,
+  requireRole('viewer'),
+  async (_req, res, next) => {
+    try {
+      res.json({
+        data: OPPORTUNITY_CLASSIFICATION_TYPES.map((t) => ({
+          id: t.id,
+          displayName: t.displayName,
+          queue: t.queue,
+          agent: t.agent,
+          storageType: t.storageType,
+        })),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+automationRouter.patch(
+  '/classification/opportunities/:opportunityId',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const body = z
+        .object({
+          toType: z.string().min(1),
+          fromType: z.string().optional(),
+          reason: z.string().optional(),
+        })
+        .parse(req.body);
+      const { userId } = (req as AuthenticatedRequest).auth;
+      res.json({
+        data: await recordClassificationCorrection({
+          workspaceId: param(req.params.projectId),
+          opportunityId: param(req.params.opportunityId),
+          fromType: body.fromType ?? 'unknown',
+          toType: body.toType,
+          reason: body.reason,
+          userId,
+        }),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 automationRouter.get('/imports', authMiddleware, requireRole('viewer'), async (req, res, next) => {
   try {
     res.json({ data: await listImports(param(req.params.projectId)) });

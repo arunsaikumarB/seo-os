@@ -75,6 +75,24 @@ type MissionSummary = {
     todaysImages?: number;
     providerHealth?: Array<{ key: string; status: string }>;
   };
+  opportunityClassification?: {
+    imported?: number;
+    classified?: number;
+    unknown?: number;
+    estimatedAccuracy?: number;
+    avgConfidence?: number;
+    snapshot?: {
+      directories?: number;
+      guestPosts?: number;
+      articles?: number;
+      images?: number;
+      videos?: number;
+      profiles?: number;
+      forums?: number;
+      qa?: number;
+      unknown?: number;
+    };
+  };
   providerFramework?: {
     connected?: number;
     healthy?: number;
@@ -396,6 +414,63 @@ export function MissionControlPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <ImageProviderMissionWidget projectId={projectId} summary={data?.imageIntelligence} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Opportunity Classification</CardTitle>
+          <CardDescription>
+            Directories · Guest Posts · Articles · Images · Videos · Profiles · Forums · Q&A ·
+            Unknown · Accuracy
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            {(
+              [
+                ['Directories', data?.opportunityClassification?.snapshot?.directories],
+                ['Guest Posts', data?.opportunityClassification?.snapshot?.guestPosts],
+                ['Articles', data?.opportunityClassification?.snapshot?.articles],
+                ['Images', data?.opportunityClassification?.snapshot?.images],
+                ['Videos', data?.opportunityClassification?.snapshot?.videos],
+                ['Profiles', data?.opportunityClassification?.snapshot?.profiles],
+                ['Forums', data?.opportunityClassification?.snapshot?.forums],
+                ['Q&A', data?.opportunityClassification?.snapshot?.qa],
+                ['Unknown', data?.opportunityClassification?.snapshot?.unknown],
+              ] as const
+            ).map(([label, n]) => (
+              <div key={label}>
+                <p className="text-xs text-muted-foreground">{label}</p>
+                <p className="font-medium tabular-nums">{n ?? 0}</p>
+              </div>
+            ))}
+            <div>
+              <p className="text-xs text-muted-foreground">Total Imported</p>
+              <p className="font-medium tabular-nums">
+                {data?.opportunityClassification?.imported ?? 0}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Total Classified</p>
+              <p className="font-medium tabular-nums">
+                {data?.opportunityClassification?.classified ?? 0}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Accuracy</p>
+              <p className="font-medium tabular-nums">
+                {data?.opportunityClassification?.estimatedAccuracy != null
+                  ? `${data.opportunityClassification.estimatedAccuracy}%`
+                  : '—'}
+              </p>
+            </div>
+          </div>
+          <Button variant="outline" size="sm" asChild>
+            <Link to={`/projects/${projectId}/backlink-builder/classification`}>
+              Classification dashboard
+            </Link>
+          </Button>
         </CardContent>
       </Card>
 

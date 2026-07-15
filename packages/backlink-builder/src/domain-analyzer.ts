@@ -2,6 +2,13 @@
 
 import { categorizeDomain } from './import-engine.js';
 import type { BacklinkTypeId } from './backlink-types.js';
+import {
+  classifyFromWebsiteInspection,
+  extractWebsiteSignals,
+  type ClassificationDecision,
+  type LearningPattern,
+  type WebsiteInspectionSignals,
+} from './opportunity-classifier.js';
 
 export interface DetectedPages {
   contact?: string;
@@ -29,6 +36,10 @@ export interface DomainAnalysisResult {
   robotsTxtStatus?: string;
   sitemapFound?: boolean;
   fetchStatusCode?: number;
+  /** Rich page-structure signals used by the classification engine */
+  websiteSignals?: WebsiteInspectionSignals;
+  /** Site-inspection classification (confidence + reason) */
+  classificationDecision?: ClassificationDecision;
 }
 
 const TLD_COUNTRY: Record<string, string> = {
@@ -143,7 +154,8 @@ export function analyzeDomain(domain: string, url?: string): DomainAnalysisResul
 export async function analyzeDomainLive(
   domain: string,
   url?: string,
-  fetchImpl: typeof fetch = fetch
+  fetchImpl: typeof fetch = fetch,
+  opts: { learning?: LearningPattern[] } = {}
 ): Promise<DomainAnalysisResult> {
   const base = analyzeDomain(domain, url);
   const origin = `https://${base.domain}`;
@@ -152,6 +164,8 @@ export async function analyzeDomainLive(
   let sitemapFound = false;
   let fetchStatusCode: number | undefined;
   let metricsSource: 'estimated' | 'live' = 'estimated';
+  let websiteSignals: WebsiteInspectionSignals | undefined;
+  let htmlRaw = '';
 
   try {
     const homeRes = await fetchImpl(url ?? origin, {
@@ -163,7 +177,8 @@ export async function analyzeDomainLive(
     fetchStatusCode = homeRes.status;
     if (homeRes.ok) {
       metricsSource = 'live';
-      const html = (await homeRes.text()).slice(0, 50_000).toLowerCase();
+      htmlRaw = await homeRes.text();
+      const html = htmlRaw.slice(0, 120_000).toLowerCase();
       meta.homepageFetched = true;
       meta.hasContactLink =
         html.includes('contact') || html.includes('mailto:') || html.includes('/about');
@@ -188,12 +203,11 @@ export async function analyzeDomainLive(
         base.detectedPages.guestPost = `${origin}/write-for-us`;
         base.detectedPages.submission = `${origin}/contribute`;
         base.detectedPages.resource = `${origin}/resources`;
-        // Prefer guest_post when live evidence of contribution path exists
         if (meta.hasGuestPostHint && base.primaryType === 'news') {
           base.primaryType = 'guest_post';
         }
       }
-      if (html.includes('directory') || html.includes('submit listing')) {
+      if (html.includes('directory') || html.includes('submit listing') || html.includes('add business')) {
         meta.directoryPathConfirmed = true;
         base.detectedPages.directory = `${origin}/submit`;
       }
@@ -201,7 +215,7 @@ export async function analyzeDomainLive(
         meta.forumPathConfirmed = true;
         base.detectedPages.forum = `${origin}/forum`;
       }
-      if (html.includes('question') || html.includes('answers')) {
+      if (html.includes('question') || html.includes('answers') || html.includes('ask a question')) {
         meta.qaPathConfirmed = true;
         base.detectedPages.qa = `${origin}/questions`;
       }
@@ -245,15 +259,49 @@ export async function analyzeDomainLive(
     }
   }
 
+  const fetchOk = Boolean(htmlRaw) && (fetchStatusCode == null || fetchStatusCode < 400);
+  websiteSignals = extractWebsiteSignals(htmlRaw || '<html></html>', {
+    robotsOk: robotsTxtStatus === 'found',
+    sitemapFound,
+    fetchOk,
+  });
+  meta.websiteSignals = {
+    ...websiteSignals,
+    rawSnippet: undefined,
+  };
+
+  const classificationDecision = classifyFromWebsiteInspection(websiteSignals, {
+    learning: opts.learning,
+    domain: base.domain,
+    fallbackType: base.primaryType,
+  });
+  base.primaryType = classificationDecision.backlinkType;
+  base.opportunityTypes = [
+    classificationDecision.backlinkType,
+    ...base.opportunityTypes.filter((t) => t !== classificationDecision.backlinkType),
+  ].slice(0, 4) as BacklinkTypeId[];
+  meta.classification = {
+    id: classificationDecision.classificationId,
+    displayName: classificationDecision.displayName,
+    confidence: classificationDecision.confidence,
+    reason: classificationDecision.reason,
+    evidence: classificationDecision.evidence,
+    workflowQueue: classificationDecision.workflowQueue,
+    assignedAgent: classificationDecision.assignedAgent,
+    alternatives: classificationDecision.alternatives,
+  };
+
   return {
     ...base,
     metricsSource,
     robotsTxtStatus,
     sitemapFound,
     fetchStatusCode,
+    websiteSignals,
+    classificationDecision,
     metadata: {
       ...meta,
-      analyzer: metricsSource === 'live' ? 'live_fetch_v1' : 'heuristic_v1',
+      analyzer: metricsSource === 'live' ? 'live_inspect_v2' : 'heuristic_v1',
       authorityNote: 'DR/traffic remain Estimated until a live SEO metrics provider is configured',
     },
   };
