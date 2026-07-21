@@ -1,13 +1,17 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { CheckCircle2, Loader2 } from 'lucide-react';
+import { CheckCircle2, ExternalLink, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useApi } from '@/hooks/use-api';
-import { LiveBrowserView } from '@/components/browser/live-browser-view';
 import { useInterventions } from '@/components/browser/needs-your-action-queue';
 import { AiLoadingState } from '@/components/workflow/ai-activity-card';
+import {
+  normalizeSiteUrl,
+  notifyInterventionResumed,
+  openRealWebsiteTab,
+} from '@/lib/intervention-window';
 
 type InterventionDetail = {
   jobId: string;
@@ -23,11 +27,14 @@ type InterventionDetail = {
   needsAction: boolean;
   completedByAi: string[];
   userOnly: string;
+  liveUrl?: string | null;
+  pageTitle?: string | null;
 };
 
 /**
- * Lightweight intervention window — no sidebar, nav, or workflow chrome.
- * Opens automatically when AI needs login / CAPTCHA / OTP / approval.
+ * Minimal OAuth-style helper — never embeds Playwright / Live Browser.
+ * Opens the real website in a normal browser tab; SEO OS only shows this banner
+ * and monitors completion via the existing intervention/check API.
  */
 export function InterventionWindowPage() {
   const { projectId = '' } = useParams();
@@ -36,6 +43,9 @@ export function InterventionWindowPage() {
   const { request } = useApi();
   const qc = useQueryClient();
   const interventions = useInterventions(projectId, 2_000);
+  const siteOpenedRef = useRef(false);
+  const [done, setDone] = useState(false);
+  const [closeFailed, setCloseFailed] = useState(false);
 
   useEffect(() => {
     if (jobId) return;
@@ -50,8 +60,49 @@ export function InterventionWindowPage() {
         `/v1/projects/${projectId}/browser/jobs/${jobId}/intervention`
       ),
     enabled: !!projectId && !!jobId,
-    refetchInterval: 2_000,
+    refetchInterval: done ? false : 2_000,
   });
+
+  const d = intervention.data?.data;
+
+  const siteUrl =
+    normalizeSiteUrl(d?.liveUrl ?? '') ||
+    normalizeSiteUrl(d?.website ?? '') ||
+    null;
+
+  // Open the real website once — user's normal browser, not an embedded view
+  useEffect(() => {
+    if (!jobId || !siteUrl || !d?.needsAction || siteOpenedRef.current) return;
+    siteOpenedRef.current = true;
+    openRealWebsiteTab(siteUrl, jobId);
+  }, [jobId, siteUrl, d?.needsAction]);
+
+  const finishSuccess = (message: string) => {
+    if (done) return;
+    setDone(true);
+    toast.success(message);
+    notifyInterventionResumed({
+      projectId,
+      jobId: jobId!,
+      website: d?.website,
+      message,
+    });
+    qc.invalidateQueries({ queryKey: ['bee-intervention', projectId, jobId] });
+    qc.invalidateQueries({ queryKey: ['bee-interventions', projectId] });
+    qc.invalidateQueries({ queryKey: ['bee-jobs', projectId] });
+    qc.invalidateQueries({ queryKey: ['bee-stats', projectId] });
+    window.setTimeout(() => {
+      try {
+        window.close();
+        // If still open after close attempt
+        window.setTimeout(() => {
+          if (!window.closed) setCloseFailed(true);
+        }, 400);
+      } catch {
+        setCloseFailed(true);
+      }
+    }, 1_400);
+  };
 
   const checkClear = useMutation({
     mutationFn: () =>
@@ -61,18 +112,7 @@ export function InterventionWindowPage() {
       ),
     onSuccess: (res) => {
       if (res.data.cleared) {
-        toast.success(res.data.message || '✓ Step complete — AI is continuing');
-        qc.invalidateQueries({ queryKey: ['bee-intervention', projectId, jobId] });
-        qc.invalidateQueries({ queryKey: ['bee-interventions', projectId] });
-        qc.invalidateQueries({ queryKey: ['bee-jobs', projectId] });
-        qc.invalidateQueries({ queryKey: ['bee-stats', projectId] });
-        window.setTimeout(() => {
-          try {
-            window.close();
-          } catch {
-            /* ignore */
-          }
-        }, 1_200);
+        finishSuccess(res.data.message || d?.successToast || 'AI resumed successfully');
       }
     },
     onError: () => {
@@ -87,7 +127,6 @@ export function InterventionWindowPage() {
         body: JSON.stringify({ jobId }),
       }),
     onSuccess: () => {
-      toast.success('Approved — AI is continuing');
       checkClear.mutate();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -95,32 +134,25 @@ export function InterventionWindowPage() {
 
   const checkMutate = checkClear.mutate;
   const checkPending = checkClear.isPending;
-  const d = intervention.data?.data;
 
+  // Monitor session continuously (auth / navigation / approval via existing check API)
   useEffect(() => {
-    if (!projectId || !jobId || !d?.needsAction) return;
+    if (!projectId || !jobId || !d?.needsAction || done) return;
     if (d.gate === 'human_approval') return;
     const t = window.setInterval(() => {
       if (!checkPending) checkMutate();
-    }, 3_500);
+    }, 3_000);
     return () => window.clearInterval(t);
-  }, [projectId, jobId, d?.needsAction, d?.gate, checkMutate, checkPending]);
+  }, [projectId, jobId, d?.needsAction, d?.gate, checkMutate, checkPending, done]);
 
-  // Auto-close when intervention list no longer includes this job
   useEffect(() => {
-    if (!jobId || !interventions.data) return;
+    if (!jobId || !interventions.data || done) return;
     const stillWaiting = (interventions.data.data.items ?? []).some((i) => i.jobId === jobId);
     if (!stillWaiting && d && !d.needsAction) {
-      toast.success(d.successToast || 'AI is continuing');
-      window.setTimeout(() => {
-        try {
-          window.close();
-        } catch {
-          /* ignore */
-        }
-      }, 900);
+      finishSuccess(d.successToast || 'AI resumed successfully');
     }
-  }, [interventions.data, jobId, d]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [interventions.data, jobId, d?.needsAction, done]);
 
   if (!jobId) {
     return (
@@ -133,67 +165,83 @@ export function InterventionWindowPage() {
   if (intervention.isLoading || !d) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-background">
-        <AiLoadingState message="AI is preparing the live browser session…" />
+        <AiLoadingState message="Opening the website in your browser…" />
       </div>
     );
   }
 
-  if (!d.needsAction) {
+  if (done || !d.needsAction) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-background">
-        <div className="max-w-md text-center space-y-3">
-          <CheckCircle2 className="h-10 w-10 text-emerald-600 mx-auto" />
-          <p className="text-lg font-semibold">{d.successToast || 'AI is continuing'}</p>
-          <p className="text-sm text-muted-foreground">This window will close automatically.</p>
+        <div className="max-w-sm w-full rounded-2xl border border-emerald-500/30 bg-emerald-500/5 px-5 py-6 text-center space-y-3">
+          <CheckCircle2 className="h-9 w-9 text-emerald-600 mx-auto" />
+          <p className="text-base font-semibold">
+            {d.successToast || 'AI resumed successfully'}
+          </p>
+          {closeFailed ? (
+            <p className="text-sm text-muted-foreground">
+              AI resumed successfully. You may close this tab.
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">Closing this helper…</p>
+          )}
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
-      <header className="border-b border-border/60 px-4 py-3 sm:px-6">
-        <div className="mx-auto max-w-5xl space-y-1">
-          <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
-            Secure step · AI paused only this website
+    <div className="min-h-screen flex items-center justify-center p-4 bg-muted/40">
+      <div className="w-full max-w-sm rounded-2xl border border-border/60 bg-card shadow-lg px-5 py-6 space-y-4">
+        <div className="space-y-1">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            SEO OS
           </p>
-          <h1 className="text-lg font-semibold tracking-tight truncate">{d.website}</h1>
-          <p className="text-sm text-amber-800 dark:text-amber-200 font-medium">{d.reason}</p>
+          <h1 className="text-lg font-semibold tracking-tight">AI paused this website.</h1>
+          <p className="text-sm text-muted-foreground">
+            Complete the login or approval. We&apos;ll continue automatically.
+          </p>
         </div>
-      </header>
 
-      <main className="flex-1 overflow-y-auto px-4 py-4 sm:px-6">
-        <div className="mx-auto max-w-5xl space-y-4">
-          <div className="rounded-xl border border-border/50 bg-muted/30 px-4 py-3 text-sm">
-            <p className="font-medium mb-1">Instructions</p>
-            <p className="text-muted-foreground">{d.instruction}</p>
-            <p className="text-xs text-muted-foreground mt-2">
-              You only finish: <span className="text-foreground font-medium">{d.userOnly}</span>
-              {d.completedByAi?.length ? (
-                <> · AI already finished navigation, forms, and uploads.</>
-              ) : null}
-            </p>
-          </div>
-
-          <LiveBrowserView projectId={projectId} jobId={jobId} website={d.website} />
-
-          <div className="flex flex-wrap items-center gap-2 pb-8">
-            {d.gate === 'human_approval' ? (
-              <Button onClick={() => approve.mutate()} disabled={approve.isPending}>
-                {approve.isPending ? 'Approving…' : 'Approve & continue'}
-              </Button>
-            ) : (
-              <Button variant="secondary" disabled>
-                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                Watching for completion…
-              </Button>
-            )}
-            <p className="text-xs text-muted-foreground">
-              When done, AI resumes and this window closes.
-            </p>
-          </div>
+        <div className="rounded-xl bg-muted/50 px-3 py-2.5 text-sm space-y-1">
+          <p>
+            <span className="text-muted-foreground">Website · </span>
+            <span className="font-medium">{d.website}</span>
+          </p>
+          <p>
+            <span className="text-muted-foreground">Reason · </span>
+            <span className="font-medium text-amber-800 dark:text-amber-200">{d.reason}</span>
+          </p>
         </div>
-      </main>
+
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          Use the real browser tab that just opened — interact normally. SEO OS does not embed
+          Playwright or capture your mouse and keyboard here.
+        </p>
+
+        <div className="flex flex-col gap-2">
+          {siteUrl ? (
+            <Button
+              variant="outline"
+              onClick={() => openRealWebsiteTab(siteUrl, jobId)}
+            >
+              <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
+              Open website again
+            </Button>
+          ) : null}
+
+          {d.gate === 'human_approval' ? (
+            <Button onClick={() => approve.mutate()} disabled={approve.isPending}>
+              {approve.isPending ? 'Approving…' : 'I approved — continue AI'}
+            </Button>
+          ) : (
+            <div className="inline-flex items-center justify-center gap-2 text-xs text-muted-foreground py-2">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Watching for completion…
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

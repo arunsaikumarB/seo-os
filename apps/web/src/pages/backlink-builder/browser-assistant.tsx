@@ -6,8 +6,8 @@ import { useInterventions } from '@/components/browser/needs-your-action-queue';
 import { PageTransition } from '@/components/demo/page-transition';
 
 /**
- * Legacy Browser Assistant route — redirects into the lightweight intervention window.
- * Kept so old links / nav entries still work without AppShell duplication.
+ * Legacy route — opens the OAuth-style helper (real browser tab for the site).
+ * Never embeds Playwright.
  */
 export function BrowserAssistantPage() {
   const { projectId = '' } = useParams();
@@ -23,10 +23,10 @@ export function BrowserAssistantPage() {
 
   return (
     <PageTransition className="max-w-lg mx-auto space-y-4 py-12 text-center">
-      <h1 className="text-xl font-semibold">Opening secure browser…</h1>
+      <h1 className="text-xl font-semibold">Opening your browser…</h1>
       <p className="text-sm text-muted-foreground">
-        Login, CAPTCHA, and verification open in a focused window — no sidebar or workflow chrome.
-        Allow pop-ups if the window does not appear.
+        Complete login or approval on the real website. SEO OS never embeds Playwright — a small
+        helper watches for completion and resumes AI.
       </p>
       <div className="flex flex-wrap justify-center gap-2">
         {first ? (

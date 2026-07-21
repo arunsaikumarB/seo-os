@@ -34,8 +34,8 @@ export function InterventionBanner({ projectId, className }: Props) {
           <p className="font-medium text-sm">AI needs your help.</p>
           <p className="text-sm text-muted-foreground">
             {count === 1
-              ? '1 website requires attention.'
-              : `${count} websites require attention.`}
+              ? '1 website requires attention in your browser.'
+              : `${count} websites require attention in your browser.`}
             {items[0] ? (
               <span className="text-foreground">
                 {' '}

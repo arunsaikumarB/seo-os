@@ -486,8 +486,8 @@ export function BrowserExecutionCenterPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Submit Backlinks</h1>
         <p className="text-muted-foreground">
-          AI submits backlinks automatically. When login or CAPTCHA is needed, a secure browser
-          window opens — only that website pauses.
+          AI submits backlinks automatically. When login or CAPTCHA is needed, your real browser
+          opens — only that website pauses.
         </p>
       </div>
 
