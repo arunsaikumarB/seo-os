@@ -137,7 +137,7 @@ export function OpportunitySelector({
       {!selectedId && (
         <p className="text-sm text-muted-foreground">
           No current opportunity — search and select an approved website below. Your choice stays
-          active across Image Studio, Content Studio, and other modules until you change it.
+          active across Image Studio, Generate Content, and other tools until you change it.
         </p>
       )}
 

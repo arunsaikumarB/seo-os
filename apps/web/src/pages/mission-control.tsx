@@ -314,7 +314,7 @@ export function MissionControlPage() {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base flex items-center gap-2">
-            <Activity className="h-4 w-4" /> Browser Execution
+            <Activity className="h-4 w-4" /> Submit Backlinks
           </CardTitle>
           <CardDescription>
             Running · Queued · Watching · Paused · Auto-resumed · Blocked · Worker health · ETA
@@ -466,7 +466,7 @@ export function MissionControlPage() {
                 .join(' · ') || 'unconfigured'}
             </p>
             <Button variant="outline" size="sm" asChild>
-              <Link to={`/projects/${projectId}/content/library`}>Content Studio · Images</Link>
+              <Link to={`/projects/${projectId}/content/library`}>Generate Content · Images</Link>
             </Button>
           </div>
         </CardContent>
@@ -488,7 +488,7 @@ export function MissionControlPage() {
 
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">Opportunity Classification</CardTitle>
+          <CardTitle className="text-base">AI Review</CardTitle>
           <CardDescription>
             Directories · Guest Posts · Articles · Images · Videos · Profiles · Forums · Q&A ·
             Unknown · Accuracy
@@ -537,7 +537,7 @@ export function MissionControlPage() {
           </div>
           <Button variant="outline" size="sm" asChild>
             <Link to={`/projects/${projectId}/backlink-builder/classification`}>
-              Classification dashboard
+              AI Review
             </Link>
           </Button>
         </CardContent>
@@ -615,7 +615,7 @@ export function MissionControlPage() {
             </div>
           </div>
           <Button variant="outline" size="sm" asChild>
-            <Link to={`/projects/${projectId}/content/library`}>Open Content Studio</Link>
+            <Link to={`/projects/${projectId}/content/library`}>Open Generate Content</Link>
           </Button>
         </CardContent>
       </Card>
@@ -779,7 +779,7 @@ export function MissionControlPage() {
           </Link>
         </Button>
         <Button variant="outline" size="sm" asChild>
-          <Link to={`/projects/${projectId}/content/library`}>Content Studio</Link>
+          <Link to={`/projects/${projectId}/content/library`}>Generate Content</Link>
         </Button>
         <Button variant="outline" size="sm" asChild>
           <Link to={`/projects/${projectId}/backlink-builder/tracking`}>Submission Center</Link>

@@ -1,17 +1,18 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Upload, ListChecks, Link2, FileBarChart } from 'lucide-react';
+import { LayoutDashboard, Upload, ListChecks, Link2, CheckCircle2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface MobileNavProps {
   projectId?: string;
 }
 
+/** Guided mobile bar — mirrors primary workflow, not Advanced modules */
 const workflowMobileItems = (projectId: string) => [
   { label: 'Home', href: `/projects/${projectId}/home`, icon: LayoutDashboard },
   { label: 'Import', href: `/projects/${projectId}/backlink-builder/import`, icon: Upload },
-  { label: 'Review', href: `/projects/${projectId}/campaigns/queue`, icon: ListChecks },
-  { label: 'Execute', href: `/projects/${projectId}/backlink-builder/execution`, icon: Link2 },
-  { label: 'Reports', href: `/projects/${projectId}/reports/library`, icon: FileBarChart },
+  { label: 'Approve', href: `/projects/${projectId}/campaigns/queue`, icon: ListChecks },
+  { label: 'Submit', href: `/projects/${projectId}/backlink-builder/execution`, icon: Link2 },
+  { label: 'Results', href: `/projects/${projectId}/backlink-builder/track-results`, icon: CheckCircle2 },
 ];
 
 export function MobileNav({ projectId }: MobileNavProps) {

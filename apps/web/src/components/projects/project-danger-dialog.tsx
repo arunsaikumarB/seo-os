@@ -31,7 +31,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   image_assets: 'Image Assets',
   video_assets: 'Video Assets',
   submission_queue: 'Submission Queue',
-  browser_executions: 'Browser Executions',
+  browser_executions: 'Submitted backlinks',
   reports: 'Reports',
   verification_history: 'Verification History',
   ai_learning: 'AI Learning',

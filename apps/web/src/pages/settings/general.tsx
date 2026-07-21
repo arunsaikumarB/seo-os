@@ -223,17 +223,24 @@ export function ProjectSettingsPage() {
                   disabled={isArchived}
                 />
               </div>
-              <Button
-                onClick={() => save.mutate()}
-                disabled={
-                  isArchived ||
-                  save.isPending ||
-                  name.trim().length < 2 ||
-                  domain.trim().length < 3
-                }
-              >
-                {save.isPending ? 'Saving…' : 'Save changes'}
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  onClick={() => save.mutate()}
+                  disabled={
+                    isArchived ||
+                    save.isPending ||
+                    name.trim().length < 2 ||
+                    domain.trim().length < 3
+                  }
+                >
+                  {save.isPending ? 'Saving…' : 'Save'}
+                </Button>
+                <Button variant="default" asChild disabled={isArchived}>
+                  <Link to={`/projects/${projectId}/backlink-builder/import`}>
+                    Continue <ArrowRight className="h-4 w-4 ml-1" />
+                  </Link>
+                </Button>
+              </div>
             </>
           )}
         </CardContent>
@@ -242,16 +249,16 @@ export function ProjectSettingsPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
-            <MonitorSmartphone className="h-4 w-4" /> Browser Runtime
+            <MonitorSmartphone className="h-4 w-4" /> Advanced · System
           </CardTitle>
           <CardDescription>
-            Playwright / Chromium health for Browser Execution. Reinstall, repair, and run diagnostics.
+            Optional browser health tools — not required for the guided workflow.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <Button asChild variant="outline" size="sm">
             <Link to={`/projects/${projectId}/settings/browser-runtime`}>
-              Open Browser Runtime <ArrowRight className="h-3.5 w-3.5 ml-1" />
+              Open system tools <ArrowRight className="h-3.5 w-3.5 ml-1" />
             </Link>
           </Button>
         </CardContent>

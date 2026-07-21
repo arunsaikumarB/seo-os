@@ -9,15 +9,7 @@ import { PageTransition, StaggerGrid, StaggerItem } from '@/components/demo/page
 import {
   Link2,
   Sparkles,
-  Search,
-  GitBranch,
-  ShieldCheck,
   ArrowRight,
-  Users,
-  Target,
-  Mail,
-  BarChart3,
-  Upload,
   Bot,
 } from 'lucide-react';
 import type { BacklinkSummary } from './types';
@@ -158,32 +150,19 @@ export function BacklinkBuilderWidget({ summary, projectId, compact }: BacklinkB
   );
 }
 
+/** Compact continue strip — module chips moved to Advanced sidebar */
 export function BacklinkBuilderNav() {
   const { projectId = '' } = useParams();
-  const base = `/projects/${projectId}`;
-  const links = [
-    { href: `${base}/backlink-builder`, label: 'Dashboard', icon: Link2 },
-    { href: `${base}/backlink-builder/import`, label: 'Import', icon: Upload },
-    { href: `${base}/backlink-builder/explorer`, label: 'Explorer', icon: Search },
-    { href: `${base}/backlink-builder/automation`, label: 'AI Analysis', icon: Sparkles },
-    { href: `${base}/campaigns/queue`, label: 'Queue', icon: Target },
-    { href: `${base}/backlink-builder/pipeline`, label: 'Pipeline', icon: GitBranch },
-    { href: `${base}/campaigns`, label: 'Campaigns', icon: Target },
-    { href: `${base}/outreach/inbox`, label: 'Outreach', icon: Mail },
-    { href: `${base}/relationships`, label: 'Relationships', icon: Users },
-    { href: `${base}/backlink-builder/pending`, label: 'Verification', icon: ShieldCheck },
-    { href: `${base}/reports/library`, label: 'Reports', icon: BarChart3 },
-  ];
-
   return (
     <div className="flex flex-wrap gap-2">
-      {links.map((l) => (
-        <Button key={l.href} variant="outline" size="sm" asChild>
-          <Link to={l.href}>
-            <l.icon className="h-3 w-3 mr-1" /> {l.label}
-          </Link>
-        </Button>
-      ))}
+      <Button variant="outline" size="sm" asChild>
+        <Link to={`/projects/${projectId}/home`}>Dashboard</Link>
+      </Button>
+      <Button size="sm" asChild>
+        <Link to={`/projects/${projectId}/backlink-builder/import`}>
+          Continue <ArrowRight className="h-3 w-3 ml-1" />
+        </Link>
+      </Button>
     </div>
   );
 }
@@ -191,19 +170,18 @@ export function BacklinkBuilderNav() {
 export function BacklinkBuilderHero({ title, subtitle }: { title: string; subtitle: string }) {
   return (
     <PageTransition className="space-y-4">
-      <div className="relative overflow-hidden rounded-xl border bg-gradient-to-r from-primary/10 via-background to-violet-500/5 p-6">
+      <div className="relative overflow-hidden rounded-xl border bg-gradient-to-r from-primary/10 via-background to-background p-6">
         <div className="relative flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <div className="flex items-center gap-2 mb-1">
               <Sparkles className="h-5 w-5 text-primary" />
-              <Badge className="text-[10px]">Epic 1 · Backlink Builder v1.0</Badge>
+              <Badge className="text-[10px]">Backlink workflow</Badge>
             </div>
             <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
             <p className="text-muted-foreground max-w-xl">{subtitle}</p>
           </div>
         </div>
       </div>
-      <BacklinkBuilderNav />
     </PageTransition>
   );
 }

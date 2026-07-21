@@ -88,7 +88,7 @@ export const projectNav: NavItem[] = [
     featureFlag: 'backlink_builder',
   },
   {
-    label: 'Opportunity Queue',
+    label: 'Approve Opportunities',
     href: 'campaigns/queue',
     icon: ListChecks,
     featureFlag: 'backlink_builder',
@@ -99,7 +99,7 @@ export const projectNav: NavItem[] = [
     icon: Target,
     featureFlag: 'backlink_builder',
   },
-  { label: 'Content Studio', href: 'content/library', icon: FileText },
+  { label: 'Generate Content', href: 'content/library', icon: FileText },
   { label: 'Providers', href: 'providers', icon: Plug, featureFlag: 'integrations' },
   { label: 'Diagnostics', href: 'diagnostics', icon: HeartPulse },
   {
@@ -110,8 +110,8 @@ export const projectNav: NavItem[] = [
   },
   { label: 'Relationship Hub', href: 'relationships', icon: Handshake },
   {
-    label: 'Verification',
-    href: 'backlink-builder/pending',
+    label: 'Track Results',
+    href: 'backlink-builder/track-results',
     icon: CheckCircle2,
     featureFlag: 'backlink_builder',
   },
@@ -128,6 +128,6 @@ export const mobileNavItems = (projectId: string): NavItem[] => [
   { label: 'Home', href: `/projects/${projectId}/home`, icon: LayoutDashboard },
   { label: 'Import', href: `/projects/${projectId}/backlink-builder/import`, icon: Link2 },
   { label: 'Projects', href: '/projects', icon: Building2 },
-  { label: 'Review', href: `/projects/${projectId}/campaigns/queue`, icon: ListChecks },
+  { label: 'Approve', href: `/projects/${projectId}/campaigns/queue`, icon: ListChecks },
   { label: 'Settings', href: `/projects/${projectId}/settings/general`, icon: Settings },
 ];
