@@ -161,6 +161,16 @@ export function OpportunityQueuePage() {
 
   const items = queue.data?.data ?? [];
   const isPending = filter === 'pending_review';
+  const allSelected = items.length > 0 && items.every((o) => selected.has(o.id));
+  const someSelected = items.some((o) => selected.has(o.id));
+
+  const toggleAll = () => {
+    if (allSelected) {
+      setSelected(new Set());
+      return;
+    }
+    setSelected(new Set(items.map((o) => o.id)));
+  };
 
   return (
     <div className="space-y-6">
@@ -231,7 +241,20 @@ export function OpportunityQueuePage() {
         <table className="w-full text-sm">
           <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
             <tr>
-              {isPending ? <th className="px-3 py-2.5 w-10" /> : null}
+              {isPending ? (
+                <th className="px-3 py-2.5 w-10">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all websites"
+                    checked={allSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = someSelected && !allSelected;
+                    }}
+                    onChange={toggleAll}
+                    disabled={items.length === 0 || bulkReview.isPending}
+                  />
+                </th>
+              ) : null}
               <th className="px-3 py-2.5 font-medium">Website</th>
               <th className="px-3 py-2.5 font-medium">Opportunity Type</th>
               <th className="px-3 py-2.5 font-medium">Recommendation</th>
