@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -15,7 +15,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useApi } from '@/hooks/use-api';
-import { CurrentOpportunityBanner } from '@/components/opportunities/current-opportunity-banner';
 import { useCurrentOpportunity } from '@/hooks/use-current-opportunity';
 import type { SelectedOpportunity } from '@/components/opportunities/opportunity-selector';
 import {
@@ -24,10 +23,9 @@ import {
 } from '@/components/browser/bee-ops-panel';
 import { formatEta, pipelineStagesForJob } from '@/lib/bee-execution-ui';
 import {
-  ActionRequiredCard,
-  NeedsYourActionQueue,
   useInterventions,
 } from '@/components/browser/needs-your-action-queue';
+import { openInterventionWindow } from '@/lib/intervention-window';
 import { AiActivityCard, AiLoadingState } from '@/components/workflow/ai-activity-card';
 
 type BeeJob = {
@@ -488,14 +486,10 @@ export function BrowserExecutionCenterPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Submit Backlinks</h1>
         <p className="text-muted-foreground">
-          AI is submitting backlinks. If login or CAPTCHA appears, open the browser — AI resumes
-          automatically.
+          AI submits backlinks automatically. When login or CAPTCHA is needed, a secure browser
+          window opens — only that website pauses.
         </p>
       </div>
-
-      <NeedsYourActionQueue projectId={projectId} />
-
-      <CurrentOpportunityBanner projectId={projectId} />
 
       {showAdvanced ? (
         <div className="flex flex-wrap gap-2">
@@ -515,17 +509,30 @@ export function BrowserExecutionCenterPage() {
 
       {tab === 'dashboard' && (
         <>
-          {actionItems.length > 0 ? (
-            <div className="grid gap-3 lg:grid-cols-2">
-              {actionItems.slice(0, 4).map((item) => (
-                <ActionRequiredCard key={item.jobId} projectId={projectId} item={item} />
-              ))}
-            </div>
-          ) : null}
-
           {stats.isLoading ? (
             <AiLoadingState message="AI is preparing submissions…" />
-          ) : totalJobs > 0 || (s?.running ?? 0) > 0 || (s?.queued ?? 0) > 0 ? (
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              {(
+                [
+                  ['Completed', completedJobs],
+                  ['Running', s?.running ?? 0],
+                  ['Waiting For You', actionItems.length],
+                  ['Remaining', remainingJobs],
+                  ['ETA', s?.etaSeconds ? formatEta(s.etaSeconds) : '—'],
+                ] as const
+              ).map(([label, value]) => (
+                <Card key={label} className="rounded-2xl border-border/40 shadow-sm">
+                  <CardContent className="pt-4">
+                    <p className="text-xs text-muted-foreground">{label}</p>
+                    <p className="text-xl font-semibold tabular-nums mt-1">{value}</p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          {totalJobs > 0 || (s?.running ?? 0) > 0 || (s?.queued ?? 0) > 0 ? (
             <AiActivityCard
               title="AI is submitting backlinks"
               percent={progressPercent}
@@ -540,12 +547,6 @@ export function BrowserExecutionCenterPage() {
                   : 'Finishing up'
               }
               eta={s?.etaSeconds ? formatEta(s.etaSeconds) : null}
-              items={[
-                { label: 'Completed', state: completedJobs > 0 ? 'done' : 'queued' },
-                { label: 'Waiting', state: actionItems.length > 0 ? 'active' : 'queued' },
-                { label: 'Uploading', state: (s?.running ?? 0) > 0 ? 'active' : 'queued' },
-                { label: 'Remaining', state: remainingJobs > 0 ? 'active' : 'done' },
-              ]}
             />
           ) : (
             <Card className="rounded-2xl border-border/40">
@@ -555,20 +556,6 @@ export function BrowserExecutionCenterPage() {
                   Select approved websites below. AI fills forms and uploads assets for you.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="grid gap-3 sm:grid-cols-3 text-sm">
-                {(
-                  [
-                    ['Ready', selectableOpps.length],
-                    ['Needs action', actionItems.length],
-                    ['Submitted', s?.submitted ?? s?.completed ?? 0],
-                  ] as const
-                ).map(([label, value]) => (
-                  <div key={label}>
-                    <p className="text-xs text-muted-foreground">{label}</p>
-                    <p className="text-xl font-semibold tabular-nums">{value}</p>
-                  </div>
-                ))}
-              </CardContent>
             </Card>
           )}
 
@@ -658,14 +645,18 @@ export function BrowserExecutionCenterPage() {
                           />
                         </th>
                         <th className="px-3 py-2 font-medium">Website</th>
-                        <th className="px-3 py-2 font-medium">Type</th>
-                        <th className="px-3 py-2 font-medium">Status</th>
+                        <th className="px-3 py-2 font-medium">Current Status</th>
                         <th className="px-3 py-2 font-medium text-right">Next Action</th>
                       </tr>
                     </thead>
                     <tbody>
                       {oppList.map((opp) => {
                         const checked = selectedOppIds.has(opp.id);
+                        const waiting = actionItems.find(
+                          (a) =>
+                            a.website === opp.website ||
+                            (opp.domain && a.website.includes(opp.domain))
+                        );
                         return (
                           <tr key={opp.id} className="border-t">
                             <td className="px-3 py-2">
@@ -679,31 +670,38 @@ export function BrowserExecutionCenterPage() {
                             </td>
                             <td className="px-3 py-2">
                               <p className="font-medium">{opp.website}</p>
-                              {opp.domain && opp.domain !== opp.website && (
-                                <p className="text-xs text-muted-foreground">{opp.domain}</p>
-                              )}
-                            </td>
-                            <td className="px-3 py-2 capitalize">
-                              {String(opp.opportunity_type).replace(/_/g, ' ')}
                             </td>
                             <td className="px-3 py-2">
                               <Badge
                                 className={`text-[10px] ${statusBadge(opp.readiness)}`}
                               >
-                                {READINESS_LABEL[opp.readiness]}
+                                {waiting
+                                  ? 'Waiting For You'
+                                  : READINESS_LABEL[opp.readiness]}
                               </Badge>
                             </td>
                             <td className="px-3 py-2 text-right">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={
-                                  !runtimeHealthy || !opp.selectable || startExecutions.isPending
-                                }
-                                onClick={() => startExecutions.mutate([opp.id])}
-                              >
-                                <Play className="h-3 w-3 mr-1" /> Submit
-                              </Button>
+                              {waiting ? (
+                                <Button
+                                  size="sm"
+                                  onClick={() =>
+                                    openInterventionWindow(projectId, waiting.jobId)
+                                  }
+                                >
+                                  Open Browser
+                                </Button>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={
+                                    !runtimeHealthy || !opp.selectable || startExecutions.isPending
+                                  }
+                                  onClick={() => startExecutions.mutate([opp.id])}
+                                >
+                                  <Play className="h-3 w-3 mr-1" /> Submit
+                                </Button>
+                              )}
                             </td>
                           </tr>
                         );
@@ -834,12 +832,12 @@ export function BrowserExecutionCenterPage() {
                       <div className="flex items-center gap-2">
                         <Badge className={`text-[10px] ${statusBadge(j.status)}`}>{label}</Badge>
                         {label === 'Waiting for User' ? (
-                          <Button size="sm" variant="default" asChild>
-                            <Link
-                              to={`/projects/${projectId}/backlink-builder/browser-assistant?jobId=${j.id}`}
-                            >
-                              Continue Submission
-                            </Link>
+                          <Button
+                            size="sm"
+                            variant="default"
+                            onClick={() => openInterventionWindow(projectId, j.id)}
+                          >
+                            Open Browser
                           </Button>
                         ) : null}
                       </div>

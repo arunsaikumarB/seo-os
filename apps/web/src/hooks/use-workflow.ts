@@ -121,21 +121,17 @@ export function useWorkflow(projectId: string) {
     ? Math.round(bee.data?.progressPercent ?? 0)
     : Math.round((completedCount / Math.max(WORKFLOW_STEPS.length, 1)) * 100);
 
-  const continueHref = needsHumanAction && firstAction
-    ? `/projects/${projectId}/backlink-builder/browser-assistant?jobId=${firstAction.jobId}`
-    : jobsOpen
-      ? `/projects/${projectId}/backlink-builder/execution`
-      : allComplete
-        ? `/projects/${projectId}/reports/library`
-        : getStepHref(nextUnlockedStep, projectId);
+  const continueHref = jobsOpen
+    ? `/projects/${projectId}/backlink-builder/execution`
+    : allComplete
+      ? `/projects/${projectId}/reports/library`
+      : getStepHref(nextUnlockedStep, projectId);
 
-  const continueLabel = needsHumanAction
-    ? 'Open Browser'
-    : jobsOpen
-      ? 'View progress'
-      : allComplete
-        ? 'Open Reports'
-        : 'Continue';
+  const continueLabel = jobsOpen
+    ? 'View progress'
+    : allComplete
+      ? 'Open Reports'
+      : 'Continue';
 
   const aiStatusLine = needsHumanAction && firstAction
     ? `${firstAction.reason} — ${firstAction.website}`

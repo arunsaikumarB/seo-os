@@ -13,6 +13,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatEta } from '@/lib/bee-execution-ui';
+import { openInterventionWindow } from '@/lib/intervention-window';
 
 export function ProjectHomePage() {
   const { projectId = '' } = useParams();
@@ -175,12 +176,23 @@ export function ProjectHomePage() {
             <div className="pt-2 border-t border-border/40 space-y-2">
               <p className="text-xs uppercase tracking-wider text-muted-foreground">Your next step</p>
               <p className="font-medium">{nextLine}</p>
-              <Button asChild size="lg" className="mt-1">
-                <Link to={continueHref}>
-                  {continueLabel}
+              {actionItems[0] ? (
+                <Button
+                  size="lg"
+                  className="mt-1"
+                  onClick={() => openInterventionWindow(projectId, actionItems[0]!.jobId)}
+                >
+                  Open Browser
                   <ArrowRight className="ml-2 h-4 w-4" />
-                </Link>
-              </Button>
+                </Button>
+              ) : (
+                <Button asChild size="lg" className="mt-1">
+                  <Link to={continueHref}>
+                    {continueLabel}
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Link>
+                </Button>
+              )}
             </div>
           </div>
         </div>

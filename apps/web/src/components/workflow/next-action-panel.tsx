@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ArrowRight, Clock, Sparkles, AlertTriangle } from 'lucide-react';
+import { ArrowRight, Clock, Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -13,7 +13,8 @@ interface NextActionPanelProps {
 }
 
 /**
- * Single Next Action card — Continue always uses Workflow State Manager targets.
+ * Single Next Action card. Human interventions are handled by InterventionBanner
+ * + auto-opened browser windows — not duplicated here.
  */
 export function NextActionPanel({ projectId, title = 'Next Action', className }: NextActionPanelProps) {
   const {
@@ -24,44 +25,12 @@ export function NextActionPanel({ projectId, title = 'Next Action', className }:
     allComplete,
     jobsOpen,
     needsHumanAction,
-    firstAction,
     bee,
     etaLabel,
   } = useWorkflow(projectId);
 
-  if (needsHumanAction && firstAction) {
-    return (
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        className={className}
-      >
-        <Card className="border-amber-500/40 bg-amber-500/5">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-amber-600" />
-              {firstAction.reason}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            <div>
-              <p className="text-xs text-muted-foreground">Website</p>
-              <p className="font-medium">{firstAction.website}</p>
-            </div>
-            <p className="text-muted-foreground">
-              AI paused only this website. Everything else continues.
-            </p>
-            <Button asChild size="sm">
-              <Link to={continueHref}>
-                Open Browser
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
-            </Button>
-          </CardContent>
-        </Card>
-      </motion.div>
-    );
-  }
+  // Banner + auto window own the human-action state
+  if (needsHumanAction) return null;
 
   if (jobsOpen && bee) {
     return (

@@ -129,7 +129,7 @@ export const workflowNavSections: WorkflowNavSection[] = [
         featureFlag: 'v11_media_studios',
       },
       {
-        label: 'Browser Assistant',
+        label: 'Intervention Window',
         href: 'backlink-builder/browser-assistant',
         icon: Globe,
         featureFlag: 'v11_browser_assistant',

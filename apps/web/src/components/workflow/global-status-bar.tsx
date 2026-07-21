@@ -1,8 +1,6 @@
-import { useEffect, useRef } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { toast } from 'sonner';
-import { AlertTriangle, Bell, Loader2 } from 'lucide-react';
+import { Bell, Loader2 } from 'lucide-react';
 import { useApi } from '@/hooks/use-api';
 import { useAppStore } from '@/stores/app-store';
 import { useWorkflow } from '@/hooks/use-workflow';
@@ -16,15 +14,13 @@ type Props = {
   className?: string;
 };
 
-/** Always-visible AI status — ChatGPT-style “what AI is doing” */
+/** Always-visible AI status — intervention CTAs live only in InterventionBanner */
 export function GlobalStatusBar({ projectId, className }: Props) {
-  const navigate = useNavigate();
   const { request, fetchProjects } = useApi();
   const currentOrgId = useAppStore((s) => s.currentOrgId);
   const { completedCount, totalSteps, currentStep } = useWorkflow(projectId);
   const bee = useBeeExecutionProgress(projectId, 2_000);
   const interventions = useInterventions(projectId, 3_000);
-  const notifiedRef = useRef<Set<string>>(new Set());
 
   const project = useQuery({
     queryKey: ['projects', currentOrgId],
@@ -52,33 +48,11 @@ export function GlobalStatusBar({ projectId, className }: Props) {
     ? 0
     : Number((notifications.data?.data as { unread?: number })?.unread ?? 0);
 
-  useEffect(() => {
-    for (const item of actionItems) {
-      if (notifiedRef.current.has(item.jobId)) continue;
-      notifiedRef.current.add(item.jobId);
-      toast.message(item.title, {
-        description: `${item.website} — ${item.reason}`,
-        action: {
-          label: 'Open Browser',
-          onClick: () =>
-            navigate(
-              `/projects/${projectId}/backlink-builder/browser-assistant?jobId=${item.jobId}`
-            ),
-        },
-        duration: 10_000,
-      });
-    }
-  }, [actionItems, navigate, projectId]);
-
   const firstAction = actionItems[0];
   const aiTask = !p
     ? currentStep.title
     : needsAction && firstAction
-      ? firstAction.reason.includes('CAPTCHA')
-        ? 'Waiting CAPTCHA'
-        : firstAction.reason.includes('Login')
-          ? 'Waiting login'
-          : firstAction.reason
+      ? 'waiting for you'
       : p.running > 0
         ? 'Submitting backlinks'
         : p.queued > 0
@@ -118,20 +92,14 @@ export function GlobalStatusBar({ projectId, className }: Props) {
           : ''}
       </span>
       <span className="inline-flex items-center gap-1.5 text-muted-foreground min-w-0">
-        {showSpin && !needsAction ? (
-          <Loader2 className="h-3 w-3 animate-spin text-primary shrink-0" />
-        ) : null}
-        {needsAction ? <AlertTriangle className="h-3 w-3 text-amber-600 shrink-0" /> : null}
-        <span className="truncate">AI is {aiTask.toLowerCase().startsWith('waiting') || aiTask === 'Ready' ? aiTask.toLowerCase() : `doing: ${aiTask}`}</span>
+        {showSpin ? <Loader2 className="h-3 w-3 animate-spin text-primary shrink-0" /> : null}
+        <span className="truncate">
+          AI is{' '}
+          {aiTask.toLowerCase().startsWith('waiting') || aiTask === 'Ready'
+            ? aiTask.toLowerCase()
+            : `doing: ${aiTask}`}
+        </span>
       </span>
-      {needsAction && firstAction ? (
-        <Link
-          to={`/projects/${projectId}/backlink-builder/browser-assistant?jobId=${firstAction.jobId}`}
-          className="inline-flex items-center gap-1 rounded-md bg-amber-500/15 px-2 py-0.5 font-medium text-amber-800 hover:bg-amber-500/25"
-        >
-          Needs your action · Open Browser
-        </Link>
-      ) : null}
       <Link
         to={`/org/settings/notifications`}
         className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground ml-auto"

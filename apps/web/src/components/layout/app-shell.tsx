@@ -13,15 +13,17 @@ import { NextActionPanel } from '@/components/workflow/next-action-panel';
 import { WorkflowProgressHeader } from '@/components/workflow/workflow-progress-header';
 import { WorkflowCelebration } from '@/components/workflow/workflow-celebration';
 import { GlobalStatusBar } from '@/components/workflow/global-status-bar';
+import { InterventionBanner } from '@/components/browser/intervention-banner';
 import { OfflineBanner } from '@/components/beta/offline-banner';
 import { BetaAnnouncementBar } from '@/components/beta/beta-announcement-bar';
 import { useAppStore } from '@/stores/app-store';
+import { useAutoInterventionWindows } from '@/hooks/use-auto-intervention-windows';
 
 interface AppShellProps {
   projectId: string;
 }
 
-/** One progress header · one next action · page content. No duplicate CTAs. */
+/** One progress header · one next action · one intervention banner. */
 export function AppShell({ projectId }: AppShellProps) {
   const breadcrumbs = useBreadcrumbs(projectId);
   const location = useLocation();
@@ -29,6 +31,8 @@ export function AppShell({ projectId }: AppShellProps) {
   const isHome =
     location.pathname.endsWith('/home') ||
     location.pathname.replace(/\/$/, '') === `/projects/${projectId}`;
+
+  useAutoInterventionWindows(projectId);
 
   useEffect(() => {
     setCurrentProjectId(projectId);
@@ -59,6 +63,7 @@ export function AppShell({ projectId }: AppShellProps) {
         </div>
         <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto p-4 pb-20 md:p-6 md:pb-6">
           <WorkflowProgressHeader projectId={projectId} />
+          <InterventionBanner projectId={projectId} />
           <WorkflowCelebration projectId={projectId} />
           {!isHome ? (
             <div className="mb-6 max-w-xl">

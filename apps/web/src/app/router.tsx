@@ -157,6 +157,11 @@ const BrowserAssistantPage = lazy(() =>
     default: m.BrowserAssistantPage,
   }))
 );
+const InterventionWindowPage = lazy(() =>
+  import('@/pages/backlink-builder/intervention-window').then((m) => ({
+    default: m.InterventionWindowPage,
+  }))
+);
 const BrowserExecutionCenterPage = lazy(() =>
   import('@/pages/backlink-builder/execution-center').then((m) => ({
     default: m.BrowserExecutionCenterPage,
@@ -368,6 +373,15 @@ export function AppRouter() {
                     <Route path="audit-log" element={lazyEl(OrgAuditLogPage)} />
                     <Route path="diagnostics" element={lazyEl(DiagnosticsPage)} />
                   </Route>
+
+                  <Route
+                    path="/projects/:projectId/intervene"
+                    element={
+                      <ProtectedRoute>
+                        {lazyEl(InterventionWindowPage)}
+                      </ProtectedRoute>
+                    }
+                  />
 
                   <Route
                     path="/projects/:projectId"
