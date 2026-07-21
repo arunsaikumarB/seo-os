@@ -7,7 +7,9 @@ export type InterventionItem = {
   jobId: string;
   website: string;
   pausedUrl?: string | null;
+  currentUrl?: string | null;
   currentStep?: string;
+  detectedStep?: string;
   reason: string;
   title: string;
   instruction: string;
@@ -16,6 +18,7 @@ export type InterventionItem = {
   displayStatus: string;
   gate: string;
   elapsedMs: number;
+  timeWaitingMs?: number;
   autoResumePending?: boolean;
 };
 

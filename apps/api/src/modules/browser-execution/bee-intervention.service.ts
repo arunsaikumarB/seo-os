@@ -233,6 +233,19 @@ async function uploadLiveScreenshot(
   return { url: data?.signedUrl ?? null, path };
 }
 
+const HUMAN_QUEUE_GATES = new Set([
+  'login',
+  'signup',
+  'captcha',
+  'recaptcha',
+  'cloudflare',
+  'otp',
+  'mfa',
+  'email_verify',
+  'phone_verify',
+  'human_approval',
+]);
+
 export async function listInterventions(workspaceId: string) {
   const jobs = await listJobs(workspaceId);
   const items = [];
@@ -241,6 +254,11 @@ export async function listInterventions(workspaceId: string) {
     if (!isInterventionStatus(status)) continue;
     const jobRec = j as Record<string, unknown>;
     const gate = resolveInterventionGate(jobRec);
+    // Dedicated Human Intervention Queue — only protected human gates
+    if (!HUMAN_QUEUE_GATES.has(gate) && gate !== 'unknown' && gate !== 'category' && gate !== 'manual_input') {
+      continue;
+    }
+    // Keep category/manual/unknown in the queue too (still need a human)
     const copy = humanInterventionCopy(gate, jobRec);
     const started = j.watch_started_at || j.started_at || j.created_at;
     const elapsedMs = started ? Date.now() - new Date(String(started)).getTime() : 0;
@@ -248,15 +266,18 @@ export async function listInterventions(workspaceId: string) {
     const steps = (j.steps as Array<{ action?: string }> | undefined) ?? [];
     const idx = Number(j.current_step_index ?? 0);
     const stepAction = m.pauseContext?.stepAction || steps[idx]?.action || null;
+    const pausedUrl = pausedUrlFromJob(jobRec);
     items.push({
       jobId: String(j.id),
       website: String(j.site_domain ?? 'Website'),
-      pausedUrl: pausedUrlFromJob(jobRec),
+      pausedUrl,
+      currentUrl: pausedUrl,
       currentStep: m.currentStepLabel || workflowStepLabel(stepAction, idx),
+      detectedStep: m.currentStepLabel || workflowStepLabel(stepAction, idx),
       opportunityId: j.opportunity_id ? String(j.opportunity_id) : null,
       sessionId: j.session_id ? String(j.session_id) : null,
       status,
-      displayStatus: 'Waiting for User',
+      displayStatus: 'Needs You',
       gate,
       reason: copy.reason,
       title: copy.title,
@@ -266,6 +287,7 @@ export async function listInterventions(workspaceId: string) {
       pauseReason: j.pause_reason ? String(j.pause_reason) : null,
       currentStepIndex: idx,
       elapsedMs,
+      timeWaitingMs: elapsedMs,
       createdAt: String(j.created_at),
       autoResumePending: status === 'ready_to_continue',
     });

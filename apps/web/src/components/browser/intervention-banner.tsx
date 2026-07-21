@@ -10,8 +10,8 @@ type Props = {
 };
 
 /**
- * Single compact intervention banner — replaces Needs Action queue,
- * Action Required cards, and duplicate warnings across Step 6.
+ * Compact banner — optional human tasks live in Human Intervention Queue.
+ * Does not interrupt automatic submissions.
  */
 export function InterventionBanner({ projectId, className }: Props) {
   const q = useInterventions(projectId, 2_500);
@@ -23,7 +23,7 @@ export function InterventionBanner({ projectId, className }: Props) {
   return (
     <div
       className={cn(
-        'mb-6 flex flex-col gap-3 rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between',
+        'mb-6 flex flex-col gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between',
         className
       )}
       role="status"
@@ -31,23 +31,17 @@ export function InterventionBanner({ projectId, className }: Props) {
       <div className="flex items-start gap-2 min-w-0">
         <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
         <div className="min-w-0">
-          <p className="font-medium text-sm">AI needs your help.</p>
+          <p className="font-medium text-sm">Human Intervention Queue</p>
           <p className="text-sm text-muted-foreground">
             {count === 1
-              ? '1 website requires attention in your browser.'
-              : `${count} websites require attention in your browser.`}
-            {items[0] ? (
-              <span className="text-foreground">
-                {' '}
-                · {items[0].website}
-                {items[0].currentStep ? ` · ${items[0].currentStep}` : ''} ({items[0].reason})
-              </span>
-            ) : null}
+              ? '1 optional website needs you — AI submissions continue.'
+              : `${count} optional websites need you — AI submissions continue.`}
           </p>
         </div>
       </div>
       <Button
         size="sm"
+        variant="outline"
         className="shrink-0"
         onClick={() => {
           if (items.length === 1) openInterventionWindow(projectId, items[0]!.jobId);
@@ -57,7 +51,7 @@ export function InterventionBanner({ projectId, className }: Props) {
           );
         }}
       >
-        Open Browser
+        Complete Now
       </Button>
     </div>
   );

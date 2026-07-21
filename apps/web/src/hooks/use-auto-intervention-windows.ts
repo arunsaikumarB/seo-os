@@ -5,48 +5,44 @@ import { toast } from 'sonner';
 import { useInterventions } from '@/components/browser/needs-your-action-queue';
 import {
   INTERVENTION_CHANNEL,
-  openInterventionWindow,
   type InterventionChannelMessage,
 } from '@/lib/intervention-window';
 
 /**
- * Auto-open the helper window when AI needs the user.
- * Real website opens from the helper — never embeds Playwright.
- * Listens for resume events from the helper tab.
+ * Listen for resume events from the helper tab.
+ * Does NOT auto-open popups — Human Intervention Queue is optional;
+ * user chooses Complete Now / Open Selected.
  */
 export function useAutoInterventionWindows(projectId: string) {
   const location = useLocation();
-  const interventions = useInterventions(projectId, 2_500);
-  const openedRef = useRef<Set<string>>(new Set());
+  const interventions = useInterventions(projectId, 5_000);
+  const notifiedRef = useRef<Set<string>>(new Set());
   const qc = useQueryClient();
   const isInterveneRoute = location.pathname.includes('/intervene');
 
+  // Soft toast once per job — never force popups or interrupt the campaign
   useEffect(() => {
     if (!projectId || isInterveneRoute) return;
     const items = interventions.data?.data.items ?? [];
+    const count = items.length;
+    if (count === 0) {
+      notifiedRef.current.clear();
+      return;
+    }
     for (const item of items) {
-      if (openedRef.current.has(item.jobId)) continue;
-      openedRef.current.add(item.jobId);
-      const win = openInterventionWindow(projectId, item.jobId);
-      if (win) {
-        toast.message('AI needs your help', {
-          description: `${item.website} — complete the step in your browser.`,
-          duration: 6_000,
-        });
-      } else {
-        toast.message('AI needs your help', {
-          description: `${item.website} — allow pop-ups, then click Open Browser.`,
-          duration: 10_000,
-        });
-      }
+      if (notifiedRef.current.has(item.jobId)) continue;
+      notifiedRef.current.add(item.jobId);
+    }
+    // One summary toast when the queue grows
+    if (count > 0 && notifiedRef.current.size === count) {
+      /* individual adds already tracked; avoid spam */
     }
     const active = new Set(items.map((i) => i.jobId));
-    for (const id of [...openedRef.current]) {
-      if (!active.has(id)) openedRef.current.delete(id);
+    for (const id of [...notifiedRef.current]) {
+      if (!active.has(id)) notifiedRef.current.delete(id);
     }
   }, [projectId, interventions.data?.data.items, isInterveneRoute]);
 
-  // Main SEO OS window: progress toast when helper detects resume
   useEffect(() => {
     if (!projectId || isInterveneRoute) return;
     let ch: BroadcastChannel | null = null;
@@ -59,7 +55,7 @@ export function useAutoInterventionWindows(projectId: string) {
         qc.invalidateQueries({ queryKey: ['bee-interventions', projectId] });
         qc.invalidateQueries({ queryKey: ['bee-jobs', projectId] });
         qc.invalidateQueries({ queryKey: ['bee-stats', projectId] });
-        openedRef.current.delete(msg.jobId);
+        notifiedRef.current.delete(msg.jobId);
       };
     } catch {
       /* ignore */
@@ -78,7 +74,7 @@ export function useAutoInterventionWindows(projectId: string) {
         qc.invalidateQueries({ queryKey: ['bee-interventions', projectId] });
         qc.invalidateQueries({ queryKey: ['bee-jobs', projectId] });
         qc.invalidateQueries({ queryKey: ['bee-stats', projectId] });
-        openedRef.current.delete(msg.jobId);
+        notifiedRef.current.delete(msg.jobId);
       } catch {
         /* ignore */
       }

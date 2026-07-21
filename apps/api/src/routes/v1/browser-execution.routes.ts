@@ -302,6 +302,147 @@ browserExecutionRouter.get(
   }
 );
 
+browserExecutionRouter.post(
+  '/browser/interventions/bulk',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      const body = z
+        .object({
+          jobIds: z.array(z.string().uuid()).min(1),
+          action: z.enum(['skip', 'delete_forever', 'retry', 'unsupported']),
+        })
+        .parse(req.body);
+      const { bulkInterventionAction } = await import(
+        '../../modules/browser-execution/bee-intervention-actions.service.js'
+      );
+      const userId = (req as AuthenticatedRequest).auth.userId;
+      res.json({
+        data: await bulkInterventionAction(
+          param(req.params.projectId),
+          body.jobIds,
+          body.action,
+          { userId }
+        ),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.post(
+  '/browser/interventions/:jobId/skip',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      const { skipInterventionJob } = await import(
+        '../../modules/browser-execution/bee-intervention-actions.service.js'
+      );
+      const userId = (req as AuthenticatedRequest).auth.userId;
+      res.json({
+        data: await skipInterventionJob(param(req.params.projectId), param(req.params.jobId), {
+          userId,
+        }),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.post(
+  '/browser/interventions/:jobId/delete-forever',
+  authMiddleware,
+  requireRole('manager'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      const { deleteInterventionForever } = await import(
+        '../../modules/browser-execution/bee-intervention-actions.service.js'
+      );
+      const userId = (req as AuthenticatedRequest).auth.userId;
+      res.json({
+        data: await deleteInterventionForever(
+          param(req.params.projectId),
+          param(req.params.jobId),
+          { userId }
+        ),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.post(
+  '/browser/interventions/:jobId/unsupported',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      const { markInterventionUnsupported } = await import(
+        '../../modules/browser-execution/bee-intervention-actions.service.js'
+      );
+      const userId = (req as AuthenticatedRequest).auth.userId;
+      const addToIgnore = Boolean((req.body as { addToIgnore?: boolean })?.addToIgnore);
+      res.json({
+        data: await markInterventionUnsupported(
+          param(req.params.projectId),
+          param(req.params.jobId),
+          { userId, addToIgnore }
+        ),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.get(
+  '/browser/ignore-list',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      const { listGlobalIgnore } = await import(
+        '../../modules/browser-execution/bee-ignore.service.js'
+      );
+      res.json({ data: await listGlobalIgnore(param(req.params.projectId)) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.delete(
+  '/browser/ignore-list/:domain',
+  authMiddleware,
+  requireRole('manager'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      const { removeFromGlobalIgnore } = await import(
+        '../../modules/browser-execution/bee-ignore.service.js'
+      );
+      res.json({
+        data: await removeFromGlobalIgnore(
+          param(req.params.projectId),
+          decodeURIComponent(param(req.params.domain))
+        ),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 browserExecutionRouter.get(
   '/browser/jobs/:jobId/intervention',
   authMiddleware,

@@ -147,6 +147,41 @@ async function pauseForGate(params: {
   context?: Record<string, unknown>;
 }): Promise<void> {
   const { workspaceId, jobId, sessionId, stepIndex, stepId, gate } = params;
+
+  // Preferences: auto-skip optional human gates so the campaign keeps moving
+  try {
+    const { getOrCreatePolicy } = await import('./bee.service.js');
+    const { skipInterventionJob } = await import('./bee-intervention-actions.service.js');
+    const policy = await getOrCreatePolicy(workspaceId);
+    const shouldSkipLogin =
+      gate === 'login' &&
+      (policy.auto_skip_login === true ||
+        policy.never_ask_login === true ||
+        policy.pause_for_login === false);
+    const shouldSkipCaptcha =
+      gate === 'captcha' &&
+      (policy.auto_skip_captcha === true || policy.pause_for_captcha === false);
+    const shouldSkipEmail =
+      gate === 'email_verify' && policy.pause_for_email_verify === false;
+    if (shouldSkipLogin || shouldSkipCaptcha || shouldSkipEmail) {
+      await updateStep(jobId, stepIndex, {
+        status: 'paused',
+        finished_at: new Date().toISOString(),
+      });
+      await updateJob(jobId, {
+        status: 'needs_approval',
+        pause_reason: gate,
+        current_step_index: stepIndex,
+      });
+      await skipInterventionJob(workspaceId, jobId, {
+        reason: `auto_skip_${gate}`,
+      });
+      return;
+    }
+  } catch {
+    /* fall through to normal pause */
+  }
+
   const gateStatus = gateStatusFromBlocker(gate) ?? 'needs_approval';
   const stepAction = params.context?.stepAction != null ? String(params.context.stepAction) : null;
 

@@ -96,6 +96,12 @@ export async function updatePolicy(workspaceId: string, patch: Record<string, un
     'max_watch_ms',
     'session_reuse',
     'queue_auto_continue',
+    'pause_for_login',
+    'pause_for_captcha',
+    'pause_for_email_verify',
+    'auto_skip_login',
+    'auto_skip_captcha',
+    'never_ask_login',
   ];
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
   for (const k of allowed) {
@@ -176,6 +182,15 @@ export async function createExecution(params: {
   const policy = await getOrCreatePolicy(params.workspaceId);
   const domain = String(opp.domain ?? 'unknown');
   const url = String(opp.url ?? `https://${domain}`);
+
+  // Global Ignore List — never enqueue ignored domains
+  const { isDomainGloballyIgnored } = await import('./bee-ignore.service.js');
+  if (await isDomainGloballyIgnored(params.workspaceId, domain)) {
+    throw Object.assign(
+      new Error(`Domain ${domain} is on the Global Ignore List`),
+      { status: 409, code: 'GLOBALLY_IGNORED' }
+    );
+  }
 
   let html = params.htmlSnippet;
   if (!html) {
@@ -586,7 +601,7 @@ export async function startJob(workspaceId: string, jobId: string, userId?: stri
   return getJob(workspaceId, jobId);
 }
 
-async function setJobStatus(
+export async function setJobStatus(
   workspaceId: string,
   jobId: string,
   status: string,
@@ -1146,11 +1161,22 @@ export async function getStatistics(workspaceId: string) {
   }
 
   const retrying = jobs.filter((j) => String(j.status) === 'retry_scheduled').length;
-  const waitingUser = jobs.filter(
-    (j) =>
-      String(j.status).startsWith('watching') ||
-      String(j.status).startsWith('blocked_') ||
-      ['awaiting_user', 'needs_approval', 'paused', 'ready_for_review'].includes(String(j.status))
+  const interventionStatuses = (j: { status?: unknown; pause_reason?: unknown }) => {
+    const s = String(j.status);
+    return (
+      s.startsWith('watching') ||
+      s.startsWith('blocked_') ||
+      ['awaiting_user', 'needs_approval', 'paused', 'ready_for_review'].includes(s)
+    );
+  };
+  const waitingUser = jobs.filter((j) => interventionStatuses(j)).length;
+  const skipped = jobs.filter((j) => {
+    const s = String(j.status);
+    const d = String((j as { disposition?: string }).disposition ?? '');
+    return s === 'skipped' || d === 'skipped' || s === 'unsupported';
+  }).length;
+  const ready = jobs.filter((j) =>
+    ['queued', 'waiting_infrastructure', 'retry_scheduled'].includes(String(j.status))
   ).length;
   const topFailureReasons: Record<string, number> = {};
   for (const j of jobs) {
@@ -1195,7 +1221,7 @@ export async function getStatistics(workspaceId: string) {
   ).length;
 
   const totalJobs = jobs.length;
-  // Terminal for workflow progress: Submitted / Failed / Cancelled (+ verified/completed aliases)
+  // Terminal for AI campaign progress — intervention is optional (does not block completion)
   const terminalStatuses = new Set([
     'submitted',
     'completed',
@@ -1203,11 +1229,22 @@ export async function getStatistics(workspaceId: string) {
     'waiting_verification',
     'failed',
     'cancelled',
+    'skipped',
+    'unsupported',
   ]);
   const completedJobs = jobs.filter((j) => terminalStatuses.has(String(j.status))).length;
+  // AI remaining = still automating (exclude optional human intervention queue)
+  const aiActive = jobs.filter((j) => {
+    const s = String(j.status);
+    if (terminalStatuses.has(s)) return false;
+    if (interventionStatuses(j)) return false;
+    return true;
+  }).length;
   const progressPercent =
-    totalJobs > 0 ? Math.round((completedJobs / totalJobs) * 1000) / 10 : 0;
-  const executionComplete = totalJobs > 0 && completedJobs >= totalJobs;
+    totalJobs > 0
+      ? Math.round(((submitted + counts.failed + skipped) / totalJobs) * 1000) / 10
+      : 0;
+  const executionComplete = totalJobs > 0 && aiActive === 0;
 
   const successDenom = submitted + counts.failed;
   const successRate =
@@ -1216,7 +1253,7 @@ export async function getStatistics(workspaceId: string) {
   const avgSubmitMs = submitN ? Math.round(submitSum / submitN) : null;
 
   // ETA from remaining automation work ÷ active worker capacity
-  const remainingJobs = Math.max(0, totalJobs - completedJobs);
+  const remainingJobs = aiActive;
   const activeWorkerCount = Math.min(maxWorkers, Math.max(counts.running, 0));
   const effectiveWorkers = Math.max(1, activeWorkerCount || (remainingJobs > 0 ? 1 : 1));
   for (const w of runningJobs) {
@@ -1228,12 +1265,12 @@ export async function getStatistics(workspaceId: string) {
           runningJobs.reduce((sum, w) => sum + (w.etaMs ?? avgMs), 0) / runningJobs.length
         )
       : 0;
-  const queuedRemaining = counts.queued + retrying;
+  const queuedRemaining = ready;
   const etaMs =
     remainingJobs <= 0
       ? 0
       : inFlightRemainingAvg + Math.ceil(queuedRemaining / effectiveWorkers) * avgMs;
-  current.queueProgress = `${completedJobs}/${totalJobs}`;
+  current.queueProgress = `${submitted}/${totalJobs}`;
 
   const workers = Array.from({ length: maxWorkers }, (_, i) => {
     const job = runningJobs[i];
@@ -1295,6 +1332,9 @@ export async function getStatistics(workspaceId: string) {
   return {
     ...counts,
     submitted,
+    ready,
+    needsYou: waitingUser,
+    skipped,
     waitingLogin,
     waitingMfa,
     waitingApproval,
@@ -1320,6 +1360,7 @@ export async function getStatistics(workspaceId: string) {
     estimatedApprovalTime: '7–14 days',
     current,
     needsYourAction: waitingUser,
+    aiSubmitted: submitted,
     metricsSource: 'live' as const,
   };
 }

@@ -27,6 +27,7 @@ import {
 } from '@/components/browser/needs-your-action-queue';
 import { openInterventionWindow } from '@/lib/intervention-window';
 import { AiActivityCard, AiLoadingState } from '@/components/workflow/ai-activity-card';
+import { HumanInterventionQueue } from '@/components/browser/human-intervention-queue';
 
 type BeeJob = {
   id: string;
@@ -61,6 +62,10 @@ type BeeStats = {
   cancelled?: number;
   watching?: number;
   submitted?: number;
+  ready?: number;
+  needsYou?: number;
+  skipped?: number;
+  aiSubmitted?: number;
   waitingApproval?: number;
   waitingVerification?: number;
   waitingLogin?: number;
@@ -241,6 +246,12 @@ export function BrowserExecutionCenterPage() {
           max_watch_ms?: number;
           session_reuse?: boolean;
           queue_auto_continue?: boolean;
+          pause_for_login?: boolean;
+          pause_for_captcha?: boolean;
+          pause_for_email_verify?: boolean;
+          auto_skip_login?: boolean;
+          auto_skip_captcha?: boolean;
+          never_ask_login?: boolean;
         };
       }>(`/v1/projects/${projectId}/browser/policies`),
     enabled: !!projectId,
@@ -486,8 +497,8 @@ export function BrowserExecutionCenterPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Submit Backlinks</h1>
         <p className="text-muted-foreground">
-          AI submits backlinks automatically. When login or CAPTCHA is needed, your real browser
-          opens — only that website pauses.
+          AI submits automatically. Login and CAPTCHA sites go to the Human Intervention Queue —
+          they never block the campaign.
         </p>
       </div>
 
@@ -512,14 +523,15 @@ export function BrowserExecutionCenterPage() {
           {stats.isLoading ? (
             <AiLoadingState message="AI is preparing submissions…" />
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
               {(
                 [
-                  ['Completed', completedJobs],
+                  ['Ready', s?.ready ?? s?.queued ?? 0],
                   ['Running', s?.running ?? 0],
-                  ['Waiting For You', actionItems.length],
-                  ['Remaining', remainingJobs],
-                  ['ETA', s?.etaSeconds ? formatEta(s.etaSeconds) : '—'],
+                  ['Completed', s?.aiSubmitted ?? s?.submitted ?? completedJobs],
+                  ['Needs You', s?.needsYou ?? actionItems.length],
+                  ['Skipped', s?.skipped ?? 0],
+                  ['Failed', s?.failed ?? 0],
                 ] as const
               ).map(([label, value]) => (
                 <Card key={label} className="rounded-2xl border-border/40 shadow-sm">
@@ -532,6 +544,100 @@ export function BrowserExecutionCenterPage() {
             </div>
           )}
 
+          {totalJobs > 0 ? (
+            <Card className="rounded-2xl border-border/40">
+              <CardContent className="pt-5 space-y-3">
+                <p className="text-sm">
+                  AI submitted{' '}
+                  <span className="font-semibold tabular-nums">
+                    {s?.aiSubmitted ?? s?.submitted ?? 0}
+                  </span>{' '}
+                  websites automatically.
+                  {(s?.needsYou ?? actionItems.length) > 0 ? (
+                    <>
+                      {' '}
+                      <span className="font-semibold tabular-nums">
+                        {s?.needsYou ?? actionItems.length}
+                      </span>{' '}
+                      websites require human interaction.
+                    </>
+                  ) : (
+                    <> No websites require human interaction.</>
+                  )}
+                </p>
+                {(s?.needsYou ?? actionItems.length) > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        const ids = actionItems.map((i) => i.jobId);
+                        if (ids[0]) openInterventionWindow(projectId, ids[0]);
+                        for (const id of ids.slice(1)) openInterventionWindow(projectId, id);
+                      }}
+                    >
+                      Complete Now
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={async () => {
+                        try {
+                          await request(
+                            `/v1/projects/${projectId}/browser/interventions/bulk`,
+                            {
+                              method: 'POST',
+                              body: JSON.stringify({
+                                jobIds: actionItems.map((i) => i.jobId),
+                                action: 'skip',
+                              }),
+                            }
+                          );
+                          toast.success('Skipped intervention sites for this campaign');
+                          invalidate();
+                        } catch (e) {
+                          toast.error(e instanceof Error ? e.message : 'Skip failed');
+                        }
+                      }}
+                    >
+                      Skip
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={async () => {
+                        if (
+                          !window.confirm(
+                            'Delete forever? Domains will be added to the Global Ignore List.'
+                          )
+                        ) {
+                          return;
+                        }
+                        try {
+                          await request(
+                            `/v1/projects/${projectId}/browser/interventions/bulk`,
+                            {
+                              method: 'POST',
+                              body: JSON.stringify({
+                                jobIds: actionItems.map((i) => i.jobId),
+                                action: 'delete_forever',
+                              }),
+                            }
+                          );
+                          toast.success('Deleted forever — Global Ignore List updated');
+                          invalidate();
+                        } catch (e) {
+                          toast.error(e instanceof Error ? e.message : 'Delete failed');
+                        }
+                      }}
+                    >
+                      Delete Forever
+                    </Button>
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+          ) : null}
+
           {totalJobs > 0 || (s?.running ?? 0) > 0 || (s?.queued ?? 0) > 0 ? (
             <AiActivityCard
               title="AI is submitting backlinks"
@@ -543,8 +649,10 @@ export function BrowserExecutionCenterPage() {
               }
               next={
                 remainingJobs > 0
-                  ? `${remainingJobs} website${remainingJobs === 1 ? '' : 's'} remaining`
-                  : 'Finishing up'
+                  ? `${remainingJobs} website${remainingJobs === 1 ? '' : 's'} still automating`
+                  : actionItems.length > 0
+                    ? 'Automation idle — optional human tasks remain'
+                    : 'Finishing up'
               }
               eta={s?.etaSeconds ? formatEta(s.etaSeconds) : null}
             />
@@ -558,6 +666,47 @@ export function BrowserExecutionCenterPage() {
               </CardHeader>
             </Card>
           )}
+
+          <HumanInterventionQueue projectId={projectId} />
+
+          <Card className="rounded-2xl border-border/40">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Intervention preferences</CardTitle>
+              <CardDescription>
+                Control which gates pause for you vs skip automatically.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-3 sm:grid-cols-2 text-sm">
+              {(
+                [
+                  ['pause_for_login', 'Pause for Login'],
+                  ['pause_for_captcha', 'Pause for CAPTCHA'],
+                  ['pause_for_email_verify', 'Pause for Email Verification'],
+                  ['auto_skip_login', 'Automatically Skip Login Sites'],
+                  ['auto_skip_captcha', 'Automatically Skip CAPTCHA Sites'],
+                  ['never_ask_login', 'Never Ask Again for Login Sites'],
+                ] as const
+              ).map(([key, label]) => {
+                const checked = Boolean(
+                  (policy.data?.data as Record<string, unknown> | undefined)?.[key] ??
+                    (key.startsWith('pause_') ? true : false)
+                );
+                return (
+                  <label key={key} className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={savePolicy.isPending || policy.isLoading}
+                      onChange={(e) =>
+                        savePolicy.mutate({ [key]: e.target.checked })
+                      }
+                    />
+                    <span>{label}</span>
+                  </label>
+                );
+              })}
+            </CardContent>
+          </Card>
 
           {showAdvanced ? (
             <Card className="border-dashed">
@@ -650,13 +799,19 @@ export function BrowserExecutionCenterPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {oppList.map((opp) => {
+                      {oppList
+                        .filter((opp) => {
+                          // Keep Login/CAPTCHA out of the normal submission table —
+                          // they live in Human Intervention Queue only
+                          const waiting = actionItems.find(
+                            (a) =>
+                              a.website === opp.website ||
+                              (opp.domain && a.website.includes(opp.domain))
+                          );
+                          return !waiting;
+                        })
+                        .map((opp) => {
                         const checked = selectedOppIds.has(opp.id);
-                        const waiting = actionItems.find(
-                          (a) =>
-                            a.website === opp.website ||
-                            (opp.domain && a.website.includes(opp.domain))
-                        );
                         return (
                           <tr key={opp.id} className="border-t">
                             <td className="px-3 py-2">
@@ -675,33 +830,20 @@ export function BrowserExecutionCenterPage() {
                               <Badge
                                 className={`text-[10px] ${statusBadge(opp.readiness)}`}
                               >
-                                {waiting
-                                  ? 'Waiting For You'
-                                  : READINESS_LABEL[opp.readiness]}
+                                {READINESS_LABEL[opp.readiness]}
                               </Badge>
                             </td>
                             <td className="px-3 py-2 text-right">
-                              {waiting ? (
-                                <Button
-                                  size="sm"
-                                  onClick={() =>
-                                    openInterventionWindow(projectId, waiting.jobId)
-                                  }
-                                >
-                                  Open Browser
-                                </Button>
-                              ) : (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  disabled={
-                                    !runtimeHealthy || !opp.selectable || startExecutions.isPending
-                                  }
-                                  onClick={() => startExecutions.mutate([opp.id])}
-                                >
-                                  <Play className="h-3 w-3 mr-1" /> Submit
-                                </Button>
-                              )}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={
+                                  !runtimeHealthy || !opp.selectable || startExecutions.isPending
+                                }
+                                onClick={() => startExecutions.mutate([opp.id])}
+                              >
+                                <Play className="h-3 w-3 mr-1" /> Submit
+                              </Button>
                             </td>
                           </tr>
                         );
