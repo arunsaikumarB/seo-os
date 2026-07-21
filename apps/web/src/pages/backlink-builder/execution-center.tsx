@@ -4,6 +4,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   Play,
+  Pause,
+  Square,
+  RotateCcw,
   Settings2,
   Monitor,
   ScrollText,
@@ -58,6 +61,7 @@ type BeeStats = {
   needs_approval: number;
   completed: number;
   failed: number;
+  failedToStart?: number;
   blocked: number;
   cancelled?: number;
   watching?: number;
@@ -85,6 +89,9 @@ type BeeStats = {
   remainingJobs?: number;
   progressPercent?: number;
   executionComplete?: boolean;
+  campaignState?: string;
+  campaignIsRunning?: boolean;
+  aiStatusLine?: string;
   workers?: Array<{
     workerId: number;
     status: 'idle' | 'busy';
@@ -105,11 +112,19 @@ type ExecutionOpportunity = {
   opportunity_type: string;
   status: string;
   pipeline_stage?: string | null;
-  readiness: 'ready' | 'in_progress' | 'needs_approval' | 'completed' | 'failed' | 'needs_domain' | 'not_ready';
+  readiness: string;
+  rowStatus?: string;
+  error_message?: string | null;
   selectable: boolean;
   has_submission: boolean;
   has_content_draft: boolean;
-  latest_job: { id: string; status: string; created_at: string } | null;
+  latest_job: {
+    id: string;
+    status: string;
+    created_at: string;
+    disposition?: string | null;
+    error_message?: string | null;
+  } | null;
 };
 
 type BulkProgressItem = {
@@ -130,12 +145,32 @@ const TABS = [
   'replay',
 ] as const;
 
-const READINESS_LABEL: Record<ExecutionOpportunity['readiness'], string> = {
+const ROW_STATUS_LABEL: Record<string, string> = {
+  Ready: 'Ready',
+  Starting: 'Starting',
+  Queued: 'Starting',
+  Running: 'Running',
+  'Waiting Human': 'Waiting Human',
+  Completed: 'Completed',
+  Submitted: 'Completed',
+  Verified: 'Verified',
+  Failed: 'Failed',
+  'Failed to Start': 'Failed to Start',
+  Skipped: 'Skipped',
+  Deleted: 'Deleted',
+  // legacy readiness keys
   ready: 'Ready',
-  in_progress: 'In progress',
-  needs_approval: 'Needs approval',
+  starting: 'Starting',
+  running: 'Running',
+  waiting_human: 'Waiting Human',
   completed: 'Completed',
+  verified: 'Verified',
   failed: 'Failed',
+  failed_to_start: 'Failed to Start',
+  skipped: 'Skipped',
+  deleted: 'Deleted',
+  in_progress: 'Starting',
+  needs_approval: 'Waiting Human',
   needs_domain: 'Needs domain',
   not_ready: 'Not ready',
 };
@@ -328,12 +363,14 @@ export function BrowserExecutionCenterPage() {
       setSelectedOppIds(new Set());
       invalidate();
       if (errors.length && !results.length) {
-        toast.error(`All executions failed: ${errors[0]?.message ?? 'Unknown error'}`);
+        toast.error(
+          `Execution failed before submission began. ${errors[0]?.message ?? 'Failed to start'}`
+        );
         return;
       }
       if (errors.length) {
         toast.error(
-          `${results.length} started, ${errors.length} failed: ${errors[0]?.message ?? ''}`
+          `${results.length} started, ${errors.length} failed to start: ${errors[0]?.message ?? ''}`
         );
       } else {
         toast.success(
@@ -344,10 +381,38 @@ export function BrowserExecutionCenterPage() {
       }
       if (results[0]?.jobId) {
         setSelectedJobId(results[0].jobId);
-        setTab('timeline');
       }
     },
-    onError: (e: Error) => toast.error(e.message || 'Could not start executions'),
+    onError: (e: Error) =>
+      toast.error(e.message || 'Execution failed before submission began.'),
+  });
+
+  const campaignControl = useMutation({
+    mutationFn: (action: 'pause' | 'resume' | 'stop' | 'retry_failed') => {
+      if (action === 'retry_failed') {
+        return request(`/v1/projects/${projectId}/browser/retry/bulk`, {
+          method: 'POST',
+          body: JSON.stringify({ mode: 'all_failed' }),
+        });
+      }
+      return request(`/v1/projects/${projectId}/browser/campaign/${action}`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+    },
+    onSuccess: (_, action) => {
+      toast.success(
+        action === 'pause'
+          ? 'Campaign paused'
+          : action === 'resume'
+            ? 'Campaign resumed'
+            : action === 'stop'
+              ? 'Campaign stopped'
+              : 'Retrying failed jobs'
+      );
+      invalidate();
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const act = useMutation({
@@ -383,32 +448,33 @@ export function BrowserExecutionCenterPage() {
   const statusBadge = useMemo(() => {
     const waitingUser = 'bg-amber-500/15 text-amber-800';
     const map: Record<string, string> = {
-      needs_approval: waitingUser,
-      ready_for_review: waitingUser,
-      paused: waitingUser,
-      awaiting_user: waitingUser,
-      blocked_captcha: waitingUser,
-      blocked_mfa: waitingUser,
-      blocked_email_verify: waitingUser,
-      blocked_phone_verify: waitingUser,
-      watching_captcha: waitingUser,
-      watching_login: waitingUser,
-      watching_mfa: waitingUser,
-      watching_email: waitingUser,
-      watching_phone: waitingUser,
-      ready_to_continue: 'bg-emerald-500/15 text-emerald-700',
-      completed: 'bg-emerald-500/15 text-emerald-700',
-      failed: 'bg-red-500/15 text-red-700',
-      retry_scheduled: 'bg-violet-500/15 text-violet-700',
+      Ready: 'bg-emerald-500/15 text-emerald-700',
+      Starting: 'bg-sky-500/15 text-sky-700',
+      Queued: 'bg-sky-500/15 text-sky-700',
+      Running: 'bg-sky-500/15 text-sky-700',
+      'Waiting Human': waitingUser,
+      Completed: 'bg-emerald-500/15 text-emerald-700',
+      Submitted: 'bg-emerald-500/15 text-emerald-700',
+      Verified: 'bg-emerald-500/15 text-emerald-700',
+      Failed: 'bg-red-500/15 text-red-700',
+      'Failed to Start': 'bg-red-500/15 text-red-700',
+      Skipped: 'bg-muted text-muted-foreground',
+      Deleted: 'bg-muted text-muted-foreground',
       ready: 'bg-emerald-500/15 text-emerald-700',
+      starting: 'bg-sky-500/15 text-sky-700',
+      running: 'bg-sky-500/15 text-sky-700',
+      waiting_human: waitingUser,
+      completed: 'bg-emerald-500/15 text-emerald-700',
+      verified: 'bg-emerald-500/15 text-emerald-700',
+      failed: 'bg-red-500/15 text-red-700',
+      failed_to_start: 'bg-red-500/15 text-red-700',
+      skipped: 'bg-muted text-muted-foreground',
       in_progress: 'bg-sky-500/15 text-sky-700',
+      needs_approval: waitingUser,
       needs_domain: 'bg-amber-500/15 text-amber-700',
       not_ready: 'bg-muted text-muted-foreground',
     };
-    return (status: string) => {
-      if (status.startsWith('watching_') || status.startsWith('blocked_')) return waitingUser;
-      return map[status] ?? '';
-    };
+    return (status: string) => map[status] ?? '';
   }, []);
 
   const toggleOpp = (id: string, selectable: boolean) => {
@@ -462,12 +528,20 @@ export function BrowserExecutionCenterPage() {
     return { total, started, failed, active };
   }, [bulkProgress]);
 
-  const totalJobs = s?.totalJobs ?? jobList.length;
+  const totalJobs = s?.totalJobs ?? 0;
   const completedJobs = s?.completedJobs ?? 0;
   const remainingJobs = s?.remainingJobs ?? Math.max(0, totalJobs - completedJobs);
-  const progressPercent =
-    s?.progressPercent ??
-    (totalJobs > 0 ? Math.round((completedJobs / totalJobs) * 1000) / 10 : 0);
+  /** Progress ONLY from Execution State Manager — never recalculate locally */
+  const progressPercent = Math.round(s?.progressPercent ?? 0);
+  const campaignState = s?.campaignState ?? 'Idle';
+  const campaignIsRunning = Boolean(s?.campaignIsRunning);
+  const campaignControlsVisible =
+    campaignIsRunning ||
+    campaignState === 'Starting' ||
+    campaignState === 'Waiting Human' ||
+    campaignState === 'Paused';
+  const showFailedToStart =
+    campaignState === 'Failed To Start' || (s?.failedToStart ?? 0) > 0;
   const maxWorkers =
     s?.maxParallelSessions ?? policy.data?.data.max_parallel_sessions ?? 0;
   const workerSlots =
@@ -638,14 +712,45 @@ export function BrowserExecutionCenterPage() {
             </Card>
           ) : null}
 
-          {totalJobs > 0 || (s?.running ?? 0) > 0 || (s?.queued ?? 0) > 0 ? (
+          {showFailedToStart && !campaignIsRunning && campaignState !== 'Starting' ? (
+            <Card className="rounded-2xl border-red-500/30 bg-red-500/5">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Failed to Start</CardTitle>
+                <CardDescription>
+                  {s?.aiStatusLine ??
+                    'Execution failed before submission began.'}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button
+                  size="sm"
+                  disabled={
+                    !runtimeHealthy ||
+                    selectedOppIds.size === 0 ||
+                    startExecutions.isPending
+                  }
+                  onClick={() => startExecutions.mutate([...selectedOppIds])}
+                >
+                  <RotateCcw className="h-3 w-3 mr-1" />
+                  Retry
+                  {selectedOppIds.size > 0 ? ` (${selectedOppIds.size})` : ''}
+                </Button>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {campaignIsRunning ||
+          campaignState === 'Starting' ||
+          campaignState === 'Waiting Human' ||
+          campaignState === 'Paused' ? (
             <AiActivityCard
-              title="AI is submitting backlinks"
+              title={s?.aiStatusLine ?? 'Submitting backlinks'}
               percent={progressPercent}
               current={
                 s?.current?.website
                   ? `${s.current.website}${s.current.step ? ` · ${s.current.step}` : ''}`
-                  : workerSlots.find((w) => w.status === 'busy')?.website ?? 'Working…'
+                  : workerSlots.find((w) => w.status === 'busy')?.website ??
+                    (campaignState === 'Starting' ? 'Starting…' : 'Working…')
               }
               next={
                 remainingJobs > 0
@@ -656,7 +761,7 @@ export function BrowserExecutionCenterPage() {
               }
               eta={s?.etaSeconds ? formatEta(s.etaSeconds) : null}
             />
-          ) : (
+          ) : !showFailedToStart ? (
             <Card className="rounded-2xl border-border/40">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">Ready to submit</CardTitle>
@@ -665,7 +770,7 @@ export function BrowserExecutionCenterPage() {
                 </CardDescription>
               </CardHeader>
             </Card>
-          )}
+          ) : null}
 
           <HumanInterventionQueue projectId={projectId} />
 
@@ -735,25 +840,78 @@ export function BrowserExecutionCenterPage() {
                   </CardDescription>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    disabled={
-                      !runtimeHealthy ||
-                      selectedOppIds.size === 0 ||
-                      startExecutions.isPending ||
-                      selectableOpps.length === 0
-                    }
-                    onClick={() => startExecutions.mutate([...selectedOppIds])}
-                    title={
-                      runtimeHealthy
-                        ? undefined
-                        : 'Browser Runtime Missing — Install Required'
-                    }
-                  >
-                    <Play className="h-3 w-3 mr-1" />
-                    Start Submission
-                    {selectedOppIds.size > 0 ? ` (${selectedOppIds.size})` : ''}
-                  </Button>
+                  {campaignControlsVisible ? (
+                    <>
+                      {campaignState === 'Paused' ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={campaignControl.isPending}
+                          onClick={() => campaignControl.mutate('resume')}
+                        >
+                          <Play className="h-3 w-3 mr-1" />
+                          Resume
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={campaignControl.isPending}
+                          onClick={() => campaignControl.mutate('pause')}
+                        >
+                          <Pause className="h-3 w-3 mr-1" />
+                          Pause
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={campaignControl.isPending}
+                        onClick={() => campaignControl.mutate('stop')}
+                      >
+                        <Square className="h-3 w-3 mr-1" />
+                        Stop
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={
+                          campaignControl.isPending ||
+                          ((s?.failed ?? 0) === 0 && (s?.failedToStart ?? 0) === 0)
+                        }
+                        onClick={() => campaignControl.mutate('retry_failed')}
+                      >
+                        <RotateCcw className="h-3 w-3 mr-1" />
+                        Retry Failed
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      size="sm"
+                      disabled={
+                        !runtimeHealthy ||
+                        selectedOppIds.size === 0 ||
+                        startExecutions.isPending ||
+                        selectableOpps.length === 0
+                      }
+                      onClick={() => startExecutions.mutate([...selectedOppIds])}
+                      title={
+                        runtimeHealthy
+                          ? undefined
+                          : 'Browser Runtime Missing — Install Required'
+                      }
+                    >
+                      {showFailedToStart || (s?.failedToStart ?? 0) > 0 ? (
+                        <RotateCcw className="h-3 w-3 mr-1" />
+                      ) : (
+                        <Play className="h-3 w-3 mr-1" />
+                      )}
+                      {showFailedToStart || (s?.failedToStart ?? 0) > 0
+                        ? 'Retry'
+                        : 'Start Submission'}
+                      {selectedOppIds.size > 0 ? ` (${selectedOppIds.size})` : ''}
+                    </Button>
+                  )}
                 </div>
               </div>
               {!runtimeHealthy ? (
@@ -795,7 +953,7 @@ export function BrowserExecutionCenterPage() {
                         </th>
                         <th className="px-3 py-2 font-medium">Website</th>
                         <th className="px-3 py-2 font-medium">Current Status</th>
-                        <th className="px-3 py-2 font-medium text-right">Next Action</th>
+                        <th className="px-3 py-2 font-medium">Detail</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -812,6 +970,9 @@ export function BrowserExecutionCenterPage() {
                         })
                         .map((opp) => {
                         const checked = selectedOppIds.has(opp.id);
+                        const statusKey = opp.rowStatus ?? opp.readiness;
+                        const statusLabel =
+                          ROW_STATUS_LABEL[statusKey] ?? statusKey;
                         return (
                           <tr key={opp.id} className="border-t">
                             <td className="px-3 py-2">
@@ -828,22 +989,18 @@ export function BrowserExecutionCenterPage() {
                             </td>
                             <td className="px-3 py-2">
                               <Badge
-                                className={`text-[10px] ${statusBadge(opp.readiness)}`}
+                                className={`text-[10px] ${statusBadge(statusKey)}`}
                               >
-                                {READINESS_LABEL[opp.readiness]}
+                                {statusLabel}
                               </Badge>
                             </td>
-                            <td className="px-3 py-2 text-right">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={
-                                  !runtimeHealthy || !opp.selectable || startExecutions.isPending
-                                }
-                                onClick={() => startExecutions.mutate([opp.id])}
-                              >
-                                <Play className="h-3 w-3 mr-1" /> Submit
-                              </Button>
+                            <td className="px-3 py-2 text-xs text-muted-foreground max-w-[240px] truncate">
+                              {statusKey === 'Failed to Start' ||
+                              statusKey === 'failed_to_start'
+                                ? opp.error_message ||
+                                  opp.latest_job?.error_message ||
+                                  'Failed to start'
+                                : '—'}
                             </td>
                           </tr>
                         );

@@ -73,13 +73,20 @@ export function useWorkflow(projectId: string) {
   const needsHumanAction = actionItems.length > 0;
   const firstAction = actionItems[0] ?? null;
 
+  const campaignState = bee.data?.campaignState ?? 'Idle';
+  const campaignIsRunning = Boolean(bee.data?.campaignIsRunning);
+  /** Active campaign — never from Failed To Start / Idle alone */
+  const jobsOpen =
+    campaignIsRunning ||
+    campaignState === 'Waiting Human' ||
+    campaignState === 'Paused' ||
+    campaignState === 'Starting';
+
   useEffect(() => {
-    if (bee.data?.executionComplete && (bee.data.totalJobs ?? 0) > 0) {
+    if (bee.data?.executionComplete && campaignState === 'Completed') {
       markStepComplete(projectId, 'submit-backlinks');
     }
-  }, [bee.data?.executionComplete, bee.data?.totalJobs, projectId, markStepComplete]);
-
-  const jobsOpen = (bee.data?.totalJobs ?? 0) > 0 && !bee.data?.executionComplete;
+  }, [bee.data?.executionComplete, campaignState, projectId, markStepComplete]);
 
   const completedCount = WORKFLOW_STEPS.filter((s) => {
     if (s.id === 'submit-backlinks' && jobsOpen) return false;
@@ -117,9 +124,11 @@ export function useWorkflow(projectId: string) {
 
   const allComplete = completedCount >= WORKFLOW_STEPS.length && !jobsOpen;
 
-  const progressPercent = jobsOpen
-    ? Math.round(bee.data?.progressPercent ?? 0)
-    : Math.round((completedCount / Math.max(WORKFLOW_STEPS.length, 1)) * 100);
+  /** Progress ONLY from Execution State Manager when a campaign is active */
+  const progressPercent =
+    jobsOpen || campaignState === 'Completed' || campaignState === 'Failed To Start'
+      ? Math.round(bee.data?.progressPercent ?? 0)
+      : Math.round((completedCount / Math.max(WORKFLOW_STEPS.length, 1)) * 100);
 
   const continueHref = jobsOpen
     ? `/projects/${projectId}/backlink-builder/execution`
@@ -135,8 +144,8 @@ export function useWorkflow(projectId: string) {
 
   const aiStatusLine = needsHumanAction && firstAction
     ? `${firstAction.reason} — ${firstAction.website}`
-    : jobsOpen
-      ? `Submitting backlinks · ${bee.data!.completedJobs}/${bee.data!.totalJobs}`
+    : bee.data?.aiStatusLine
+      ? bee.data.aiStatusLine
       : allComplete
         ? 'Campaign complete'
         : `Working on ${currentStep.title}`;

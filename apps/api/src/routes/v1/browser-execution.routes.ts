@@ -25,6 +25,10 @@ import {
   startJob,
   updateJobSteps,
   updatePolicy,
+  pauseCampaign,
+  resumeCampaign,
+  stopCampaign,
+  markJobFailedToStart,
 } from '../../modules/browser-execution/bee.service.js';
 import {
   bulkRetryJobs,
@@ -107,11 +111,22 @@ browserExecutionRouter.post(
         htmlSnippet: body.htmlSnippet,
         mappingOverrides: body.mappingOverrides,
       });
-      const data =
-        body.startImmediately === false
-          ? job
-          : ((await startJob(workspaceId, String(job.id), userId)) ?? job);
-      res.status(201).json({ data });
+      if (body.startImmediately === false) {
+        res.status(201).json({ data: job });
+        return;
+      }
+      try {
+        const started = await startJob(workspaceId, String(job.id), userId);
+        res.status(201).json({ data: started ?? job });
+      } catch (startErr) {
+        const msg =
+          startErr instanceof Error ? startErr.message : 'Failed to start';
+        await markJobFailedToStart(workspaceId, String(job.id), msg);
+        throw Object.assign(new Error(msg), {
+          status: (startErr as { status?: number })?.status ?? 400,
+          code: 'FAILED_TO_START',
+        });
+      }
     } catch (err) {
       next(err);
     }
@@ -196,6 +211,51 @@ browserExecutionRouter.post(
       requireBee();
       const body = z.object({ jobId: z.string().uuid() }).parse(req.body);
       res.json({ data: await pauseJob(param(req.params.projectId), body.jobId) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.post(
+  '/browser/campaign/pause',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      res.json({ data: await pauseCampaign(param(req.params.projectId)) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.post(
+  '/browser/campaign/resume',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      const { userId } = (req as AuthenticatedRequest).auth;
+      res.json({
+        data: await resumeCampaign(param(req.params.projectId), userId),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.post(
+  '/browser/campaign/stop',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      res.json({ data: await stopCampaign(param(req.params.projectId)) });
     } catch (err) {
       next(err);
     }

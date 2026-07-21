@@ -10,6 +10,7 @@ export type BeeExecutionProgress = {
   running: number;
   queued: number;
   failed: number;
+  failedToStart?: number;
   submitted: number;
   skipped: number;
   deleted: number;
@@ -26,6 +27,10 @@ export type BeeExecutionProgress = {
   estimatedApprovalTime: string;
   successRate: number | null;
   trackResults?: Record<string, number>;
+  /** ESM campaign lifecycle */
+  campaignState?: string;
+  campaignIsRunning?: boolean;
+  aiStatusLine?: string;
 };
 
 const EMPTY: BeeExecutionProgress = {
@@ -37,6 +42,7 @@ const EMPTY: BeeExecutionProgress = {
   running: 0,
   queued: 0,
   failed: 0,
+  failedToStart: 0,
   submitted: 0,
   skipped: 0,
   deleted: 0,
@@ -52,6 +58,9 @@ const EMPTY: BeeExecutionProgress = {
   etaSeconds: 0,
   estimatedApprovalTime: '7–14 days',
   successRate: null,
+  campaignState: 'Idle',
+  campaignIsRunning: false,
+  aiStatusLine: 'Ready to submit',
 };
 
 /** Live progress from Execution State Manager (`/browser/statistics`). */
@@ -80,6 +89,7 @@ export function useBeeExecutionProgress(projectId: string, refetchInterval = 2_0
         running: Number(d.running ?? 0),
         queued: Number(d.queued ?? 0),
         failed: Number(d.failed ?? 0),
+        failedToStart: Number(d.failedToStart ?? 0),
         submitted: Number(d.submitted ?? 0),
         skipped: Number(d.skipped ?? 0),
         deleted: Number(d.deleted ?? 0),
@@ -96,6 +106,9 @@ export function useBeeExecutionProgress(projectId: string, refetchInterval = 2_0
         estimatedApprovalTime: String(d.estimatedApprovalTime ?? '7–14 days'),
         successRate: d.successRate ?? null,
         trackResults: d.trackResults,
+        campaignState: String(d.campaignState ?? 'Idle'),
+        campaignIsRunning: Boolean(d.campaignIsRunning),
+        aiStatusLine: String(d.aiStatusLine ?? 'Ready to submit'),
       };
     },
     enabled: !!projectId,

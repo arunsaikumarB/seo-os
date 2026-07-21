@@ -33,25 +33,21 @@ export type ExecutionStateItem = {
 export type ExecutionStateSnapshot = {
   counts: ExecutionStateCounts;
   items: ExecutionStateItem[];
-  /** Visible campaign items (excludes Deleted / Ignored). */
+  /** Visible campaign items (excludes Deleted / Ignored / Failed to Start). */
   campaignItems: ExecutionStateItem[];
+  failedToStart: ExecutionStateItem[];
   /** Failed queue — does not block automation. */
   failedQueue: ExecutionStateItem[];
   /** Waiting Human queue. */
   waitingHuman: ExecutionStateItem[];
   /** Verification-eligible (Submitted / Verified / Approved only). */
   verificationEligible: ExecutionStateItem[];
-  trackResults: {
-    Submitted: number;
-    Running: number;
-    'Waiting Human': number;
-    Failed: number;
-    Skipped: number;
-    Deleted: number;
-    Verified: number;
-    Approved: number;
-    Rejected: number;
-  };
+  trackResults: Record<string, number>;
+  campaignState: string;
+  campaignIsRunning: boolean;
+  aiStatusLine: string;
+  progressPercent: number;
+  totalExecutable: number;
   ignoreListCount: number;
   generatedAt: string;
   metricsSource: 'live';
@@ -71,7 +67,10 @@ export async function getExecutionState(workspaceId: string): Promise<ExecutionS
     const row = j as Record<string, unknown>;
     const disposition = dispositionOf(row);
     const rawStatus = String(j.status);
-    const status = toPublicExecutionStatus(rawStatus, { disposition });
+    const status = toPublicExecutionStatus(rawStatus, {
+      disposition,
+      errorCode: j.error_code != null ? String(j.error_code) : null,
+    });
     return {
       jobId: String(j.id),
       website: String(j.site_domain ?? 'Website'),
@@ -98,12 +97,15 @@ export async function getExecutionState(workspaceId: string): Promise<ExecutionS
         opportunity_id: j.opportunity_id != null ? String(j.opportunity_id) : null,
         pause_reason: j.pause_reason != null ? String(j.pause_reason) : null,
         disposition: dispositionOf(row),
+        error_code: j.error_code != null ? String(j.error_code) : null,
+        error_message: j.error_message != null ? String(j.error_message) : null,
         metrics: (j.metrics as Record<string, unknown>) ?? null,
       };
     })
   );
 
-  const campaignItems = items.filter((i) => !i.hidden);
+  const campaignItems = items.filter((i) => !i.hidden && i.status !== 'Failed to Start');
+  const failedToStart = items.filter((i) => i.status === 'Failed to Start');
   const failedQueue = campaignItems.filter((i) => i.status === 'Failed');
   const waitingHuman = campaignItems.filter((i) => i.status === 'Waiting Human');
   const verificationEligible = items.filter((i) =>
@@ -114,23 +116,30 @@ export async function getExecutionState(workspaceId: string): Promise<ExecutionS
     counts,
     items,
     campaignItems,
+    failedToStart,
     failedQueue,
     waitingHuman,
     verificationEligible,
     trackResults: {
-      Submitted: counts.Submitted,
+      Submitted: counts.Submitted + counts.Completed,
       Running: counts.Running,
       'Waiting Human': counts['Waiting Human'],
       Failed: counts.Failed,
+      'Failed to Start': counts['Failed to Start'],
       Skipped: counts.Skipped,
       Deleted: counts.Deleted,
       Verified: counts.Verified,
       Approved: counts.Approved,
       Rejected: counts.Rejected,
     },
+    campaignState: counts.campaignState,
+    campaignIsRunning: counts.campaignIsRunning,
+    aiStatusLine: counts.aiStatusLine,
+    progressPercent: counts.progressPercent,
+    totalExecutable: counts.totalExecutable,
     ignoreListCount: ignore.items?.length ?? 0,
     generatedAt: new Date().toISOString(),
-    metricsSource: 'live',
+    metricsSource: 'live' as const,
   };
 }
 
@@ -145,15 +154,16 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
     state,
     running: c.Running,
     queued: c.Queued,
-    ready: c.Queued,
+    ready: c.Ready,
     paused: 0,
     needs_approval: c['Waiting Human'],
-    completed: c.Submitted + c.Verified + c.Approved,
+    completed: c.Submitted + c.Completed + c.Verified + c.Approved,
     failed: c.Failed,
+    failedToStart: c['Failed to Start'],
     blocked: 0,
     cancelled: c.Deleted,
     watching: c['Waiting Human'],
-    submitted: c.Submitted,
+    submitted: c.Submitted + c.Completed,
     skipped: c.Skipped,
     deleted: c.Deleted,
     ignored: c.Ignored,
@@ -167,15 +177,20 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
     waitingLogin: 0,
     waitingMfa: 0,
     retrying: 0,
-    aiSubmitted: c.Submitted + c.Verified,
-    totalJobs: c.campaignTotal,
+    aiSubmitted: c.Submitted + c.Completed + c.Verified,
+    totalJobs: c.totalExecutable,
     completedJobs: c.campaignResolved,
     remainingJobs: c.Running + c.Queued,
     progressPercent: c.progressPercent,
     executionComplete: c.executionComplete,
+    campaignState: c.campaignState,
+    campaignIsRunning: c.campaignIsRunning,
+    aiStatusLine: c.aiStatusLine,
     successRate:
-      c.Submitted + c.Failed > 0
-        ? Math.round((c.Submitted / (c.Submitted + c.Failed)) * 1000) / 10
+      c.Submitted + c.Completed + c.Failed > 0
+        ? Math.round(
+            ((c.Submitted + c.Completed) / (c.Submitted + c.Completed + c.Failed)) * 1000
+          ) / 10
         : null,
     maxParallelSessions: maxWorkers,
     activeWorkerCount: Math.min(maxWorkers, c.Running),
@@ -185,6 +200,7 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
     needsYourAction: c['Waiting Human'],
     trackResults: state.trackResults,
     failedQueue: state.failedQueue,
+    failedToStartQueue: state.failedToStart,
     metricsSource: 'live' as const,
   };
 }

@@ -5,6 +5,7 @@ import {
   mapAssetsToFields,
   redactFormValues,
   gateStatusFromBlocker,
+  toPublicExecutionStatus,
   type AssetMapping,
   type ExecutionGate,
   type ExecutionPlanStep,
@@ -351,6 +352,24 @@ export async function listExecutionReadyOpportunities(workspaceId: string) {
   return listApprovedOpportunities(workspaceId);
 }
 
+/** Mark a job as Failed to Start — never counts as Running / progress. */
+export async function markJobFailedToStart(
+  workspaceId: string,
+  jobId: string,
+  reason: string
+) {
+  await setJobStatus(workspaceId, jobId, 'failed', {
+    finished_at: new Date().toISOString(),
+    disposition: 'failed_to_start',
+    error_code: 'FAILED_TO_START',
+    error_message: reason,
+  });
+  await appendLog(workspaceId, jobId, 'error', 'Failed to start', {
+    reason,
+  }).catch(() => undefined);
+  return getJob(workspaceId, jobId);
+}
+
 export async function startExecutionsForOpportunities(params: {
   workspaceId: string;
   opportunityIds: string[];
@@ -364,9 +383,10 @@ export async function startExecutionsForOpportunities(params: {
     status: string;
     siteDomain?: string | null;
   }> = [];
-  const errors: Array<{ opportunityId: string; message: string }> = [];
+  const errors: Array<{ opportunityId: string; message: string; jobId?: string }> = [];
 
   for (const opportunityId of params.opportunityIds) {
+    let jobId: string | null = null;
     try {
       const job = await createExecution({
         workspaceId: params.workspaceId,
@@ -374,11 +394,19 @@ export async function startExecutionsForOpportunities(params: {
         mode: params.mode ?? 'prepare',
         userId: params.userId,
       });
+      jobId = String(job.id);
       let status = String(job.status);
-      let jobId = String(job.id);
       if (params.startImmediately !== false) {
-        const started = await startJob(params.workspaceId, jobId, params.userId);
-        status = String(started?.status ?? 'preparing');
+        try {
+          const started = await startJob(params.workspaceId, jobId, params.userId);
+          status = String(started?.status ?? 'preparing');
+        } catch (startErr) {
+          const msg =
+            startErr instanceof Error ? startErr.message : 'Failed to start';
+          await markJobFailedToStart(params.workspaceId, jobId, msg);
+          errors.push({ opportunityId, message: msg, jobId });
+          continue;
+        }
       }
       results.push({
         opportunityId,
@@ -390,18 +418,84 @@ export async function startExecutionsForOpportunities(params: {
       errors.push({
         opportunityId,
         message: err instanceof Error ? err.message : String(err),
+        jobId: jobId ?? undefined,
       });
     }
   }
 
   if (errors.length && results.length === 0) {
     throw Object.assign(
-      new Error(`All executions failed: ${errors.map((e) => e.message).join('; ')}`),
-      { status: 500, errors }
+      new Error(
+        `Execution failed before submission began. ${errors.map((e) => e.message).join('; ')}`
+      ),
+      { status: 400, code: 'FAILED_TO_START', errors }
     );
   }
 
   return { results, errors };
+}
+
+/** Pause all active (non-terminal) campaign jobs. */
+export async function pauseCampaign(workspaceId: string) {
+  const jobs = await listJobs(workspaceId);
+  const paused: string[] = [];
+  for (const j of jobs) {
+    const pub = toPublicExecutionStatus(String(j.status), {
+      disposition:
+        (j as { disposition?: string | null }).disposition ??
+        ((j.metrics as { disposition?: string } | null)?.disposition ?? null),
+    });
+    if (pub === 'Running' || pub === 'Queued') {
+      await pauseJob(workspaceId, String(j.id));
+      paused.push(String(j.id));
+    }
+  }
+  return { paused };
+}
+
+/** Resume paused / waiting-human jobs that are ready to continue. */
+export async function resumeCampaign(workspaceId: string, userId?: string) {
+  const jobs = await listJobs(workspaceId);
+  const resumed: string[] = [];
+  for (const j of jobs) {
+    const st = String(j.status);
+    if (st === 'paused' || st === 'ready_to_continue') {
+      await resumeJob(workspaceId, String(j.id), { resumeReason: 'campaign_resume' });
+      resumed.push(String(j.id));
+    } else if (st === 'failed' || st === 'waiting_infrastructure') {
+      const d =
+        (j as { disposition?: string | null }).disposition ??
+        ((j.metrics as { disposition?: string } | null)?.disposition ?? null);
+      if (d === 'failed_to_start' || st === 'waiting_infrastructure') {
+        try {
+          await startJob(workspaceId, String(j.id), userId);
+          resumed.push(String(j.id));
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Failed to start';
+          await markJobFailedToStart(workspaceId, String(j.id), msg);
+        }
+      }
+    }
+  }
+  return { resumed };
+}
+
+/** Stop all open campaign jobs (cancel → Skipped disposition for stop). */
+export async function stopCampaign(workspaceId: string) {
+  const jobs = await listJobs(workspaceId);
+  const stopped: string[] = [];
+  for (const j of jobs) {
+    const pub = toPublicExecutionStatus(String(j.status), {
+      disposition:
+        (j as { disposition?: string | null }).disposition ??
+        ((j.metrics as { disposition?: string } | null)?.disposition ?? null),
+    });
+    if (pub === 'Running' || pub === 'Queued' || pub === 'Waiting Human') {
+      await cancelJob(workspaceId, String(j.id), 'campaign_stopped');
+      stopped.push(String(j.id));
+    }
+  }
+  return { stopped };
 }
 
 export async function getJob(workspaceId: string, jobId: string) {
@@ -874,6 +968,7 @@ export async function retryJob(
       retry_count: nextAttempt,
       error_code: null,
       error_message: null,
+      disposition: null,
       metrics: { ...metrics, retryHistory: history, nextRetryAt: new Date(Date.now() + delay * 1000).toISOString() },
       updated_at: new Date().toISOString(),
     })

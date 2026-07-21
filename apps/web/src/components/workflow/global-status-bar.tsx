@@ -14,11 +14,12 @@ type Props = {
   className?: string;
 };
 
-/** Always-visible AI status — intervention CTAs live only in InterventionBanner */
+/** Always-visible AI status — reads ONLY from Execution State Manager */
 export function GlobalStatusBar({ projectId, className }: Props) {
   const { request, fetchProjects } = useApi();
   const currentOrgId = useAppStore((s) => s.currentOrgId);
-  const { completedCount, totalSteps, currentStep } = useWorkflow(projectId);
+  const { completedCount, totalSteps, currentStep, aiStatusLine: workflowAi } =
+    useWorkflow(projectId);
   const bee = useBeeExecutionProgress(projectId, 2_000);
   const interventions = useInterventions(projectId, 3_000);
 
@@ -43,33 +44,33 @@ export function GlobalStatusBar({ projectId, className }: Props) {
   const p = bee.data;
   const actionItems = interventions.data?.data.items ?? [];
   const needsAction = actionItems.length > 0;
-  const hasJobs = (p?.totalJobs ?? 0) > 0;
+  const campaignState = p?.campaignState ?? 'Idle';
+  const campaignActive =
+    Boolean(p?.campaignIsRunning) ||
+    campaignState === 'Waiting Human' ||
+    campaignState === 'Paused' ||
+    campaignState === 'Starting' ||
+    campaignState === 'Completed' ||
+    campaignState === 'Failed To Start';
   const unread = Array.isArray(notifications.data?.data)
     ? 0
     : Number((notifications.data?.data as { unread?: number })?.unread ?? 0);
 
   const firstAction = actionItems[0];
-  const aiTask = !p
-    ? currentStep.title
-    : needsAction && firstAction
+  const aiTask =
+    needsAction && firstAction
       ? 'waiting for you'
-      : p.running > 0
-        ? 'Submitting backlinks'
-        : p.queued > 0
-          ? 'Preparing submissions'
-          : p.waitingVerification > 0
-            ? 'Verifying links'
-            : p.executionComplete
-              ? 'Ready'
-              : currentStep.title;
+      : p?.aiStatusLine || workflowAi || currentStep.title;
 
-  const pct = hasJobs
+  const pct = campaignActive
     ? Math.round(p?.progressPercent ?? 0)
     : Math.round((completedCount / Math.max(totalSteps, 1)) * 100);
-  const progressLabel = hasJobs
+  const progressLabel = campaignActive
     ? `${p?.completedJobs ?? 0}/${p?.totalJobs ?? 0}`
     : `${completedCount}/${totalSteps}`;
-  const showSpin = Boolean(p && (p.running > 0 || needsAction));
+  const showSpin = Boolean(
+    p && (p.campaignIsRunning || campaignState === 'Starting' || needsAction)
+  );
 
   return (
     <div
@@ -86,8 +87,8 @@ export function GlobalStatusBar({ projectId, className }: Props) {
       </Link>
       <span className="text-muted-foreground tabular-nums">
         {progressLabel}
-        {hasJobs ? ` (${pct}%)` : ''}
-        {hasJobs && p && !p.executionComplete && p.etaSeconds > 0
+        {campaignActive ? ` (${pct}%)` : ''}
+        {campaignActive && p && p.campaignIsRunning && p.etaSeconds > 0
           ? ` · ETA ${formatEta(p.etaSeconds)}`
           : ''}
       </span>
@@ -95,7 +96,10 @@ export function GlobalStatusBar({ projectId, className }: Props) {
         {showSpin ? <Loader2 className="h-3 w-3 animate-spin text-primary shrink-0" /> : null}
         <span className="truncate">
           AI is{' '}
-          {aiTask.toLowerCase().startsWith('waiting') || aiTask === 'Ready'
+          {aiTask.toLowerCase().startsWith('waiting') ||
+          aiTask.toLowerCase().startsWith('ready') ||
+          aiTask.toLowerCase().startsWith('execution failed') ||
+          aiTask.toLowerCase().startsWith('campaign')
             ? aiTask.toLowerCase()
             : `doing: ${aiTask}`}
         </span>

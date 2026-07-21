@@ -2,34 +2,58 @@ import {
   BACKLINK_TYPES,
   buildIntelligentContentPlan,
   detectSubmissionRequirements,
+  websiteRowStatus,
+  type ExecutionPublicStatus,
 } from '@seo-os/backlink-builder';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 
-const ACTIVE_JOB_STATUSES = new Set([
-  'queued',
-  'preparing',
-  'running',
-  'paused',
-  'needs_approval',
-  'ready_for_review',
-  'ready_to_continue',
-  'watching_captcha',
-  'watching_login',
-  'watching_mfa',
-  'watching_email',
-  'watching_phone',
-  'blocked_captcha',
-  'blocked_mfa',
-]);
-
 export type OpportunityReadiness =
   | 'ready'
+  | 'starting'
+  | 'running'
+  | 'waiting_human'
+  | 'completed'
+  | 'verified'
+  | 'failed'
+  | 'failed_to_start'
+  | 'skipped'
+  | 'deleted'
   | 'in_progress'
   | 'needs_approval'
-  | 'completed'
-  | 'failed'
   | 'needs_domain'
   | 'not_ready';
+
+function readinessFromPublic(pub: ExecutionPublicStatus): OpportunityReadiness {
+  switch (pub) {
+    case 'Ready':
+      return 'ready';
+    case 'Starting':
+    case 'Queued':
+      return 'starting';
+    case 'Running':
+      return 'running';
+    case 'Waiting Human':
+      return 'waiting_human';
+    case 'Completed':
+    case 'Submitted':
+      return 'completed';
+    case 'Verified':
+    case 'Approved':
+      return 'verified';
+    case 'Failed to Start':
+      return 'failed_to_start';
+    case 'Failed':
+    case 'Rejected':
+      return 'failed';
+    case 'Skipped':
+      return 'skipped';
+    case 'Deleted':
+    case 'Ignored':
+      return 'deleted';
+    default:
+      return 'ready';
+  }
+}
 
 function typeMeta(opportunityType: string) {
   const hit = BACKLINK_TYPES.find((t) => t.id === opportunityType);
@@ -60,7 +84,15 @@ export async function listApprovedOpportunities(workspaceId: string) {
   const ids = (opps ?? []).map((o) => o.id);
   const jobsByOpp = new Map<
     string,
-    { id: string; status: string; created_at: string; site_domain?: string | null }
+    {
+      id: string;
+      status: string;
+      created_at: string;
+      site_domain?: string | null;
+      disposition?: string | null;
+      error_code?: string | null;
+      error_message?: string | null;
+    }
   >();
   const packByOpp = new Set<string>();
 
@@ -68,7 +100,9 @@ export async function listApprovedOpportunities(workspaceId: string) {
     const [{ data: jobs }, { data: packs }] = await Promise.all([
       getSupabaseAdmin()
         .from('execution_jobs')
-        .select('id, opportunity_id, status, created_at, site_domain')
+        .select(
+          'id, opportunity_id, status, created_at, site_domain, disposition, error_code, error_message, metrics'
+        )
         .eq('workspace_id', workspaceId)
         .in('opportunity_id', ids)
         .is('deleted_at', null)
@@ -83,11 +117,16 @@ export async function listApprovedOpportunities(workspaceId: string) {
     for (const job of jobs ?? []) {
       const oppId = String(job.opportunity_id);
       if (!jobsByOpp.has(oppId)) {
+        const metrics = job.metrics as { disposition?: string } | null;
         jobsByOpp.set(oppId, {
           id: String(job.id),
           status: String(job.status),
           created_at: String(job.created_at),
           site_domain: job.site_domain as string | null,
+          disposition:
+            (job.disposition as string | null) ?? metrics?.disposition ?? null,
+          error_code: (job.error_code as string | null) ?? null,
+          error_message: (job.error_message as string | null) ?? null,
         });
       }
     }
@@ -164,23 +203,24 @@ export async function listApprovedOpportunities(workspaceId: string) {
       opp.pipeline_stage === 'outreach' ||
       opp.queue_status === 'approved';
 
+    let rowStatus: ExecutionPublicStatus = 'Ready';
     let readiness: OpportunityReadiness = 'not_ready';
     if (latestJob) {
-      const st = latestJob.status;
-      if (st === 'completed' || st === 'submitted' || st === 'verified') readiness = 'completed';
-      else if (st === 'failed') readiness = 'failed';
-      else if (st === 'deleted' || st === 'ignored' || st === 'skipped') readiness = 'not_ready';
-      else if (st === 'needs_approval' || st === 'ready_for_review') readiness = 'needs_approval';
-      else if (ACTIVE_JOB_STATUSES.has(st)) readiness = 'in_progress';
-      else readiness = 'ready';
+      rowStatus = websiteRowStatus(latestJob.status, latestJob.disposition);
+      readiness = readinessFromPublic(rowStatus);
     } else if (!hasDomain) {
       readiness = 'needs_domain';
+      rowStatus = 'Ready';
     } else if (campaignEligible) {
       readiness = 'ready';
+      rowStatus = 'Ready';
     }
 
     const selectable =
-      readiness === 'ready' || readiness === 'failed' || readiness === 'completed';
+      readiness === 'ready' ||
+      readiness === 'failed' ||
+      readiness === 'failed_to_start' ||
+      readiness === 'completed';
 
     return {
       id: opp.id,
@@ -205,6 +245,9 @@ export async function listApprovedOpportunities(workspaceId: string) {
       status: opp.queue_status || opp.status,
       pipeline_stage: opp.pipeline_stage,
       readiness,
+      /** ESM public website status — sole badge source for Submit Backlinks */
+      rowStatus,
+      error_message: latestJob?.error_message ?? null,
       /** Execution Center: whether Start Execution is allowed */
       selectable,
       /** Content Studio / media: any approved row may generate packs */
@@ -227,6 +270,8 @@ export async function listApprovedOpportunities(workspaceId: string) {
             id: latestJob.id,
             status: latestJob.status,
             created_at: latestJob.created_at,
+            disposition: latestJob.disposition ?? null,
+            error_message: latestJob.error_message ?? null,
           }
         : null,
     };

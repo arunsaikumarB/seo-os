@@ -4,40 +4,39 @@
  * must map through these public statuses and count helpers.
  */
 
-/** User-facing execution statuses (product vocabulary). */
+/** User-facing website / job statuses (product vocabulary). */
 export const EXECUTION_PUBLIC_STATUSES = [
+  'Ready',
+  'Starting',
   'Queued',
   'Running',
-  'Submitted',
   'Waiting Human',
+  'Submitted',
+  'Completed',
+  'Verified',
   'Failed',
+  'Failed to Start',
   'Skipped',
   'Deleted',
   'Ignored',
-  'Verified',
   'Approved',
   'Rejected',
 ] as const;
 
 export type ExecutionPublicStatus = (typeof EXECUTION_PUBLIC_STATUSES)[number];
 
-/** Internal DB / worker statuses that count toward campaign progress denominators. */
-export const CAMPAIGN_EXCLUDED_STATUSES = new Set([
-  'deleted',
-  'ignored',
-]);
+/** Campaign-level lifecycle (not per-website). */
+export const CAMPAIGN_STATES = [
+  'Idle',
+  'Starting',
+  'Running',
+  'Waiting Human',
+  'Failed To Start',
+  'Completed',
+  'Paused',
+] as const;
 
-/** Statuses that are terminal for automation (site will not run again unless retried). */
-export const TERMINAL_PUBLIC = new Set<ExecutionPublicStatus>([
-  'Submitted',
-  'Failed',
-  'Skipped',
-  'Deleted',
-  'Ignored',
-  'Verified',
-  'Approved',
-  'Rejected',
-]);
+export type CampaignState = (typeof CAMPAIGN_STATES)[number];
 
 export type ExecutionStateJobInput = {
   id: string;
@@ -55,29 +54,28 @@ export type ExecutionStateJobInput = {
 };
 
 /**
- * Map raw execution_jobs.status (+ disposition) → public Execution Status.
- * Deleting always yields Deleted — never Failed.
+ * Map raw execution_jobs.status (+ disposition) → public status.
+ * Delete Forever → Deleted (never Failed).
+ * Start API failure → Failed to Start (never Running / never progress).
  */
 export function toPublicExecutionStatus(
   status: string,
-  opts?: { disposition?: string | null }
+  opts?: { disposition?: string | null; errorCode?: string | null }
 ): ExecutionPublicStatus {
   const s = String(status ?? '');
   const d = String(opts?.disposition ?? '');
+  const code = String(opts?.errorCode ?? '');
 
   if (s === 'deleted' || d === 'deleted_forever' || d === 'deleted') return 'Deleted';
   if (s === 'ignored' || d === 'ignored' || d === 'globally_ignored') return 'Ignored';
+  if (d === 'failed_to_start' || code === 'FAILED_TO_START') return 'Failed to Start';
   if (s === 'skipped' || s === 'unsupported' || d === 'skipped') return 'Skipped';
   if (s === 'failed') return 'Failed';
   if (s === 'verified') return 'Verified';
   if (s === 'approved') return 'Approved';
   if (s === 'rejected') return 'Rejected';
-  if (
-    s === 'submitted' ||
-    s === 'completed' ||
-    s === 'waiting_verification'
-  ) {
-    return 'Submitted';
+  if (s === 'submitted' || s === 'completed' || s === 'waiting_verification') {
+    return s === 'completed' ? 'Completed' : 'Submitted';
   }
   if (
     s.startsWith('watching') ||
@@ -90,18 +88,16 @@ export function toPublicExecutionStatus(
   ) {
     return 'Waiting Human';
   }
-  if (
-    s === 'queued' ||
-    s === 'retry_scheduled' ||
-    s === 'waiting_infrastructure'
-  ) {
+  if (s === 'queued' || s === 'retry_scheduled') {
     return 'Queued';
   }
+  if (s === 'waiting_infrastructure') {
+    // Parked before a live browser session — treat as Failed to Start for campaign UX
+    return 'Failed to Start';
+  }
   if (s === 'cancelled') {
-    // Legacy cancel without delete disposition → Skipped (not Failed)
     return d === 'deleted_forever' ? 'Deleted' : 'Skipped';
   }
-  // Active automation
   if (
     [
       'preparing',
@@ -117,18 +113,26 @@ export function toPublicExecutionStatus(
   ) {
     return 'Running';
   }
-  return 'Queued';
+  return 'Ready';
 }
 
 export type ExecutionStateCounts = Record<ExecutionPublicStatus, number> & {
-  /** Sites still in the campaign (excludes Deleted + Ignored). */
+  /** Sites that count toward campaign progress (excludes Deleted / Ignored / Failed to Start). */
+  totalExecutable: number;
+  /** Alias for totalExecutable — campaign denominator. */
   campaignTotal: number;
-  /** Terminal among campaignTotal (progress numerator basis). */
   campaignResolved: number;
-  /** Still automating or waiting human within campaign. */
   campaignOpen: number;
+  /**
+   * Progress = (Running + Completed/Submitted/Verified + Waiting Human) / Total Executable.
+   * Failed To Start campaigns are forced to 0%.
+   */
   progressPercent: number;
   executionComplete: boolean;
+  campaignState: CampaignState;
+  /** True only when ≥1 website is actually Running. */
+  campaignIsRunning: boolean;
+  aiStatusLine: string;
 };
 
 export function emptyExecutionCounts(): ExecutionStateCounts {
@@ -137,58 +141,158 @@ export function emptyExecutionCounts(): ExecutionStateCounts {
   ) as Record<ExecutionPublicStatus, number>;
   return {
     ...base,
+    totalExecutable: 0,
     campaignTotal: 0,
     campaignResolved: 0,
     campaignOpen: 0,
     progressPercent: 0,
     executionComplete: false,
+    campaignState: 'Idle',
+    campaignIsRunning: false,
+    aiStatusLine: 'Ready to submit',
   };
 }
 
-/** Compute campaign counts from job rows — only source of truth for progress math. */
+function dispositionOf(job: ExecutionStateJobInput): string | null {
+  if (job.disposition != null) return String(job.disposition);
+  const m = job.metrics as { disposition?: string } | null;
+  return m?.disposition != null ? String(m.disposition) : null;
+}
+
+/** Compute campaign counts — ONLY source of truth for progress math. */
 export function computeExecutionCounts(
   jobs: ExecutionStateJobInput[]
 ): ExecutionStateCounts {
   const counts = emptyExecutionCounts();
   for (const job of jobs) {
     const pub = toPublicExecutionStatus(job.status, {
-      disposition: job.disposition ?? (job.metrics?.disposition as string | undefined) ?? null,
+      disposition: dispositionOf(job),
+      errorCode: job.error_code ?? null,
     });
     counts[pub]++;
   }
 
-  // Progress denominator: never include Deleted / Ignored
-  counts.campaignTotal =
-    jobs.length - counts.Deleted - counts.Ignored;
-  counts.campaignResolved =
-    counts.Submitted +
-    counts.Failed +
-    counts.Skipped +
-    counts.Verified +
-    counts.Approved +
-    counts.Rejected;
-  counts.campaignOpen = Math.max(0, counts.campaignTotal - counts.campaignResolved);
-  counts.progressPercent =
-    counts.campaignTotal > 0
-      ? Math.round((counts.campaignResolved / counts.campaignTotal) * 1000) / 10
-      : 0;
-  // Campaign complete when nothing left automating (Waiting Human is optional — still "open")
-  counts.executionComplete =
-    counts.campaignTotal > 0 && counts.Running === 0 && counts.Queued === 0;
+  // Failed to Start / Deleted / Ignored never inflate campaign progress
+  counts.totalExecutable =
+    jobs.length - counts.Deleted - counts.Ignored - counts['Failed to Start'];
+  counts.campaignTotal = counts.totalExecutable;
 
+  const completedLike =
+    counts.Submitted + counts.Completed + counts.Verified + counts.Approved;
+
+  counts.campaignResolved =
+    completedLike + counts.Failed + counts.Skipped + counts.Rejected;
+
+  counts.campaignOpen = Math.max(
+    0,
+    counts.totalExecutable - counts.campaignResolved
+  );
+
+  counts.campaignIsRunning = counts.Running > 0;
+
+  // Progress numerator: sites that have left Ready (actively in flight or done-ish human wait)
+  const progressed =
+    counts.Running + completedLike + counts['Waiting Human'];
+
+  let campaignState: CampaignState = 'Idle';
+  if (counts.campaignIsRunning) {
+    campaignState = 'Running';
+  } else if (counts.Queued > 0 || counts.Starting > 0) {
+    campaignState = 'Starting';
+  } else if (counts['Waiting Human'] > 0) {
+    campaignState = 'Waiting Human';
+  } else if (
+    counts['Failed to Start'] > 0 &&
+    counts.totalExecutable === 0 &&
+    completedLike === 0
+  ) {
+    campaignState = 'Failed To Start';
+  } else if (
+    counts.totalExecutable > 0 &&
+    counts.Running === 0 &&
+    counts.Queued === 0 &&
+    counts.campaignOpen === 0
+  ) {
+    campaignState = 'Completed';
+  } else if (counts.totalExecutable > 0 && counts.Failed === counts.totalExecutable) {
+    campaignState = 'Completed'; // all failed after start — still a finished campaign
+  }
+
+  counts.campaignState = campaignState;
+
+  // Campaign cannot report Running progress until at least one site is Running
+  // Failed To Start → always 0%
+  if (campaignState === 'Failed To Start' || campaignState === 'Idle') {
+    counts.progressPercent = 0;
+  } else if (counts.totalExecutable > 0) {
+    counts.progressPercent =
+      Math.round((progressed / counts.totalExecutable) * 1000) / 10;
+  } else {
+    counts.progressPercent = 0;
+  }
+
+  counts.executionComplete =
+    campaignState === 'Completed' ||
+    (counts.totalExecutable > 0 &&
+      counts.Running === 0 &&
+      counts.Queued === 0 &&
+      counts['Waiting Human'] === 0);
+
+  counts.aiStatusLine = aiStatusForCampaign(counts);
   return counts;
 }
 
-/** Whether a job should appear in Verification (Submitted only). */
-export function isVerificationEligible(status: string, disposition?: string | null): boolean {
-  const pub = toPublicExecutionStatus(status, { disposition });
-  return pub === 'Submitted' || pub === 'Verified' || pub === 'Approved';
+export function aiStatusForCampaign(c: ExecutionStateCounts): string {
+  switch (c.campaignState) {
+    case 'Failed To Start':
+      return 'Execution failed before submission began.';
+    case 'Starting':
+      return 'Starting submissions…';
+    case 'Running':
+      return 'Submitting backlinks';
+    case 'Waiting Human':
+      return 'Waiting for you';
+    case 'Completed':
+      return 'Campaign complete';
+    case 'Paused':
+      return 'Campaign paused';
+    default:
+      return 'Ready to submit';
+  }
 }
 
-/** Whether a job should be hidden from all project surfaces after Delete Forever. */
-export function isHiddenFromProject(status: string, disposition?: string | null): boolean {
+/** Whether a job should appear in Verification (Submitted only). */
+export function isVerificationEligible(
+  status: string,
+  disposition?: string | null
+): boolean {
+  const pub = toPublicExecutionStatus(status, { disposition });
+  return (
+    pub === 'Submitted' ||
+    pub === 'Completed' ||
+    pub === 'Verified' ||
+    pub === 'Approved'
+  );
+}
+
+/** Whether a job should be hidden from project surfaces after Delete Forever. */
+export function isHiddenFromProject(
+  status: string,
+  disposition?: string | null
+): boolean {
   const pub = toPublicExecutionStatus(status, { disposition });
   return pub === 'Deleted' || pub === 'Ignored';
+}
+
+/** Website table badge — Ready when failed to start (retryable). */
+export function websiteRowStatus(
+  status: string,
+  disposition?: string | null
+): ExecutionPublicStatus {
+  const pub = toPublicExecutionStatus(status, { disposition });
+  if (pub === 'Failed to Start') return 'Failed to Start';
+  if (pub === 'Queued') return 'Starting';
+  return pub;
 }
 
 export function publicStatusLabel(status: ExecutionPublicStatus): string {
