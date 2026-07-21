@@ -235,7 +235,7 @@ export function BrowserAssistantPage() {
           </p>
         </div>
         <Button variant="outline" size="sm" asChild>
-          <Link to={`/projects/${projectId}/backlink-builder/execution`}>Execution Center</Link>
+          <Link to={`/projects/${projectId}/backlink-builder/execution`}>Submission Center</Link>
         </Button>
       </div>
 
@@ -254,7 +254,7 @@ export function BrowserAssistantPage() {
                     <div>
                       <p className="font-medium">{d.successToast || 'AI is continuing'}</p>
                       <p className="text-sm text-muted-foreground mt-1">
-                        {d.website} no longer needs you. Watch progress in Execution Center.
+                        {d.website} no longer needs you. Watch progress in Submission Center.
                       </p>
                       <Button size="sm" className="mt-3" asChild variant="outline">
                         <Link to={`/projects/${projectId}/backlink-builder/execution`}>
@@ -369,7 +369,7 @@ export function BrowserAssistantPage() {
         <Card>
           <CardContent className="pt-4 text-sm text-muted-foreground">
             Select a website from <span className="font-medium text-foreground">Needs Your Action</span>{' '}
-            above, or open one from the Execution Center. AI will send you here automatically whenever
+            above, or open one from Submission Center. AI will send you here automatically whenever
             login, CAPTCHA, MFA, or verification is required.
           </CardContent>
         </Card>

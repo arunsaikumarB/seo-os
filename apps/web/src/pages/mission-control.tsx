@@ -416,7 +416,7 @@ export function MissionControlPage() {
                   : ''}
             </p>
             <Button variant="outline" size="sm" asChild>
-              <Link to={`/projects/${projectId}/backlink-builder/execution`}>Execution Center</Link>
+              <Link to={`/projects/${projectId}/backlink-builder/execution`}>Submission Center</Link>
             </Button>
           </div>
         </CardContent>

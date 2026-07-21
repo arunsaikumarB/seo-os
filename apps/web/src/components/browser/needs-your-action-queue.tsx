@@ -108,7 +108,7 @@ export function NeedsYourActionQueue({
                 <Link
                   to={`/projects/${projectId}/backlink-builder/browser-assistant?jobId=${item.jobId}`}
                 >
-                  {item.cta || 'Open'}
+                  {item.cta === 'Open Browser Assistant' ? 'Continue' : item.cta || 'Open'}
                   <ExternalLink className="h-3.5 w-3.5 ml-1.5" />
                 </Link>
               </Button>
@@ -153,7 +153,7 @@ export function ActionRequiredCard({
           <Link
             to={`/projects/${projectId}/backlink-builder/browser-assistant?jobId=${item.jobId}`}
           >
-            Open Browser Assistant
+            Continue Submission
             <ExternalLink className="h-3.5 w-3.5 ml-1.5" />
           </Link>
         </Button>

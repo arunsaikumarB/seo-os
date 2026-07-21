@@ -486,13 +486,13 @@ export function BrowserExecutionCenterPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Submit Backlinks</h1>
           <p className="text-muted-foreground">
-            AI opens websites, fills forms, and submits. If login or CAPTCHA appears, open Browser
-            Assistant — AI resumes automatically.
+            AI is submitting backlinks. If login or CAPTCHA appears, continue submission — AI resumes
+            automatically.
           </p>
         </div>
         <Button variant="outline" size="sm" asChild>
           <Link to={`/projects/${projectId}/backlink-builder/browser-assistant`}>
-            Browser Assistant
+            Continue Submission
           </Link>
         </Button>
       </div>
@@ -534,9 +534,7 @@ export function BrowserExecutionCenterPage() {
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Overview</CardTitle>
-              <CardDescription>
-                Progress · running jobs · completed · needs your action · ETA
-              </CardDescription>
+              <CardDescription>Progress · running · completed · needs your action · ETA</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
@@ -548,18 +546,11 @@ export function BrowserExecutionCenterPage() {
                     ['Submitted', s?.submitted ?? 0],
                     ['Completed', s?.completed ?? 0],
                     ['Failed', s?.failed ?? 0],
-                    ['Retrying', s?.retrying ?? 0],
-                    ['Workers', s?.workerUsage ?? (maxWorkers ? `0/${maxWorkers}` : '—')],
                     ['ETA', formatEta(s?.etaSeconds)],
-                    [
-                      'Avg Runtime',
-                      s?.avgRuntimeMs != null ? `${Math.round(s.avgRuntimeMs / 1000)}s` : '—',
-                    ],
                     [
                       'Success Rate',
                       s?.successRate != null ? `${s.successRate}%` : '—',
                     ],
-                    ['Waiting Verification', s?.waitingVerification ?? 0],
                   ] as const
                 ).map(([label, value]) => (
                   <div key={label}>
@@ -589,10 +580,9 @@ export function BrowserExecutionCenterPage() {
 
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base">Live Workers</CardTitle>
+              <CardTitle className="text-base">AI is submitting</CardTitle>
               <CardDescription>
-                Configured pool {maxWorkers || '—'}/workers · active{' '}
-                {s?.activeWorkerCount ?? 0} · ETA {formatEta(s?.etaSeconds)}
+                Estimated finish {formatEta(s?.etaSeconds)} · active {s?.activeWorkerCount ?? 0}
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 text-sm">
@@ -604,7 +594,7 @@ export function BrowserExecutionCenterPage() {
                 workerSlots.map((w) => (
                   <div key={w.workerId} className="rounded-md border px-3 py-2">
                     <div className="flex items-center justify-between gap-2">
-                      <p className="font-medium">Worker {w.workerId}</p>
+                      <p className="font-medium">Slot {w.workerId}</p>
                       <Badge
                         className={
                           w.status === 'busy'
@@ -656,7 +646,7 @@ export function BrowserExecutionCenterPage() {
                     }
                   >
                     <Play className="h-3 w-3 mr-1" />
-                    Start Execution
+                    Start Submission
                     {selectedOppIds.size > 0 ? ` (${selectedOppIds.size})` : ''}
                   </Button>
                 </div>
@@ -895,7 +885,7 @@ export function BrowserExecutionCenterPage() {
                             <Link
                               to={`/projects/${projectId}/backlink-builder/browser-assistant?jobId=${j.id}`}
                             >
-                              Open Browser Assistant
+                              Continue Submission
                             </Link>
                           </Button>
                         ) : null}

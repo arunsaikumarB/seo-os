@@ -7,7 +7,7 @@ export const EXECUTION_PIPELINE_STAGES = [
   'Filling Form',
   'Uploading Assets',
   'Submitting',
-  'Waiting Verification',
+  'Checking Backlinks',
   'Completed',
 ] as const;
 
@@ -59,7 +59,7 @@ export function executionStatusLabel(
   if (p === 'login' || p === 'captcha' || p === 'mfa' || p === 'human_approval') {
     return 'Waiting for User';
   }
-  if (s === 'waiting_verification') return 'Waiting Verification';
+  if (s === 'waiting_verification') return 'Checking backlinks';
   if (s === 'submitted' || s === 'completed' || s === 'verified') return 'Submitted';
   if (
     [

@@ -53,8 +53,12 @@ export function TrackResultsPage() {
       value: (s.estimatedTraffic as string | number | undefined) ?? '—',
     },
     {
-      label: 'Estimated DA gain',
+      label: 'Estimated Authority',
       value: (s.estimatedDaGain as string | number | undefined) ?? '—',
+    },
+    {
+      label: 'Estimated Ranking Impact',
+      value: (s.estimatedRankingImpact as string | number | undefined) ?? '—',
     },
   ] as const;
 

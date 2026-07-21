@@ -44,7 +44,7 @@ export function useWorkflow(projectId: string) {
   }, [workflowProgress, projectId]);
 
   // Visiting later stages must NOT auto-complete Submit (job-driven only).
-  const visitCompleteBlocked = new Set(['submit-backlinks', 'track-results']);
+  const visitCompleteBlocked = new Set(['submit-backlinks', 'track-results', 'reports-analytics']);
 
   useEffect(() => {
     const path = location.pathname;

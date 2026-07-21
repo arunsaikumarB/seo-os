@@ -89,8 +89,8 @@ export function BacklinkPendingPage() {
   return (
     <div className="space-y-6">
       <BacklinkBuilderHero
-        title="Verification"
-        subtitle="Detailed link checks — also available from Track Results."
+        title="Check Backlinks"
+        subtitle="See what landed — also summarized in Track Results."
       />
 
       <Card>

@@ -13,8 +13,8 @@ export interface WorkflowStep {
 }
 
 /**
- * Guided backlink pipeline — primary UX path.
- * Internal systems stay in Advanced; users only see these steps.
+ * Guided backlink pipeline — primary UX path (8 steps).
+ * Internal systems stay in Advanced; users only see outcomes.
  */
 export const WORKFLOW_STEPS: WorkflowStep[] = [
   {
@@ -86,8 +86,18 @@ export const WORKFLOW_STEPS: WorkflowStep[] = [
     number: 7,
     emoji: '⑦',
     title: 'Track Results',
-    purpose: 'See submitted, pending, approved, verified — and download Excel, CSV, or PDF.',
+    purpose: 'See submitted, pending, approved, verified, and estimated impact.',
     route: 'backlink-builder/track-results',
+    estimatedMinutes: 5,
+    difficulty: 'Beginner',
+  },
+  {
+    id: 'reports-analytics',
+    number: 8,
+    emoji: '⑧',
+    title: 'Reports & Analytics',
+    purpose: 'Download executive, campaign, and period reports as Excel, CSV, or PDF.',
+    route: 'reports/library',
     estimatedMinutes: 5,
     difficulty: 'Beginner',
   },
@@ -95,22 +105,24 @@ export const WORKFLOW_STEPS: WorkflowStep[] = [
 
 export const TOTAL_WORKFLOW_STEPS = WORKFLOW_STEPS.length;
 
-/** Older step ids still stored in local progress — map to the current 7-step flow */
+/** Older step ids still stored in local progress */
 export const WORKFLOW_STEP_ALIASES: Record<string, string[]> = {
   'ai-review': ['ai-discovery'],
   'approve-opportunities': ['opportunity-review'],
   'generate-content': ['content-studio'],
   'submit-backlinks': ['browser-execution'],
-  'track-results': ['verification', 'reports'],
+  'track-results': ['verification'],
+  'reports-analytics': ['reports'],
 };
 
 /** Compact labels for the workflow progress strip */
 export const WORKFLOW_PIPELINE_LABELS: Array<{ id: string; label: string }> = [
-  { id: 'create-project', label: 'Project' },
+  { id: 'create-project', label: 'Create Project' },
   { id: 'import-websites', label: 'Import' },
   { id: 'ai-review', label: 'AI Review' },
   { id: 'approve-opportunities', label: 'Approve' },
-  { id: 'generate-content', label: 'Content' },
+  { id: 'generate-content', label: 'Generate' },
   { id: 'submit-backlinks', label: 'Submit' },
   { id: 'track-results', label: 'Results' },
+  { id: 'reports-analytics', label: 'Reports' },
 ];

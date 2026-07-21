@@ -440,10 +440,10 @@ export function ContentLibraryPage() {
         <>
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base">Generate submission package</CardTitle>
+              <CardTitle className="text-base">Generate Content</CardTitle>
               <CardDescription>
-                Select an opportunity. AI studies the destination site, detects backlink type, and
-                generates only the required fields.
+                Select an opportunity. AI detects the backlink type and builds the right submission —
+                you never pick a format.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -464,14 +464,8 @@ export function ContentLibraryPage() {
                   ) : intel ? (
                     <div className="rounded-md border p-3 space-y-3">
                       <div className="flex flex-wrap items-center gap-2">
-                        <Badge className="capitalize">{modeLabel}</Badge>
-                        <Badge className="capitalize bg-transparent">{intel.plan.detectedTypeLabel}</Badge>
-                        {intel.reusedLearning ? (
-                          <Badge className="text-[10px]">Learned requirements</Badge>
-                        ) : null}
-                        <span className="text-xs text-muted-foreground">
-                          Confidence {Math.round(intel.plan.confidence || 0)}%
-                        </span>
+                        <span className="text-xs text-muted-foreground">Detected Backlink Type</span>
+                        <Badge className="capitalize">{intel.plan.detectedTypeLabel}</Badge>
                       </div>
                       <p className="text-xs text-muted-foreground">{intel.plan.reason}</p>
                       <p className="text-xs">{MODE_HINTS[studioMode] ?? MODE_HINTS.generic}</p>
@@ -575,8 +569,10 @@ export function ContentLibraryPage() {
                       onClick={() => generatePack.mutate()}
                     >
                       {generatePack.isPending
-                        ? 'Generating package…'
-                        : `Generate ${modeLabel.replace(/ Mode$/, '')} Package`}
+                        ? 'Generating content…'
+                        : studioMode.includes('forum')
+                          ? 'Generate Submission'
+                          : 'Generate Content'}
                     </Button>
                     <Button
                       variant="outline"

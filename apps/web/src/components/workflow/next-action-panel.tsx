@@ -44,13 +44,13 @@ export function NextActionPanel({ projectId, title, className }: NextActionPanel
               <p className="text-sm text-amber-800 dark:text-amber-200">{firstAction.reason}</p>
             </div>
             <p className="text-sm text-muted-foreground">
-              AI finished everything it can. Open Browser Assistant to continue.
+              AI finished everything it can. Continue Submission to finish this step.
             </p>
             <Button asChild size="sm">
               <Link
                 to={`/projects/${projectId}/backlink-builder/browser-assistant?jobId=${firstAction.jobId}`}
               >
-                Open Browser
+                Continue Submission
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Link>
             </Button>
@@ -76,11 +76,11 @@ export function NextActionPanel({ projectId, title, className }: NextActionPanel
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Your guided workflow is complete. Track results anytime.
+              Your guided workflow is complete. Open reports anytime.
             </p>
             <Button asChild size="sm">
-              <Link to={`/projects/${projectId}/backlink-builder/track-results`}>
-                Track Results
+              <Link to={`/projects/${projectId}/reports/library`}>
+                Reports & Analytics
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Link>
             </Button>
@@ -116,7 +116,7 @@ export function NextActionPanel({ projectId, title, className }: NextActionPanel
             </div>
             <Button asChild size="sm" variant="outline">
               <Link to={`/projects/${projectId}/backlink-builder/execution`}>
-                View progress
+                View Submission Center
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Link>
             </Button>

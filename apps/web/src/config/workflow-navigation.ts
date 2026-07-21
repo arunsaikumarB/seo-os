@@ -18,7 +18,6 @@ import {
   Plug,
   GraduationCap,
   FolderPlus,
-  Activity,
 } from 'lucide-react';
 import type { NavItem } from './navigation';
 
@@ -35,7 +34,7 @@ export interface WorkflowNavSection {
 
 export interface WorkflowNavItem extends NavItem {
   absolute?: boolean;
-  /** Shown as ①…⑦ in primary pipeline */
+  /** Shown as ①…⑧ in primary pipeline */
   stepNumber?: number;
   dividerBefore?: boolean;
 }
@@ -44,7 +43,7 @@ export interface WorkflowNavItem extends NavItem {
 export const workflowNavSections: WorkflowNavSection[] = [
   {
     id: 'primary',
-    label: 'Workflow',
+    label: 'Backlink Builder',
     flat: true,
     items: [
       {
@@ -101,6 +100,13 @@ export const workflowNavSections: WorkflowNavSection[] = [
         featureFlag: 'backlink_builder',
         stepNumber: 7,
       },
+      {
+        label: 'Reports & Analytics',
+        href: 'reports/library',
+        icon: FileBarChart,
+        featureFlag: 'reports',
+        stepNumber: 8,
+      },
     ],
   },
   {
@@ -129,38 +135,20 @@ export const workflowNavSections: WorkflowNavSection[] = [
         featureFlag: 'v11_browser_assistant',
       },
       {
-        label: 'Execution Center',
-        href: 'backlink-builder/execution',
-        icon: Activity,
-        featureFlag: 'bee_enabled',
+        label: 'Mission Control',
+        href: 'mission-control',
+        icon: MonitorSmartphone,
+        featureFlag: 'mission_control',
       },
-      {
-        label: 'Verification',
-        href: 'backlink-builder/pending',
-        icon: CheckCircle2,
-        featureFlag: 'backlink_builder',
-      },
-      {
-        label: 'Reports',
-        href: 'reports/library',
-        icon: FileBarChart,
-        featureFlag: 'reports',
-      },
+      { label: 'Provider Settings', href: 'providers', icon: Plug, featureFlag: 'integrations' },
+      { label: 'Diagnostics', href: 'diagnostics', icon: HeartPulse },
       {
         label: 'Learning',
         href: 'command-center',
         icon: GraduationCap,
       },
-      { label: 'Provider Settings', href: 'providers', icon: Plug, featureFlag: 'integrations' },
-      { label: 'Diagnostics', href: 'diagnostics', icon: HeartPulse },
       {
         label: 'System Health',
-        href: 'mission-control',
-        icon: MonitorSmartphone,
-        featureFlag: 'mission_control',
-      },
-      {
-        label: 'Browser Runtime',
         href: 'settings/browser-runtime',
         icon: MonitorSmartphone,
         featureFlag: 'backlink_builder',
