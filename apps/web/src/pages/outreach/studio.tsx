@@ -47,6 +47,18 @@ export function EmailStudioPage() {
     enabled: !!projectId,
   });
 
+  const contentDrafts = useQuery({
+    queryKey: ['content-drafts', projectId],
+    queryFn: () =>
+      request<{
+        data: {
+          emailDrafts: Array<{ id: string; subject?: string; title?: string; status?: string; created_at: string }>;
+          contentDrafts: Array<{ id: string; title?: string; body?: string; status?: string; created_at: string }>;
+        };
+      }>(`/v1/projects/${projectId}/campaigns/drafts`),
+    enabled: !!projectId,
+  });
+
   const aiGenerate = useMutation({
     mutationFn: () =>
       request<{
@@ -264,6 +276,46 @@ export function EmailStudioPage() {
                 Gmail / Outlook OAuth send is deferred to V1.1. SMTP remains the live send path when
                 configured. Drafts still require human approval before send.
               </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Content drafts</CardTitle>
+              <CardDescription>
+                Moved from Generate Content — outreach-ready copy lives here
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {(contentDrafts.data?.data.contentDrafts ?? []).length === 0 ? (
+                <p className="text-sm text-muted-foreground">No content drafts yet.</p>
+              ) : (
+                (contentDrafts.data?.data.contentDrafts ?? []).map((d) => (
+                  <div key={d.id} className="rounded-md border px-3 py-2 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-medium">{d.title ?? 'Untitled'}</p>
+                      <Badge className="text-[10px] capitalize">{d.status ?? 'draft'}</Badge>
+                    </div>
+                    {d.body ? (
+                      <p className="text-xs text-muted-foreground line-clamp-2 mt-1">{d.body}</p>
+                    ) : null}
+                  </div>
+                ))
+              )}
+              {(contentDrafts.data?.data.emailDrafts ?? []).length > 0 ? (
+                <div className="pt-2 space-y-2 border-t">
+                  <p className="text-xs font-medium text-muted-foreground">Email drafts</p>
+                  {(contentDrafts.data?.data.emailDrafts ?? []).map((d) => (
+                    <div
+                      key={d.id}
+                      className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"
+                    >
+                      <p className="font-medium">{d.subject ?? d.title ?? 'Email draft'}</p>
+                      <Badge className="text-[10px] capitalize">{d.status ?? 'draft'}</Badge>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </CardContent>
           </Card>
 
