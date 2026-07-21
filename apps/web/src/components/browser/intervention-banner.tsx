@@ -39,7 +39,8 @@ export function InterventionBanner({ projectId, className }: Props) {
             {items[0] ? (
               <span className="text-foreground">
                 {' '}
-                · {items[0].website} ({items[0].reason})
+                · {items[0].website}
+                {items[0].currentStep ? ` · ${items[0].currentStep}` : ''} ({items[0].reason})
               </span>
             ) : null}
           </p>

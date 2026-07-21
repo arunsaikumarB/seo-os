@@ -1,5 +1,7 @@
 /** Browser action plan builder — never bypasses CAPTCHA/login */
 
+import { detectInterventionSignals } from './intervention-signals.js';
+
 export interface BrowserPlanStep {
   order: number;
   action: string;
@@ -28,20 +30,10 @@ export function buildBrowserActionPlan(input: {
   const html = (input.htmlSnippet ?? '').toLowerCase();
   let metricsSource: 'estimated' | 'live' = input.htmlSnippet ? 'live' : 'estimated';
 
-  const loginRequired =
-    input.loginRequired ||
-    html.includes('login') ||
-    html.includes('sign in') ||
-    html.includes('password');
-  const captchaRequired =
-    input.captchaRequired ||
-    html.includes('captcha') ||
-    html.includes('recaptcha') ||
-    html.includes('hcaptcha');
-  const emailVerifyRequired =
-    input.emailVerifyRequired ||
-    html.includes('verify your email') ||
-    html.includes('email verification');
+  const signals = detectInterventionSignals(input.htmlSnippet, input.url);
+  const loginRequired = input.loginRequired || signals.loginForm;
+  const captchaRequired = input.captchaRequired || signals.captcha;
+  const emailVerifyRequired = input.emailVerifyRequired || signals.emailVerify;
 
   const formFields: string[] = [];
   const inputRegex = /<input[^>]+name=["']([^"']+)["']/gi;

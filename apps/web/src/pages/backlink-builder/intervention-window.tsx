@@ -22,18 +22,25 @@ type InterventionDetail = {
   reason: string;
   title: string;
   instruction: string;
+  explanation?: string;
   successToast: string;
   stepLabel: string;
+  currentStepLabel?: string;
   needsAction: boolean;
   completedByAi: string[];
   userOnly: string;
+  pausedUrl?: string | null;
+  openUrl?: string | null;
   liveUrl?: string | null;
   pageTitle?: string | null;
+  screenshot?: { url?: string | null; label?: string } | null;
+  domEvidence?: string | null;
+  pauseEvidence?: string[];
 };
 
 /**
  * Minimal OAuth-style helper — never embeds Playwright / Live Browser.
- * Opens the real website in a normal browser tab; SEO OS only shows this banner
+ * Opens the exact paused URL in a normal browser tab; SEO OS only shows this banner
  * and monitors completion via the existing intervention/check API.
  */
 export function InterventionWindowPage() {
@@ -46,6 +53,7 @@ export function InterventionWindowPage() {
   const siteOpenedRef = useRef(false);
   const [done, setDone] = useState(false);
   const [closeFailed, setCloseFailed] = useState(false);
+  const [showDom, setShowDom] = useState(false);
 
   useEffect(() => {
     if (jobId) return;
@@ -65,12 +73,13 @@ export function InterventionWindowPage() {
 
   const d = intervention.data?.data;
 
+  // Exact paused URL only — never fall back to bare homepage/domain
   const siteUrl =
+    normalizeSiteUrl(d?.pausedUrl ?? '') ||
+    normalizeSiteUrl(d?.openUrl ?? '') ||
     normalizeSiteUrl(d?.liveUrl ?? '') ||
-    normalizeSiteUrl(d?.website ?? '') ||
     null;
 
-  // Open the real website once — user's normal browser, not an embedded view
   useEffect(() => {
     if (!jobId || !siteUrl || !d?.needsAction || siteOpenedRef.current) return;
     siteOpenedRef.current = true;
@@ -94,7 +103,6 @@ export function InterventionWindowPage() {
     window.setTimeout(() => {
       try {
         window.close();
-        // If still open after close attempt
         window.setTimeout(() => {
           if (!window.closed) setCloseFailed(true);
         }, 400);
@@ -135,7 +143,6 @@ export function InterventionWindowPage() {
   const checkMutate = checkClear.mutate;
   const checkPending = checkClear.isPending;
 
-  // Monitor session continuously (auth / navigation / approval via existing check API)
   useEffect(() => {
     if (!projectId || !jobId || !d?.needsAction || done) return;
     if (d.gate === 'human_approval') return;
@@ -165,7 +172,7 @@ export function InterventionWindowPage() {
   if (intervention.isLoading || !d) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-background">
-        <AiLoadingState message="Opening the website in your browser…" />
+        <AiLoadingState message="Opening the paused page in your browser…" />
       </div>
     );
   }
@@ -190,23 +197,34 @@ export function InterventionWindowPage() {
     );
   }
 
+  const step = d.currentStepLabel || d.stepLabel;
+  const explanation = d.explanation || d.instruction;
+
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-muted/40">
-      <div className="w-full max-w-sm rounded-2xl border border-border/60 bg-card shadow-lg px-5 py-6 space-y-4">
+      <div className="w-full max-w-md rounded-2xl border border-border/60 bg-card shadow-lg px-5 py-6 space-y-4">
         <div className="space-y-1">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             SEO OS
           </p>
           <h1 className="text-lg font-semibold tracking-tight">AI paused this website.</h1>
-          <p className="text-sm text-muted-foreground">
-            Complete the login or approval. We&apos;ll continue automatically.
-          </p>
+          <p className="text-sm text-muted-foreground">{explanation}</p>
         </div>
 
-        <div className="rounded-xl bg-muted/50 px-3 py-2.5 text-sm space-y-1">
+        <div className="rounded-xl bg-muted/50 px-3 py-2.5 text-sm space-y-2">
           <p>
             <span className="text-muted-foreground">Website · </span>
             <span className="font-medium">{d.website}</span>
+          </p>
+          <p className="break-all">
+            <span className="text-muted-foreground">Paused URL · </span>
+            <span className="font-medium text-xs">
+              {d.pausedUrl || siteUrl || 'Restoring exact page…'}
+            </span>
+          </p>
+          <p>
+            <span className="text-muted-foreground">Current Step · </span>
+            <span className="font-medium">{step}</span>
           </p>
           <p>
             <span className="text-muted-foreground">Reason · </span>
@@ -214,21 +232,49 @@ export function InterventionWindowPage() {
           </p>
         </div>
 
+        {d.screenshot?.url ? (
+          <div className="overflow-hidden rounded-xl border border-border/50">
+            <img
+              src={d.screenshot.url}
+              alt="Paused page screenshot"
+              className="w-full max-h-48 object-cover object-top bg-muted"
+            />
+          </div>
+        ) : null}
+
+        {d.domEvidence ? (
+          <div className="space-y-1">
+            <button
+              type="button"
+              className="text-[11px] text-muted-foreground underline"
+              onClick={() => setShowDom((v) => !v)}
+            >
+              {showDom ? 'Hide DOM evidence' : 'Show DOM evidence (debug)'}
+            </button>
+            {showDom ? (
+              <pre className="max-h-28 overflow-auto rounded-lg bg-muted/80 p-2 text-[10px] leading-snug text-muted-foreground">
+                {d.domEvidence}
+              </pre>
+            ) : null}
+          </div>
+        ) : null}
+
         <p className="text-xs text-muted-foreground leading-relaxed">
-          Use the real browser tab that just opened — interact normally. SEO OS does not embed
-          Playwright or capture your mouse and keyboard here.
+          Use the real browser tab that just opened on the paused page — interact normally. SEO OS
+          does not embed Playwright here.
         </p>
 
         <div className="flex flex-col gap-2">
           {siteUrl ? (
-            <Button
-              variant="outline"
-              onClick={() => openRealWebsiteTab(siteUrl, jobId)}
-            >
+            <Button variant="outline" onClick={() => openRealWebsiteTab(siteUrl, jobId)}>
               <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
-              Open website again
+              Open paused page again
             </Button>
-          ) : null}
+          ) : (
+            <p className="text-xs text-amber-800 dark:text-amber-200 text-center">
+              Exact paused URL is not available yet. Wait a moment or reopen from Submit Backlinks.
+            </p>
+          )}
 
           {d.gate === 'human_approval' ? (
             <Button onClick={() => approve.mutate()} disabled={approve.isPending}>

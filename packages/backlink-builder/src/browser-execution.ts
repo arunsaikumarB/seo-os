@@ -1,5 +1,7 @@
 /** BEE — Execution planner, form intelligence, asset mapping (domain logic) */
 
+import { detectInterventionSignals } from './intervention-signals.js';
+
 export type ExecutionStepAction =
   | 'open'
   | 'login'
@@ -19,10 +21,13 @@ export type ExecutionStepAction =
 
 export type ExecutionGate =
   | 'login'
+  | 'signup'
   | 'captcha'
   | 'mfa'
   | 'email_verify'
   | 'phone_verify'
+  | 'category'
+  | 'manual_input'
   | 'human_approval'
   | null;
 
@@ -55,10 +60,12 @@ export interface FormIntelligenceResult {
   metricsSource: 'estimated' | 'live';
   gates: {
     login: boolean;
+    signup: boolean;
     captcha: boolean;
     mfa: boolean;
     emailVerify: boolean;
     phoneVerify: boolean;
+    category: boolean;
   };
 }
 
@@ -149,12 +156,16 @@ export function detectFormIntelligence(htmlSnippet?: string): FormIntelligenceRe
     controls.push({ name, type: 'select', required: /\brequired\b/i.test(attrs) });
   }
 
+  const signals = detectInterventionSignals(htmlSnippet ?? '', '');
   const gates = {
-    login: /login|sign[\s-]?in|password/i.test(html),
-    captcha: /captcha|recaptcha|hcaptcha|turnstile/i.test(html),
-    mfa: /mfa|2fa|two[\s-]?factor|otp|authenticator/i.test(html),
-    emailVerify: /verify your email|email verification|confirm your email/i.test(html),
-    phoneVerify: /verify.*(phone|sms)|sms code|phone verification/i.test(html),
+    // Login only when a real login form is present — never from loose copy / password alone
+    login: signals.loginForm,
+    signup: signals.signupForm,
+    captcha: signals.captcha,
+    mfa: signals.mfa,
+    emailVerify: signals.emailVerify,
+    phoneVerify: signals.phoneVerify,
+    category: signals.categoryManual,
   };
 
   const validationHints: string[] = [];
@@ -205,13 +216,20 @@ export function buildExecutionPlan(input: {
   push('open', { url: input.url }, { requiresUser: false });
   push('screenshot', { label: 'page_loaded' });
 
-  if (form.gates.login || input.profile?.loginUrl) {
+  // Only plan a login gate when a real login form was detected
+  if (form.gates.login) {
     push(
       'login',
       { loginUrl: input.profile?.loginUrl ?? null, message: 'User must authenticate — never bypassed' },
       { requiresUser: true, blocker: 'login' }
     );
     push('screenshot', { label: 'login' });
+  } else if (form.gates.signup) {
+    push(
+      'wait_approval',
+      { reason: 'signup', message: 'Registration required before submission' },
+      { requiresUser: true, blocker: 'signup' }
+    );
   }
 
   push('navigate', {
@@ -222,7 +240,15 @@ export function buildExecutionPlan(input: {
   push('screenshot', { label: 'form_ready' });
 
   push('fill', { targets: ['businessName', 'company', 'description', 'email', 'phone', 'address'] });
-  push('select', { targets: ['categories', 'tags'] });
+  if (form.gates.category) {
+    push(
+      'select',
+      { targets: ['categories', 'tags'], message: 'Category may require manual selection' },
+      { requiresUser: true, blocker: 'category' }
+    );
+  } else {
+    push('select', { targets: ['categories', 'tags'] });
+  }
   push('fill', { targets: ['keywords', 'anchorText', 'landingPage', 'socialUrls'] });
 
   if (form.hasImageUpload || form.hasFileUpload) {
@@ -373,6 +399,10 @@ export function gateStatusFromBlocker(blocker: ExecutionGate): string | null {
       return 'blocked_phone_verify';
     case 'login':
     case 'human_approval':
+      return 'needs_approval';
+    case 'signup':
+    case 'category':
+    case 'manual_input':
       return 'needs_approval';
     default:
       return null;

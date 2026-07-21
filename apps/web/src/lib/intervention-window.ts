@@ -22,7 +22,7 @@ export function openInterventionWindow(projectId: string, jobId: string): Window
   }
   // Compact helper — real website opens from the helper page itself
   const features =
-    'popup=yes,width=480,height=420,menubar=no,toolbar=no,location=no,status=no,scrollbars=yes,resizable=yes';
+    'popup=yes,width=520,height=640,menubar=no,toolbar=no,location=no,status=no,scrollbars=yes,resizable=yes';
   const win = window.open(
     interventionWindowUrl(projectId, jobId),
     `seo-os-intervene-${jobId}`,

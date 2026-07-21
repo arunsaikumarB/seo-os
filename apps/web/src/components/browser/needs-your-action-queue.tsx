@@ -6,9 +6,12 @@ import { openInterventionWindow } from '@/lib/intervention-window';
 export type InterventionItem = {
   jobId: string;
   website: string;
+  pausedUrl?: string | null;
+  currentStep?: string;
   reason: string;
   title: string;
   instruction: string;
+  explanation?: string;
   cta: string;
   displayStatus: string;
   gate: string;

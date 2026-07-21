@@ -4,6 +4,7 @@
  */
 
 import type { ExecutionGate } from './browser-execution.js';
+import { detectLoginForm } from './intervention-signals.js';
 
 export type GateClearanceReason =
   | 'captcha_gone'
@@ -55,7 +56,6 @@ const CAPTCHA_RE = /g-recaptcha|h-captcha|hcaptcha|cf-turnstile|data-sitekey|cap
 const MFA_RE = /two[\s-]?factor|authenticator app|enter (your )?otp|verification code|mfa|2fa/i;
 const EMAIL_VERIFY_RE = /verify your email|email verification|confirm your email|check your inbox/i;
 const PHONE_VERIFY_RE = /verify.*(phone|sms)|sms code|phone verification|enter the code (we )?sent/i;
-const LOGIN_FORM_RE = /type=["']password["']|sign[\s-]?in|log[\s-]?in/i;
 const LOGOUT_RE = /log[\s-]?out|sign[\s-]?out|sign out/i;
 const AVATAR_RE = /avatar|user-menu|account-menu|profile-menu/i;
 const DASHBOARD_RE = /\/(dashboard|account|home|profile|settings|member|portal)(\/|$|\?)/i;
@@ -108,7 +108,7 @@ export function evaluateGateClearance(
       };
     }
     case 'login': {
-      const loginForm = LOGIN_FORM_RE.test(htmlLower);
+      const loginForm = detectLoginForm(html, url);
       const logout = probes.logoutVisible === true || LOGOUT_RE.test(htmlLower);
       const avatar = probes.avatarVisible === true || AVATAR_RE.test(htmlLower);
       const authCookie = cookies.some((c) => AUTH_COOKIE_RE.test(c));

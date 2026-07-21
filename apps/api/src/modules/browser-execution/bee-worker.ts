@@ -143,10 +143,12 @@ async function pauseForGate(params: {
   stepId: string | null;
   gate: NonNullable<ExecutionGate>;
   screenshotBase64?: string;
+  htmlSnippet?: string;
   context?: Record<string, unknown>;
 }): Promise<void> {
   const { workspaceId, jobId, sessionId, stepIndex, stepId, gate } = params;
   const gateStatus = gateStatusFromBlocker(gate) ?? 'needs_approval';
+  const stepAction = params.context?.stepAction != null ? String(params.context.stepAction) : null;
 
   await updateStep(jobId, stepIndex, {
     status: 'paused',
@@ -158,32 +160,76 @@ async function pauseForGate(params: {
     current_step_index: stepIndex,
   });
   let pageUrl: string | undefined;
+  let pageTitle: string | undefined;
+  let liveHtml: string | undefined = params.htmlSnippet;
+  let shot = params.screenshotBase64;
+  let evidence: string[] = Array.isArray(params.context?.evidence)
+    ? (params.context!.evidence as string[])
+    : [];
+  let explanation =
+    params.context?.explanation != null ? String(params.context.explanation) : undefined;
+  let reasonLabel = params.context?.reason != null ? String(params.context.reason) : undefined;
   try {
     if (sessionId) {
       const runtime = getSessionRuntime(sessionId);
       if (runtime.hasLivePage()) {
-        const snap = await runtime.captureFrame(40);
-        pageUrl = snap.url;
+        const cap = await runtime.capture(`pause_${gate}`);
+        pageUrl = cap.url;
+        pageTitle = cap.title;
+        liveHtml = liveHtml || cap.htmlSnippet;
+        shot = shot || cap.screenshotBase64;
+        if (cap.interventionEvidence?.length) evidence = cap.interventionEvidence;
+        if (cap.interventionExplanation) explanation = explanation || cap.interventionExplanation;
+        if (cap.interventionReason) reasonLabel = reasonLabel || cap.interventionReason;
       }
     }
   } catch {
     /* optional */
   }
+  const pausedUrl = String(pageUrl ?? params.context?.url ?? '') || null;
+  const { workflowStepLabel } = await import('@seo-os/backlink-builder');
+  const currentStepLabel = workflowStepLabel(stepAction, stepIndex);
+  const domEvidence = liveHtml
+    ? liveHtml
+        .replace(/\s+/g, ' ')
+        .slice(0, 2_500)
+    : null;
+
   await mergeJobMetrics(workspaceId, jobId, {
     pauseReason: gate,
     pausedAt: new Date().toISOString(),
-    lastUrl: pageUrl ?? params.context?.url ?? null,
-    pauseContext: { ...(params.context ?? {}), url: pageUrl ?? params.context?.url },
+    lastUrl: pausedUrl,
+    pausedUrl,
+    pageTitle: pageTitle ?? null,
+    currentStepLabel,
+    pauseExplanation: explanation ?? reasonLabel ?? null,
+    pauseReasonLabel: reasonLabel ?? null,
+    loginFormDetected: gate === 'login',
+    domEvidence,
+    pauseEvidence: evidence,
+    pauseContext: {
+      ...(params.context ?? {}),
+      url: pausedUrl,
+      pausedUrl,
+      stepAction,
+      currentStepLabel,
+      explanation,
+      reason: reasonLabel,
+      evidence,
+      pageTitle,
+    },
   });
-  await appendLog(workspaceId, jobId, 'warn', `Waiting for User — ${gate}`, {
+  await appendLog(workspaceId, jobId, 'warn', `Waiting for User — ${reasonLabel || gate}`, {
     nonNegotiable: true,
     displayStatus: 'Waiting for User',
-    note: 'Open Browser Assistant to finish this step. AI auto-resumes — never bypassed.',
+    note: 'Open the exact paused URL to finish this step. AI auto-resumes — never bypassed.',
+    pausedUrl,
+    currentStepLabel,
     ...params.context,
   });
 
-  if (params.screenshotBase64) {
-    await storeScreenshot(workspaceId, jobId, stepId, `gate_${gate}`, params.screenshotBase64);
+  if (shot) {
+    await storeScreenshot(workspaceId, jobId, stepId, `gate_${gate}`, shot);
   }
 
   if (sessionId) {
@@ -375,10 +421,43 @@ export async function runBeeExecutionJob(data: {
           continue;
         }
         let shot: string | undefined;
+        let htmlSnippet: string | undefined;
+        let pauseCtx: Record<string, unknown> = { stepAction: action };
         if (health.playwrightAvailable) {
           try {
             const cap = await runtime.capture(`gate_${blocker}`);
             shot = cap.screenshotBase64;
+            htmlSnippet = cap.htmlSnippet;
+            pauseCtx = {
+              stepAction: action,
+              url: cap.url,
+              reason: cap.interventionReason,
+              explanation: cap.interventionExplanation,
+              evidence: cap.interventionEvidence,
+            };
+            // Never label as login unless a login form was actually detected
+            if (blocker === 'login' && !cap.detectedGates.includes('login')) {
+              const fallback =
+                (cap.detectedGates[0] as NonNullable<ExecutionGate> | undefined) ?? 'manual_input';
+              await pauseForGate({
+                workspaceId,
+                jobId,
+                sessionId,
+                stepIndex: step.step_index,
+                stepId: step.id,
+                gate: fallback,
+                screenshotBase64: shot,
+                htmlSnippet,
+                context: {
+                  ...pauseCtx,
+                  plannedGate: 'login',
+                  explanation:
+                    cap.interventionExplanation ||
+                    'Automation paused — login form was not detected on this page.',
+                },
+              });
+              return;
+            }
           } catch {
             // ignore
           }
@@ -391,7 +470,8 @@ export async function runBeeExecutionJob(data: {
           stepId: step.id,
           gate: blocker,
           screenshotBase64: shot,
-          context: { stepAction: action },
+          htmlSnippet,
+          context: pauseCtx,
         });
         return;
       }
@@ -414,16 +494,32 @@ export async function runBeeExecutionJob(data: {
               cap.screenshotBase64
             );
             for (const g of cap.detectedGates) {
-              if (g === 'captcha' || g === 'mfa' || g === 'email_verify' || g === 'phone_verify' || g === 'login') {
+              if (
+                g === 'captcha' ||
+                g === 'mfa' ||
+                g === 'email_verify' ||
+                g === 'phone_verify' ||
+                g === 'login' ||
+                g === 'signup' ||
+                g === 'category'
+              ) {
                 await pauseForGate({
                   workspaceId,
                   jobId,
                   sessionId,
                   stepIndex: step.step_index,
                   stepId: step.id,
-                  gate: g,
+                  gate: g as NonNullable<ExecutionGate>,
                   screenshotBase64: cap.screenshotBase64,
-                  context: { url: cap.url, during: action },
+                  htmlSnippet: cap.htmlSnippet,
+                  context: {
+                    url: cap.url,
+                    during: action,
+                    stepAction: action,
+                    reason: cap.interventionReason,
+                    explanation: cap.interventionExplanation,
+                    evidence: cap.interventionEvidence,
+                  },
                 });
                 return;
               }
@@ -535,9 +631,17 @@ export async function runBeeExecutionJob(data: {
               sessionId,
               stepIndex: step.step_index,
               stepId: step.id,
-              gate: result.gate,
+              gate: result.gate as NonNullable<ExecutionGate>,
               screenshotBase64: result.capture.screenshotBase64,
-              context: { during: 'submit' },
+              htmlSnippet: result.capture.htmlSnippet,
+              context: {
+                during: 'submit',
+                stepAction: 'submit',
+                url: result.capture.url,
+                reason: result.capture.interventionReason,
+                explanation: result.capture.interventionExplanation,
+                evidence: result.capture.interventionEvidence,
+              },
             });
             return;
           }
@@ -569,14 +673,49 @@ export async function runBeeExecutionJob(data: {
           });
           await updateJob(jobId, { status: 'verified' });
         } else if (action === 'login') {
+          let gate: NonNullable<ExecutionGate> = 'login';
+          let ctx: Record<string, unknown> = {
+            message: 'Authenticate in session — never auto-filled',
+            stepAction: 'login',
+          };
+          let shot: string | undefined;
+          let htmlSnippet: string | undefined;
+          try {
+            const cap = await runtime.capture('login_step');
+            shot = cap.screenshotBase64;
+            htmlSnippet = cap.htmlSnippet;
+            ctx = {
+              ...ctx,
+              url: cap.url,
+              reason: cap.interventionReason,
+              explanation: cap.interventionExplanation,
+              evidence: cap.interventionEvidence,
+            };
+            if (cap.detectedGates.includes('login')) {
+              gate = 'login';
+            } else if (cap.detectedGates.includes('signup')) {
+              gate = 'signup';
+            } else if (cap.detectedGates[0]) {
+              gate = cap.detectedGates[0] as NonNullable<ExecutionGate>;
+            } else {
+              gate = 'manual_input';
+              ctx.explanation =
+                'Login step reached but no login form was detected on this page.';
+              ctx.reason = 'Action Required';
+            }
+          } catch {
+            /* optional */
+          }
           await pauseForGate({
             workspaceId,
             jobId,
             sessionId,
             stepIndex: step.step_index,
             stepId: step.id,
-            gate: 'login',
-            context: { message: 'Authenticate in session — never auto-filled' },
+            gate,
+            screenshotBase64: shot,
+            htmlSnippet,
+            context: ctx,
           });
           return;
         }
@@ -871,13 +1010,13 @@ export function pipelineLabelForStatus(status: string, pauseReason?: string | nu
     preparing: 'Preparing',
     launching_browser: 'Launching Browser',
     navigating: 'Opening Website',
-    authenticating: 'Waiting Login',
+    authenticating: 'Authenticating',
     analyzing_form: 'Finding Form',
     filling_fields: 'Filling Company Info',
     uploading_assets: 'Uploading Assets',
     validating: 'Detecting Fields',
     ready_for_review: 'Ready for Review',
-    awaiting_user: 'Waiting Login',
+    awaiting_user: 'Waiting for User',
     submitting: 'Submitting',
     submitted: 'Submitted',
     waiting_verification: 'Verification Scheduled',

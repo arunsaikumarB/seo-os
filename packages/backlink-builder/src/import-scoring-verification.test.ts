@@ -111,7 +111,7 @@ describe('browser execution planner', () => {
     const { detectFormIntelligence, buildExecutionPlan, gateStatusFromBlocker, redactFormValues } =
       await import('../src/browser-execution.js');
     const form = detectFormIntelligence(
-      '<form><input name="title" required /><div class="g-recaptcha"></div><input type="password" /></form>'
+      '<form action="/login"><input name="email" type="email" /><input type="password" /><button>Sign in</button><div class="g-recaptcha"></div></form>'
     );
     expect(form.gates.captcha).toBe(true);
     expect(form.gates.login).toBe(true);

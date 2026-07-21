@@ -2,6 +2,7 @@
  * BrowserExecutionService — Playwright runtime for BEE.
  * Never bypasses CAPTCHA/MFA/email/phone/login. Pauses and returns gate reason.
  */
+import { detectInterventionSignals, type DetectedInterventionGate } from '@seo-os/backlink-builder';
 import { logger } from '../../lib/logger.js';
 
 export type BrowserMode = 'headless' | 'headed';
@@ -25,7 +26,10 @@ export interface PageCapture {
   consoleLogs: string[];
   url: string;
   title: string;
-  detectedGates: Array<'captcha' | 'mfa' | 'email_verify' | 'phone_verify' | 'login'>;
+  detectedGates: DetectedInterventionGate[];
+  interventionReason?: string | null;
+  interventionExplanation?: string | null;
+  interventionEvidence?: string[];
 }
 
 type PlaywrightModule = typeof import('playwright');
@@ -194,13 +198,17 @@ export class BrowserExecutionService {
   async capture(_label: string): Promise<PageCapture> {
     if (!this.page) throw new Error('No page');
     const html = await this.page.content();
-    const htmlLower = html.toLowerCase();
+    const pageUrl = this.page.url();
+    const signals = detectInterventionSignals(html, pageUrl);
     const detectedGates: PageCapture['detectedGates'] = [];
-    if (/captcha|recaptcha|hcaptcha|turnstile/.test(htmlLower)) detectedGates.push('captcha');
-    if (/mfa|2fa|two-factor|authenticator|otp/.test(htmlLower)) detectedGates.push('mfa');
-    if (/verify your email|email verification/.test(htmlLower)) detectedGates.push('email_verify');
-    if (/phone verification|sms code|verify.*phone/.test(htmlLower)) detectedGates.push('phone_verify');
-    if (/type=["']password["']|sign in|log in/.test(htmlLower)) detectedGates.push('login');
+    if (signals.captcha) detectedGates.push('captcha');
+    if (signals.mfa) detectedGates.push('mfa');
+    if (signals.emailVerify) detectedGates.push('email_verify');
+    if (signals.phoneVerify) detectedGates.push('phone_verify');
+    // Login ONLY when a real login form was detected
+    if (signals.loginForm) detectedGates.push('login');
+    else if (signals.signupForm) detectedGates.push('signup');
+    else if (signals.categoryManual) detectedGates.push('category');
 
     let screenshotBase64: string | undefined;
     try {
@@ -214,9 +222,12 @@ export class BrowserExecutionService {
       screenshotBase64,
       htmlSnippet: html.slice(0, 50_000),
       consoleLogs: [...this.consoleLogs],
-      url: this.page.url(),
+      url: pageUrl,
       title: await this.page.title(),
       detectedGates,
+      interventionReason: signals.reason,
+      interventionExplanation: signals.explanation,
+      interventionEvidence: signals.evidence,
     };
   }
 
@@ -535,6 +546,15 @@ export class BrowserExecutionService {
     }
     if (before.detectedGates.includes('phone_verify')) {
       return { submitted: false, gate: 'phone_verify', capture: before };
+    }
+    if (before.detectedGates.includes('login')) {
+      return { submitted: false, gate: 'login', capture: before };
+    }
+    if (before.detectedGates.includes('signup')) {
+      return { submitted: false, gate: 'signup', capture: before };
+    }
+    if (before.detectedGates.includes('category')) {
+      return { submitted: false, gate: 'category', capture: before };
     }
 
     try {

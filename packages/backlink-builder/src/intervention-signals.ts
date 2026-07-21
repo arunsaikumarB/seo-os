@@ -1,0 +1,389 @@
+/**
+ * Page-gate signals for Human Intervention.
+ * Login is reported only when a real login form is detected — never from
+ * loose "sign in" copy or a lone password field on a submission form.
+ */
+
+export type DetectedInterventionGate =
+  | 'login'
+  | 'signup'
+  | 'captcha'
+  | 'mfa'
+  | 'email_verify'
+  | 'phone_verify'
+  | 'category'
+  | 'manual_input';
+
+export interface InterventionSignals {
+  loginForm: boolean;
+  signupForm: boolean;
+  captcha: boolean;
+  mfa: boolean;
+  emailVerify: boolean;
+  phoneVerify: boolean;
+  categoryManual: boolean;
+  /** Highest-priority gate for pausing automation, if any */
+  primaryGate: DetectedInterventionGate | null;
+  /** Short human-readable pause reason */
+  reason: string | null;
+  /** Longer explanation for the intervention helper */
+  explanation: string | null;
+  /** Compact DOM evidence for debugging */
+  evidence: string[];
+}
+
+function hasPasswordInput(html: string): boolean {
+  return /<input[^>]*\btype=["']password["'][^>]*>/i.test(html);
+}
+
+function hasConfirmPassword(html: string): boolean {
+  return (
+    /<input[^>]*(name|id|placeholder)=["'][^"']*(confirm|password2|password_confirmation|retype)[^"']*["'][^>]*>/i.test(
+      html
+    ) || (html.match(/<input[^>]*\btype=["']password["'][^>]*>/gi) ?? []).length >= 2
+  );
+}
+
+function hasUsernameOrEmailField(html: string): boolean {
+  return (
+    /<input[^>]*\btype=["']email["'][^>]*>/i.test(html) ||
+    /<input[^>]*(name|id|autocomplete)=["'][^"']*(user|email|login|username|userid)[^"']*["'][^>]*>/i.test(
+      html
+    )
+  );
+}
+
+function hasLoginSubmitIntent(html: string): boolean {
+  return (
+    /<(?:button|input)[^>]*(?:value|aria-label|title)=["'][^"']*(?:sign[\s-]?in|log[\s-]?in|login)[^"']*["'][^>]*>/i.test(
+      html
+    ) ||
+    /<(?:button|a)[^>]*>[^<]*(?:sign[\s-]?in|log[\s-]?in)[^<]*<\/(?:button|a)>/i.test(html) ||
+    /<form[^>]*action=["'][^"']*(?:login|signin|sign-in|auth\/login)[^"']*["'][^>]*>/i.test(html)
+  );
+}
+
+function hasSignupIntent(html: string, url = ''): boolean {
+  const blob = `${html}\n${url}`.toLowerCase();
+  return (
+    /sign[\s-]?up|register|create (an )?account|join (now|us|free)/i.test(blob) ||
+    /\/(signup|sign-up|register|join|create-account)(\/|$|\?)/i.test(url)
+  );
+}
+
+function hasLoginHeadingOrUrl(html: string, url = ''): boolean {
+  return (
+    /<(?:h1|h2|h3|legend|title)[^>]*>[^<]*(?:sign[\s-]?in|log[\s-]?in|login)[^<]*</i.test(html) ||
+    /\/(login|signin|sign-in|auth)(\/|$|\?)/i.test(url)
+  );
+}
+
+/** True only when a login form is actually present on the page. */
+export function detectLoginForm(html: string, url = ''): boolean {
+  if (!hasPasswordInput(html)) return false;
+  // Registration / create-account forms are not "login"
+  if (hasSignupIntent(html, url) && (hasConfirmPassword(html) || !hasLoginSubmitIntent(html))) {
+    return false;
+  }
+  const identity = hasUsernameOrEmailField(html);
+  const intent = hasLoginSubmitIntent(html) || hasLoginHeadingOrUrl(html, url);
+  // Require password + (identity field OR clear login intent)
+  return identity || intent;
+}
+
+export function detectSignupForm(html: string, url = ''): boolean {
+  if (!hasSignupIntent(html, url)) return false;
+  // Prefer signup when register CTA / confirm password present
+  if (hasConfirmPassword(html)) return true;
+  if (hasPasswordInput(html) && hasUsernameOrEmailField(html) && !hasLoginSubmitIntent(html)) {
+    return true;
+  }
+  return /<(?:button|input|a)[^>]*>[^<]*(?:sign[\s-]?up|register|create account)[^<]*/i.test(html);
+}
+
+export function detectCategoryManualInput(html: string): boolean {
+  const hasCategorySelect =
+    /<select[^>]*(?:name|id|aria-label)=["'][^"']*categor[^"']*["'][^>]*>/i.test(html) ||
+    (/categor(?:y|ies)/i.test(html) && /<select[^>]*\brequired\b/i.test(html));
+  if (!hasCategorySelect) return false;
+  // Empty first option / "select category" placeholder is a strong signal
+  const needsPick =
+    /<option[^>]*(?:value=["']["']|value=["']0["'])[^>]*>[^<]*(?:select|choose|pick)?[^<]*categor/i.test(
+      html
+    ) || /select (a |your )?categor/i.test(html);
+  return needsPick || /<select[^>]*(?:name|id)=["'][^"']*categor[^"']*["'][^>]*\brequired\b/i.test(html);
+}
+
+export function detectInterventionSignals(htmlSnippet?: string, url = ''): InterventionSignals {
+  const html = htmlSnippet ?? '';
+  const htmlLower = html.toLowerCase();
+  const evidence: string[] = [];
+
+  const captcha =
+    /g-recaptcha|h-captcha|hcaptcha|cf-turnstile|data-sitekey|captcha-container|id=["']captcha/i.test(
+      html
+    );
+  if (captcha) evidence.push('captcha_widget');
+
+  const mfa = /mfa|2fa|two[\s-]?factor|authenticator|enter (your )?otp|verification code/i.test(
+    htmlLower
+  );
+  if (mfa) evidence.push('mfa_prompt');
+
+  const emailVerify = /verify your email|email verification|confirm your email|check your inbox/i.test(
+    htmlLower
+  );
+  if (emailVerify) evidence.push('email_verify_copy');
+
+  const phoneVerify = /verify.*(phone|sms)|sms code|phone verification/i.test(htmlLower);
+  if (phoneVerify) evidence.push('phone_verify_copy');
+
+  const loginForm = detectLoginForm(html, url);
+  if (loginForm) {
+    if (hasPasswordInput(html)) evidence.push('password_input');
+    if (hasUsernameOrEmailField(html)) evidence.push('username_or_email_input');
+    if (hasLoginSubmitIntent(html)) evidence.push('login_submit_cta');
+  }
+
+  const signupForm = !loginForm && detectSignupForm(html, url);
+  if (signupForm) evidence.push('signup_or_register');
+
+  const categoryManual = detectCategoryManualInput(html);
+  if (categoryManual) evidence.push('category_select_manual');
+
+  let primaryGate: DetectedInterventionGate | null = null;
+  let reason: string | null = null;
+  let explanation: string | null = null;
+
+  // Priority: hard blockers first, then auth, then form assistance
+  if (captcha) {
+    primaryGate = 'captcha';
+    reason = 'Solve CAPTCHA';
+    explanation = 'A CAPTCHA challenge is blocking submission. Solve it on the live page.';
+  } else if (mfa) {
+    primaryGate = 'mfa';
+    reason = 'Enter Verification Code';
+    explanation = 'Multi-factor authentication is required before automation can continue.';
+  } else if (emailVerify) {
+    primaryGate = 'email_verify';
+    reason = 'Verify Email';
+    explanation = 'Email verification is required before the listing can be submitted.';
+  } else if (phoneVerify) {
+    primaryGate = 'phone_verify';
+    reason = 'Verify Phone';
+    explanation = 'Phone verification is required before automation can continue.';
+  } else if (loginForm) {
+    primaryGate = 'login';
+    reason = 'Login form detected before submission.';
+    explanation =
+      'A login form was detected on this page. Sign in on the exact paused URL so AI can continue.';
+  } else if (signupForm) {
+    primaryGate = 'signup';
+    reason = 'Registration is required before submitting.';
+    explanation =
+      'This site requires creating an account before a listing can be submitted. Complete registration on the paused page.';
+  } else if (categoryManual) {
+    primaryGate = 'category';
+    reason = 'Category selection requires manual input.';
+    explanation =
+      'A required category field could not be filled reliably. Choose the correct category on the paused page.';
+  }
+
+  return {
+    loginForm,
+    signupForm,
+    captcha,
+    mfa,
+    emailVerify,
+    phoneVerify,
+    categoryManual,
+    primaryGate,
+    reason,
+    explanation,
+    evidence,
+  };
+}
+
+/** Map a stored pause_reason / gate key to display copy (no false "Login Required"). */
+export function interventionCopyForPauseReason(
+  pauseReason: string | null | undefined,
+  opts?: { loginFormDetected?: boolean | null; explanation?: string | null }
+): {
+  gate: DetectedInterventionGate | 'human_approval' | 'unknown';
+  reason: string;
+  title: string;
+  instruction: string;
+  cta: string;
+  successToast: string;
+} {
+  const pause = String(pauseReason ?? '');
+  const loginOk = opts?.loginFormDetected === true;
+
+  if (pause === 'login' && !loginOk && opts?.loginFormDetected === false) {
+    // Stored as login but evidence says otherwise — fall through to unknown-style copy
+    return {
+      gate: 'unknown',
+      reason: opts?.explanation || 'Action Required',
+      title: 'AI needs your help',
+      instruction:
+        opts?.explanation ||
+        'Complete the step on the live page. AI continues automatically when finished.',
+      cta: 'Open paused page',
+      successToast: 'Step complete — resuming automation…',
+    };
+  }
+
+  switch (pause) {
+    case 'login':
+      return {
+        gate: 'login',
+        reason: 'Login form detected before submission.',
+        title: 'AI needs your help — Login',
+        instruction:
+          opts?.explanation ||
+          'A login form was detected. Sign in on the paused page — AI continues automatically.',
+        cta: 'Open paused page',
+        successToast: 'Login successful — resuming automation…',
+      };
+    case 'signup':
+    case 'registration':
+      return {
+        gate: 'signup',
+        reason: 'Registration is required before submitting.',
+        title: 'AI needs your help — Registration',
+        instruction:
+          opts?.explanation ||
+          'Create or finish the account on this website, then wait — AI continues automatically.',
+        cta: 'Open paused page',
+        successToast: 'Registration complete — resuming automation…',
+      };
+    case 'category':
+    case 'category_selection':
+      return {
+        gate: 'category',
+        reason: 'Category selection requires manual input.',
+        title: 'AI needs your help — Category',
+        instruction:
+          opts?.explanation ||
+          'Select the correct category on the paused page. AI continues when the field is set.',
+        cta: 'Open paused page',
+        successToast: 'Category selected — resuming automation…',
+      };
+    case 'manual_input':
+      return {
+        gate: 'manual_input',
+        reason: 'Manual input required',
+        title: 'AI needs your help',
+        instruction:
+          opts?.explanation ||
+          'A form field requires manual input. Complete it on the paused page.',
+        cta: 'Open paused page',
+        successToast: 'Input complete — resuming automation…',
+      };
+    case 'captcha':
+    case 'recaptcha':
+      return {
+        gate: 'captcha',
+        reason: 'Solve CAPTCHA',
+        title: 'CAPTCHA detected',
+        instruction:
+          'Solve the CAPTCHA on the live page. AI will continue automatically when cleared.',
+        cta: 'Open paused page',
+        successToast: 'CAPTCHA solved — AI is continuing…',
+      };
+    case 'cloudflare':
+      return {
+        gate: 'captcha',
+        reason: 'Cloudflare Challenge',
+        title: 'Security check required',
+        instruction: 'Complete the Cloudflare / bot check. AI resumes when the site unlocks.',
+        cta: 'Open paused page',
+        successToast: 'Challenge cleared — resuming automation…',
+      };
+    case 'mfa':
+    case 'otp':
+      return {
+        gate: 'mfa',
+        reason: 'Enter Verification Code',
+        title: 'MFA / OTP required',
+        instruction:
+          'Enter the one-time code from your authenticator or SMS. AI continues after success.',
+        cta: 'Open paused page',
+        successToast: 'Verification successful — resuming automation…',
+      };
+    case 'email_verify':
+      return {
+        gate: 'email_verify',
+        reason: 'Verify Email',
+        title: 'Email verification required',
+        instruction:
+          'Open the verification email and confirm. Return here — AI detects completion automatically.',
+        cta: 'Open paused page',
+        successToast: 'Email verified — resuming automation…',
+      };
+    case 'phone_verify':
+      return {
+        gate: 'phone_verify',
+        reason: 'Verify Phone',
+        title: 'Phone verification required',
+        instruction: 'Enter the SMS code on the live page. AI continues automatically.',
+        cta: 'Open paused page',
+        successToast: 'Phone verified — resuming automation…',
+      };
+    case 'human_approval':
+      return {
+        gate: 'human_approval',
+        reason: 'Manual Approval',
+        title: 'Approval needed',
+        instruction: 'Review the prepared submission, then approve so AI can submit.',
+        cta: 'Open paused page',
+        successToast: 'Approved — resuming automation…',
+      };
+    case 'validation_failed':
+      return {
+        gate: 'manual_input',
+        reason: 'Form validation needs correction',
+        title: 'AI needs your help — Validation',
+        instruction:
+          opts?.explanation ||
+          'Some required fields failed validation. Fix them on the paused page.',
+        cta: 'Open paused page',
+        successToast: 'Validation fixed — resuming automation…',
+      };
+    default:
+      return {
+        gate: 'unknown',
+        reason: opts?.explanation || 'Action Required',
+        title: 'AI needs your help',
+        instruction:
+          opts?.explanation ||
+          'Complete the step on the live page. AI continues automatically when finished.',
+        cta: 'Open paused page',
+        successToast: 'Step complete — resuming automation…',
+      };
+  }
+}
+
+export function workflowStepLabel(action?: string | null, stepIndex?: number | null): string {
+  const a = String(action ?? '');
+  const map: Record<string, string> = {
+    open: 'Open Website',
+    navigate: 'Navigate',
+    login: 'Login',
+    analyze_form: 'Find Form',
+    fill: 'Fill Listing',
+    select: 'Select Category',
+    upload: 'Upload Assets',
+    upload_logo: 'Upload Logo',
+    upload_images: 'Upload Images',
+    upload_videos: 'Upload Videos',
+    preview: 'Preview',
+    wait_approval: 'Awaiting Approval',
+    submit: 'Submit Listing',
+    verify: 'Verify Backlink',
+    screenshot: 'Capture Page',
+  };
+  if (map[a]) return map[a];
+  if (stepIndex != null && Number.isFinite(stepIndex)) return `Step ${Number(stepIndex) + 1}`;
+  return 'Workflow step';
+}

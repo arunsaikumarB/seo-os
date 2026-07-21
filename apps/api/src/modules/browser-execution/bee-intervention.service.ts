@@ -3,7 +3,12 @@
  * Jobs stay Waiting for User; sessions + storage preserved for auto-resume.
  */
 import { randomUUID } from 'node:crypto';
-import { isWatchableGate, type ExecutionGate } from '@seo-os/backlink-builder';
+import {
+  isWatchableGate,
+  interventionCopyForPauseReason,
+  workflowStepLabel,
+  type ExecutionGate,
+} from '@seo-os/backlink-builder';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { logger } from '../../lib/logger.js';
 import { DEFAULT_FEATURE_FLAGS } from '@seo-os/shared';
@@ -26,6 +31,8 @@ export type InterventionGate =
   | 'email_verify'
   | 'phone_verify'
   | 'security_question'
+  | 'category'
+  | 'manual_input'
   | 'human_approval'
   | 'unknown';
 
@@ -54,119 +61,124 @@ export function isInterventionStatus(status: string): boolean {
   );
 }
 
+type PauseMetrics = {
+  pauseContext?: {
+    url?: string;
+    pausedUrl?: string;
+    stepAction?: string;
+    currentStepLabel?: string;
+    explanation?: string;
+    reason?: string;
+    evidence?: string[];
+    pageTitle?: string;
+  };
+  lastUrl?: string;
+  pausedUrl?: string;
+  pageTitle?: string;
+  currentStepLabel?: string;
+  pauseExplanation?: string;
+  pauseReasonLabel?: string;
+  loginFormDetected?: boolean;
+  domEvidence?: string;
+  pauseEvidence?: string[];
+};
+
+function metricsOf(job: Record<string, unknown>): PauseMetrics {
+  return (job.metrics as PauseMetrics | null) ?? {};
+}
+
+function pausedUrlFromJob(job: Record<string, unknown>): string | null {
+  const m = metricsOf(job);
+  const raw =
+    m.pausedUrl ||
+    m.pauseContext?.pausedUrl ||
+    m.pauseContext?.url ||
+    m.lastUrl ||
+    null;
+  const s = raw != null ? String(raw).trim() : '';
+  return s || null;
+}
+
+/**
+ * Resolve gate from stored pause_reason first.
+ * Never infer "login" from vague statuses like awaiting_user / authenticating alone.
+ */
 export function resolveInterventionGate(job: {
   status?: unknown;
   pause_reason?: unknown;
+  metrics?: unknown;
 }): InterventionGate {
   const pause = String(job.pause_reason ?? '');
   const status = String(job.status ?? '');
-  if (pause === 'login' || status.includes('login') || status === 'authenticating') return 'login';
+  const m = (job.metrics as PauseMetrics | null) ?? {};
+
+  if (pause === 'login') {
+    // Only report login when we recorded login-form evidence (or legacy jobs without the flag)
+    if (m.loginFormDetected === false) return 'unknown';
+    return 'login';
+  }
+  if (pause === 'signup' || pause === 'registration') return 'signup';
+  if (pause === 'category' || pause === 'category_selection') return 'category';
+  if (pause === 'manual_input' || pause === 'validation_failed') return 'manual_input';
   if (pause === 'captcha' || status.includes('captcha')) return 'captcha';
   if (pause === 'mfa' || status.includes('mfa')) return 'mfa';
-  if (pause === 'email_verify' || status.includes('email')) return 'email_verify';
+  if (pause === 'email_verify' || (status.includes('email') && status.includes('watch'))) {
+    return 'email_verify';
+  }
   if (pause === 'phone_verify' || status.includes('phone')) return 'phone_verify';
-  if (pause === 'human_approval' || status === 'needs_approval' || status === 'ready_for_review') {
+  if (pause === 'human_approval') return 'human_approval';
+  if (!pause && (status === 'needs_approval' || status === 'ready_for_review')) {
     return 'human_approval';
   }
   if (/cloudflare|turnstile/i.test(pause)) return 'cloudflare';
   if (/otp|2fa/i.test(pause)) return 'otp';
-  if (/signup|sign_up/i.test(pause)) return 'signup';
+  if (/signup|sign_up|registration/i.test(pause)) return 'signup';
+  if (/categor/i.test(pause)) return 'category';
   if (/security/i.test(pause)) return 'security_question';
+  // watching_login is explicit — still login
+  if (status === 'watching_login' || status === 'blocked_login') return 'login';
+  if (status === 'needs_approval' || status === 'ready_for_review') return 'human_approval';
   return 'unknown';
 }
 
-export function humanInterventionCopy(gate: InterventionGate): {
+export function humanInterventionCopy(gate: InterventionGate, job?: {
+  pause_reason?: unknown;
+  metrics?: unknown;
+}): {
   reason: string;
   title: string;
   instruction: string;
   cta: string;
   successToast: string;
 } {
-  switch (gate) {
-    case 'login':
-      return {
-        reason: 'Login Required',
-        title: 'AI needs your help — Login',
-        instruction:
-          'AI has completed everything possible. Please sign in on this website to continue.',
-        cta: 'Open Browser Assistant',
-        successToast: 'Login successful — resuming automation…',
-      };
-    case 'signup':
-      return {
-        reason: 'Signup Required',
-        title: 'AI needs your help — Signup',
-        instruction: 'Create or finish the account on this website, then wait — AI continues automatically.',
-        cta: 'Open Browser Assistant',
-        successToast: 'Signup complete — resuming automation…',
-      };
-    case 'captcha':
-    case 'recaptcha':
-      return {
-        reason: 'Solve CAPTCHA',
-        title: 'CAPTCHA detected',
-        instruction: 'Solve the CAPTCHA on the live page. AI will continue automatically when cleared.',
-        cta: 'Solve CAPTCHA',
-        successToast: 'CAPTCHA solved — AI is continuing…',
-      };
-    case 'cloudflare':
-      return {
-        reason: 'Cloudflare Challenge',
-        title: 'Security check required',
-        instruction: 'Complete the Cloudflare / bot check. AI resumes when the site unlocks.',
-        cta: 'Open Browser Assistant',
-        successToast: 'Challenge cleared — resuming automation…',
-      };
-    case 'mfa':
-    case 'otp':
-      return {
-        reason: 'Enter Verification Code',
-        title: 'MFA / OTP required',
-        instruction: 'Enter the one-time code from your authenticator or SMS. AI continues after success.',
-        cta: 'Open Browser Assistant',
-        successToast: 'Verification successful — resuming automation…',
-      };
-    case 'email_verify':
-      return {
-        reason: 'Verify Email',
-        title: 'Email verification required',
-        instruction: 'Open the verification email and confirm. Return here — AI detects completion automatically.',
-        cta: 'Open Browser Assistant',
-        successToast: 'Email verified — resuming automation…',
-      };
-    case 'phone_verify':
-      return {
-        reason: 'Verify Phone',
-        title: 'Phone verification required',
-        instruction: 'Enter the SMS code on the live page. AI continues automatically.',
-        cta: 'Open Browser Assistant',
-        successToast: 'Phone verified — resuming automation…',
-      };
-    case 'security_question':
-      return {
-        reason: 'Security Question',
-        title: 'Security question required',
-        instruction: 'Answer the security question on the live page. AI resumes when done.',
-        cta: 'Open Browser Assistant',
-        successToast: 'Security check passed — resuming automation…',
-      };
-    case 'human_approval':
-      return {
-        reason: 'Manual Approval',
-        title: 'Approval needed',
-        instruction: 'Review the prepared submission, then approve so AI can submit.',
-        cta: 'Open Browser Assistant',
-        successToast: 'Approved — resuming automation…',
-      };
-    default:
-      return {
-        reason: 'Action Required',
-        title: 'AI needs your help',
-        instruction: 'Complete the step on the live page. AI continues automatically when finished.',
-        cta: 'Open Browser Assistant',
-        successToast: 'Step complete — resuming automation…',
-      };
+  const pause = job?.pause_reason != null ? String(job.pause_reason) : gate;
+  const m = (job?.metrics as PauseMetrics | null) ?? {};
+  const copy = interventionCopyForPauseReason(pause, {
+    loginFormDetected: m.loginFormDetected,
+    explanation: m.pauseExplanation || m.pauseContext?.explanation || m.pauseReasonLabel || null,
+  });
+  // Prefer stored human labels when present
+  if (m.pauseReasonLabel && gate !== 'login') {
+    return {
+      ...copy,
+      reason: String(m.pauseReasonLabel),
+      instruction: String(m.pauseExplanation || m.pauseContext?.explanation || copy.instruction),
+    };
   }
+  if (gate === 'login' && m.loginFormDetected !== false) {
+    return {
+      ...copy,
+      reason: m.pauseReasonLabel || copy.reason,
+      instruction: String(m.pauseExplanation || m.pauseContext?.explanation || copy.instruction),
+    };
+  }
+  return {
+    reason: copy.reason,
+    title: copy.title,
+    instruction: copy.instruction,
+    cta: copy.cta,
+    successToast: copy.successToast,
+  };
 }
 
 async function signLatestScreenshot(workspaceId: string, jobId: string) {
@@ -227,14 +239,20 @@ export async function listInterventions(workspaceId: string) {
   for (const j of jobs) {
     const status = String(j.status);
     if (!isInterventionStatus(status)) continue;
-    // ready_to_continue is transient — still show briefly as resuming
-    const gate = resolveInterventionGate(j);
-    const copy = humanInterventionCopy(gate);
+    const jobRec = j as Record<string, unknown>;
+    const gate = resolveInterventionGate(jobRec);
+    const copy = humanInterventionCopy(gate, jobRec);
     const started = j.watch_started_at || j.started_at || j.created_at;
     const elapsedMs = started ? Date.now() - new Date(String(started)).getTime() : 0;
+    const m = metricsOf(jobRec);
+    const steps = (j.steps as Array<{ action?: string }> | undefined) ?? [];
+    const idx = Number(j.current_step_index ?? 0);
+    const stepAction = m.pauseContext?.stepAction || steps[idx]?.action || null;
     items.push({
       jobId: String(j.id),
       website: String(j.site_domain ?? 'Website'),
+      pausedUrl: pausedUrlFromJob(jobRec),
+      currentStep: m.currentStepLabel || workflowStepLabel(stepAction, idx),
       opportunityId: j.opportunity_id ? String(j.opportunity_id) : null,
       sessionId: j.session_id ? String(j.session_id) : null,
       status,
@@ -243,9 +261,10 @@ export async function listInterventions(workspaceId: string) {
       reason: copy.reason,
       title: copy.title,
       instruction: copy.instruction,
+      explanation: m.pauseExplanation || m.pauseContext?.explanation || copy.instruction,
       cta: copy.cta,
       pauseReason: j.pause_reason ? String(j.pause_reason) : null,
-      currentStepIndex: Number(j.current_step_index ?? 0),
+      currentStepIndex: idx,
       elapsedMs,
       createdAt: String(j.created_at),
       autoResumePending: status === 'ready_to_continue',
@@ -258,18 +277,25 @@ export async function listInterventions(workspaceId: string) {
 export async function getIntervention(workspaceId: string, jobId: string) {
   const job = await getJob(workspaceId, jobId);
   if (!job) return null;
+  const jobRec = job as Record<string, unknown>;
   const status = String(job.status);
-  const gate = resolveInterventionGate(job);
-  const copy = humanInterventionCopy(gate);
+  const gate = resolveInterventionGate(jobRec);
+  const copy = humanInterventionCopy(gate, jobRec);
+  const m = metricsOf(jobRec);
   const steps = (job.steps as Array<{ step_index: number; action: string; status: string }> | undefined) ?? [];
   const doneSteps = steps.filter((s) => s.status === 'done').length;
   const totalSteps = Math.max(steps.length, 8);
+  const idx = Number(job.current_step_index ?? 0);
+  const stepAction = m.pauseContext?.stepAction || steps[idx]?.action || null;
+  const currentStepLabel =
+    m.currentStepLabel || workflowStepLabel(stepAction, idx);
   const screenshot = await signLatestScreenshot(workspaceId, jobId);
+  const pausedUrl = pausedUrlFromJob(jobRec);
 
   const sessionId = String(job.session_id ?? '');
   let sessionConnected = false;
   let liveUrl: string | null = null;
-  let pageTitle: string | null = null;
+  let pageTitle: string | null = m.pageTitle || m.pauseContext?.pageTitle || null;
   if (sessionId) {
     try {
       const runtime = getSessionRuntime(sessionId);
@@ -277,18 +303,25 @@ export async function getIntervention(workspaceId: string, jobId: string) {
       const cap = await runtime.capture('intervention_ping');
       sessionConnected = health.playwrightAvailable && Boolean(cap.url);
       liveUrl = cap.url || null;
-      pageTitle = cap.title || null;
+      pageTitle = cap.title || pageTitle;
     } catch {
       sessionConnected = false;
     }
   }
 
+  // Prefer exact paused URL; live session URL only if it is not a bare homepage substitute
+  const openUrl = pausedUrl || liveUrl || null;
+
   const started = job.watch_started_at || job.started_at || job.created_at;
   const elapsedMs = started ? Date.now() - new Date(String(started)).getTime() : 0;
+  const explanation =
+    m.pauseExplanation || m.pauseContext?.explanation || copy.instruction;
 
   return {
     jobId,
     website: String(job.site_domain ?? 'Website'),
+    pausedUrl,
+    openUrl,
     opportunityId: job.opportunity_id ? String(job.opportunity_id) : null,
     sessionId: sessionId || null,
     status,
@@ -297,18 +330,23 @@ export async function getIntervention(workspaceId: string, jobId: string) {
     reason: copy.reason,
     title: copy.title,
     instruction: copy.instruction,
+    explanation,
     cta: copy.cta,
     successToast: copy.successToast,
     pauseReason: job.pause_reason ? String(job.pause_reason) : null,
-    currentStep: doneSteps || Number(job.current_step_index ?? 0),
+    currentStep: doneSteps || idx,
     totalSteps,
-    stepLabel: `${Math.max(1, doneSteps || Number(job.current_step_index ?? 0) || 1)} / ${totalSteps}`,
+    stepLabel: currentStepLabel,
+    currentStepLabel,
     browser: sessionConnected ? 'Live' : 'Session saved',
     session: sessionConnected ? 'Connected' : 'Restorable',
     elapsedMs,
     screenshot,
-    liveUrl,
+    liveUrl: openUrl,
     pageTitle,
+    domEvidence: m.domEvidence || null,
+    pauseEvidence: m.pauseEvidence || m.pauseContext?.evidence || [],
+    loginFormDetected: m.loginFormDetected ?? (gate === 'login' ? true : null),
     needsAction: isInterventionStatus(status),
     autoResume: true,
     completedByAi: [
@@ -341,9 +379,16 @@ async function ensureLiveInterventionSession(
     .eq('id', sessionId)
     .maybeSingle();
   const storageState = sess ? await loadStorageStateFromSession(sess) : null;
-  const metrics = (job.metrics as { pauseContext?: { url?: string }; lastUrl?: string } | null) ?? null;
+  const metrics = (job.metrics as {
+    pauseContext?: { url?: string; pausedUrl?: string };
+    lastUrl?: string;
+    pausedUrl?: string;
+  } | null) ?? null;
   const site = String(job.site_domain ?? '');
+  // Always restore the exact paused URL — never invent a homepage when we have a pause URL
   const targetUrl =
+    metrics?.pausedUrl ||
+    metrics?.pauseContext?.pausedUrl ||
     metrics?.pauseContext?.url ||
     metrics?.lastUrl ||
     (site ? (site.startsWith('http') ? site : `https://${site}`) : '');
@@ -508,8 +553,8 @@ export async function checkInterventionCleared(workspaceId: string, jobId: strin
   const job = await getJob(workspaceId, jobId);
   if (!job) return { cleared: false, resumed: false, message: 'Job not found' };
 
-  const gate = resolveInterventionGate(job) as ExecutionGate | InterventionGate;
-  const copy = humanInterventionCopy(resolveInterventionGate(job));
+  const gate = resolveInterventionGate(job as Record<string, unknown>);
+  const copy = humanInterventionCopy(gate, job as Record<string, unknown>);
   const sessionId = String(job.session_id ?? '');
   const watchable = isWatchableGate(gate as ExecutionGate) ? (gate as NonNullable<ExecutionGate>) : null;
 
