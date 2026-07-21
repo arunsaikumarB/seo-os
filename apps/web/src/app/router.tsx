@@ -109,6 +109,9 @@ const BacklinkLostPage = lazy(() =>
 const BacklinkPendingPage = lazy(() =>
   import('@/pages/backlink-builder/pending').then((m) => ({ default: m.BacklinkPendingPage }))
 );
+const TrackResultsPage = lazy(() =>
+  import('@/pages/backlink-builder/track-results').then((m) => ({ default: m.TrackResultsPage }))
+);
 const BacklinkAuditPage = lazy(() =>
   import('@/pages/backlink-builder/audit').then((m) => ({ default: m.BacklinkAuditPage }))
 );
@@ -396,6 +399,10 @@ export function AppRouter() {
                     <Route path="backlink-builder/won" element={lazyEl(BacklinkWonPage)} />
                     <Route path="backlink-builder/lost" element={lazyEl(BacklinkLostPage)} />
                     <Route path="backlink-builder/pending" element={lazyEl(BacklinkPendingPage)} />
+                    <Route
+                      path="backlink-builder/track-results"
+                      element={lazyEl(TrackResultsPage)}
+                    />
                     <Route
                       path="backlink-builder/verification"
                       element={lazyEl(BacklinkPendingPage)}

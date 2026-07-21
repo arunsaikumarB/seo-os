@@ -10,7 +10,7 @@ type Props = {
   className?: string;
 };
 
-/** Current Step · Next Step · Progress — shown on guided pages */
+/** Current · Next · Progress — guided pages only */
 export function WorkflowContextBar({ projectId, className }: Props) {
   const {
     currentStep,
@@ -20,7 +20,7 @@ export function WorkflowContextBar({ projectId, className }: Props) {
     allComplete,
     getStepHref,
     steps,
-    completedSteps,
+    isStepComplete,
   } = useWorkflow(projectId);
   const bee = useBeeExecutionProgress(projectId);
   const hasJobs = (bee.data?.totalJobs ?? 0) > 0;
@@ -31,7 +31,7 @@ export function WorkflowContextBar({ projectId, className }: Props) {
     ? Math.round(bee.data?.progressPercent ?? 0)
     : Math.round((completedCount / Math.max(totalSteps, 1)) * 100);
   const estRemaining = steps
-    .filter((s) => !completedSteps.has(s.id))
+    .filter((s) => !isStepComplete(s.id))
     .reduce((sum, s) => sum + (s.estimatedMinutes ?? 5), 0);
 
   return (
@@ -44,17 +44,13 @@ export function WorkflowContextBar({ projectId, className }: Props) {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 space-y-1">
           <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
-            {showComplete
-              ? 'Workflow complete'
-              : jobsOpen
-                ? 'Browser Execution'
-                : 'Current stage'}
+            {showComplete ? 'Done' : jobsOpen ? 'Submitting' : 'Current'}
           </p>
           <p className="font-medium truncate">
             {showComplete
-              ? 'All steps finished'
+              ? 'Workflow complete'
               : jobsOpen
-                ? `${bee.data!.completedJobs}/${bee.data!.totalJobs} jobs · Workers ${bee.data!.workerUsage}`
+                ? `AI is submitting backlinks · ${bee.data!.completedJobs}/${bee.data!.totalJobs}`
                 : currentStep.title}
           </p>
           {!showComplete && !jobsOpen && nextStep.id !== currentStep.id ? (

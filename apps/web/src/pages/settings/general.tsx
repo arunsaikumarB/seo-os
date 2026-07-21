@@ -134,9 +134,11 @@ export function ProjectSettingsPage() {
       <ProjectSettingsNav projectId={projectId} />
       <div>
         <h1 className="text-2xl font-semibold flex items-center gap-2">
-          <Settings className="h-6 w-6" /> Project settings
+          <Settings className="h-6 w-6" /> Create Project
         </h1>
-        <p className="text-muted-foreground">Website details and enterprise project lifecycle</p>
+        <p className="text-sm text-muted-foreground mt-1">
+          Business name, website, industry, and description — AI studies your site automatically.
+        </p>
       </div>
 
       {isArchived && (
@@ -160,8 +162,8 @@ export function ProjectSettingsPage() {
         <CardHeader>
           <div className="flex items-center justify-between gap-2">
             <div>
-              <CardTitle className="text-base">General</CardTitle>
-              <CardDescription>Name, domain, and description for this project</CardDescription>
+              <CardTitle className="text-base">Your business</CardTitle>
+              <CardDescription>Tell AI who you are — then continue the workflow</CardDescription>
             </div>
             {p?.status && <Badge className="capitalize text-[10px]">{p.status}</Badge>}
           </div>
@@ -174,7 +176,7 @@ export function ProjectSettingsPage() {
           ) : (
             <>
               <div className="space-y-2">
-                <Label htmlFor="proj-name">Name</Label>
+                <Label htmlFor="proj-name">Business Name</Label>
                 <Input
                   id="proj-name"
                   value={name}
@@ -183,7 +185,7 @@ export function ProjectSettingsPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="proj-domain">Domain</Label>
+                <Label htmlFor="proj-domain">Website</Label>
                 <Input
                   id="proj-domain"
                   value={domain}

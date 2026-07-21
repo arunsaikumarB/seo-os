@@ -73,7 +73,7 @@ export function Sidebar({ projectId, className }: SidebarProps) {
       </div>
       <nav className="flex-1 overflow-y-auto px-3 py-4">
         <p className="px-3 mb-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-          Backlink Builder
+          Dashboard
         </p>
         <div className="space-y-0.5">
           {visibleSections.map((section) => {

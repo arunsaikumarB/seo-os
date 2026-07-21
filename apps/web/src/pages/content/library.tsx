@@ -337,11 +337,11 @@ export function ContentLibraryPage() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <Sparkles className="h-6 w-6" /> Intelligent Content Studio
+            <Sparkles className="h-6 w-6" /> Generate Content
           </h1>
           <p className="text-muted-foreground">
-            Auto-detects the destination backlink type and builds the exact submission package — no
-            manual content type selection.
+            AI detects each website type and builds articles, listings, forum replies, images, and
+            video metadata — no manual selection.
           </p>
         </div>
         <div className="flex gap-2">

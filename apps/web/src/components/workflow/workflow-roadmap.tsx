@@ -11,7 +11,7 @@ interface WorkflowRoadmapProps {
 }
 
 export function WorkflowRoadmap({ projectId, compact, className }: WorkflowRoadmapProps) {
-  const { steps, completedSteps, completedCount, totalSteps, currentStep, getStepHref } =
+  const { steps, completedCount, totalSteps, currentStep, getStepHref, isStepComplete } =
     useWorkflow(projectId);
 
   const pct = Math.round((completedCount / Math.max(totalSteps, 1)) * 100);
@@ -25,15 +25,15 @@ export function WorkflowRoadmap({ projectId, compact, className }: WorkflowRoadm
     >
       <div className="mb-4 flex items-center justify-between gap-2">
         <div>
-          <p className="text-sm font-semibold tracking-tight">Workflow Progress</p>
+          <p className="text-sm font-semibold tracking-tight">Workflow</p>
           <p className="text-xs text-muted-foreground mt-0.5">
-            {pct}% complete · {completedCount} of {totalSteps} stages
+            {completedCount} / {totalSteps} · {pct}%
           </p>
         </div>
       </div>
       <ol className={cn('grid gap-2', compact ? 'sm:grid-cols-2' : 'sm:grid-cols-2 lg:grid-cols-4')}>
         {steps.map((step) => {
-          const done = completedSteps.has(step.id);
+          const done = isStepComplete(step.id);
           const current = step.id === currentStep.id && !done;
           const label =
             WORKFLOW_PIPELINE_LABELS.find((l) => l.id === step.id)?.label ?? step.title;

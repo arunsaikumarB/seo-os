@@ -1,6 +1,10 @@
 import { useEffect, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import { WORKFLOW_STEPS, type WorkflowStep } from '@/config/workflow-steps';
+import {
+  WORKFLOW_STEPS,
+  WORKFLOW_STEP_ALIASES,
+  type WorkflowStep,
+} from '@/config/workflow-steps';
 import { useAppStore, WORKFLOW_GLOBAL_KEY } from '@/stores/app-store';
 import { useBeeExecutionProgress } from '@/hooks/use-bee-execution-progress';
 
@@ -8,6 +12,12 @@ function stepMatchesPath(step: WorkflowStep, path: string, projectId: string): b
   if (step.orgLevel) return false;
   const normalized = path.replace(`/projects/${projectId}/`, '').replace(/^\//, '');
   return normalized === step.route || normalized.startsWith(`${step.route}/`);
+}
+
+function isStepDone(completed: Set<string>, stepId: string): boolean {
+  if (completed.has(stepId)) return true;
+  const aliases = WORKFLOW_STEP_ALIASES[stepId] ?? [];
+  return aliases.some((a) => completed.has(a));
 }
 
 export function getStepHref(step: WorkflowStep, projectId: string): string {
@@ -33,8 +43,8 @@ export function useWorkflow(projectId: string) {
     return set;
   }, [workflowProgress, projectId]);
 
-  // Visiting later stages must NOT auto-complete Browser Execution (job-driven only).
-  const visitCompleteBlocked = new Set(['browser-execution', 'verification', 'reports']);
+  // Visiting later stages must NOT auto-complete Submit (job-driven only).
+  const visitCompleteBlocked = new Set(['submit-backlinks', 'track-results']);
 
   useEffect(() => {
     const path = location.pathname;
@@ -54,34 +64,33 @@ export function useWorkflow(projectId: string) {
 
   const bee = useBeeExecutionProgress(projectId, 5_000);
 
-  // Mark Browser Execution complete only when every job is Submitted / Failed / Cancelled
+  // Mark Submit complete only when every job is terminal
   useEffect(() => {
     if (bee.data?.executionComplete && (bee.data.totalJobs ?? 0) > 0) {
-      markStepComplete(projectId, 'browser-execution');
+      markStepComplete(projectId, 'submit-backlinks');
     }
   }, [bee.data?.executionComplete, bee.data?.totalJobs, projectId, markStepComplete]);
 
   const jobsOpen = (bee.data?.totalJobs ?? 0) > 0 && !bee.data?.executionComplete;
 
   const completedCount = WORKFLOW_STEPS.filter((s) => {
-    if (s.id === 'browser-execution' && jobsOpen) return false;
-    return completedSteps.has(s.id);
+    if (s.id === 'submit-backlinks' && jobsOpen) return false;
+    return isStepDone(completedSteps, s.id);
   }).length;
 
   const currentStep =
     jobsOpen
-      ? WORKFLOW_STEPS.find((s) => s.id === 'browser-execution')!
-      : WORKFLOW_STEPS.find((s) => !completedSteps.has(s.id)) ??
+      ? WORKFLOW_STEPS.find((s) => s.id === 'submit-backlinks')!
+      : WORKFLOW_STEPS.find((s) => !isStepDone(completedSteps, s.id)) ??
         WORKFLOW_STEPS[WORKFLOW_STEPS.length - 1];
 
   const nextStep =
     jobsOpen
       ? currentStep
-      : WORKFLOW_STEPS.find((s) => !completedSteps.has(s.id) && s.id !== currentStep.id) ??
+      : WORKFLOW_STEPS.find((s) => !isStepDone(completedSteps, s.id) && s.id !== currentStep.id) ??
         currentStep;
 
-  const allComplete =
-    completedCount >= WORKFLOW_STEPS.length && !jobsOpen;
+  const allComplete = completedCount >= WORKFLOW_STEPS.length && !jobsOpen;
 
   return {
     steps: WORKFLOW_STEPS,
@@ -93,6 +102,7 @@ export function useWorkflow(projectId: string) {
     expertMode,
     learningMode,
     allComplete,
+    isStepComplete: (stepId: string) => isStepDone(completedSteps, stepId),
     getStepHref: (step: WorkflowStep) => getStepHref(step, projectId),
   };
 }

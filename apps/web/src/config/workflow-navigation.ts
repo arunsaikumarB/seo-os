@@ -7,22 +7,18 @@ import {
   ListChecks,
   Target,
   FileText,
-  ClipboardList,
   Handshake,
   CheckCircle2,
   FileBarChart,
-  Radar,
   Image,
   Video,
   Globe,
-  Lightbulb,
-  Layers,
   HeartPulse,
   MonitorSmartphone,
   Plug,
   GraduationCap,
-  Search,
   FolderPlus,
+  Activity,
 } from 'lucide-react';
 import type { NavItem } from './navigation';
 
@@ -39,16 +35,16 @@ export interface WorkflowNavSection {
 
 export interface WorkflowNavItem extends NavItem {
   absolute?: boolean;
-  /** Shown as ①…⑧ in primary pipeline */
+  /** Shown as ①…⑦ in primary pipeline */
   stepNumber?: number;
   dividerBefore?: boolean;
 }
 
-/** V2 guided IA — primary pipeline + collapsible Advanced */
+/** Guided IA — primary pipeline + collapsible Advanced (nothing deleted) */
 export const workflowNavSections: WorkflowNavSection[] = [
   {
     id: 'primary',
-    label: 'Backlink Builder',
+    label: 'Workflow',
     flat: true,
     items: [
       {
@@ -71,46 +67,39 @@ export const workflowNavSections: WorkflowNavSection[] = [
         stepNumber: 2,
       },
       {
-        label: 'AI Discovery & Qualification',
+        label: 'AI Review',
         href: 'backlink-builder/classification',
         icon: Sparkles,
         featureFlag: 'backlink_builder',
         stepNumber: 3,
       },
       {
-        label: 'Opportunity Review',
+        label: 'Approve Opportunities',
         href: 'campaigns/queue',
         icon: ListChecks,
         featureFlag: 'backlink_builder',
         stepNumber: 4,
       },
       {
-        label: 'Content Studio',
+        label: 'Generate Content',
         href: 'content/library',
         icon: FileText,
         featureFlag: 'v11_content_studio_v2',
         stepNumber: 5,
       },
       {
-        label: 'Browser Execution',
+        label: 'Submit Backlinks',
         href: 'backlink-builder/execution',
         icon: Link2,
         featureFlag: 'bee_enabled',
         stepNumber: 6,
       },
       {
-        label: 'Verification',
-        href: 'backlink-builder/pending',
+        label: 'Track Results',
+        href: 'backlink-builder/track-results',
         icon: CheckCircle2,
         featureFlag: 'backlink_builder',
         stepNumber: 7,
-      },
-      {
-        label: 'Reports',
-        href: 'reports/library',
-        icon: FileBarChart,
-        featureFlag: 'reports',
-        stepNumber: 8,
       },
     ],
   },
@@ -140,53 +129,41 @@ export const workflowNavSections: WorkflowNavSection[] = [
         featureFlag: 'v11_browser_assistant',
       },
       {
-        label: 'Recommendations',
-        href: 'backlink-builder/recommendations',
-        icon: Lightbulb,
-        featureFlag: 'v11_recommendations',
+        label: 'Execution Center',
+        href: 'backlink-builder/execution',
+        icon: Activity,
+        featureFlag: 'bee_enabled',
       },
       {
-        label: 'Discover Websites',
-        href: 'backlink-builder/discover',
-        icon: Radar,
+        label: 'Verification',
+        href: 'backlink-builder/pending',
+        icon: CheckCircle2,
         featureFlag: 'backlink_builder',
       },
       {
-        label: 'Explorer',
-        href: 'backlink-builder/explorer',
-        icon: Search,
-        featureFlag: 'backlink_builder',
-      },
-      {
-        label: 'Submission Center',
-        href: 'backlink-builder/tracking',
-        icon: ClipboardList,
-        featureFlag: 'v11_submission_assistant',
-      },
-      {
-        label: 'AI Analysis',
-        href: 'backlink-builder/automation',
-        icon: Layers,
-        featureFlag: 'backlink_builder',
-      },
-      { label: 'Provider Settings', href: 'providers', icon: Plug, featureFlag: 'integrations' },
-      { label: 'Runtime Diagnostics', href: 'diagnostics', icon: HeartPulse },
-      {
-        label: 'Browser Runtime',
-        href: 'settings/browser-runtime',
-        icon: MonitorSmartphone,
-        featureFlag: 'backlink_builder',
-      },
-      {
-        label: 'Mission Control',
-        href: 'mission-control',
-        icon: LayoutDashboard,
-        featureFlag: 'mission_control',
+        label: 'Reports',
+        href: 'reports/library',
+        icon: FileBarChart,
+        featureFlag: 'reports',
       },
       {
         label: 'Learning',
         href: 'command-center',
         icon: GraduationCap,
+      },
+      { label: 'Provider Settings', href: 'providers', icon: Plug, featureFlag: 'integrations' },
+      { label: 'Diagnostics', href: 'diagnostics', icon: HeartPulse },
+      {
+        label: 'System Health',
+        href: 'mission-control',
+        icon: MonitorSmartphone,
+        featureFlag: 'mission_control',
+      },
+      {
+        label: 'Browser Runtime',
+        href: 'settings/browser-runtime',
+        icon: MonitorSmartphone,
+        featureFlag: 'backlink_builder',
       },
       { label: 'Settings', href: 'settings/general', icon: Settings },
     ],

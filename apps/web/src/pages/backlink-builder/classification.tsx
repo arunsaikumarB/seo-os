@@ -112,10 +112,10 @@ export function ClassificationDashboardPage() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <Sparkles className="h-6 w-6" /> Opportunity Classification
+            <Sparkles className="h-6 w-6" /> AI Review
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
-            AI inspects each site structure after import — type, confidence, reason, and workflow queue.
+            AI found opportunities and grouped them by type. Continue when you are ready to approve.
           </p>
         </div>
         <BacklinkBuilderNav />
@@ -125,13 +125,12 @@ export function ClassificationDashboardPage() {
         <Skeleton className="h-40 w-full" />
       ) : (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {(
               [
                 ['Imported', a?.imported],
-                ['Classified', a?.classified],
-                ['Unknown', a?.unknown],
-                ['Est. Accuracy', a?.estimatedAccuracy != null ? `${a.estimatedAccuracy}%` : '—'],
+                ['Reviewed', a?.classified],
+                ['Still learning', a?.unknown],
               ] as const
             ).map(([label, value]) => (
               <Card key={label}>
@@ -145,10 +144,12 @@ export function ClassificationDashboardPage() {
 
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base">Imported Websites — categorized summary</CardTitle>
-              <CardDescription>
-                Avg confidence {a?.avgConfidence ?? 0}% · Learning patterns {a?.learningPatterns ?? 0}
-              </CardDescription>
+              <CardTitle className="text-base">
+                {a?.classified != null
+                  ? `AI found ${a.classified} opportunities`
+                  : 'AI review summary'}
+              </CardTitle>
+              <CardDescription>Grouped by website type — ready for approval</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
               {(a?.byType ?? []).length === 0 ? (

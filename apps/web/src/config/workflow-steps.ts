@@ -12,15 +12,18 @@ export interface WorkflowStep {
   difficulty?: 'Beginner' | 'Easy' | 'Intermediate';
 }
 
-/** Guided backlink pipeline — primary UX path (V2) */
+/**
+ * Guided backlink pipeline — primary UX path.
+ * Internal systems stay in Advanced; users only see these steps.
+ */
 export const WORKFLOW_STEPS: WorkflowStep[] = [
   {
     id: 'create-project',
     number: 1,
     emoji: '①',
     title: 'Create Project',
-    purpose: 'Confirm your website project — domain, industry, and goals.',
-    aiTip: 'One project per website keeps results clean.',
+    purpose: 'Tell AI about your business — name, website, industry, and description.',
+    aiTip: 'AI studies your website automatically after you continue.',
     route: 'settings/general',
     estimatedMinutes: 2,
     difficulty: 'Beginner',
@@ -30,71 +33,61 @@ export const WORKFLOW_STEPS: WorkflowStep[] = [
     number: 2,
     emoji: '②',
     title: 'Import Websites',
-    purpose: 'Paste or upload target websites. AI analysis starts automatically.',
-    aiTip: 'Import first — discovery and classification run in the background.',
+    purpose: 'Paste, CSV, Excel, Sheets, or add websites manually. AI validates and deduplicates.',
+    aiTip: 'Import first — AI starts reviewing in the background.',
     route: 'backlink-builder/import',
     estimatedMinutes: 5,
     difficulty: 'Easy',
   },
   {
-    id: 'ai-discovery',
+    id: 'ai-review',
     number: 3,
     emoji: '③',
-    title: 'AI Discovery & Qualification',
-    purpose: 'AI classifies each site (directory, guest post, forum, and more) and scores fit.',
-    aiTip: 'You do not pick the type — AI detects the correct submission workflow.',
+    title: 'AI Review',
+    purpose: 'AI groups opportunities by type — directories, guest posts, forums, and more.',
+    aiTip: 'You do not pick the type. AI detects the right workflow.',
     route: 'backlink-builder/classification',
     estimatedMinutes: 5,
     difficulty: 'Easy',
   },
   {
-    id: 'opportunity-review',
+    id: 'approve-opportunities',
     number: 4,
     emoji: '④',
-    title: 'Opportunity Review',
-    purpose: 'Approve the strongest opportunities before content and execution.',
+    title: 'Approve Opportunities',
+    purpose: 'Approve or reject websites. AI already scored fit and difficulty.',
     route: 'campaigns/queue',
     estimatedMinutes: 10,
     difficulty: 'Easy',
   },
   {
-    id: 'content-studio',
+    id: 'generate-content',
     number: 5,
     emoji: '⑤',
-    title: 'Content Studio',
-    purpose: 'Generate the right submission package for each approved website.',
-    aiTip: 'Images and videos are included when the submission type needs them.',
+    title: 'Generate Content',
+    purpose: 'AI creates articles, listings, forum replies, images, and video metadata.',
+    aiTip: 'No manual format picking — AI builds the right package for each site.',
     route: 'content/library',
     estimatedMinutes: 10,
     difficulty: 'Easy',
   },
   {
-    id: 'browser-execution',
+    id: 'submit-backlinks',
     number: 6,
     emoji: '⑥',
-    title: 'Browser Execution',
-    purpose: 'Submit approved packages — AI fills forms and pauses only for human steps.',
+    title: 'Submit Backlinks',
+    purpose: 'AI opens sites, fills forms, uploads assets, and submits. You only help on login or CAPTCHA.',
     route: 'backlink-builder/execution',
     estimatedMinutes: 15,
     difficulty: 'Easy',
   },
   {
-    id: 'verification',
+    id: 'track-results',
     number: 7,
     emoji: '⑦',
-    title: 'Verification',
-    purpose: 'Confirm published backlinks and track wins.',
-    route: 'backlink-builder/pending',
-    estimatedMinutes: 10,
-    difficulty: 'Easy',
-  },
-  {
-    id: 'reports',
-    number: 8,
-    emoji: '⑧',
-    title: 'Reports',
-    purpose: 'Share executive progress — submitted, verified, and success rate.',
-    route: 'reports/library',
+    title: 'Track Results',
+    purpose: 'See submitted, pending, approved, verified — and download Excel, CSV, or PDF.',
+    route: 'backlink-builder/track-results',
     estimatedMinutes: 5,
     difficulty: 'Beginner',
   },
@@ -102,14 +95,22 @@ export const WORKFLOW_STEPS: WorkflowStep[] = [
 
 export const TOTAL_WORKFLOW_STEPS = WORKFLOW_STEPS.length;
 
+/** Older step ids still stored in local progress — map to the current 7-step flow */
+export const WORKFLOW_STEP_ALIASES: Record<string, string[]> = {
+  'ai-review': ['ai-discovery'],
+  'approve-opportunities': ['opportunity-review'],
+  'generate-content': ['content-studio'],
+  'submit-backlinks': ['browser-execution'],
+  'track-results': ['verification', 'reports'],
+};
+
 /** Compact labels for the workflow progress strip */
 export const WORKFLOW_PIPELINE_LABELS: Array<{ id: string; label: string }> = [
-  { id: 'create-project', label: 'Project Created' },
-  { id: 'import-websites', label: 'Websites Imported' },
-  { id: 'ai-discovery', label: 'AI Analysis' },
-  { id: 'opportunity-review', label: 'Opportunities Qualified' },
-  { id: 'content-studio', label: 'Content Generation' },
-  { id: 'browser-execution', label: 'Browser Execution' },
-  { id: 'verification', label: 'Verification' },
-  { id: 'reports', label: 'Reports' },
+  { id: 'create-project', label: 'Project' },
+  { id: 'import-websites', label: 'Import' },
+  { id: 'ai-review', label: 'AI Review' },
+  { id: 'approve-opportunities', label: 'Approve' },
+  { id: 'generate-content', label: 'Content' },
+  { id: 'submit-backlinks', label: 'Submit' },
+  { id: 'track-results', label: 'Results' },
 ];

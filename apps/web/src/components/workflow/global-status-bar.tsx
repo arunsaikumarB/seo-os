@@ -16,12 +16,12 @@ type Props = {
   className?: string;
 };
 
+/** Always-visible AI status — ChatGPT-style “what AI is doing” */
 export function GlobalStatusBar({ projectId, className }: Props) {
   const navigate = useNavigate();
   const { request, fetchProjects } = useApi();
   const currentOrgId = useAppStore((s) => s.currentOrgId);
-  const { completedCount, totalSteps, currentStep, allComplete: guideAllComplete } =
-    useWorkflow(projectId);
+  const { completedCount, totalSteps, currentStep } = useWorkflow(projectId);
   const bee = useBeeExecutionProgress(projectId, 2_000);
   const interventions = useInterventions(projectId, 3_000);
   const notifiedRef = useRef<Set<string>>(new Set());
@@ -74,21 +74,27 @@ export function GlobalStatusBar({ projectId, className }: Props) {
   const aiTask = !p
     ? currentStep.title
     : needsAction && firstAction
-      ? `${firstAction.reason} — ${firstAction.website}`
+      ? firstAction.reason.includes('CAPTCHA')
+        ? 'Waiting CAPTCHA'
+        : firstAction.reason.includes('Login')
+          ? 'Waiting login'
+          : firstAction.reason
       : p.running > 0
-        ? 'Browser submitting…'
+        ? 'Submitting backlinks'
         : p.queued > 0
-          ? 'Jobs queued…'
-          : p.executionComplete
-            ? 'Execution idle'
-            : currentStep.title;
+          ? 'Preparing submissions'
+          : p.waitingVerification > 0
+            ? 'Verifying links'
+            : p.executionComplete
+              ? 'Ready'
+              : currentStep.title;
 
   const pct = hasJobs
     ? Math.round(p?.progressPercent ?? 0)
     : Math.round((completedCount / Math.max(totalSteps, 1)) * 100);
   const progressLabel = hasJobs
-    ? `Execution ${p?.completedJobs ?? 0}/${p?.totalJobs ?? 0}`
-    : `Workflow ${pct}%`;
+    ? `${p?.completedJobs ?? 0}/${p?.totalJobs ?? 0}`
+    : `${completedCount}/${totalSteps}`;
   const showSpin = Boolean(p && (p.running > 0 || needsAction));
 
   return (
@@ -110,29 +116,21 @@ export function GlobalStatusBar({ projectId, className }: Props) {
         {hasJobs && p && !p.executionComplete && p.etaSeconds > 0
           ? ` · ETA ${formatEta(p.etaSeconds)}`
           : ''}
-        {hasJobs && p ? ` · Workers ${p.workerUsage}` : ''}
       </span>
       <span className="inline-flex items-center gap-1.5 text-muted-foreground min-w-0">
-        {showSpin && !needsAction && (
+        {showSpin && !needsAction ? (
           <Loader2 className="h-3 w-3 animate-spin text-primary shrink-0" />
-        )}
-        {needsAction ? (
-          <AlertTriangle className="h-3 w-3 text-amber-600 shrink-0" />
         ) : null}
-        <span className="truncate">AI: {aiTask}</span>
+        {needsAction ? <AlertTriangle className="h-3 w-3 text-amber-600 shrink-0" /> : null}
+        <span className="truncate">AI is {aiTask.toLowerCase().startsWith('waiting') || aiTask === 'Ready' ? aiTask.toLowerCase() : `doing: ${aiTask}`}</span>
       </span>
       {needsAction && firstAction ? (
         <Link
           to={`/projects/${projectId}/backlink-builder/browser-assistant?jobId=${firstAction.jobId}`}
           className="inline-flex items-center gap-1 rounded-md bg-amber-500/15 px-2 py-0.5 font-medium text-amber-800 hover:bg-amber-500/25"
         >
-          Needs your action ({actionItems.length}) · Open Browser Assistant
+          Needs your action · Open Browser
         </Link>
-      ) : (
-        <span className="text-muted-foreground tabular-nums">Queued {p?.queued ?? 0}</span>
-      )}
-      {guideAllComplete && hasJobs && !p?.executionComplete ? (
-        <span className="text-amber-700 tabular-nums">Execution still running</span>
       ) : null}
       <Link
         to={`/org/settings/notifications`}

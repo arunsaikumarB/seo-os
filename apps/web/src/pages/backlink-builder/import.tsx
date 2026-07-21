@@ -168,9 +168,7 @@ export function BacklinkImportPage() {
           <Upload className="h-6 w-6" /> Import Websites
         </h1>
         <p className="text-muted-foreground mt-1">
-          Import via CSV, Excel (.xlsx), TXT, or pasted URLs. The AI inspects each website (nav,
-          forms, buttons, metadata, robots/sitemap) and classifies opportunity type before the
-          Opportunity Queue.
+          Paste, CSV, Excel, or Sheets. AI validates, deduplicates, and studies each website.
         </p>
       </div>
 

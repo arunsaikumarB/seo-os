@@ -484,10 +484,10 @@ export function BrowserExecutionCenterPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Browser Execution</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Submit Backlinks</h1>
           <p className="text-muted-foreground">
-            Monitor progress, running jobs, and completed submissions. When login, CAPTCHA, MFA, or
-            verification is needed, open Browser Assistant — AI resumes automatically when you finish.
+            AI opens websites, fills forms, and submits. If login or CAPTCHA appears, open Browser
+            Assistant — AI resumes automatically.
           </p>
         </div>
         <Button variant="outline" size="sm" asChild>

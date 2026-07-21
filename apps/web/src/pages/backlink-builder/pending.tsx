@@ -90,7 +90,7 @@ export function BacklinkPendingPage() {
     <div className="space-y-6">
       <BacklinkBuilderHero
         title="Verification"
-        subtitle="Real HTTP fetch of the source URL — checks status, target presence, anchor match, and nofollow heuristics. Loss events notify via platform notifications."
+        subtitle="Detailed link checks — also available from Track Results."
       />
 
       <Card>

@@ -168,10 +168,10 @@ export function OpportunityQueuePage() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <ListChecks className="h-6 w-6" /> Opportunity Review
+            <ListChecks className="h-6 w-6" /> Approve Opportunities
           </h1>
           <p className="text-muted-foreground">
-            Approve the strongest sites. AI already detected the submission type.
+            Approve or reject websites. AI already scored traffic, difficulty, and fit.
           </p>
         </div>
         <Button
