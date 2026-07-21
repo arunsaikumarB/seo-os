@@ -1006,6 +1006,9 @@ export async function listSessions(workspaceId: string) {
 }
 
 export async function getStatistics(workspaceId: string) {
+  // Single source of truth — Execution State Manager
+  const { getStatisticsFromExecutionState } = await import('./execution-state.service.js');
+  const base = await getStatisticsFromExecutionState(workspaceId);
   const jobs = await listJobs(workspaceId);
   const policy = await getOrCreatePolicy(workspaceId);
   const maxWorkers = Math.max(1, Number(policy.max_parallel_sessions ?? 4));
@@ -1021,32 +1024,7 @@ export async function getStatistics(workspaceId: string) {
     /* optional */
   }
 
-  const counts = {
-    running: 0,
-    queued: 0,
-    paused: 0,
-    needs_approval: 0,
-    completed: 0,
-    failed: 0,
-    blocked: 0,
-    cancelled: 0,
-    watching: 0,
-    ready_to_continue: 0,
-    auto_resumed: 0,
-    completed_after_captcha: 0,
-    completed_after_login: 0,
-  };
-  let runtimeSum = 0;
-  let runtimeN = 0;
-  let submitSum = 0;
-  let submitN = 0;
-  let current: {
-    website?: string;
-    step?: string;
-    browser?: string;
-    queueProgress?: string;
-  } = {};
-
+  const { toPublicExecutionStatus } = await import('@seo-os/backlink-builder');
   const runningJobs: Array<{
     website: string;
     step: string;
@@ -1056,222 +1034,34 @@ export async function getStatistics(workspaceId: string) {
     elapsedMs: number;
     etaMs: number | null;
   }> = [];
-
-  const pipelineLabel = (status: string, pauseReason?: string | null) => {
-    if (status.startsWith('watching_captcha') || pauseReason === 'captcha') return 'Waiting CAPTCHA';
-    if (status.startsWith('watching_login') || pauseReason === 'login') return 'Waiting Login';
-    if (status.includes('mfa') || pauseReason === 'mfa') return 'Waiting MFA';
-    if (status.includes('email') || pauseReason === 'email_verify') return 'Waiting Email Verification';
-    if (status.includes('phone') || pauseReason === 'phone_verify') return 'Waiting Phone Verification';
-    const map: Record<string, string> = {
-      queued: 'Queued',
-      preparing: 'Preparing',
-      launching_browser: 'Launching Browser',
-      navigating: 'Opening Website',
-      authenticating: 'Authenticating',
-      analyzing_form: 'Finding Form',
-      filling_fields: 'Filling Company Info',
-      uploading_assets: 'Uploading Assets',
-      validating: 'Detecting Fields',
-      ready_for_review: 'Ready for Review',
-      awaiting_user: 'Waiting for User',
-      submitting: 'Submitting',
-      submitted: 'Submitted',
-      waiting_verification: 'Verification Scheduled',
-      completed: 'Submitted',
-      verified: 'Verified',
-      failed: 'Temporary Failure',
-      retry_scheduled: 'Retrying',
-    };
-    return map[status] ?? status.replace(/_/g, ' ');
-  };
-
+  let current: { website?: string; step?: string; browser?: string; queueProgress?: string } = {};
   for (const j of jobs) {
-    const s = String(j.status);
-    if (
-      [
-        'preparing',
-        'launching_browser',
-        'authenticating',
-        'navigating',
-        'analyzing_form',
-        'uploading_assets',
-        'filling_fields',
-        'validating',
-        'submitting',
-        'waiting_verification',
-        'submitted',
-      ].includes(s)
-    ) {
-      counts.running++;
-      const startedAt = j.started_at ? String(j.started_at) : null;
-      const elapsedMs = startedAt ? Date.now() - new Date(startedAt).getTime() : 0;
-      runningJobs.push({
+    const disposition =
+      j.disposition != null
+        ? String(j.disposition)
+        : ((j.metrics as { disposition?: string } | null)?.disposition ?? null);
+    const pub = toPublicExecutionStatus(String(j.status), { disposition });
+    if (pub !== 'Running') continue;
+    const startedAt = j.started_at ? String(j.started_at) : null;
+    const elapsedMs = startedAt ? Date.now() - new Date(startedAt).getTime() : 0;
+    runningJobs.push({
+      website: String(j.site_domain ?? ''),
+      step: String(j.status),
+      stepLabel: String(j.status).replace(/_/g, ' '),
+      sessionId: String(j.session_id ?? ''),
+      startedAt,
+      elapsedMs,
+      etaMs: null,
+    });
+    if (!current.website) {
+      current = {
         website: String(j.site_domain ?? ''),
-        step: s,
-        stepLabel: pipelineLabel(s, j.pause_reason != null ? String(j.pause_reason) : null),
-        sessionId: String(j.session_id ?? ''),
-        startedAt,
-        elapsedMs,
-        etaMs: null,
-      });
-      if (!current.website) {
-        current = {
-          website: String(j.site_domain ?? ''),
-          step: pipelineLabel(s),
-          browser: String(j.session_id ?? ''),
-        };
-      }
-    } else if (s === 'queued' || s === 'retry_scheduled' || s === 'waiting_infrastructure')
-      counts.queued++;
-    else if (s === 'paused' || s === 'awaiting_user' || s === 'ready_for_review') counts.paused++;
-    else if (s === 'needs_approval') counts.needs_approval++;
-    else if (s === 'completed' || s === 'verified') {
-      counts.completed++;
-      const resume = String(j.resume_reason ?? '');
-      const pause = String(j.pause_reason ?? '');
-      if (pause === 'captcha' || resume.includes('captcha')) counts.completed_after_captcha++;
-      if (pause === 'login' || resume.includes('login')) counts.completed_after_login++;
-    } else if (s === 'failed') counts.failed++;
-    else if (s.startsWith('blocked_')) counts.blocked++;
-    else if (s.startsWith('watching')) {
-      counts.watching++;
-      if (!current.website) {
-        current = {
-          website: String(j.site_domain ?? ''),
-          step: pipelineLabel(s, j.pause_reason != null ? String(j.pause_reason) : null),
-          browser: String(j.session_id ?? ''),
-        };
-      }
-    } else if (s === 'ready_to_continue') counts.ready_to_continue++;
-    else if (s === 'cancelled') counts.cancelled++;
-
-    if (j.auto_resumed) counts.auto_resumed++;
-
-    if (j.started_at && j.finished_at) {
-      const ms =
-        new Date(String(j.finished_at)).getTime() - new Date(String(j.started_at)).getTime();
-      runtimeSum += ms;
-      runtimeN++;
-      if (s === 'completed' || s === 'verified' || s === 'submitted') {
-        submitSum += ms;
-        submitN++;
-      }
+        step: String(j.status).replace(/_/g, ' '),
+        browser: String(j.session_id ?? ''),
+      };
     }
   }
-
-  const retrying = jobs.filter((j) => String(j.status) === 'retry_scheduled').length;
-  const interventionStatuses = (j: { status?: unknown; pause_reason?: unknown }) => {
-    const s = String(j.status);
-    return (
-      s.startsWith('watching') ||
-      s.startsWith('blocked_') ||
-      ['awaiting_user', 'needs_approval', 'paused', 'ready_for_review'].includes(s)
-    );
-  };
-  const waitingUser = jobs.filter((j) => interventionStatuses(j)).length;
-  const skipped = jobs.filter((j) => {
-    const s = String(j.status);
-    const d = String((j as { disposition?: string }).disposition ?? '');
-    return s === 'skipped' || d === 'skipped' || s === 'unsupported';
-  }).length;
-  const ready = jobs.filter((j) =>
-    ['queued', 'waiting_infrastructure', 'retry_scheduled'].includes(String(j.status))
-  ).length;
-  const topFailureReasons: Record<string, number> = {};
-  for (const j of jobs) {
-    if (String(j.status) !== 'failed') continue;
-    const code = String(j.error_code ?? 'UNKNOWN_EXCEPTION');
-    topFailureReasons[code] = (topFailureReasons[code] ?? 0) + 1;
-  }
-
-  const submitted =
-    jobs.filter((j) =>
-      ['submitted', 'completed', 'verified', 'waiting_verification'].includes(String(j.status))
-    ).length;
-  const waitingLogin = jobs.filter((j) => {
-    const s = String(j.status);
-    const p = String(j.pause_reason ?? '');
-    return (
-      s.startsWith('watching_login') ||
-      s === 'authenticating' ||
-      p === 'login' ||
-      (s === 'awaiting_user' && p === 'login')
-    );
-  }).length;
-  const waitingMfa = jobs.filter((j) => {
-    const s = String(j.status);
-    const p = String(j.pause_reason ?? '');
-    return s.includes('mfa') || p === 'mfa';
-  }).length;
-  const waitingApproval = jobs.filter((j) => {
-    const s = String(j.status);
-    const p = String(j.pause_reason ?? '');
-    return (
-      s === 'needs_approval' ||
-      s === 'ready_for_review' ||
-      s.startsWith('watching_captcha') ||
-      s.startsWith('blocked_captcha') ||
-      p === 'human_approval' ||
-      p === 'captcha'
-    );
-  }).length;
-  const waitingVerification = jobs.filter(
-    (j) => String(j.status) === 'waiting_verification'
-  ).length;
-
-  const totalJobs = jobs.length;
-  // Terminal for AI campaign progress — intervention is optional (does not block completion)
-  const terminalStatuses = new Set([
-    'submitted',
-    'completed',
-    'verified',
-    'waiting_verification',
-    'failed',
-    'cancelled',
-    'skipped',
-    'unsupported',
-  ]);
-  const completedJobs = jobs.filter((j) => terminalStatuses.has(String(j.status))).length;
-  // AI remaining = still automating (exclude optional human intervention queue)
-  const aiActive = jobs.filter((j) => {
-    const s = String(j.status);
-    if (terminalStatuses.has(s)) return false;
-    if (interventionStatuses(j)) return false;
-    return true;
-  }).length;
-  const progressPercent =
-    totalJobs > 0
-      ? Math.round(((submitted + counts.failed + skipped) / totalJobs) * 1000) / 10
-      : 0;
-  const executionComplete = totalJobs > 0 && aiActive === 0;
-
-  const successDenom = submitted + counts.failed;
-  const successRate =
-    successDenom > 0 ? Math.round((submitted / successDenom) * 1000) / 10 : null;
-  const avgMs = runtimeN ? Math.round(runtimeSum / runtimeN) : 90_000;
-  const avgSubmitMs = submitN ? Math.round(submitSum / submitN) : null;
-
-  // ETA from remaining automation work ÷ active worker capacity
-  const remainingJobs = aiActive;
-  const activeWorkerCount = Math.min(maxWorkers, Math.max(counts.running, 0));
-  const effectiveWorkers = Math.max(1, activeWorkerCount || (remainingJobs > 0 ? 1 : 1));
-  for (const w of runningJobs) {
-    w.etaMs = Math.max(0, avgMs - w.elapsedMs);
-  }
-  const inFlightRemainingAvg =
-    runningJobs.length > 0
-      ? Math.round(
-          runningJobs.reduce((sum, w) => sum + (w.etaMs ?? avgMs), 0) / runningJobs.length
-        )
-      : 0;
-  const queuedRemaining = ready;
-  const etaMs =
-    remainingJobs <= 0
-      ? 0
-      : inFlightRemainingAvg + Math.ceil(queuedRemaining / effectiveWorkers) * avgMs;
-  current.queueProgress = `${submitted}/${totalJobs}`;
-
+  current.queueProgress = `${base.completedJobs}/${base.totalJobs}`;
   const workers = Array.from({ length: maxWorkers }, (_, i) => {
     const job = runningJobs[i];
     if (!job) {
@@ -1294,74 +1084,18 @@ export async function getStatistics(workspaceId: string) {
     };
   });
 
-  const day = new Date().toISOString().slice(0, 10);
-  await getSupabaseAdmin().from('execution_statistics').upsert(
-    {
-      workspace_id: workspaceId,
-      day,
-      running: counts.running,
-      queued: counts.queued,
-      paused: counts.paused,
-      needs_approval: counts.needs_approval,
-      completed: counts.completed,
-      failed: counts.failed,
-      blocked: counts.blocked,
-      cancelled: counts.cancelled,
-      watching: counts.watching,
-      auto_resumed: counts.auto_resumed,
-      completed_after_captcha: counts.completed_after_captcha,
-      completed_after_login: counts.completed_after_login,
-      avg_runtime_ms: runtimeN ? Math.round(runtimeSum / runtimeN) : null,
-      success_rate: successRate,
-      meta: {
-        ready_to_continue: counts.ready_to_continue,
-        current,
-        workerUsage: `${activeWorkerCount}/${maxWorkers}`,
-        avgSubmissionMs: avgSubmitMs,
-        pool: poolStats,
-        totalJobs,
-        completedJobs,
-        progressPercent,
-        executionComplete,
-      },
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: 'workspace_id,day' }
-  );
-
   return {
-    ...counts,
-    submitted,
-    ready,
-    needsYou: waitingUser,
-    skipped,
-    waitingLogin,
-    waitingMfa,
-    waitingApproval,
-    waitingVerification,
-    retrying,
-    waitingUser,
-    topFailureReasons,
-    successRate,
-    avgRuntimeMs: runtimeN ? Math.round(runtimeSum / runtimeN) : null,
-    avgSubmissionMs: avgSubmitMs,
-    maxParallelSessions: maxWorkers,
-    activeWorkerCount,
-    workerUsage: `${activeWorkerCount}/${maxWorkers}`,
+    ...base,
     workers,
     browserPool: poolStats,
-    totalJobs,
-    completedJobs,
-    remainingJobs,
-    progressPercent,
-    executionComplete,
-    etaSeconds: Math.round(etaMs / 1000),
-    estimatedFinishAt: etaMs > 0 ? new Date(Date.now() + etaMs).toISOString() : null,
-    estimatedApprovalTime: '7–14 days',
     current,
-    needsYourAction: waitingUser,
-    aiSubmitted: submitted,
-    metricsSource: 'live' as const,
+    maxParallelSessions: maxWorkers,
+    activeWorkerCount: Math.min(maxWorkers, runningJobs.length),
+    workerUsage: `${Math.min(maxWorkers, runningJobs.length)}/${maxWorkers}`,
+    topFailureReasons: {} as Record<string, number>,
+    avgRuntimeMs: null as number | null,
+    avgSubmissionMs: null as number | null,
+    estimatedFinishAt: null as string | null,
   };
 }
 

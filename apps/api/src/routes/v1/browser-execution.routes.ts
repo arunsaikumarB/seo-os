@@ -850,6 +850,23 @@ browserExecutionRouter.get(
 );
 
 browserExecutionRouter.get(
+  '/browser/execution-state',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      const { getExecutionState } = await import(
+        '../../modules/browser-execution/execution-state.service.js'
+      );
+      res.json({ data: await getExecutionState(param(req.params.projectId)) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.get(
   '/browser/policies',
   authMiddleware,
   requireRole('viewer'),
@@ -896,32 +913,38 @@ browserExecutionRouter.get(
         res.json({ data: report });
         return;
       }
+      const { getExecutionState } = await import(
+        '../../modules/browser-execution/execution-state.service.js'
+      );
+      const state = await getExecutionState(param(req.params.projectId));
       const stats = await getStatistics(param(req.params.projectId));
-      const jobs = await listJobs(param(req.params.projectId));
       const history = await listHistory(param(req.params.projectId));
       const payload = {
         generatedAt: new Date().toISOString(),
-        metricsSource: 'live',
+        metricsSource: 'live' as const,
+        executionState: state,
+        trackResults: state.trackResults,
+        counts: state.counts,
         statistics: stats,
-        jobs: jobs.map((j) => ({
-          id: j.id,
+        jobs: state.campaignItems.map((j) => ({
+          id: j.jobId,
           status: j.status,
-          domain: j.site_domain,
-          mode: j.mode,
-          pauseReason: j.pause_reason,
-          resumeReason: j.resume_reason,
-          watchDurationMs: j.watch_duration_ms,
-          autoResumed: j.auto_resumed,
-          createdAt: j.created_at,
-          finishedAt: j.finished_at,
+          rawStatus: j.rawStatus,
+          domain: j.website,
+          disposition: j.disposition,
+          pauseReason: j.pauseReason,
+          createdAt: j.createdAt,
+          finishedAt: j.finishedAt,
         })),
+        failedQueue: state.failedQueue,
         history,
       };
       if (format === 'csv') {
         const lines = [
-          'id,status,domain,mode,createdAt',
+          'id,status,domain,disposition,createdAt',
           ...payload.jobs.map(
-            (j) => `${j.id},${j.status},${j.domain},${j.mode},${j.createdAt}`
+            (j) =>
+              `${j.id},${j.status},${j.domain},${j.disposition ?? ''},${j.createdAt ?? ''}`
           ),
         ];
         res.setHeader('Content-Type', 'text/csv');

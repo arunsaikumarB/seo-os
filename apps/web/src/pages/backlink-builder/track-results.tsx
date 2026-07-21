@@ -7,58 +7,60 @@ import { PageTransition } from '@/components/demo/page-transition';
 import { useApi } from '@/hooks/use-api';
 import { AiLoadingState } from '@/components/workflow/ai-activity-card';
 
+type TrackResults = {
+  Submitted: number;
+  Running: number;
+  'Waiting Human': number;
+  Failed: number;
+  Skipped: number;
+  Deleted: number;
+  Verified: number;
+  Approved: number;
+  Rejected: number;
+};
+
+type ExecutionState = {
+  trackResults: TrackResults;
+  counts: {
+    campaignTotal: number;
+    campaignResolved: number;
+    progressPercent: number;
+    executionComplete: boolean;
+  };
+};
+
 /**
  * Step 7 — Track Results.
- * UX-only composition over existing summary / pending / reports APIs.
+ * Reads exclusively from the Execution State Manager.
  */
 export function TrackResultsPage() {
   const { projectId = '' } = useParams();
   const { request } = useApi();
 
-  const summary = useQuery({
-    queryKey: ['track-results-summary', projectId],
+  const state = useQuery({
+    queryKey: ['execution-state', projectId],
     queryFn: () =>
-      request<{ data: Record<string, unknown> }>(
-        `/v1/projects/${projectId}/backlink-builder/summary`
-      ).catch(() => ({ data: {} })),
-    enabled: !!projectId,
-    retry: false,
-  });
-
-  const pending = useQuery({
-    queryKey: ['track-results-pending', projectId],
-    queryFn: () =>
-      request<{ data: unknown[] }>(`/v1/projects/${projectId}/backlink-builder/pending`).catch(
-        () => ({ data: [] })
+      request<{ data: ExecutionState }>(
+        `/v1/projects/${projectId}/browser/execution-state`
       ),
     enabled: !!projectId,
+    refetchInterval: 3_000,
     retry: false,
   });
 
-  const s = (summary.data?.data ?? {}) as Record<string, unknown>;
-  const num = (key: string, fallback = 0) => {
-    const v = s[key];
-    return typeof v === 'number' ? v : fallback;
-  };
+  const tr = state.data?.data.trackResults;
+  const counts = state.data?.data.counts;
 
   const metrics = [
-    { label: 'Submitted', value: num('submitted') },
-    { label: 'Pending', value: pending.data?.data?.length ?? num('pending') },
-    { label: 'Approved', value: num('approved') },
-    { label: 'Rejected', value: num('lost', num('failed')) },
-    { label: 'Verified', value: num('verified', num('won')) },
-    {
-      label: 'Traffic Estimate',
-      value: (s.estimatedTraffic as string | number | undefined) ?? '—',
-    },
-    {
-      label: 'Authority Gain',
-      value: (s.estimatedDaGain as string | number | undefined) ?? '—',
-    },
-    {
-      label: 'Backlinks Live',
-      value: num('live', num('verified', num('won'))),
-    },
+    { label: 'Submitted', value: tr?.Submitted ?? 0 },
+    { label: 'Running', value: tr?.Running ?? 0 },
+    { label: 'Waiting Human', value: tr?.['Waiting Human'] ?? 0 },
+    { label: 'Failed', value: tr?.Failed ?? 0 },
+    { label: 'Skipped', value: tr?.Skipped ?? 0 },
+    { label: 'Deleted', value: tr?.Deleted ?? 0 },
+    { label: 'Verified', value: tr?.Verified ?? 0 },
+    { label: 'Approved', value: tr?.Approved ?? 0 },
+    { label: 'Rejected', value: tr?.Rejected ?? 0 },
   ] as const;
 
   return (
@@ -68,14 +70,25 @@ export function TrackResultsPage() {
           <CheckCircle2 className="h-6 w-6" /> Track Results
         </h1>
         <p className="text-muted-foreground text-sm max-w-2xl">
-          Submitted, pending, approved, and live — plus downloads for your team.
+          Live campaign status from the Execution State Manager — not verification alone.
         </p>
       </div>
 
-      {summary.isLoading ? (
-        <AiLoadingState message="AI is checking backlink status…" />
+      {counts ? (
+        <p className="text-sm text-muted-foreground">
+          Campaign total{' '}
+          <span className="font-semibold tabular-nums text-foreground">
+            {counts.campaignTotal}
+          </span>
+          {' · '}
+          {counts.campaignResolved} resolved · {counts.progressPercent}% complete
+        </p>
+      ) : null}
+
+      {state.isLoading ? (
+        <AiLoadingState message="AI is checking execution status…" />
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {metrics.map((m) => (
             <Card key={m.label} className="border-border/40 shadow-sm rounded-2xl">
               <CardContent className="pt-4">
@@ -102,7 +115,9 @@ export function TrackResultsPage() {
             </Link>
           </Button>
           <Button variant="outline" asChild>
-            <Link to={`/projects/${projectId}/backlink-builder/pending`}>Open verification list</Link>
+            <Link to={`/projects/${projectId}/backlink-builder/pending`}>
+              Open verification (Submitted only)
+            </Link>
           </Button>
         </CardContent>
       </Card>

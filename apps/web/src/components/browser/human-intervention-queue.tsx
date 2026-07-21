@@ -51,6 +51,9 @@ export function HumanInterventionQueue({ projectId }: Props) {
     qc.invalidateQueries({ queryKey: ['bee-jobs', projectId] });
     qc.invalidateQueries({ queryKey: ['bee-stats', projectId] });
     qc.invalidateQueries({ queryKey: ['bee-opportunities', projectId] });
+    qc.invalidateQueries({ queryKey: ['execution-state', projectId] });
+    qc.invalidateQueries({ queryKey: ['bee-execution-progress', projectId] });
+    qc.invalidateQueries({ queryKey: ['backlink-pending', projectId] });
   };
 
   const allSelected = items.length > 0 && items.every((i) => selected.has(i.jobId));

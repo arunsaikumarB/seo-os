@@ -562,6 +562,20 @@ export async function listLostBacklinks(workspaceId: string) {
 }
 
 export async function listPendingBacklinks(workspaceId: string) {
+  // Verification only tracks Submitted websites — exclude Failed / Deleted / Ignored
+  const { getExecutionState } = await import(
+    '../browser-execution/execution-state.service.js'
+  );
+  const state = await getExecutionState(workspaceId).catch(() => null);
+  const eligibleDomains = new Set(
+    (state?.verificationEligible ?? []).map((i) => i.website.toLowerCase())
+  );
+  const eligibleOppIds = new Set(
+    (state?.verificationEligible ?? [])
+      .map((i) => i.opportunityId)
+      .filter(Boolean) as string[]
+  );
+
   const { data, error } = await getSupabaseAdmin()
     .from('backlinks')
     .select('*')
@@ -569,7 +583,16 @@ export async function listPendingBacklinks(workspaceId: string) {
     .eq('verification_status', 'pending')
     .order('won_at', { ascending: false });
   if (error) throw error;
-  return data ?? [];
+  const rows = data ?? [];
+  if (!state) return rows;
+  return rows.filter((b) => {
+    const domain = String(b.domain ?? '').toLowerCase();
+    const oppId = b.opportunity_id ? String(b.opportunity_id) : '';
+    if (eligibleOppIds.has(oppId)) return true;
+    if (domain && eligibleDomains.has(domain)) return true;
+    // If no execution jobs yet, keep legacy pending rows that aren't lost domains
+    return state.verificationEligible.length === 0 && state.campaignItems.length === 0;
+  });
 }
 
 export async function getLinkAudit(workspaceId: string) {

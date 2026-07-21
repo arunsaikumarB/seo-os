@@ -253,6 +253,14 @@ export async function listInterventions(workspaceId: string) {
     const status = String(j.status);
     if (!isInterventionStatus(status)) continue;
     const jobRec = j as Record<string, unknown>;
+    const disposition =
+      jobRec.disposition != null
+        ? String(jobRec.disposition)
+        : ((jobRec.metrics as { disposition?: string } | null)?.disposition ?? null);
+    // Deleted / Ignored never appear in Human Intervention Queue
+    if (status === 'deleted' || status === 'ignored' || disposition === 'deleted_forever') {
+      continue;
+    }
     const gate = resolveInterventionGate(jobRec);
     // Dedicated Human Intervention Queue — only protected human gates
     if (!HUMAN_QUEUE_GATES.has(gate) && gate !== 'unknown' && gate !== 'category' && gate !== 'manual_input') {

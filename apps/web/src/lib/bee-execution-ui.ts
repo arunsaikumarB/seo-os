@@ -20,29 +20,39 @@ const TERMINAL = new Set([
   'waiting_verification',
   'failed',
   'cancelled',
+  'skipped',
+  'unsupported',
+  'deleted',
+  'ignored',
+  'approved',
+  'rejected',
 ]);
 
 export function isTerminalJobStatus(status: string): boolean {
   return TERMINAL.has(status);
 }
 
-/** Concise badge labels for Active Jobs (user-facing vocabulary). */
+/** Concise badge labels — aligned with Execution State Manager public statuses. */
 export function executionStatusLabel(
   status: string,
-  opts?: { pauseReason?: string | null; errorCode?: string | null; errorMessage?: string | null }
+  opts?: {
+    pauseReason?: string | null;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+    disposition?: string | null;
+  }
 ): string {
   const s = status;
-  const p = String(opts?.pauseReason ?? '');
+  const d = String(opts?.disposition ?? '');
+  if (s === 'deleted' || d === 'deleted_forever') return 'Deleted';
+  if (s === 'ignored') return 'Ignored';
+  if (s === 'skipped' || s === 'unsupported') return 'Skipped';
   if (s === 'waiting_infrastructure' || opts?.errorCode === 'BROWSER_RUNTIME_MISSING') {
     return 'Queued';
   }
-  if (s === 'failed') {
-    return opts?.errorMessage?.startsWith('Temporary Failure')
-      ? 'Failed'
-      : opts?.errorMessage || opts?.errorCode?.replace(/_/g, ' ') || 'Failed';
-  }
-  if (s === 'cancelled') return 'Cancelled';
-  if (s === 'retry_scheduled') return 'Retrying';
+  if (s === 'failed') return 'Failed';
+  if (s === 'cancelled') return 'Skipped';
+  if (s === 'retry_scheduled') return 'Queued';
   if (s === 'queued') return 'Queued';
   if (
     s.startsWith('watching_') ||
@@ -51,20 +61,21 @@ export function executionStatusLabel(
     s === 'needs_approval' ||
     s === 'ready_for_review' ||
     s === 'awaiting_user' ||
-    s === 'authenticating' ||
     s === 'ready_to_continue'
   ) {
-    return 'Waiting for User';
+    return 'Waiting Human';
   }
-  if (p === 'login' || p === 'captcha' || p === 'mfa' || p === 'human_approval') {
-    return 'Waiting for User';
+  if (s === 'approved') return 'Approved';
+  if (s === 'rejected') return 'Rejected';
+  if (s === 'waiting_verification') return 'Submitted';
+  if (s === 'submitted' || s === 'completed' || s === 'verified') {
+    return s === 'verified' ? 'Verified' : 'Submitted';
   }
-  if (s === 'waiting_verification') return 'Checking backlinks';
-  if (s === 'submitted' || s === 'completed' || s === 'verified') return 'Submitted';
   if (
     [
       'preparing',
       'launching_browser',
+      'authenticating',
       'navigating',
       'analyzing_form',
       'filling_fields',

@@ -96,7 +96,16 @@ export async function listApprovedOpportunities(workspaceId: string) {
     }
   }
 
-  return (opps ?? []).map((opp) => {
+  return (opps ?? [])
+    .filter((opp) => {
+      // Delete Forever — never show on Submit Backlinks / project pickers
+      const auto = String(opp.automation_status ?? '');
+      if (auto === 'deleted' || auto === 'ignored') return false;
+      const latest = jobsByOpp.get(String(opp.id));
+      if (latest && (latest.status === 'deleted' || latest.status === 'ignored')) return false;
+      return true;
+    })
+    .map((opp) => {
     const meta = (opp.metadata as Record<string, unknown>) ?? {};
     const workflow =
       typeof meta.workflow === 'object' && meta.workflow
@@ -158,8 +167,9 @@ export async function listApprovedOpportunities(workspaceId: string) {
     let readiness: OpportunityReadiness = 'not_ready';
     if (latestJob) {
       const st = latestJob.status;
-      if (st === 'completed') readiness = 'completed';
-      else if (st === 'failed' || st === 'cancelled') readiness = 'failed';
+      if (st === 'completed' || st === 'submitted' || st === 'verified') readiness = 'completed';
+      else if (st === 'failed') readiness = 'failed';
+      else if (st === 'deleted' || st === 'ignored' || st === 'skipped') readiness = 'not_ready';
       else if (st === 'needs_approval' || st === 'ready_for_review') readiness = 'needs_approval';
       else if (ACTIVE_JOB_STATUSES.has(st)) readiness = 'in_progress';
       else readiness = 'ready';

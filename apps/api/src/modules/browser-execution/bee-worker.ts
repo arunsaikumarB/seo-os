@@ -687,7 +687,20 @@ export async function runBeeExecutionJob(data: {
               error_message: 'Submit control not completed',
               finished_at: new Date().toISOString(),
             });
+            if (job.opportunity_id) {
+              await getSupabaseAdmin()
+                .from('opportunities')
+                .update({ automation_status: 'failed' })
+                .eq('id', job.opportunity_id);
+            }
             await recordHistory(workspaceId, jobId, 'failed');
+            // Failed Queue — never stop the campaign
+            await enqueueJob(
+              QUEUES.LOW,
+              'bee_queue',
+              { type: 'bee_queue', workspaceId },
+              { singletonKey: `bee-queue-drain-${workspaceId}`, startAfter: 0 }
+            );
             return;
           }
           await updateJob(jobId, { status: 'submitted' });

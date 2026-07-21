@@ -385,6 +385,10 @@ export const EXECUTION_JOB_STATUSES = [
   'waiting_infrastructure',
   'skipped',
   'unsupported',
+  'deleted',
+  'ignored',
+  'approved',
+  'rejected',
 ] as const;
 
 export type ExecutionJobStatus = (typeof EXECUTION_JOB_STATUSES)[number];
