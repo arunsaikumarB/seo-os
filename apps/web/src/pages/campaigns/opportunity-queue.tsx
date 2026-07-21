@@ -98,7 +98,7 @@ export function OpportunityQueuePage() {
       }),
     onSuccess: (_data, vars) => {
       if (vars.action === 'approve') {
-        toast.success('Approved — ready for Content Studio');
+        toast.success('Approved — ready to Generate Content');
         const row = (queue.data?.data ?? []).find((o) => o.id === vars.id);
         if (row) setSharedOpportunity(projectId, toShared(row));
       } else {
