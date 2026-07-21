@@ -19,7 +19,8 @@ export function ProjectHomePage() {
   const { currentOrgId } = useAppStore();
   const { user } = useAuth();
   const { fetchProjects, request } = useApi();
-  const { currentStep, nextStep, getStepHref, allComplete } = useWorkflow(projectId);
+  const { currentStep, continueHref, continueLabel, allComplete, aiStatusLine } =
+    useWorkflow(projectId);
   const beeProgress = useBeeExecutionProgress(projectId);
   const interventions = useInterventions(projectId, 3_000);
   const actionItems = interventions.data?.data.items ?? [];
@@ -108,34 +109,17 @@ export function ProjectHomePage() {
   ].filter((r) => (r.value ?? 0) > 0);
 
   const approved = num(s.approved);
-  const nextCta = actionItems[0]
-    ? {
-        href: `/projects/${projectId}/backlink-builder/browser-assistant?jobId=${actionItems[0].jobId}`,
-        label: 'Continue Submission',
-        line: `${actionItems[0].reason} on ${actionItems[0].website}.`,
-      }
+  const nextLine = actionItems[0]
+    ? `${actionItems[0].reason} on ${actionItems[0].website}.`
     : jobsOpen
-      ? {
-          href: `/projects/${projectId}/backlink-builder/execution`,
-          label: 'View progress',
-          line: 'AI is submitting backlinks for you.',
-        }
+      ? 'AI is submitting backlinks for you.'
       : showComplete
-        ? {
-            href: `/projects/${projectId}/reports/library`,
-            label: 'Open Reports',
-            line: 'Your campaign workflow is complete.',
-          }
-        : {
-            href: getStepHref(nextStep.id === currentStep.id ? currentStep : nextStep),
-            label: 'Continue',
-            line:
-              classified > 0 && currentStep.id === 'ai-review'
-                ? `Approve ${classified} opportunities.`
-                : approved > 0 && currentStep.number <= 4
-                  ? `Approve remaining opportunities, then generate content.`
-                  : nextStep.purpose,
-          };
+        ? 'Your campaign workflow is complete.'
+        : classified > 0 && currentStep.id === 'ai-review'
+          ? `Approve ${classified} opportunities.`
+          : approved > 0 && currentStep.number <= 4
+            ? 'Approve remaining opportunities, then generate content.'
+            : aiStatusLine;
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">
@@ -190,10 +174,10 @@ export function ProjectHomePage() {
 
             <div className="pt-2 border-t border-border/40 space-y-2">
               <p className="text-xs uppercase tracking-wider text-muted-foreground">Your next step</p>
-              <p className="font-medium">{nextCta.line}</p>
+              <p className="font-medium">{nextLine}</p>
               <Button asChild size="lg" className="mt-1">
-                <Link to={nextCta.href}>
-                  {nextCta.label}
+                <Link to={continueHref}>
+                  {continueLabel}
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Link>
               </Button>

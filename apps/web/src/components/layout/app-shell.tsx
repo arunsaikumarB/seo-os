@@ -1,4 +1,4 @@
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import { useEffect } from 'react';
 import { Sidebar } from './sidebar';
 import { Topbar } from './topbar';
@@ -9,9 +9,9 @@ import { useBreadcrumbs } from '@/hooks/use-breadcrumbs';
 import { HelpDrawer } from '@/components/workflow/help-drawer';
 import { AiCoachPanel } from '@/components/workflow/ai-coach-panel';
 import { LearningModeBanner } from '@/components/workflow/learning-mode-banner';
-import { NextActionStrip } from '@/components/workflow/next-action-strip';
 import { NextActionPanel } from '@/components/workflow/next-action-panel';
-import { WorkflowContextBar } from '@/components/workflow/workflow-context-bar';
+import { WorkflowProgressHeader } from '@/components/workflow/workflow-progress-header';
+import { WorkflowCelebration } from '@/components/workflow/workflow-celebration';
 import { GlobalStatusBar } from '@/components/workflow/global-status-bar';
 import { OfflineBanner } from '@/components/beta/offline-banner';
 import { BetaAnnouncementBar } from '@/components/beta/beta-announcement-bar';
@@ -21,9 +21,14 @@ interface AppShellProps {
   projectId: string;
 }
 
+/** One progress header · one next action · page content. No duplicate CTAs. */
 export function AppShell({ projectId }: AppShellProps) {
   const breadcrumbs = useBreadcrumbs(projectId);
+  const location = useLocation();
   const setCurrentProjectId = useAppStore((s) => s.setCurrentProjectId);
+  const isHome =
+    location.pathname.endsWith('/home') ||
+    location.pathname.replace(/\/$/, '') === `/projects/${projectId}`;
 
   useEffect(() => {
     setCurrentProjectId(projectId);
@@ -53,11 +58,13 @@ export function AppShell({ projectId }: AppShellProps) {
           </div>
         </div>
         <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto p-4 pb-20 md:p-6 md:pb-6">
-          <WorkflowContextBar projectId={projectId} />
-          <div className="mb-6 max-w-xl">
-            <NextActionPanel projectId={projectId} title="Next Action" />
-          </div>
-          <NextActionStrip projectId={projectId} />
+          <WorkflowProgressHeader projectId={projectId} />
+          <WorkflowCelebration projectId={projectId} />
+          {!isHome ? (
+            <div className="mb-6 max-w-xl">
+              <NextActionPanel projectId={projectId} />
+            </div>
+          ) : null}
           <Outlet />
         </main>
       </div>

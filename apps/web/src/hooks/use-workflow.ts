@@ -7,6 +7,8 @@ import {
 } from '@/config/workflow-steps';
 import { useAppStore, WORKFLOW_GLOBAL_KEY } from '@/stores/app-store';
 import { useBeeExecutionProgress } from '@/hooks/use-bee-execution-progress';
+import { useInterventions } from '@/components/browser/needs-your-action-queue';
+import { formatEta } from '@/lib/bee-execution-ui';
 
 function stepMatchesPath(step: WorkflowStep, path: string, projectId: string): boolean {
   if (step.orgLevel) return false;
@@ -25,6 +27,10 @@ export function getStepHref(step: WorkflowStep, projectId: string): string {
   return `/projects/${projectId}/${step.route}`;
 }
 
+/**
+ * Workflow State Manager — single source of truth for guided UX.
+ * Pages must not invent their own Continue targets or progress math.
+ */
 export function useWorkflow(projectId: string) {
   const location = useLocation();
   const {
@@ -43,7 +49,6 @@ export function useWorkflow(projectId: string) {
     return set;
   }, [workflowProgress, projectId]);
 
-  // Visiting later stages must NOT auto-complete Submit (job-driven only).
   const visitCompleteBlocked = new Set(['submit-backlinks', 'track-results', 'reports-analytics']);
 
   useEffect(() => {
@@ -63,8 +68,11 @@ export function useWorkflow(projectId: string) {
   }, [projectId, markGlobalStepComplete]);
 
   const bee = useBeeExecutionProgress(projectId, 5_000);
+  const interventions = useInterventions(projectId, 3_000);
+  const actionItems = interventions.data?.data.items ?? [];
+  const needsHumanAction = actionItems.length > 0;
+  const firstAction = actionItems[0] ?? null;
 
-  // Mark Submit complete only when every job is terminal
   useEffect(() => {
     if (bee.data?.executionComplete && (bee.data.totalJobs ?? 0) > 0) {
       markStepComplete(projectId, 'submit-backlinks');
@@ -78,7 +86,23 @@ export function useWorkflow(projectId: string) {
     return isStepDone(completedSteps, s.id);
   }).length;
 
+  /** Campaign progress step (what the AI campaign is on) */
   const currentStep =
+    jobsOpen
+      ? WORKFLOW_STEPS.find((s) => s.id === 'submit-backlinks')!
+      : WORKFLOW_STEPS.find((s) => !isStepDone(completedSteps, s.id)) ??
+        WORKFLOW_STEPS[WORKFLOW_STEPS.length - 1];
+
+  /** Page the user is viewing */
+  const activeStep =
+    WORKFLOW_STEPS.find((s) => stepMatchesPath(s, location.pathname, projectId)) ?? null;
+
+  const isOnHome =
+    location.pathname.endsWith('/home') ||
+    location.pathname.replace(/\/$/, '').endsWith(`/projects/${projectId}`);
+
+  /** Next unlocked step the Continue button always targets */
+  const nextUnlockedStep =
     jobsOpen
       ? WORKFLOW_STEPS.find((s) => s.id === 'submit-backlinks')!
       : WORKFLOW_STEPS.find((s) => !isStepDone(completedSteps, s.id)) ??
@@ -87,10 +111,45 @@ export function useWorkflow(projectId: string) {
   const nextStep =
     jobsOpen
       ? currentStep
-      : WORKFLOW_STEPS.find((s) => !isStepDone(completedSteps, s.id) && s.id !== currentStep.id) ??
-        currentStep;
+      : WORKFLOW_STEPS.find(
+          (s) => !isStepDone(completedSteps, s.id) && s.id !== currentStep.id
+        ) ?? currentStep;
 
   const allComplete = completedCount >= WORKFLOW_STEPS.length && !jobsOpen;
+
+  const progressPercent = jobsOpen
+    ? Math.round(bee.data?.progressPercent ?? 0)
+    : Math.round((completedCount / Math.max(WORKFLOW_STEPS.length, 1)) * 100);
+
+  const continueHref = needsHumanAction && firstAction
+    ? `/projects/${projectId}/backlink-builder/browser-assistant?jobId=${firstAction.jobId}`
+    : jobsOpen
+      ? `/projects/${projectId}/backlink-builder/execution`
+      : allComplete
+        ? `/projects/${projectId}/reports/library`
+        : getStepHref(nextUnlockedStep, projectId);
+
+  const continueLabel = needsHumanAction
+    ? 'Open Browser'
+    : jobsOpen
+      ? 'View progress'
+      : allComplete
+        ? 'Open Reports'
+        : 'Continue';
+
+  const aiStatusLine = needsHumanAction && firstAction
+    ? `${firstAction.reason} — ${firstAction.website}`
+    : jobsOpen
+      ? `Submitting backlinks · ${bee.data!.completedJobs}/${bee.data!.totalJobs}`
+      : allComplete
+        ? 'Campaign complete'
+        : `Working on ${currentStep.title}`;
+
+  const etaLabel = jobsOpen && bee.data?.etaSeconds
+    ? formatEta(bee.data.etaSeconds)
+    : currentStep.estimatedMinutes
+      ? `~${currentStep.estimatedMinutes} min`
+      : null;
 
   return {
     steps: WORKFLOW_STEPS,
@@ -98,7 +157,20 @@ export function useWorkflow(projectId: string) {
     completedCount,
     totalSteps: WORKFLOW_STEPS.length,
     currentStep,
+    activeStep,
+    isOnHome,
     nextStep,
+    nextUnlockedStep,
+    continueHref,
+    continueLabel,
+    progressPercent,
+    aiStatusLine,
+    etaLabel,
+    jobsOpen,
+    needsHumanAction,
+    firstAction,
+    actionItems,
+    bee: bee.data,
     expertMode,
     learningMode,
     allComplete,
@@ -112,3 +184,6 @@ export function usePageHelpKey(projectId: string): string {
   const path = location.pathname.replace(`/projects/${projectId}/`, '').replace(/^\//, '');
   return path || 'home';
 }
+
+/** @deprecated Use useWorkflow — alias for Workflow State Manager */
+export const useWorkflowState = useWorkflow;

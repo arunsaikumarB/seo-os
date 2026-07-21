@@ -7,9 +7,9 @@ import { Badge } from '@/components/ui/badge';
 import { useApi } from '@/hooks/use-api';
 import { getApiErrorMessage } from '@/lib/api';
 import { toast } from 'sonner';
-import { BacklinkBuilderNav } from '@/components/backlink-builder/backlink-builder-widget';
 import { PageTransition } from '@/components/demo/page-transition';
-import { Upload, FileSpreadsheet, FileText, Link2, Play, ArrowRight, Sheet } from 'lucide-react';
+import { AiActivityCard } from '@/components/workflow/ai-activity-card';
+import { Upload, FileSpreadsheet, FileText, Link2, Sheet } from 'lucide-react';
 
 type ImportResult = {
   importId: string;
@@ -62,7 +62,6 @@ export function BacklinkImportPage() {
   const [sourceType, setSourceType] = useState<string>('url_list');
   const [content, setContent] = useState('');
   const [fileName, setFileName] = useState<string | undefined>();
-  const [lastImportId, setLastImportId] = useState<string | null>(null);
 
   const history = useQuery({
     queryKey: ['backlink-imports', projectId],
@@ -87,38 +86,13 @@ export function BacklinkImportPage() {
         }
       ),
     onSuccess: (res) => {
-      const pipelineStarted = Boolean(res.data.pipeline);
-      setLastImportId(res.data.importId);
       queryClient.invalidateQueries({ queryKey: ['backlink-imports', projectId] });
       queryClient.invalidateQueries({ queryKey: ['automation-summary', projectId] });
-      if (pipelineStarted) {
-        toast.success(
-          `Imported ${res.data.stats.valid} URLs — automation pipeline started (classify & score)`
-        );
-      } else {
-        toast.success(`Imported ${res.data.stats.valid} valid URLs`);
-      }
+      toast.success(
+        `Imported ${res.data.stats.valid} websites — AI is reviewing them now`
+      );
     },
     onError: (err) => toast.error(getApiErrorMessage(err, 'Import failed')),
-  });
-
-  const runPipeline = useMutation({
-    mutationFn: (importId: string) =>
-      request<{ data: { queued?: boolean; status?: string; message?: string } }>(
-        `/v1/projects/${projectId}/backlink-builder/automation/imports/${importId}/run`,
-        { method: 'POST' }
-      ),
-    onSuccess: (res) => {
-      const status = res.data?.status ?? (res.data?.queued ? 'queued' : 'started');
-      toast.success(
-        status === 'already_active'
-          ? 'Pipeline already running for this import'
-          : 'Automation pipeline started — watch Import History for opportunity counts'
-      );
-      queryClient.invalidateQueries({ queryKey: ['backlink-imports', projectId] });
-      queryClient.invalidateQueries({ queryKey: ['automation-summary', projectId] });
-    },
-    onError: (err) => toast.error(getApiErrorMessage(err, 'Pipeline failed')),
   });
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -154,15 +128,10 @@ export function BacklinkImportPage() {
   const latest = history.data?.data?.[0];
   const pipelineBusy =
     importMutation.isPending ||
-    runPipeline.isPending ||
     (latest != null && ACTIVE_STATUSES.has(String(latest.status)));
 
   return (
-    <PageTransition className="space-y-6">
-      <div className="flex items-center gap-3 flex-wrap">
-        <BacklinkBuilderNav />
-      </div>
-
+    <PageTransition className="space-y-6 max-w-5xl">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
           <Upload className="h-6 w-6" /> Import Websites
@@ -172,13 +141,29 @@ export function BacklinkImportPage() {
         </p>
       </div>
 
+      {(pipelineBusy || importMutation.isPending) && (
+        <AiActivityCard
+          title="AI is inspecting websites"
+          percent={importMutation.isPending ? 40 : pipelineBusy ? 68 : 0}
+          current={importMutation.isPending ? 'Validating URLs' : 'Analyzing forms'}
+          next={importMutation.isPending ? 'Checking robots.txt' : 'Grouping opportunities'}
+          eta="~1 min"
+          items={[
+            { label: 'Homepage', state: importMutation.isPending ? 'active' : 'done' },
+            { label: 'Navigation', state: importMutation.isPending ? 'queued' : 'done' },
+            { label: 'Forms', state: pipelineBusy && !importMutation.isPending ? 'active' : 'queued' },
+            { label: 'Robots.txt', state: 'queued' },
+            { label: 'Metadata', state: 'queued' },
+          ]}
+        />
+      )}
+
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle className="text-base">Import Source</CardTitle>
             <CardDescription>
-              Validate & Import also starts the automation pipeline (analyze → classify → score →
-              queue)
+              Import starts AI review automatically — you do not need to run anything else.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -232,48 +217,30 @@ export function BacklinkImportPage() {
                 disabled={!content.trim() || importMutation.isPending}
                 onClick={() => importMutation.mutate()}
               >
-                {importMutation.isPending ? 'Importing…' : 'Validate & Import'}
-              </Button>
-              {(lastImportId || latest?.id) && (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={runPipeline.isPending || pipelineBusy}
-                  onClick={() => runPipeline.mutate(lastImportId ?? String(latest?.id))}
-                >
-                  <Play className="h-3.5 w-3.5 mr-1" />
-                  {runPipeline.isPending ? 'Starting…' : 'Run Automation Pipeline'}
-                </Button>
-              )}
-              <Button size="sm" variant="ghost" asChild>
-                <Link to={`/projects/${projectId}/backlink-builder/automation`}>
-                  View pipeline <ArrowRight className="h-3.5 w-3.5 ml-1" />
-                </Link>
+                {importMutation.isPending ? 'Importing…' : 'Import & continue'}
               </Button>
             </div>
             {pipelineBusy && (
-              <p className="text-xs text-violet-600 dark:text-violet-300">
-                Pipeline is running in the background. Import History refreshes automatically —
-                opportunity counts appear when classify/score finishes (large imports can take a few
-                minutes).
+              <p className="text-xs text-muted-foreground">
+                AI is reviewing in the background. Opportunity counts appear when review finishes.
               </p>
             )}
           </CardContent>
         </Card>
 
         <div className="space-y-4">
-          <Card className="border-amber-500/20 bg-amber-500/5">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">What happens next</CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm space-y-2 text-muted-foreground">
-              <p>1. URLs validated & deduplicated</p>
-              <p>2. AI scans homepage, nav, forms, robots, sitemap</p>
-              <p>3. Classifies type + confidence + reason</p>
-              <p>4. Groups into workflow queues & assigns agents</p>
-              <p>5. Human approval in Opportunity Queue</p>
-            </CardContent>
-          </Card>
+          <AiActivityCard
+            title="After you import"
+            percent={null}
+            current="Validate & deduplicate"
+            next="AI Review → Approve"
+            items={[
+              { label: 'Validate URLs', state: 'done' },
+              { label: 'Study websites', state: 'queued' },
+              { label: 'Group by type', state: 'queued' },
+              { label: 'Ready to approve', state: 'queued' },
+            ]}
+          />
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-base flex items-center gap-2">
@@ -282,8 +249,7 @@ export function BacklinkImportPage() {
             </CardHeader>
             <CardContent className="text-sm space-y-2">
               <p className="text-muted-foreground">
-                Requires Google OAuth (V1.1). Live Sheets import is unavailable until credentials are
-                configured.
+                Connect Google when ready — paste or CSV works now.
               </p>
               <Button size="sm" variant="outline" disabled>
                 Connect Google Sheets
@@ -296,15 +262,15 @@ export function BacklinkImportPage() {
       {latest?.metadata?.classificationSummary && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Imported Websites — AI classification</CardTitle>
+            <CardTitle className="text-base">AI found opportunities</CardTitle>
             <CardDescription>
               {latest.metadata.classificationSummary.classified} of{' '}
-              {latest.metadata.classificationSummary.imported} inspected ·{' '}
+              {latest.metadata.classificationSummary.imported} websites reviewed ·{' '}
               <Link
                 className="underline underline-offset-2"
                 to={`/projects/${projectId}/backlink-builder/classification`}
               >
-                Open classification dashboard
+                Open AI Review
               </Link>
             </CardDescription>
           </CardHeader>
@@ -318,17 +284,6 @@ export function BacklinkImportPage() {
                 <span className="tabular-nums font-semibold">{row.count}</span>
               </div>
             ))}
-            {(latest.metadata.classificationSummary.samples ?? []).slice(0, 5).length > 0 && (
-              <div className="pt-2 space-y-2">
-                <p className="text-xs font-medium text-muted-foreground">Sample reasons</p>
-                {(latest.metadata.classificationSummary.samples ?? []).slice(0, 5).map((s) => (
-                  <p key={`${s.domain}-${s.type}`} className="text-xs text-muted-foreground">
-                    <span className="font-medium text-foreground">{s.domain}</span> —{' '}
-                    {s.label ?? s.type} ({s.confidence}%) · {s.reason}
-                  </p>
-                ))}
-              </div>
-            )}
           </CardContent>
         </Card>
       )}
@@ -351,30 +306,19 @@ export function BacklinkImportPage() {
                     opportunities · {new Date(imp.created_at).toLocaleDateString()}
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Badge
-                    className={`text-[10px] capitalize ${
-                      ACTIVE_STATUSES.has(imp.status) ? 'animate-pulse' : ''
-                    }`}
-                  >
-                    {imp.status}
-                  </Badge>
-                  {['validated', 'failed', 'completed'].includes(imp.status) && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={runPipeline.isPending}
-                      onClick={() => runPipeline.mutate(imp.id)}
-                    >
-                      <Play className="h-3 w-3" />
-                    </Button>
-                  )}
-                  <Button size="sm" variant="ghost" asChild>
-                    <Link to={`/projects/${projectId}/backlink-builder/automation`}>
-                      <ArrowRight className="h-3.5 w-3.5" />
-                    </Link>
-                  </Button>
-                </div>
+                <Badge
+                  className={`text-[10px] capitalize ${
+                    ACTIVE_STATUSES.has(imp.status)
+                      ? 'animate-pulse'
+                      : ''
+                  }`}
+                >
+                  {ACTIVE_STATUSES.has(imp.status)
+                    ? 'AI reviewing'
+                    : imp.status === 'completed'
+                      ? 'Ready'
+                      : imp.status}
+                </Badge>
               </div>
             ))}
             {!history.data?.data?.length && (

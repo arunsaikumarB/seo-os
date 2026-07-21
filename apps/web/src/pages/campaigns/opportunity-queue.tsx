@@ -233,13 +233,12 @@ export function OpportunityQueuePage() {
             <tr>
               {isPending ? <th className="px-3 py-2.5 w-10" /> : null}
               <th className="px-3 py-2.5 font-medium">Website</th>
-              <th className="px-3 py-2.5 font-medium">Type</th>
-              <th className="px-3 py-2.5 font-medium">Score</th>
-              <th className="px-3 py-2.5 font-medium">Traffic</th>
+              <th className="px-3 py-2.5 font-medium">Opportunity Type</th>
+              <th className="px-3 py-2.5 font-medium">Recommendation</th>
               <th className="px-3 py-2.5 font-medium">Difficulty</th>
-              <th className="px-3 py-2.5 font-medium">Est. Approval</th>
+              <th className="px-3 py-2.5 font-medium">Approval Chance</th>
               <th className="px-3 py-2.5 font-medium">Status</th>
-              <th className="px-3 py-2.5 font-medium text-right">Actions</th>
+              <th className="px-3 py-2.5 font-medium text-right">Next Action</th>
             </tr>
           </thead>
           <tbody>
@@ -264,9 +263,8 @@ export function OpportunityQueuePage() {
                 <td className="px-3 py-3 capitalize">
                   {opp.opportunity_type.replace(/_/g, ' ')}
                 </td>
-                <td className="px-3 py-3 tabular-nums font-medium">{opp.score}</td>
-                <td className="px-3 py-3 tabular-nums text-muted-foreground">
-                  {opp.monthly_traffic != null ? opp.monthly_traffic.toLocaleString() : '—'}
+                <td className="px-3 py-3 text-muted-foreground max-w-[14rem] truncate">
+                  {opp.ai_recommendation ?? (opp.score >= 70 ? 'Strong fit' : 'Review carefully')}
                 </td>
                 <td className="px-3 py-3 text-muted-foreground">
                   {opp.difficulty != null ? String(opp.difficulty) : '—'}
@@ -311,7 +309,7 @@ export function OpportunityQueuePage() {
                           Generate
                         </Button>
                         <Button size="sm" onClick={() => openWithWorkingSet(opp, 'execute')}>
-                          Execute
+                          Submit
                         </Button>
                       </>
                     )}

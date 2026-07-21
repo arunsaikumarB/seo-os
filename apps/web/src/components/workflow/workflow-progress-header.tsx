@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Check } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { useWorkflow } from '@/hooks/use-workflow';
 import { WORKFLOW_PIPELINE_LABELS } from '@/config/workflow-steps';
@@ -9,15 +10,37 @@ type Props = {
   className?: string;
 };
 
-/** Horizontal ①–⑧ progress — shown on every guided page */
+/** Sole workflow progress chrome — Current / Next / Progress live here only */
 export function WorkflowProgressHeader({ projectId, className }: Props) {
-  const { steps, currentStep, getStepHref, isStepComplete } = useWorkflow(projectId);
+  const {
+    steps,
+    currentStep,
+    nextUnlockedStep,
+    getStepHref,
+    isStepComplete,
+    progressPercent,
+    completedCount,
+    totalSteps,
+    allComplete,
+    jobsOpen,
+  } = useWorkflow(projectId);
 
   return (
-    <div className={cn('mb-4 rounded-xl border border-border/40 bg-card/60 px-3 py-3', className)}>
-      <p className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2 px-1">
-        Workflow Progress
-      </p>
+    <motion.div
+      initial={{ opacity: 0, y: -4 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={cn('mb-6 rounded-xl border border-border/40 bg-card/60 px-3 py-3 space-y-3', className)}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+        <p className="text-[11px] uppercase tracking-wider text-muted-foreground">
+          Workflow Progress
+        </p>
+        <p className="text-[11px] text-muted-foreground tabular-nums">
+          {allComplete && !jobsOpen
+            ? 'Complete'
+            : `${completedCount}/${totalSteps} · ${progressPercent}%`}
+        </p>
+      </div>
       <ol className="flex flex-wrap gap-1.5">
         {steps.map((step) => {
           const done = isStepComplete(step.id);
@@ -51,6 +74,18 @@ export function WorkflowProgressHeader({ projectId, className }: Props) {
           );
         })}
       </ol>
-    </div>
+      {!allComplete ? (
+        <p className="text-xs text-muted-foreground px-1">
+          Current · <span className="text-foreground font-medium">{currentStep.title}</span>
+          {nextUnlockedStep.id !== currentStep.id ? (
+            <>
+              {' '}
+              · Next ·{' '}
+              <span className="text-foreground font-medium">{nextUnlockedStep.title}</span>
+            </>
+          ) : null}
+        </p>
+      ) : null}
+    </motion.div>
   );
 }

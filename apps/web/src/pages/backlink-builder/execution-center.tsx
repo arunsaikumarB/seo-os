@@ -28,6 +28,7 @@ import {
   NeedsYourActionQueue,
   useInterventions,
 } from '@/components/browser/needs-your-action-queue';
+import { AiActivityCard, AiLoadingState } from '@/components/workflow/ai-activity-card';
 
 type BeeJob = {
   id: string;
@@ -145,7 +146,8 @@ export function BrowserExecutionCenterPage() {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [selectedOppIds, setSelectedOppIds] = useState<Set<string>>(new Set());
   const [bulkProgress, setBulkProgress] = useState<BulkProgressItem[]>([]);
-  const { opportunity: currentOpp, setOpportunity } = useCurrentOpportunity(projectId);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const { setOpportunity } = useCurrentOpportunity(projectId);
 
   const setTab = (t: (typeof TABS)[number]) => {
     setParams({ tab: t });
@@ -453,6 +455,7 @@ export function BrowserExecutionCenterPage() {
 
   const totalJobs = s?.totalJobs ?? jobList.length;
   const completedJobs = s?.completedJobs ?? 0;
+  const remainingJobs = s?.remainingJobs ?? Math.max(0, totalJobs - completedJobs);
   const progressPercent =
     s?.progressPercent ??
     (totalJobs > 0 ? Math.round((completedJobs / totalJobs) * 1000) / 10 : 0);
@@ -482,44 +485,33 @@ export function BrowserExecutionCenterPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Submit Backlinks</h1>
-          <p className="text-muted-foreground">
-            AI is submitting backlinks. If login or CAPTCHA appears, continue submission — AI resumes
-            automatically.
-          </p>
-        </div>
-        <Button variant="outline" size="sm" asChild>
-          <Link to={`/projects/${projectId}/backlink-builder/browser-assistant`}>
-            Continue Submission
-          </Link>
-        </Button>
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Submit Backlinks</h1>
+        <p className="text-muted-foreground">
+          AI is submitting backlinks. If login or CAPTCHA appears, open the browser — AI resumes
+          automatically.
+        </p>
       </div>
 
       <NeedsYourActionQueue projectId={projectId} />
 
       <CurrentOpportunityBanner projectId={projectId} />
-      {currentOpp ? (
-        <p className="text-xs text-muted-foreground">
-          Selecting an opportunity also updates the shared current website (
-          <span className="font-medium text-foreground">{currentOpp.website}</span>).
-        </p>
-      ) : null}
 
-      <div className="flex flex-wrap gap-2">
-        {TABS.map((t) => (
-          <Button
-            key={t}
-            size="sm"
-            variant={tab === t ? 'default' : 'outline'}
-            onClick={() => setTab(t)}
-            className="capitalize"
-          >
-            {t}
-          </Button>
-        ))}
-      </div>
+      {showAdvanced ? (
+        <div className="flex flex-wrap gap-2">
+          {TABS.map((t) => (
+            <Button
+              key={t}
+              size="sm"
+              variant={tab === t ? 'default' : 'outline'}
+              onClick={() => setTab(t)}
+              className="capitalize"
+            >
+              {t}
+            </Button>
+          ))}
+        </div>
+      ) : null}
 
       {tab === 'dashboard' && (
         <>
@@ -531,26 +523,44 @@ export function BrowserExecutionCenterPage() {
             </div>
           ) : null}
 
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Overview</CardTitle>
-              <CardDescription>Progress · running · completed · needs your action · ETA</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
+          {stats.isLoading ? (
+            <AiLoadingState message="AI is preparing submissions…" />
+          ) : totalJobs > 0 || (s?.running ?? 0) > 0 || (s?.queued ?? 0) > 0 ? (
+            <AiActivityCard
+              title="AI is submitting backlinks"
+              percent={progressPercent}
+              current={
+                s?.current?.website
+                  ? `${s.current.website}${s.current.step ? ` · ${s.current.step}` : ''}`
+                  : workerSlots.find((w) => w.status === 'busy')?.website ?? 'Working…'
+              }
+              next={
+                remainingJobs > 0
+                  ? `${remainingJobs} website${remainingJobs === 1 ? '' : 's'} remaining`
+                  : 'Finishing up'
+              }
+              eta={s?.etaSeconds ? formatEta(s.etaSeconds) : null}
+              items={[
+                { label: 'Completed', state: completedJobs > 0 ? 'done' : 'queued' },
+                { label: 'Waiting', state: actionItems.length > 0 ? 'active' : 'queued' },
+                { label: 'Uploading', state: (s?.running ?? 0) > 0 ? 'active' : 'queued' },
+                { label: 'Remaining', state: remainingJobs > 0 ? 'active' : 'done' },
+              ]}
+            />
+          ) : (
+            <Card className="rounded-2xl border-border/40">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Ready to submit</CardTitle>
+                <CardDescription>
+                  Select approved websites below. AI fills forms and uploads assets for you.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-3 sm:grid-cols-3 text-sm">
                 {(
                   [
-                    ['Queued', s?.queued ?? 0],
-                    ['Running', s?.running ?? 0],
-                    ['Needs Your Action', actionItems.length],
-                    ['Submitted', s?.submitted ?? 0],
-                    ['Completed', s?.completed ?? 0],
-                    ['Failed', s?.failed ?? 0],
-                    ['ETA', formatEta(s?.etaSeconds)],
-                    [
-                      'Success Rate',
-                      s?.successRate != null ? `${s.successRate}%` : '—',
-                    ],
+                    ['Ready', selectableOpps.length],
+                    ['Needs action', actionItems.length],
+                    ['Submitted', s?.submitted ?? s?.completed ?? 0],
                   ] as const
                 ).map(([label, value]) => (
                   <div key={label}>
@@ -558,75 +568,34 @@ export function BrowserExecutionCenterPage() {
                     <p className="text-xl font-semibold tabular-nums">{value}</p>
                   </div>
                 ))}
-              </div>
-              <div>
-                <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
-                  <span>Progress</span>
-                  <span className="tabular-nums">
-                    {completedJobs}/{totalJobs} ({progressPercent}%)
-                  </span>
-                </div>
-                <div className="h-2 rounded-full bg-muted overflow-hidden">
-                  <div
-                    className="h-full bg-primary transition-all"
-                    style={{
-                      width: `${totalJobs === 0 ? 0 : Math.min(100, progressPercent)}%`,
-                    }}
-                  />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          )}
 
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">AI is submitting</CardTitle>
-              <CardDescription>
-                Estimated finish {formatEta(s?.etaSeconds)} · active {s?.activeWorkerCount ?? 0}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 text-sm">
-              {maxWorkers === 0 ? (
-                <p className="text-sm text-muted-foreground col-span-full">
-                  Loading worker policy…
-                </p>
-              ) : (
-                workerSlots.map((w) => (
+          {showAdvanced ? (
+            <Card className="border-dashed">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Technical · workers & queues</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 text-sm">
+                {workerSlots.map((w) => (
                   <div key={w.workerId} className="rounded-md border px-3 py-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="font-medium">Slot {w.workerId}</p>
-                      <Badge
-                        className={
-                          w.status === 'busy'
-                            ? 'border-transparent bg-foreground text-background'
-                            : 'bg-muted text-muted-foreground'
-                        }
-                      >
-                        {w.status === 'busy' ? 'Busy' : 'Idle'}
-                      </Badge>
-                    </div>
-                    <p className="mt-1 truncate text-xs text-muted-foreground">
-                      {w.website || '—'}
-                    </p>
+                    <p className="font-medium">Slot {w.workerId}</p>
+                    <p className="mt-1 truncate text-xs text-muted-foreground">{w.website || '—'}</p>
                     <p className="text-xs">{w.step || 'Idle'}</p>
-                    <p className="mt-1 text-[10px] text-muted-foreground tabular-nums">
-                      Elapsed {Math.round((w.elapsedMs || 0) / 1000)}s
-                      {w.etaMs != null ? ` · ETA ${Math.round(w.etaMs / 1000)}s` : ''}
-                    </p>
                   </div>
-                ))
-              )}
-            </CardContent>
-          </Card>
+                ))}
+              </CardContent>
+            </Card>
+          ) : null}
 
           <Card>
             <CardHeader className="pb-3">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <CardTitle className="text-base">Approved opportunities</CardTitle>
+                  <CardTitle className="text-base">Approved websites</CardTitle>
                   <CardDescription>
-                    Loaded from this project workspace. Select sites and start execution — no manual
-                    IDs required.
+                    Select sites and start submission — AI handles the rest.
                   </CardDescription>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -652,27 +621,27 @@ export function BrowserExecutionCenterPage() {
                 </div>
               </div>
               {!runtimeHealthy ? (
-                <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
-                  <p className="font-medium">Browser Runtime Missing — Install Required</p>
+                <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  <p className="font-medium">Browser setup needed</p>
                   <p className="mt-0.5">
-                    {runtime.data?.data.last_error ||
-                      'Administrator Action Required. Suggested Fix: Install Chromium.'}{' '}
-                    <Link
+                    Ask an admin to finish browser setup, then try again.{' '}
+                    <button
+                      type="button"
                       className="underline font-medium"
-                      to={`/projects/${projectId}/settings/browser-runtime`}
+                      onClick={() => setShowAdvanced(true)}
                     >
-                      Open Browser Runtime
-                    </Link>
+                      Technical details
+                    </button>
                   </p>
                 </div>
               ) : null}
             </CardHeader>
             <CardContent className="space-y-3">
               {opportunities.isLoading ? (
-                <Skeleton className="h-32 w-full" />
+                <AiLoadingState message="AI is loading approved websites…" />
               ) : oppList.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  No approved opportunities yet. Approve items in Opportunity Queue first.
+                  No approved websites yet. Approve items in Approve Opportunities first.
                 </p>
               ) : (
                 <div className="overflow-x-auto rounded-md border">
@@ -689,11 +658,9 @@ export function BrowserExecutionCenterPage() {
                           />
                         </th>
                         <th className="px-3 py-2 font-medium">Website</th>
-                        <th className="px-3 py-2 font-medium">Score</th>
                         <th className="px-3 py-2 font-medium">Type</th>
                         <th className="px-3 py-2 font-medium">Status</th>
-                        <th className="px-3 py-2 font-medium">Readiness</th>
-                        <th className="px-3 py-2 font-medium text-right">Action</th>
+                        <th className="px-3 py-2 font-medium text-right">Next Action</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -716,14 +683,8 @@ export function BrowserExecutionCenterPage() {
                                 <p className="text-xs text-muted-foreground">{opp.domain}</p>
                               )}
                             </td>
-                            <td className="px-3 py-2 tabular-nums">{opp.score}</td>
                             <td className="px-3 py-2 capitalize">
                               {String(opp.opportunity_type).replace(/_/g, ' ')}
-                            </td>
-                            <td className="px-3 py-2">
-                              <Badge className="text-[10px] capitalize">
-                                {String(opp.status).replace(/_/g, ' ')}
-                              </Badge>
                             </td>
                             <td className="px-3 py-2">
                               <Badge
@@ -731,11 +692,6 @@ export function BrowserExecutionCenterPage() {
                               >
                                 {READINESS_LABEL[opp.readiness]}
                               </Badge>
-                              {opp.latest_job && (
-                                <p className="text-[10px] text-muted-foreground mt-1 capitalize">
-                                  Job: {opp.latest_job.status.replace(/_/g, ' ')}
-                                </p>
-                              )}
                             </td>
                             <td className="px-3 py-2 text-right">
                               <Button
@@ -744,14 +700,9 @@ export function BrowserExecutionCenterPage() {
                                 disabled={
                                   !runtimeHealthy || !opp.selectable || startExecutions.isPending
                                 }
-                                title={
-                                  runtimeHealthy
-                                    ? undefined
-                                    : 'Browser Runtime Missing — Install Required'
-                                }
                                 onClick={() => startExecutions.mutate([opp.id])}
                               >
-                                <Play className="h-3 w-3 mr-1" /> Start
+                                <Play className="h-3 w-3 mr-1" /> Submit
                               </Button>
                             </td>
                           </tr>
@@ -798,30 +749,21 @@ export function BrowserExecutionCenterPage() {
           {showExecutionSummary ? (
             <Card className="border-emerald-500/30">
               <CardHeader className="pb-2">
-                <CardTitle className="text-base">Execution Summary</CardTitle>
+                <CardTitle className="text-base">Submission complete</CardTitle>
                 <CardDescription>
-                  {s?.executionComplete
-                    ? 'All jobs reached Submitted, Failed, or Cancelled'
-                    : 'Current batch snapshot'}
+                  AI finished this batch. Track results or download a report.
                 </CardDescription>
               </CardHeader>
               <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
                 {(
                   [
-                    ['Total Jobs', s?.totalJobs ?? 0],
                     ['Submitted', s?.submitted ?? 0],
-                    ['Waiting Approval', s?.waitingApproval ?? 0],
-                    ['Waiting Verification', s?.waitingVerification ?? 0],
-                    ['Failed', s?.failed ?? 0],
+                    ['Pending', s?.waitingApproval ?? 0],
+                    ['Verifying', s?.waitingVerification ?? 0],
                     [
-                      'Success Rate',
+                      'Success',
                       s?.successRate != null ? `${s.successRate}%` : '—',
                     ],
-                    [
-                      'Estimated Approval Time',
-                      s?.estimatedApprovalTime ?? '7–14 days',
-                    ],
-                    ['Cancelled', s?.cancelled ?? 0],
                   ] as const
                 ).map(([label, value]) => (
                   <div key={label}>
@@ -835,12 +777,23 @@ export function BrowserExecutionCenterPage() {
         </>
       )}
 
-      {(tab === 'dashboard' || tab === 'timeline' || tab === 'logs' || tab === 'replay') && (
+      <div>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground"
+          onClick={() => setShowAdvanced((v) => !v)}
+        >
+          {showAdvanced ? 'Hide' : 'Show'} Advanced
+        </Button>
+      </div>
+
+      {showAdvanced && (tab === 'dashboard' || tab === 'timeline' || tab === 'logs' || tab === 'replay') && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Active Jobs</CardTitle>
+            <CardTitle className="text-base">Active submissions</CardTitle>
             <CardDescription>
-              Live pipeline per website · {completedJobs}/{totalJobs} finished
+              {completedJobs}/{totalJobs} finished
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -956,7 +909,7 @@ export function BrowserExecutionCenterPage() {
         </Card>
       )}
 
-      {(tab === 'dashboard' || tab === 'timeline' || tab === 'logs') && (
+      {showAdvanced && (tab === 'dashboard' || tab === 'timeline' || tab === 'logs') && (
         <BeeOpsPanel
           projectId={projectId}
           selectedJobId={selectedJobId}
@@ -964,7 +917,7 @@ export function BrowserExecutionCenterPage() {
         />
       )}
 
-      {tab === 'timeline' && selected && (
+      {showAdvanced && tab === 'timeline' && selected && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Execution timeline</CardTitle>
@@ -989,7 +942,7 @@ export function BrowserExecutionCenterPage() {
         </Card>
       )}
 
-      {tab === 'logs' && (
+      {showAdvanced && tab === 'logs' && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
@@ -1016,7 +969,7 @@ export function BrowserExecutionCenterPage() {
         </Card>
       )}
 
-      {tab === 'history' && (
+      {showAdvanced && tab === 'history' && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Execution history</CardTitle>
@@ -1037,7 +990,7 @@ export function BrowserExecutionCenterPage() {
         </Card>
       )}
 
-      {tab === 'sessions' && (
+      {showAdvanced && tab === 'sessions' && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
@@ -1060,7 +1013,7 @@ export function BrowserExecutionCenterPage() {
         </Card>
       )}
 
-      {tab === 'policies' && policy.data?.data && (
+      {showAdvanced && tab === 'policies' && policy.data?.data && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">

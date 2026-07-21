@@ -15,6 +15,7 @@ import { ImageIntelligencePanel } from '@/pages/content/image-intelligence';
 import { OpportunitySelector } from '@/components/opportunities/opportunity-selector';
 import { CurrentOpportunityBanner } from '@/components/opportunities/current-opportunity-banner';
 import { useCurrentOpportunity } from '@/hooks/use-current-opportunity';
+import { AiActivityCard, AiLoadingState } from '@/components/workflow/ai-activity-card';
 
 type DraftRow = {
   id: string;
@@ -340,19 +341,12 @@ export function ContentLibraryPage() {
             <Sparkles className="h-6 w-6" /> Generate Content
           </h1>
           <p className="text-muted-foreground">
-            AI detects each website type and builds articles, listings, forum replies, images, and
-            video metadata — no manual selection.
+            AI builds articles, listings, images, and metadata for each approved website.
           </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => setTab('images')}>
             <ImageIcon className="h-4 w-4 mr-1" /> Images
-          </Button>
-          <Button variant="outline" asChild>
-            <Link to={`/projects/${projectId}/backlink-builder/video-studio`}>Video Studio</Link>
-          </Button>
-          <Button variant="outline" asChild>
-            <Link to={`/projects/${projectId}/campaigns/approvals`}>Approvals</Link>
           </Button>
           {tab === 'articles' && (
             <Button onClick={() => setShowCreate((v) => !v)}>
@@ -361,6 +355,26 @@ export function ContentLibraryPage() {
           )}
         </div>
       </div>
+
+      {generatePack.isPending || (intel && intel.packStatus === 'generating') ? (
+        <AiActivityCard
+          title="AI is generating content"
+          percent={generatePack.isPending ? 55 : 72}
+          current={generatePack.isPending ? 'Writing article' : 'Finishing assets'}
+          next="Metadata & schema"
+          eta="~1 min"
+          items={[
+            { label: 'Articles', state: generatePack.isPending ? 'active' : 'done' },
+            { label: 'Descriptions', state: generatePack.isPending ? 'queued' : 'done' },
+            {
+              label: 'Images',
+              state: intel?.imagesReady ? 'done' : generatePack.isPending ? 'queued' : 'active',
+            },
+            { label: 'Video Metadata', state: intel?.videoReady ? 'done' : 'queued' },
+            { label: 'Schema', state: 'queued' },
+          ]}
+        />
+      ) : null}
 
       <div className="flex flex-wrap gap-1 border-b pb-2">
         {tabs.map((t) => {
@@ -460,7 +474,7 @@ export function ContentLibraryPage() {
               {selectedOpp && (
                 <div className="space-y-3">
                   {intelligence.isLoading ? (
-                    <Skeleton className="h-28 w-full" />
+                    <AiLoadingState message="AI is studying this website…" />
                   ) : intel ? (
                     <div className="rounded-md border p-3 space-y-3">
                       <div className="flex flex-wrap items-center gap-2">

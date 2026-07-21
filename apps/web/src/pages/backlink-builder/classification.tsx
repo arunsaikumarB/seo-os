@@ -1,24 +1,21 @@
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Layers, Sparkles } from 'lucide-react';
+import { ChevronDown, Sparkles } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
 import { useApi } from '@/hooks/use-api';
 import { PageTransition } from '@/components/demo/page-transition';
-import { BacklinkBuilderNav } from '@/components/backlink-builder/backlink-builder-widget';
+import { AiActivityCard, AiLoadingState } from '@/components/workflow/ai-activity-card';
+import { cn } from '@/lib/utils';
 
 type Analytics = {
   imported: number;
   classified: number;
   unknown: number;
-  avgConfidence: number;
-  estimatedAccuracy: number;
-  learningPatterns: number;
   byType: Array<{ id: string; label: string; count: number }>;
-  byQueue: Array<{ queue: string; count: number }>;
   snapshot: {
     directories: number;
     guestPosts: number;
@@ -48,10 +45,24 @@ type QueueGroup = {
   }>;
 };
 
+const GROUPS: Array<{ key: keyof Analytics['snapshot']; label: string }> = [
+  { key: 'directories', label: 'Directories' },
+  { key: 'guestPosts', label: 'Guest Posts' },
+  { key: 'forums', label: 'Forums' },
+  { key: 'images', label: 'Images' },
+  { key: 'videos', label: 'Videos' },
+  { key: 'articles', label: 'Resource Pages' },
+  { key: 'profiles', label: 'Profiles' },
+  { key: 'qa', label: 'Q&A' },
+  { key: 'unknown', label: 'Unknown' },
+];
+
 export function ClassificationDashboardPage() {
   const { projectId = '' } = useParams();
   const { request } = useApi();
   const qc = useQueryClient();
+  const [openGroup, setOpenGroup] = useState<string | null>(null);
+  const [showTechnical, setShowTechnical] = useState(false);
 
   const analytics = useQuery({
     queryKey: ['classification-analytics', projectId],
@@ -60,7 +71,7 @@ export function ClassificationDashboardPage() {
         `/v1/projects/${projectId}/backlink-builder/automation/classification/analytics`
       ),
     enabled: !!projectId,
-    refetchInterval: 12_000,
+    refetchInterval: 8_000,
   });
 
   const queues = useQuery({
@@ -70,7 +81,7 @@ export function ClassificationDashboardPage() {
         `/v1/projects/${projectId}/backlink-builder/automation/classification/queues`
       ),
     enabled: !!projectId,
-    refetchInterval: 12_000,
+    refetchInterval: 8_000,
   });
 
   const types = useQuery({
@@ -79,7 +90,7 @@ export function ClassificationDashboardPage() {
       request<{ data: Array<{ id: string; displayName: string }> }>(
         `/v1/projects/${projectId}/backlink-builder/automation/classification/types`
       ),
-    enabled: !!projectId,
+    enabled: !!projectId && showTechnical,
   });
 
   const correct = useMutation({
@@ -96,188 +107,179 @@ export function ClassificationDashboardPage() {
         }
       ),
     onSuccess: () => {
-      toast.success('Classification updated — AI will learn from this correction');
+      toast.success('Updated — AI will remember this');
       qc.invalidateQueries({ queryKey: ['classification-analytics', projectId] });
       qc.invalidateQueries({ queryKey: ['classification-queues', projectId] });
-      qc.invalidateQueries({ queryKey: ['opportunity-queue', projectId] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const a = analytics.data?.data;
   const snap = a?.snapshot;
+  const classified = a?.classified ?? 0;
+  const stillScanning = analytics.isFetching && classified === 0;
+
+  const queueByLabel = (label: string) =>
+    (queues.data?.data.queues ?? []).find(
+      (q) => q.label.toLowerCase().includes(label.toLowerCase().split(' ')[0].toLowerCase())
+    );
 
   return (
-    <PageTransition className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <Sparkles className="h-6 w-6" /> AI Review
-          </h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            AI found opportunities and grouped them by type. Continue when you are ready to approve.
-          </p>
-        </div>
-        <BacklinkBuilderNav />
+    <PageTransition className="space-y-6 max-w-4xl">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
+          <Sparkles className="h-6 w-6" /> AI Review
+        </h1>
+        <p className="text-muted-foreground text-sm mt-1">
+          AI found opportunities and grouped them by type.
+        </p>
       </div>
 
+      {stillScanning || analytics.isLoading ? (
+        <AiActivityCard
+          title="AI is reviewing websites"
+          percent={classified > 0 && a?.imported ? Math.round((classified / a.imported) * 100) : 35}
+          current="Detecting opportunity type"
+          next="Scoring difficulty & fit"
+          eta="~1 min"
+          items={[
+            { label: 'Homepage', state: 'done' },
+            { label: 'Navigation', state: 'done' },
+            { label: 'Forms', state: 'active' },
+            { label: 'Metadata', state: 'queued' },
+          ]}
+        />
+      ) : null}
+
       {analytics.isLoading ? (
-        <Skeleton className="h-40 w-full" />
+        <AiLoadingState message="AI is studying imported websites…" />
       ) : (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {(
-              [
-                ['Imported', a?.imported],
-                ['Reviewed', a?.classified],
-                ['Still learning', a?.unknown],
-              ] as const
-            ).map(([label, value]) => (
-              <Card key={label}>
-                <CardContent className="pt-4">
-                  <p className="text-xs text-muted-foreground">{label}</p>
-                  <p className="text-2xl font-semibold tabular-nums">{value ?? 0}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          <Card>
+          <Card className="rounded-2xl border-border/40 shadow-sm">
             <CardHeader className="pb-2">
-              <CardTitle className="text-base">
-                {a?.classified != null
-                  ? `AI found ${a.classified} opportunities`
-                  : 'AI review summary'}
-              </CardTitle>
-              <CardDescription>Grouped by website type — ready for approval</CardDescription>
+              <CardTitle className="text-base">AI Found</CardTitle>
+              <CardDescription>
+                <span className="text-2xl font-semibold tabular-nums text-foreground">
+                  {classified}
+                </span>{' '}
+                opportunities · grouped by type
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
-              {(a?.byType ?? []).length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No classifications yet. Import URLs to start the AI scan.
-                </p>
-              ) : (
-                (a?.byType ?? []).map((row) => (
-                  <div
-                    key={row.id}
-                    className="flex items-center justify-between border-b border-border/60 py-2 last:border-0"
-                  >
-                    <span className="text-sm font-medium">{row.label}</span>
-                    <span className="tabular-nums font-semibold">{row.count}</span>
+              {GROUPS.map(({ key, label }) => {
+                const count = snap?.[key] ?? 0;
+                if (count === 0 && key !== 'unknown') return null;
+                const open = openGroup === key;
+                const group = queueByLabel(label);
+                return (
+                  <div key={key} className="rounded-xl border border-border/50 overflow-hidden">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between px-3 py-2.5 text-left hover:bg-muted/40"
+                      onClick={() => setOpenGroup(open ? null : key)}
+                    >
+                      <span className="text-sm font-medium">{label}</span>
+                      <span className="flex items-center gap-2">
+                        <Badge className="tabular-nums text-[10px]">{count}</Badge>
+                        <ChevronDown
+                          className={cn('h-4 w-4 text-muted-foreground transition-transform', open && 'rotate-180')}
+                        />
+                      </span>
+                    </button>
+                    {open ? (
+                      <div className="border-t border-border/40 px-3 py-2 space-y-2 bg-muted/20">
+                        {(group?.items ?? []).length === 0 ? (
+                          <p className="text-xs text-muted-foreground py-2">
+                            {count} sites in this group — open Approve Opportunities to decide.
+                          </p>
+                        ) : (
+                          group!.items.slice(0, 12).map((item) => (
+                            <div
+                              key={item.id}
+                              className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 py-2 border-b border-border/30 last:border-0"
+                            >
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium truncate">{item.website}</p>
+                                <p className="text-[11px] text-muted-foreground">
+                                  Difficulty · {item.score != null ? item.score : '—'}
+                                  {item.reason ? ` · ${item.reason.slice(0, 60)}` : ''}
+                                </p>
+                              </div>
+                              <Button size="sm" variant="outline" asChild>
+                                <Link to={`/projects/${projectId}/campaigns/queue`}>
+                                  Approve
+                                </Link>
+                              </Button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    ) : null}
                   </div>
-                ))
-              )}
+                );
+              })}
             </CardContent>
           </Card>
 
-          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
-            {(
-              [
-                ['Directories', snap?.directories],
-                ['Guest Posts', snap?.guestPosts],
-                ['Articles', snap?.articles],
-                ['Images', snap?.images],
-                ['Videos', snap?.videos],
-                ['Profiles', snap?.profiles],
-                ['Forums', snap?.forums],
-                ['Q&A', snap?.qa],
-                ['Unknown', snap?.unknown],
-              ] as const
-            ).map(([label, n]) => (
-              <Card key={label}>
-                <CardContent className="pt-4">
-                  <p className="text-xs text-muted-foreground">{label}</p>
-                  <p className="text-xl font-semibold tabular-nums">{n ?? 0}</p>
+          <div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground"
+              onClick={() => setShowTechnical((v) => !v)}
+            >
+              {showTechnical ? 'Hide' : 'Show'} Technical Details
+            </Button>
+            {showTechnical ? (
+              <Card className="mt-2 border-dashed">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">Advanced · queues & overrides</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4 text-sm">
+                  {(queues.data?.data.queues ?? []).map((q) => (
+                    <div key={q.queue}>
+                      <p className="font-medium mb-2">
+                        {q.label} <Badge className="text-[10px] ml-1">{q.count}</Badge>
+                      </p>
+                      <ul className="space-y-2">
+                        {q.items.slice(0, 5).map((item) => (
+                          <li key={item.id} className="flex flex-wrap gap-2 items-center text-xs">
+                            <span className="font-medium">{item.website}</span>
+                            <span className="text-muted-foreground">
+                              {item.type} · {item.confidence}% · {item.agent || '—'}
+                            </span>
+                            <select
+                              className="h-7 rounded border px-1"
+                              defaultValue=""
+                              onChange={(e) => {
+                                const toType = e.target.value;
+                                if (!toType) return;
+                                correct.mutate({
+                                  opportunityId: item.id,
+                                  fromType: item.type,
+                                  toType,
+                                });
+                                e.target.value = '';
+                              }}
+                            >
+                              <option value="">Override…</option>
+                              {(types.data?.data ?? []).map((t) => (
+                                <option key={t.id} value={t.id}>
+                                  {t.displayName}
+                                </option>
+                              ))}
+                            </select>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
                 </CardContent>
               </Card>
-            ))}
+            ) : null}
           </div>
         </>
       )}
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Layers className="h-4 w-4" /> Workflow queues
-          </CardTitle>
-          <CardDescription>
-            Each classified group routes into its dedicated automation queue. Override type to teach the
-            engine.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {queues.isLoading ? (
-            <Skeleton className="h-32 w-full" />
-          ) : (queues.data?.data.queues ?? []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">No pending classified opportunities.</p>
-          ) : (
-            (queues.data?.data.queues ?? []).map((q) => (
-              <div key={q.queue} className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-medium capitalize">{q.label}</h3>
-                  <Badge className="text-[10px]">{q.count}</Badge>
-                </div>
-                <ul className="space-y-2">
-                  {q.items.slice(0, 8).map((item) => (
-                    <li
-                      key={item.id}
-                      className="rounded-md border px-3 py-2 text-sm flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
-                    >
-                      <div className="min-w-0">
-                        <p className="font-medium truncate">{item.website}</p>
-                        <p className="text-xs text-muted-foreground truncate">
-                          {item.type} · {item.confidence}% · {item.reason || '—'}
-                        </p>
-                        <p className="text-[11px] text-muted-foreground">
-                          Agent: {item.agent || '—'} · {item.domain}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <select
-                          className="h-8 rounded-md border border-input bg-transparent px-2 text-xs max-w-[160px]"
-                          defaultValue=""
-                          onChange={(e) => {
-                            const toType = e.target.value;
-                            if (!toType) return;
-                            correct.mutate({
-                              opportunityId: item.id,
-                              fromType: item.type,
-                              toType,
-                            });
-                            e.target.value = '';
-                          }}
-                        >
-                          <option value="">Override type…</option>
-                          {(types.data?.data ?? []).map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.displayName}
-                            </option>
-                          ))}
-                        </select>
-                        <Button size="sm" variant="outline" asChild>
-                          <Link to={`/projects/${projectId}/campaigns/queue`}>Queue</Link>
-                        </Button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
-
-      <div className="flex flex-wrap gap-2">
-        <Button variant="outline" asChild>
-          <Link to={`/projects/${projectId}/backlink-builder/import`}>Import URLs</Link>
-        </Button>
-        <Button variant="outline" asChild>
-          <Link to={`/projects/${projectId}/campaigns/queue`}>Opportunity Queue</Link>
-        </Button>
-        <Button variant="outline" asChild>
-          <Link to={`/projects/${projectId}/reports`}>Reports</Link>
-        </Button>
-      </div>
     </PageTransition>
   );
 }

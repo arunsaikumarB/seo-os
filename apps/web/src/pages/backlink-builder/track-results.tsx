@@ -3,10 +3,9 @@ import { useQuery } from '@tanstack/react-query';
 import { Download, FileBarChart, CheckCircle2 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
 import { PageTransition } from '@/components/demo/page-transition';
 import { useApi } from '@/hooks/use-api';
-import { NextActionPanel } from '@/components/workflow/next-action-panel';
+import { AiLoadingState } from '@/components/workflow/ai-activity-card';
 
 /**
  * Step 7 — Track Results.
@@ -49,16 +48,16 @@ export function TrackResultsPage() {
     { label: 'Rejected', value: num('lost', num('failed')) },
     { label: 'Verified', value: num('verified', num('won')) },
     {
-      label: 'Traffic',
+      label: 'Traffic Estimate',
       value: (s.estimatedTraffic as string | number | undefined) ?? '—',
     },
     {
-      label: 'Estimated Authority',
+      label: 'Authority Gain',
       value: (s.estimatedDaGain as string | number | undefined) ?? '—',
     },
     {
-      label: 'Estimated Ranking Impact',
-      value: (s.estimatedRankingImpact as string | number | undefined) ?? '—',
+      label: 'Backlinks Live',
+      value: num('live', num('verified', num('won'))),
     },
   ] as const;
 
@@ -69,15 +68,12 @@ export function TrackResultsPage() {
           <CheckCircle2 className="h-6 w-6" /> Track Results
         </h1>
         <p className="text-muted-foreground text-sm max-w-2xl">
-          Everything that was submitted, what is waiting, and what landed — plus downloads for your
-          team.
+          Submitted, pending, approved, and live — plus downloads for your team.
         </p>
       </div>
 
-      <NextActionPanel projectId={projectId} />
-
       {summary.isLoading ? (
-        <Skeleton className="h-40 w-full" />
+        <AiLoadingState message="AI is checking backlink status…" />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {metrics.map((m) => (
