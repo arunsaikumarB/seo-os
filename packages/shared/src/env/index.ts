@@ -18,6 +18,8 @@ export const apiEnvSchema = z.object({
     .string()
     .optional()
     .transform((v) => v === 'true'),
+  /** Parallel content-generation item workers (Phase 3). Default 4. */
+  CONTENT_GEN_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(4),
   SENTRY_DSN: z.string().optional(),
   SENTRY_ENVIRONMENT: z.string().optional(),
   OTEL_SERVICE_NAME: z.string().optional(),

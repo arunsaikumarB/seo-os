@@ -216,6 +216,89 @@ automationRouter.post(
   }
 );
 
+/** Phase 3 — Content generation pipeline (additive endpoints). */
+automationRouter.get(
+  '/content-generation',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const { getContentGenerationBoard } = await import(
+        '../../modules/campaigns/content-generation.service.js'
+      );
+      res.json({ data: await getContentGenerationBoard(param(req.params.projectId)) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+automationRouter.post(
+  '/content-generation/generate',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const body = z
+        .object({
+          itemIds: z.array(z.string().uuid()).max(500).optional(),
+        })
+        .parse(req.body ?? {});
+      const { enqueueContentGeneration } = await import(
+        '../../modules/campaigns/content-generation.service.js'
+      );
+      res.json({
+        data: await enqueueContentGeneration(param(req.params.projectId), {
+          itemIds: body.itemIds,
+          stage: 'all',
+        }),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+automationRouter.post(
+  '/content-generation/bulk',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const body = z
+        .object({
+          action: z.enum([
+            'generate_all',
+            'generate_selected',
+            'retry_failed',
+            'retry_missing_images',
+            'retry_missing_metadata',
+            'retry_missing_videos',
+            'approve_selected',
+            'approve_all',
+            'reject_selected',
+            'delete_packages',
+            'export_packages',
+          ]),
+          itemIds: z.array(z.string().uuid()).max(500).optional().default([]),
+        })
+        .parse(req.body);
+      const { bulkContentGenerationAction } = await import(
+        '../../modules/campaigns/content-generation.service.js'
+      );
+      res.json({
+        data: await bulkContentGenerationAction(
+          param(req.params.projectId),
+          body.action,
+          body.itemIds
+        ),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 automationRouter.patch(
   '/classification/opportunities/:opportunityId',
   authMiddleware,

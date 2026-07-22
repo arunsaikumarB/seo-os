@@ -140,12 +140,19 @@ backlinkBuilderRouter.get(
         getCampaignCounts,
         listCampaignItems,
       } = await import('../../modules/campaigns/campaign-state.service.js');
+      const { getContentGenerationBoard } = await import(
+        '../../modules/campaigns/content-generation.service.js'
+      );
       const workspaceId = param(req.params.projectId);
       const items = await listCampaignItems(workspaceId, { includeDeleted: true });
       const counts = await getCampaignCounts(workspaceId);
+      const gen = await getContentGenerationBoard(workspaceId);
       res.json({
         data: {
           totals: counts,
+          generationAudit: gen.generationAudit,
+          orphans: gen.orphans,
+          generationProgress: gen.progress,
           items: items.map((i) => ({
             website: i.websiteUrl ?? i.domain ?? i.id,
             imported: true,
@@ -155,6 +162,11 @@ backlinkBuilderRouter.get(
             images: i.imageStatus,
             metadata: i.metadataStatus,
             videoMeta: i.videoMetadataStatus,
+            schema: i.schemaStatus,
+            generationStatus: i.generationStatus,
+            qualityScore: i.qualityScore,
+            retryCount: i.retryCount,
+            packageApprovedBy: i.packageApprovedBy,
             submission: i.submissionStatus,
             verification: i.verificationStatus,
             currentStatus: i.currentStatus,

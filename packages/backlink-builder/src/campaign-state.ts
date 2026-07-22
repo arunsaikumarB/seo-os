@@ -146,6 +146,15 @@ export function normalizeCampaignWebsiteUrl(raw: string): string | null {
   }
 }
 
+export const GENERATION_STATUSES = [
+  'Queued',
+  'Generating',
+  'Completed',
+  'Failed',
+  'Needs Review',
+] as const;
+export type GenerationStatus = (typeof GENERATION_STATUSES)[number];
+
 export type CampaignItemInput = {
   id: string;
   websiteUrl?: string | null;
@@ -171,6 +180,12 @@ export type CampaignItemInput = {
   reviewDecision?: ReviewDecision | null;
   approvedBy?: ApprovedBy | null;
   duplicateOfId?: string | null;
+  /** Phase 3 — Content generation (additive) */
+  generationStatus?: GenerationStatus | null;
+  schemaStatus?: CampaignDetailStatus | null;
+  qualityScore?: number | null;
+  retryCount?: number | null;
+  packageApprovedBy?: 'auto' | 'user' | null;
 };
 
 export type CampaignCounts = {
@@ -723,3 +738,120 @@ export function decideAfterAnalysis(input: {
     lifecycle: 'Classified',
   };
 }
+
+/* ─── Phase 3: Content generation (additive fields only) ─── */
+
+/**
+ * Quality tiers — exact boundaries (mirrors Phase 2):
+ * > 90 → Completed (auto)
+ * 70–90 inclusive → Needs Review
+ * < 70 → Failed
+ */
+export function tierFromQualityScore(
+  score: number
+): 'Completed' | 'Needs Review' | 'Failed' {
+  if (score > 90) return 'Completed';
+  if (score >= 70) return 'Needs Review';
+  return 'Failed';
+}
+
+export type GenerationProgressCounts = {
+  approved: number;
+  queued: number;
+  generating: number;
+  completed: number;
+  failed: number;
+  needsReview: number;
+  waiting: number;
+  /** processed / (queued+generating+completed+failed+needsReview) for active run */
+  percent: number;
+  active: boolean;
+};
+
+export function computeGenerationProgress(
+  items: CampaignItemInput[]
+): GenerationProgressCounts {
+  let queued = 0;
+  let generating = 0;
+  let completed = 0;
+  let failed = 0;
+  let needsReview = 0;
+  let approved = 0;
+  for (const i of items) {
+    if (i.currentStatus === 'Deleted') continue;
+    if (
+      i.currentStatus === 'Approved' ||
+      i.currentStatus === 'Package Generated' ||
+      i.currentStatus === 'Ready'
+    ) {
+      approved++;
+    }
+    switch (i.generationStatus) {
+      case 'Queued':
+        queued++;
+        break;
+      case 'Generating':
+        generating++;
+        break;
+      case 'Completed':
+        completed++;
+        break;
+      case 'Failed':
+        failed++;
+        break;
+      case 'Needs Review':
+        needsReview++;
+        break;
+      default:
+        break;
+    }
+  }
+  const inRun = queued + generating + completed + failed + needsReview;
+  const processed = completed + failed + needsReview;
+  return {
+    approved,
+    queued,
+    generating,
+    completed,
+    failed,
+    needsReview,
+    waiting: queued,
+    percent: inRun > 0 ? Math.round((processed / inRun) * 1000) / 10 : 0,
+    active: queued + generating > 0,
+  };
+}
+
+/** Required assets for a Completed package — missing any → assert. */
+export function assertPackageAssetsComplete(item: {
+  packageStatus?: CampaignDetailStatus | null;
+  imageStatus?: CampaignDetailStatus | null;
+  metadataStatus?: CampaignDetailStatus | null;
+  videoMetadataStatus?: CampaignDetailStatus | null;
+  schemaStatus?: CampaignDetailStatus | null;
+}): void {
+  const missing: string[] = [];
+  if (item.packageStatus !== 'generated') missing.push('package');
+  if (item.imageStatus !== 'generated') missing.push('images');
+  if (item.metadataStatus !== 'generated') missing.push('metadata');
+  if (item.videoMetadataStatus !== 'generated') missing.push('video_metadata');
+  if (item.schemaStatus !== 'generated') missing.push('schema');
+  if (missing.length) {
+    throw new Error(
+      `Package cannot be Completed with missing assets: ${missing.join(', ')}`
+    );
+  }
+}
+
+export function qualityFailureReason(
+  score: number,
+  recommendations: string[] = []
+): string {
+  const tier = tierFromQualityScore(score);
+  const tip = recommendations.length ? ` — ${recommendations.slice(0, 3).join('; ')}` : '';
+  if (tier === 'Failed') return `quality below threshold (${score})${tip}`;
+  if (tier === 'Needs Review') return `quality needs review (${score})${tip}`;
+  return `quality auto-approved (${score})`;
+}
+
+export const CONTENT_GEN_MAX_RETRIES = 3;
+export const CONTENT_GEN_DEFAULT_CONCURRENCY = 4;

@@ -231,6 +231,21 @@ export function generateContentPack(
     pack.body = pack.videoMetadata?.[0]?.description ?? guest.metaDescription;
   }
 
+  // Structured data for submission packages (schema_status tracking)
+  (pack as ContentPackPayload & { schemaJsonLd?: Record<string, unknown> }).schemaJsonLd = {
+    '@context': 'https://schema.org',
+    '@type': plan.mode === 'directory' || plan.mode === 'profile' ? 'Organization' : 'Article',
+    name: pack.businessName ?? brandName,
+    headline: pack.seoTitle ?? pack.headline ?? guest.seoTitle,
+    description: pack.metaDescription ?? guest.metaDescription,
+    url: `https://${domain}`,
+    author: {
+      '@type': 'Organization',
+      name: brandName,
+      url: `https://${domain}`,
+    },
+  };
+
   pack.quality = scoreContentPackQuality(pack as unknown as Record<string, unknown>);
   return pack;
 }

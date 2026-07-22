@@ -18,6 +18,7 @@ import {
   type CampaignDetailStatus,
   type CampaignItemInput,
   type CampaignLifecycleStatus,
+  type GenerationStatus,
   type ReviewDecision,
   type ReviewTier,
   type SubmissionStatus,
@@ -60,7 +61,7 @@ export async function listCampaignItems(
   const { data: opps } = await getSupabaseAdmin()
     .from('opportunities')
     .select(
-      'id, campaign_id, url, domain, website_name, title, opportunity_type, status, queue_status, pipeline_stage, automation_status, campaign_lifecycle, campaign_step, package_status, image_status, metadata_status, video_metadata_status, submission_status, verification_status, last_error, metadata, import_id, domain_analysis_id, confidence_score, review_tier, review_decision, approved_by, duplicate_of_id, created_at, updated_at'
+      'id, campaign_id, url, domain, website_name, title, opportunity_type, status, queue_status, pipeline_stage, automation_status, campaign_lifecycle, campaign_step, package_status, image_status, metadata_status, video_metadata_status, submission_status, verification_status, last_error, metadata, import_id, domain_analysis_id, confidence_score, review_tier, review_decision, approved_by, duplicate_of_id, generation_status, schema_status, quality_score, retry_count, package_approved_by, created_at, updated_at'
     )
     .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: true })
@@ -204,6 +205,14 @@ export async function listCampaignItems(
       reviewDecision: (o.review_decision as ReviewDecision | null) ?? null,
       approvedBy: (o.approved_by as ApprovedBy) ?? null,
       duplicateOfId: o.duplicate_of_id != null ? String(o.duplicate_of_id) : null,
+      generationStatus: (o.generation_status as GenerationStatus | null) ?? null,
+      schemaStatus: detailOf(o.schema_status, 'pending'),
+      qualityScore: o.quality_score != null ? Number(o.quality_score) : null,
+      retryCount: o.retry_count != null ? Number(o.retry_count) : 0,
+      packageApprovedBy:
+        o.package_approved_by === 'auto' || o.package_approved_by === 'user'
+          ? o.package_approved_by
+          : null,
       raw: o as Record<string, unknown>,
     });
   }
@@ -234,6 +243,11 @@ export type UpdateCampaignItemPatch = {
   reviewDecision?: ReviewDecision | null;
   approvedBy?: ApprovedBy;
   duplicateOfId?: string | null;
+  generationStatus?: GenerationStatus | null;
+  schemaStatus?: CampaignDetailStatus | null;
+  qualityScore?: number | null;
+  retryCount?: number | null;
+  packageApprovedBy?: 'auto' | 'user' | null;
   /** Skip transition check (backfill only). */
   force?: boolean;
 };
@@ -317,6 +331,12 @@ export async function updateCampaignItem(
   if (patch.reviewDecision !== undefined) update.review_decision = patch.reviewDecision;
   if (patch.approvedBy !== undefined) update.approved_by = patch.approvedBy;
   if (patch.duplicateOfId !== undefined) update.duplicate_of_id = patch.duplicateOfId;
+  if (patch.generationStatus !== undefined) update.generation_status = patch.generationStatus;
+  if (patch.schemaStatus !== undefined) update.schema_status = patch.schemaStatus;
+  if (patch.qualityScore !== undefined) update.quality_score = patch.qualityScore;
+  if (patch.retryCount !== undefined) update.retry_count = patch.retryCount;
+  if (patch.packageApprovedBy !== undefined)
+    update.package_approved_by = patch.packageApprovedBy;
   if (patch.classification != null) {
     const meta = (row.metadata as Record<string, unknown>) ?? {};
     const prev =

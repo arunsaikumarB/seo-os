@@ -373,8 +373,8 @@ export async function createContentPack(
     try {
       const { updateCampaignItem } = await import('../campaigns/campaign-state.service.js');
       await updateCampaignItem(workspaceId, opportunityId, {
-        currentStatus: 'Package Generated',
         packageStatus: 'generated',
+        metadataStatus: 'generated',
         force: true,
       });
     } catch {

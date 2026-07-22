@@ -19,6 +19,11 @@ import {
 import { handleImageJobs } from '../modules/image-intelligence/iie-worker.js';
 import { handleProviderJobs } from '../modules/providers/pif-worker.js';
 import { recoverStuckAnalyzingImports } from '../modules/backlinks/discovery.service.js';
+import {
+  handleContentGenerateJobs,
+  resumeInterruptedContentGeneration,
+} from '../modules/campaigns/content-generation.service.js';
+import { getEnv } from '../config/env.js';
 
 export async function startJobInfrastructure(): Promise<void> {
   const boss = await getBoss();
@@ -68,6 +73,11 @@ export async function startJobInfrastructure(): Promise<void> {
     { concurrency: 4, batchSize: 1, pollingIntervalSeconds: 1 }
   );
 
+  const contentGenConcurrency = Math.min(
+    16,
+    Math.max(1, Number(getEnv().CONTENT_GEN_CONCURRENCY ?? 4))
+  );
+
   // Higher concurrency so CAPTCHA/login watchers + queue drain never block each other
   await registerJobHandler(QUEUES.LOW, async (jobs) => {
     const outreachJobs = jobs.filter((j) => (j.data as Record<string, unknown>)?.messageId);
@@ -107,6 +117,9 @@ export async function startJobInfrastructure(): Promise<void> {
     const recoverJobs = jobs.filter(
       (j) => (j.data as Record<string, unknown>)?.type === 'automation_recover_stuck'
     );
+    const contentGenJobs = jobs.filter(
+      (j) => (j.data as Record<string, unknown>)?.type === 'content_generate'
+    );
     const otherJobs = jobs.filter((j) => {
       const d = j.data as Record<string, unknown>;
       return (
@@ -121,6 +134,7 @@ export async function startJobInfrastructure(): Promise<void> {
         d?.type !== 'bee_resume' &&
         d?.type !== 'bee_session_health' &&
         d?.type !== 'automation_recover_stuck' &&
+        d?.type !== 'content_generate' &&
         !String(d?.type ?? '').startsWith('image_') &&
         !String(d?.type ?? '').startsWith('provider_')
       );
@@ -188,10 +202,28 @@ export async function startJobInfrastructure(): Promise<void> {
     if (recoverJobs.length) {
       await recoverStuckAnalyzingImports();
     }
+    if (contentGenJobs.length) {
+      const mapped = contentGenJobs.map((j) => ({
+        id: j.id,
+        data: j.data as Record<string, unknown>,
+      }));
+      // Parallel within the batch, capped at CONTENT_GEN_CONCURRENCY
+      let cursor = 0;
+      const workers = Array.from(
+        { length: Math.min(contentGenConcurrency, mapped.length) },
+        async () => {
+          while (cursor < mapped.length) {
+            const idx = cursor++;
+            await handleContentGenerateJobs([mapped[idx]!]);
+          }
+        }
+      );
+      await Promise.all(workers);
+    }
     for (const job of otherJobs) {
       logger.debug({ jobId: job.id }, 'Low-priority job received');
     }
-  }, { concurrency: 4, batchSize: 4, pollingIntervalSeconds: 1 });
+  }, { concurrency: Math.max(4, contentGenConcurrency), batchSize: Math.max(4, contentGenConcurrency), pollingIntervalSeconds: 1 });
 
   // Startup + periodic recovery for imports left analyzing without a run
   try {
@@ -199,6 +231,13 @@ export async function startJobInfrastructure(): Promise<void> {
     logger.info({ recovered }, 'Startup stuck-import recovery finished');
   } catch (err) {
     logger.warn({ err }, 'Startup stuck-import recovery failed');
+  }
+
+  try {
+    const resumed = await resumeInterruptedContentGeneration();
+    logger.info(resumed, 'Startup content-generation resume finished');
+  } catch (err) {
+    logger.warn({ err }, 'Startup content-generation resume failed');
   }
 
   try {
@@ -217,6 +256,6 @@ export async function startJobInfrastructure(): Promise<void> {
   }
 
   logger.info(
-    'Job infrastructure ready (queues initialized; agents, ingest, crawl, playwright/BEE+watch/resume, outreach, workflow, report, integration, bee-learning/queue/session-health, image-intelligence, provider-framework, recover-stuck handlers registered)'
+    'Job infrastructure ready (queues initialized; agents, ingest, crawl, playwright/BEE+watch/resume, outreach, workflow, report, integration, bee-learning/queue/session-health, image-intelligence, provider-framework, recover-stuck, content-generate handlers registered)'
   );
 }

@@ -15,6 +15,11 @@ type HealthRow = {
   images: string | null;
   metadata: string | null;
   videoMeta: string | null;
+  schema: string | null;
+  generationStatus: string | null;
+  qualityScore: number | null;
+  retryCount: number | null;
+  packageApprovedBy: string | null;
   submission: string | null;
   verification: string | null;
   currentStatus: string;
@@ -26,8 +31,19 @@ type HealthRow = {
   updatedAt: string | null;
 };
 
+type AssetAudit = { generated: number; missingFailed: number };
+
 type HealthData = {
   totals: Record<string, number> & { byStatus?: Record<string, number> };
+  generationAudit?: {
+    packages: AssetAudit;
+    images: AssetAudit;
+    metadata: AssetAudit;
+    videoMetadata: AssetAudit;
+    schema: AssetAudit;
+  };
+  orphans?: { count: number; items: Array<{ table: string; id: string; opportunityId: string | null }> };
+  generationProgress?: Record<string, number | boolean>;
   items: HealthRow[];
 };
 
@@ -47,6 +63,8 @@ export function CampaignHealthPage() {
 
   const data = health.data?.data;
   const totals = data?.totals;
+  const audit = data?.generationAudit;
+  const orphans = data?.orphans;
 
   return (
     <div className="space-y-4 p-2 font-mono text-xs">
@@ -71,6 +89,47 @@ export function CampaignHealthPage() {
         </div>
       ) : null}
 
+      {audit ? (
+        <div className="border p-2 space-y-2">
+          <p className="font-semibold">Generation audit</p>
+          <table className="w-full max-w-md border-collapse">
+            <thead>
+              <tr className="border-b">
+                <th className="text-left py-1">Asset</th>
+                <th className="text-left py-1">Generated</th>
+                <th className="text-left py-1">Missing/Failed</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(
+                [
+                  ['Packages', audit.packages],
+                  ['Images', audit.images],
+                  ['Metadata', audit.metadata],
+                  ['Video Metadata', audit.videoMetadata],
+                  ['Schema', audit.schema],
+                ] as const
+              ).map(([label, row]) => (
+                <tr key={label} className="border-b">
+                  <td className="py-1">{label}</td>
+                  <td className="py-1">{row.generated}</td>
+                  <td className="py-1">{row.missingFailed}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p>
+            Orphan assets: {orphans?.count ?? 0}
+            {orphans && orphans.count > 0
+              ? ` · ${orphans.items
+                  .slice(0, 5)
+                  .map((o) => `${o.table}:${o.id}`)
+                  .join(', ')}`
+              : ' (must be 0)'}
+          </p>
+        </div>
+      ) : null}
+
       {health.isLoading ? <p>Loading…</p> : null}
       {health.isError ? <p className="text-red-600">Failed to load campaign health</p> : null}
 
@@ -87,6 +146,11 @@ export function CampaignHealthPage() {
                 'Images',
                 'Metadata',
                 'Video Meta',
+                'Schema',
+                'Gen Status',
+                'Quality',
+                'Retries',
+                'Pkg By',
                 'Submission',
                 'Verification',
                 'Current Status',
@@ -114,6 +178,11 @@ export function CampaignHealthPage() {
                 <td className="px-2 py-1">{row.images}</td>
                 <td className="px-2 py-1">{row.metadata}</td>
                 <td className="px-2 py-1">{row.videoMeta}</td>
+                <td className="px-2 py-1">{row.schema}</td>
+                <td className="px-2 py-1">{row.generationStatus}</td>
+                <td className="px-2 py-1">{row.qualityScore ?? ''}</td>
+                <td className="px-2 py-1">{row.retryCount ?? ''}</td>
+                <td className="px-2 py-1">{row.packageApprovedBy}</td>
                 <td className="px-2 py-1">{row.submission}</td>
                 <td className="px-2 py-1">{row.verification}</td>
                 <td className="px-2 py-1">{row.currentStatus}</td>

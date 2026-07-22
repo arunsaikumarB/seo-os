@@ -4,13 +4,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   assignReviewTier,
+  assertPackageAssetsComplete,
   canTransitionCampaignLifecycle,
   computeAiReviewSummary,
   computeCampaignCounts,
+  computeGenerationProgress,
   decideAfterAnalysis,
   deriveCampaignLifecycle,
   furthestCampaignLifecycle,
   normalizeCampaignWebsiteUrl,
+  tierFromQualityScore,
 } from '../src/campaign-state.js';
 
 describe('campaign state manager', () => {
@@ -104,5 +107,50 @@ describe('campaign state manager', () => {
         s.dead +
         s.pending
     ).toBe(4);
+  });
+
+  it('quality tiers use exact Phase 2/3 boundaries', () => {
+    expect(tierFromQualityScore(91)).toBe('Completed');
+    expect(tierFromQualityScore(90)).toBe('Needs Review');
+    expect(tierFromQualityScore(70)).toBe('Needs Review');
+    expect(tierFromQualityScore(69)).toBe('Failed');
+  });
+
+  it('assertPackageAssetsComplete rejects missing assets', () => {
+    expect(() =>
+      assertPackageAssetsComplete({
+        packageStatus: 'generated',
+        imageStatus: 'generated',
+        metadataStatus: 'generated',
+        videoMetadataStatus: 'generated',
+        schemaStatus: 'pending',
+      })
+    ).toThrow(/schema/);
+    expect(() =>
+      assertPackageAssetsComplete({
+        packageStatus: 'generated',
+        imageStatus: 'generated',
+        metadataStatus: 'generated',
+        videoMetadataStatus: 'generated',
+        schemaStatus: 'generated',
+      })
+    ).not.toThrow();
+  });
+
+  it('generation progress counts from generation_status', () => {
+    const p = computeGenerationProgress([
+      { id: '1', currentStatus: 'Approved', generationStatus: 'Queued' },
+      { id: '2', currentStatus: 'Approved', generationStatus: 'Generating' },
+      { id: '3', currentStatus: 'Ready', generationStatus: 'Completed' },
+      { id: '4', currentStatus: 'Approved', generationStatus: 'Needs Review' },
+      { id: '5', currentStatus: 'Failed', generationStatus: 'Failed' },
+      { id: '6', currentStatus: 'Deleted', generationStatus: 'Completed' },
+    ]);
+    expect(p.queued).toBe(1);
+    expect(p.generating).toBe(1);
+    expect(p.completed).toBe(1);
+    expect(p.needsReview).toBe(1);
+    expect(p.failed).toBe(1);
+    expect(p.active).toBe(true);
   });
 });
