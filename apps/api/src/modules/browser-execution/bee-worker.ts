@@ -475,6 +475,7 @@ async function pauseForGate(params: {
       await updateCampaignItem(workspaceId, opportunityId, {
         currentStatus: 'Waiting Human',
         lastError: 'Unclassified — needs diagnosis',
+        force: true,
       });
     } catch {
       /* best-effort */
