@@ -33,6 +33,16 @@ const WORKSPACE_ID =
 const startImmediately = process.env.START_IMMEDIATELY !== '0';
 
 async function main() {
+  // Prefer create-only from local scripts; Railway workers start browsers.
+  // Set START_IMMEDIATELY=1 only when queues+Chromium are healthy in-process.
+  const bossPath = resolve(__dirname, '../dist/jobs/boss.js');
+  const { getBoss, ensureRequiredQueues, areQueuesInitialized } = await import(
+    pathToFileURL(bossPath).href
+  );
+  await getBoss();
+  await ensureRequiredQueues();
+  console.log('queuesInitialized', areQueuesInitialized());
+
   // Build must exist; import compiled service
   const modPath = resolve(
     __dirname,

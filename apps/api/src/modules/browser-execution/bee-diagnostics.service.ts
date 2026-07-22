@@ -215,15 +215,23 @@ export async function validateExecutionReadiness(
         ? 'Browser Runtime Healthy'
         : 'Browser Runtime Missing — Install Required',
   });
+  const workerOk = health.indicators.find((i) => i.key === 'worker')?.status === 'green';
+  const queueOk = health.indicators.find((i) => i.key === 'queue')?.status === 'green';
   checks.push({
     key: 'worker',
-    ok: health.indicators.find((i) => i.key === 'worker')?.status === 'green',
-    message: 'Worker online',
+    ok: workerOk,
+    message: workerOk
+      ? 'Worker online'
+      : (health.indicators.find((i) => i.key === 'worker')?.detail ??
+        'Worker not ready (playwright/queue/runtime)'),
   });
   checks.push({
     key: 'queue',
-    ok: health.indicators.find((i) => i.key === 'queue')?.status === 'green',
-    message: health.indicators.find((i) => i.key === 'queue')?.detail ?? 'Queue online',
+    ok: queueOk,
+    message: queueOk
+      ? (health.indicators.find((i) => i.key === 'queue')?.detail ?? 'Queue online')
+      : (health.indicators.find((i) => i.key === 'queue')?.detail ??
+        'Queue not initialized on this process'),
   });
   checks.push({
     key: 'browser',

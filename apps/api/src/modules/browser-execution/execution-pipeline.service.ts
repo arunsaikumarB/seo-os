@@ -166,18 +166,107 @@ async function latestJobForOpp(workspaceId: string, opportunityId: string) {
   return data;
 }
 
-function isTerminalJobStatus(status: string, disposition?: string | null): boolean {
-  if (['completed', 'failed', 'skipped', 'deleted', 'ignored', 'cancelled'].includes(status))
+function isVerifiedTerminalSkip(status: string, disposition?: string | null): boolean {
+  return status === 'skipped' || disposition === 'skipped';
+}
+
+/** Real completion / cancel — not a start failure that must be retried. */
+function isFinalTerminalJob(status: string, disposition?: string | null): boolean {
+  if (isVerifiedTerminalSkip(status, disposition)) return true;
+  if (['completed', 'submitted', 'verified', 'deleted', 'ignored', 'cancelled'].includes(status))
     return true;
-  if (disposition === 'failed_to_start') return true;
+  // failed_to_start is retriable — not final
+  if (status === 'failed' && disposition === 'failed_to_start') return false;
+  if (status === 'waiting_infrastructure') return false;
+  if (status === 'failed') return true;
   return false;
 }
 
-function isActiveOrTerminalJob(status: string, disposition?: string | null): boolean {
-  if (isTerminalJobStatus(status, disposition)) return true;
-  return ['queued', 'preparing', 'running', 'waiting_human', 'paused', 'starting'].includes(
-    status
+function isRetriableStartFailure(status: string, disposition?: string | null): boolean {
+  if (status === 'waiting_infrastructure') return true;
+  if (status === 'failed' && disposition === 'failed_to_start') return true;
+  return false;
+}
+
+function isInFlightJob(status: string): boolean {
+  return [
+    'preparing',
+    'starting',
+    'running',
+    'waiting_human',
+    'needs_approval',
+    'paused',
+    'navigating',
+    'analyzing_form',
+    'filling_fields',
+    'uploading_assets',
+    'submitting',
+    'waiting_verification',
+    'retry_scheduled',
+  ].includes(status);
+}
+
+function isInfrastructureStartError(msg: string): boolean {
+  return /Cannot start execution|queues not initialized|Worker online|BROWSER_RUNTIME|Browser Runtime|queue:/i.test(
+    msg
   );
+}
+
+async function resetJobForStartRetry(workspaceId: string, jobId: string) {
+  await admin()
+    .from('execution_jobs')
+    .update({
+      status: 'queued',
+      disposition: null,
+      error_code: null,
+      error_message: null,
+      finished_at: null,
+      started_at: null,
+      session_id: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', jobId)
+    .eq('workspace_id', workspaceId);
+}
+
+/**
+ * Items that must have a job or verified terminal skip:
+ * Ready + Failed/Submitting with retriable start failure (pipeline recovery).
+ */
+export async function listPipelineTargetItems(workspaceId: string): Promise<ReadyOpp[]> {
+  const ready = await listReadyCampaignItems(workspaceId);
+  const byId = new Map(ready.map((r) => [r.id, r]));
+
+  const { data: failedStarts } = await admin()
+    .from('execution_jobs')
+    .select('opportunity_id')
+    .eq('workspace_id', workspaceId)
+    .is('deleted_at', null)
+    .or('disposition.eq.failed_to_start,status.eq.waiting_infrastructure');
+
+  const oppIds = [
+    ...new Set(
+      (failedStarts ?? [])
+        .map((j) => String(j.opportunity_id ?? ''))
+        .filter(Boolean)
+    ),
+  ].filter((id) => !byId.has(id));
+
+  if (oppIds.length) {
+    const { data: extras } = await admin()
+      .from('opportunities')
+      .select(
+        'id, domain, url, website_name, campaign_lifecycle, pipeline_stage, generation_status, package_approved_by, automation_status, metadata, last_error'
+      )
+      .eq('workspace_id', workspaceId)
+      .in('id', oppIds)
+      .not('automation_status', 'in', '("deleted","ignored")');
+    for (const o of (extras ?? []) as ReadyOpp[]) {
+      byId.set(o.id, o);
+    }
+  }
+
+  return [...byId.values()];
 }
 
 /**
@@ -280,8 +369,119 @@ async function detectVerifiedBlocker(
   return null;
 }
 
+async function tryStartOrPark(params: {
+  workspaceId: string;
+  opportunityId: string;
+  jobId: string;
+  userId?: string;
+}): Promise<{ ok: boolean; status: string | null; error?: string }> {
+  await writeOppPipelineMeta(params.workspaceId, params.opportunityId, { startApiCalled: true });
+  try {
+    const started = await startJob(params.workspaceId, params.jobId, params.userId);
+    await writeOppPipelineMeta(params.workspaceId, params.opportunityId, {
+      startApiResponse: String(started?.status ?? 'ok'),
+      executionJobStatus: String(started?.status ?? 'queued'),
+      queueAccepted: true,
+      workerAssigned: Boolean(
+        (started as { worker_id?: string } | null)?.worker_id ||
+          (started as { metrics?: { workerId?: string } } | null)?.metrics?.workerId
+      ),
+      creationError: null,
+      creationStack: null,
+    });
+    try {
+      const { updateCampaignItem } = await import('../campaigns/campaign-state.service.js');
+      await updateCampaignItem(params.workspaceId, params.opportunityId, {
+        currentStatus: 'Submitting',
+        submissionStatus: 'pending',
+        lastError: null,
+        force: true,
+      });
+    } catch {
+      /* lifecycle optional */
+    }
+    return { ok: true, status: String(started?.status ?? 'queued') };
+  } catch (startErr) {
+    const msg = startErr instanceof Error ? startErr.message : String(startErr);
+    const stack = startErr instanceof Error ? startErr.stack ?? null : null;
+    const code =
+      startErr && typeof startErr === 'object' && 'code' in startErr
+        ? String((startErr as { code: string }).code)
+        : '';
+
+    // Permanent site blockers → verified skip / failed_to_start
+    if (['SITE_UNSUPPORTED', 'SITE_UNPROFILABLE'].includes(code)) {
+      await markJobFailedToStart(params.workspaceId, params.jobId, msg);
+      await writeOppPipelineMeta(params.workspaceId, params.opportunityId, {
+        startApiResponse: msg,
+        creationError: msg,
+        creationStack: stack,
+        verifiedBlocker: msg,
+      });
+      return { ok: false, status: 'failed', error: msg };
+    }
+
+    // Infrastructure / readiness — keep queued for Railway worker retry; never silent
+    if (isInfrastructureStartError(msg) || code === 'BROWSER_RUNTIME_MISSING') {
+      await resetJobForStartRetry(params.workspaceId, params.jobId);
+      await writeOppPipelineMeta(params.workspaceId, params.opportunityId, {
+        startApiResponse: msg,
+        creationError: msg,
+        creationStack: stack,
+        queueAccepted: false,
+        executionJobStatus: 'queued',
+        whyNoJob: null,
+      });
+      // Ask Railway (shared pg-boss) to retry start on a healthy worker
+      try {
+        const { enqueueJob, QUEUES, areQueuesInitialized } = await import('../../jobs/boss.js');
+        if (areQueuesInitialized()) {
+          await enqueueJob(
+            QUEUES.PLAYWRIGHT,
+            'bee_execute',
+            {
+              type: 'bee_execute',
+              jobId: params.jobId,
+              workspaceId: params.workspaceId,
+              action: 'retry_start',
+            },
+            { singletonKey: `bee-retry-start-${params.jobId}`, retryLimit: 2 }
+          );
+          await writeOppPipelineMeta(params.workspaceId, params.opportunityId, {
+            queueAccepted: true,
+            startApiResponse: `${msg} — enqueued retry_start for worker`,
+          });
+        }
+      } catch (enqErr) {
+        logger.error(
+          { jobId: params.jobId, err: enqErr },
+          'failed to enqueue retry_start after infrastructure start error'
+        );
+      }
+      logger.error(
+        { opportunityId: params.opportunityId, jobId: params.jobId, msg, stack },
+        'execution pipeline start deferred (infra) — job left queued'
+      );
+      return { ok: false, status: 'queued', error: msg };
+    }
+
+    await markJobFailedToStart(params.workspaceId, params.jobId, msg);
+    await writeOppPipelineMeta(params.workspaceId, params.opportunityId, {
+      startApiResponse: msg,
+      creationError: msg,
+      creationStack: stack,
+    });
+    logger.error(
+      { opportunityId: params.opportunityId, jobId: params.jobId, msg, stack },
+      'execution pipeline start failed'
+    );
+    return { ok: false, status: 'failed', error: msg };
+  }
+}
+
 /**
  * Ensure every Ready item has an execution job (or verified terminal skipped job).
+ * Also recovers failed_to_start / waiting_infrastructure jobs.
  */
 export async function ensureExecutionJobsForReady(params: {
   workspaceId: string;
@@ -292,7 +492,7 @@ export async function ensureExecutionJobsForReady(params: {
   ensureSummary: NonNullable<ExecutionDiagnostics['ensureSummary']>;
 }> {
   const startImmediately = params.startImmediately !== false;
-  const ready = await listReadyCampaignItems(params.workspaceId);
+  const targets = await listPipelineTargetItems(params.workspaceId);
   const summary = {
     created: 0,
     started: 0,
@@ -302,54 +502,133 @@ export async function ensureExecutionJobsForReady(params: {
   };
 
   logger.info(
-    { workspaceId: params.workspaceId, ready: ready.length, startImmediately },
+    { workspaceId: params.workspaceId, targets: targets.length, startImmediately },
     'execution pipeline ensure start'
   );
 
-  for (const item of ready) {
+  for (const item of targets) {
     const domain = String(item.domain ?? 'unknown');
     const website = String(item.website_name || item.domain || item.id);
     try {
       const existing = await latestJobForOpp(params.workspaceId, item.id);
-      if (
-        existing &&
-        isActiveOrTerminalJob(String(existing.status), existing.disposition as string | null)
-      ) {
+      const existingStatus = existing ? String(existing.status) : '';
+      const existingDisp = (existing?.disposition as string | null) ?? null;
+
+      if (existing && isVerifiedTerminalSkip(existingStatus, existingDisp)) {
         summary.alreadyHadJob++;
         await writeOppPipelineMeta(params.workspaceId, item.id, {
           executionJobExists: true,
           executionJobId: existing.id,
-          executionJobStatus: existing.status,
+          executionJobStatus: existingStatus,
+          verifiedBlocker: existing.error_message,
           whyNoJob: null,
         });
         continue;
       }
 
-      const blocker = await detectVerifiedBlocker(params.workspaceId, domain);
-      if (blocker) {
-        await createVerifiedBlockerJob({
-          workspaceId: params.workspaceId,
-          opportunityId: item.id,
-          domain,
-          reason: blocker.reason,
-          code: blocker.code,
-          userId: params.userId,
+      if (existing && isFinalTerminalJob(existingStatus, existingDisp)) {
+        summary.alreadyHadJob++;
+        await writeOppPipelineMeta(params.workspaceId, item.id, {
+          executionJobExists: true,
+          executionJobId: existing.id,
+          executionJobStatus: existingStatus,
+          whyNoJob: null,
         });
-        summary.skippedTerminal++;
-        summary.created++;
         continue;
       }
 
-      let jobId: string | null = null;
-      try {
-        const job = await createExecution({
-          workspaceId: params.workspaceId,
-          opportunityId: item.id,
-          mode: 'prepare',
-          userId: params.userId,
+      if (existing && isInFlightJob(existingStatus)) {
+        summary.alreadyHadJob++;
+        await writeOppPipelineMeta(params.workspaceId, item.id, {
+          executionJobExists: true,
+          executionJobId: existing.id,
+          executionJobStatus: existingStatus,
+          whyNoJob: null,
+          queueAccepted: true,
         });
-        jobId = String(job.id);
-        summary.created++;
+        continue;
+      }
+
+      // Retriable start failure — reset and start again
+      if (existing && isRetriableStartFailure(existingStatus, existingDisp)) {
+        await resetJobForStartRetry(params.workspaceId, String(existing.id));
+        if (startImmediately) {
+          const r = await tryStartOrPark({
+            workspaceId: params.workspaceId,
+            opportunityId: item.id,
+            jobId: String(existing.id),
+            userId: params.userId,
+          });
+          if (r.ok) summary.started++;
+          else if (r.status === 'queued') summary.started++; // deferred to worker
+          else summary.failed++;
+        } else {
+          summary.alreadyHadJob++;
+        }
+        continue;
+      }
+
+      // Queued but not yet running — start (or re-start) immediately
+      if (existing && existingStatus === 'queued') {
+        if (startImmediately) {
+          const r = await tryStartOrPark({
+            workspaceId: params.workspaceId,
+            opportunityId: item.id,
+            jobId: String(existing.id),
+            userId: params.userId,
+          });
+          if (r.ok || r.status === 'queued') summary.started++;
+          else summary.failed++;
+        } else {
+          summary.alreadyHadJob++;
+        }
+        continue;
+      }
+
+      const blocker = await detectVerifiedBlocker(params.workspaceId, domain);
+      if (blocker) {
+        if (existing && !isVerifiedTerminalSkip(existingStatus, existingDisp)) {
+          await admin()
+            .from('execution_jobs')
+            .update({
+              status: 'skipped',
+              disposition: 'skipped',
+              error_code: blocker.code,
+              error_message: blocker.reason,
+              finished_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', existing.id);
+          summary.skippedTerminal++;
+        } else {
+          await createVerifiedBlockerJob({
+            workspaceId: params.workspaceId,
+            opportunityId: item.id,
+            domain,
+            reason: blocker.reason,
+            code: blocker.code,
+            userId: params.userId,
+          });
+          summary.skippedTerminal++;
+          summary.created++;
+        }
+        continue;
+      }
+
+      let jobId: string | null = existing ? String(existing.id) : null;
+      try {
+        if (!jobId) {
+          const job = await createExecution({
+            workspaceId: params.workspaceId,
+            opportunityId: item.id,
+            mode: 'prepare',
+            userId: params.userId,
+          });
+          jobId = String(job.id);
+          summary.created++;
+        } else {
+          summary.alreadyHadJob++;
+        }
         await writeOppPipelineMeta(params.workspaceId, item.id, {
           executionJobExists: true,
           executionJobId: jobId,
@@ -361,58 +640,22 @@ export async function ensureExecutionJobsForReady(params: {
           creationStack: null,
         });
 
-        try {
-          const { updateCampaignItem } = await import('../campaigns/campaign-state.service.js');
-          await updateCampaignItem(params.workspaceId, item.id, {
-            currentStatus: 'Submitting',
-            submissionStatus: 'pending',
-            lastError: null,
-            force: true,
+        if (startImmediately && jobId) {
+          const r = await tryStartOrPark({
+            workspaceId: params.workspaceId,
+            opportunityId: item.id,
+            jobId,
+            userId: params.userId,
           });
-        } catch (lifeErr) {
-          logger.warn(
-            { opportunityId: item.id, err: lifeErr },
-            'lifecycle → Submitting failed (job still created)'
-          );
-        }
-
-        if (startImmediately) {
-          await writeOppPipelineMeta(params.workspaceId, item.id, { startApiCalled: true });
-          try {
-            const started = await startJob(params.workspaceId, jobId, params.userId);
-            summary.started++;
-            await writeOppPipelineMeta(params.workspaceId, item.id, {
-              startApiResponse: String(started?.status ?? 'ok'),
-              executionJobStatus: String(started?.status ?? 'queued'),
-              queueAccepted: true,
-              workerAssigned: Boolean(
-                (started as { worker_id?: string } | null)?.worker_id ||
-                  (started as { metrics?: { workerId?: string } } | null)?.metrics?.workerId
-              ),
-            });
-          } catch (startErr) {
-            const msg = startErr instanceof Error ? startErr.message : String(startErr);
-            const stack = startErr instanceof Error ? startErr.stack ?? null : null;
-            await markJobFailedToStart(params.workspaceId, jobId, msg);
-            await writeOppPipelineMeta(params.workspaceId, item.id, {
-              startApiCalled: true,
-              startApiResponse: msg,
-              creationError: msg,
-              creationStack: stack,
-            });
-            summary.failed++;
-            logger.error(
-              { opportunityId: item.id, jobId, msg, stack },
-              'execution pipeline start failed'
-            );
-          }
+          if (r.ok || r.status === 'queued') summary.started++;
+          else summary.failed++;
         }
       } catch (createErr) {
         const msg = createErr instanceof Error ? createErr.message : String(createErr);
         const stack = createErr instanceof Error ? createErr.stack ?? null : null;
         summary.failed++;
         await writeOppPipelineMeta(params.workspaceId, item.id, {
-          executionJobExists: false,
+          executionJobExists: Boolean(jobId),
           whyNoJob: msg,
           creationError: msg,
           creationStack: stack,
@@ -463,6 +706,7 @@ export async function getExecutionDiagnostics(
   workspaceId: string
 ): Promise<ExecutionDiagnostics> {
   const ready = await listReadyCampaignItems(workspaceId);
+  const targets = await listPipelineTargetItems(workspaceId);
   const { data: allJobs } = await admin()
     .from('execution_jobs')
     .select('id, opportunity_id, status, disposition, metrics, error_message, site_domain')
@@ -480,16 +724,26 @@ export async function getExecutionDiagnostics(
     jobs.filter((j) => pred(String(j.status), (j.disposition as string | null) ?? null)).length;
 
   const jobsQueued = countStatus((s) => ['queued', 'preparing', 'starting'].includes(s));
-  const jobsRunning = countStatus((s) => s === 'running');
-  const jobsWaitingHuman = countStatus((s) => s === 'waiting_human');
+  const jobsRunning = countStatus((s) =>
+    ['running', 'navigating', 'analyzing_form', 'filling_fields', 'uploading_assets', 'submitting'].includes(
+      s
+    )
+  );
+  const jobsWaitingHuman = countStatus((s) =>
+    ['waiting_human', 'needs_approval', 'paused', 'blocked_captcha', 'awaiting_user'].includes(s)
+  );
   const jobsFailed = countStatus((s, d) => s === 'failed' || d === 'failed_to_start');
   const jobsCompleted = countStatus((s) => ['completed', 'submitted', 'verified'].includes(s));
   const jobsSkipped = countStatus((s) => s === 'skipped');
+  const retriableFails = countStatus((s, d) => isRetriableStartFailure(s, d));
 
   const items: PipelineItemDiag[] = [];
   let missing = 0;
 
-  for (const item of ready) {
+  // Diagnostics rows: Ready items + recovery targets (failed_to_start)
+  const diagOpps = targets.length >= ready.length ? targets : ready;
+
+  for (const item of diagOpps) {
     const job = byOpp.get(item.id);
     const meta = (item.metadata as Record<string, unknown> | null) ?? {};
     const pipe =
@@ -498,7 +752,14 @@ export async function getExecutionDiagnostics(
         : {};
     const metrics = (job?.metrics as Record<string, unknown> | null) ?? {};
     const exists = Boolean(job);
-    if (!exists) missing++;
+    const st = job ? String(job.status) : '';
+    const disp = (job?.disposition as string | null) ?? null;
+    const isReadyRow = ready.some((r) => r.id === item.id);
+    if (isReadyRow && !exists) missing++;
+    if (isReadyRow && exists && isRetriableStartFailure(st, disp)) {
+      // Ready (or restored) with retriable fail still counts as pipeline gap
+      missing++;
+    }
 
     items.push({
       campaignItemId: item.id,
@@ -510,7 +771,9 @@ export async function getExecutionDiagnostics(
       executionJobId: job ? String(job.id) : null,
       executionJobStatus: job ? String(job.status) : null,
       whyNoJob: exists
-        ? null
+        ? isRetriableStartFailure(st, disp)
+          ? String(job!.error_message ?? 'failed_to_start — retry required')
+          : null
         : (pipe.whyNoJob as string) ||
           (pipe.creationError as string) ||
           'Ready item has no execution_jobs row — ensure never ran or create failed',
@@ -551,15 +814,27 @@ export async function getExecutionDiagnostics(
   }
 
   const readyCount = ready.length;
-  const jobsForReady = ready.filter((r) => byOpp.has(r.id)).length;
-  const pipelineBroken = readyCount > jobsForReady;
+  const jobsForReady = ready.filter((r) => {
+    const j = byOpp.get(r.id);
+    if (!j) return false;
+    const st = String(j.status);
+    const disp = (j.disposition as string | null) ?? null;
+    if (isRetriableStartFailure(st, disp)) return false;
+    return true;
+  }).length;
+  const pipelineBroken =
+    readyCount > jobsForReady || retriableFails > 0 || missing > 0;
   let rootCause: string | null = null;
   if (pipelineBroken) {
-    const sample = items.find((i) => !i.executionJobExists);
-    rootCause =
-      sample?.creationError ||
-      sample?.whyNoJob ||
-      'Ready Campaign Items exist without execution_jobs — ensureExecutionJobsForReady was not invoked or createExecution failed';
+    if (retriableFails > 0) {
+      rootCause = `${retriableFails} job(s) failed_to_start / waiting_infrastructure — start never reached a healthy worker (queues not initialized or readiness false-negative). Retry via ensure-ready on API.`;
+    } else {
+      const sample = items.find((i) => !i.executionJobExists || i.whyNoJob);
+      rootCause =
+        sample?.creationError ||
+        sample?.whyNoJob ||
+        'Ready Campaign Items exist without execution_jobs — ensureExecutionJobsForReady was not invoked or createExecution failed';
+    }
   }
 
   return {
@@ -571,7 +846,7 @@ export async function getExecutionDiagnostics(
     jobsFailed,
     jobsCompleted,
     jobsSkipped,
-    missingExecutionJobs: missing,
+    missingExecutionJobs: Math.max(missing, readyCount - jobsForReady),
     pipelineBroken,
     rootCause,
     items,
