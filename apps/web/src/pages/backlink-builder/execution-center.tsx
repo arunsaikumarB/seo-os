@@ -597,6 +597,19 @@ export function BrowserExecutionCenterPage() {
             <AiLoadingState message="AI is preparing submissions…" />
           ) : null}
 
+          {/* Phase 4.6 — task experience first (AI Progress + one card), not status tables */}
+          <HumanInterventionQueue
+            projectId={projectId}
+            campaignActive={
+              campaignIsRunning ||
+              campaignState === 'Starting' ||
+              campaignState === 'Waiting Human' ||
+              campaignState === 'Paused' ||
+              totalJobs > 0 ||
+              selectableOpps.length > 0
+            }
+          />
+
           {showFailedToStart && !campaignIsRunning && campaignState !== 'Starting' ? (
             <Card className="rounded-2xl border-red-500/30 bg-red-500/5">
               <CardHeader className="pb-2">
@@ -656,17 +669,6 @@ export function BrowserExecutionCenterPage() {
               </CardHeader>
             </Card>
           ) : null}
-
-          <HumanInterventionQueue
-            projectId={projectId}
-            campaignActive={
-              campaignIsRunning ||
-              campaignState === 'Starting' ||
-              campaignState === 'Waiting Human' ||
-              campaignState === 'Paused' ||
-              totalJobs > 0
-            }
-          />
 
           {showAdvanced ? (
             <Card className="rounded-2xl border-border/40 border-dashed">
@@ -747,6 +749,55 @@ export function BrowserExecutionCenterPage() {
                     <p className="text-lg font-semibold tabular-nums">{value}</p>
                   </div>
                 ))}
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {showAdvanced ? (
+            <Card className="border-dashed">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Website status table (support)</CardTitle>
+                <CardDescription>Current Status and Detail — support engineers only</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {oppList.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No websites.</p>
+                ) : (
+                  <div className="overflow-x-auto rounded-md border">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
+                        <tr>
+                          <th className="px-3 py-2 font-medium">Website</th>
+                          <th className="px-3 py-2 font-medium">Current Status</th>
+                          <th className="px-3 py-2 font-medium">Detail</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {oppList.map((opp) => {
+                          const statusKey = opp.rowStatus ?? opp.readiness;
+                          const statusLabel = ROW_STATUS_LABEL[statusKey] ?? statusKey;
+                          return (
+                            <tr key={opp.id} className="border-t">
+                              <td className="px-3 py-2 font-medium">{opp.website}</td>
+                              <td className="px-3 py-2">
+                                <Badge className={`text-[10px] ${statusBadge(statusKey)}`}>
+                                  {statusLabel}
+                                </Badge>
+                              </td>
+                              <td className="px-3 py-2 text-xs text-muted-foreground max-w-[240px] truncate">
+                                {statusKey === 'Failed to Start' || statusKey === 'failed_to_start'
+                                  ? opp.error_message ||
+                                    opp.latest_job?.error_message ||
+                                    'Failed to start'
+                                  : '—'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </CardContent>
             </Card>
           ) : null}
@@ -873,15 +924,11 @@ export function BrowserExecutionCenterPage() {
                           />
                         </th>
                         <th className="px-3 py-2 font-medium">Website</th>
-                        <th className="px-3 py-2 font-medium">Current Status</th>
-                        <th className="px-3 py-2 font-medium">Detail</th>
                       </tr>
                     </thead>
                     <tbody>
                       {oppList
                         .filter((opp) => {
-                          // Keep Login/CAPTCHA out of the normal submission table —
-                          // they live in Human Intervention Queue only
                           const waiting = actionItems.find(
                             (a) =>
                               a.website === opp.website ||
@@ -891,9 +938,6 @@ export function BrowserExecutionCenterPage() {
                         })
                         .map((opp) => {
                         const checked = selectedOppIds.has(opp.id);
-                        const statusKey = opp.rowStatus ?? opp.readiness;
-                        const statusLabel =
-                          ROW_STATUS_LABEL[statusKey] ?? statusKey;
                         return (
                           <tr key={opp.id} className="border-t">
                             <td className="px-3 py-2">
@@ -907,21 +951,6 @@ export function BrowserExecutionCenterPage() {
                             </td>
                             <td className="px-3 py-2">
                               <p className="font-medium">{opp.website}</p>
-                            </td>
-                            <td className="px-3 py-2">
-                              <Badge
-                                className={`text-[10px] ${statusBadge(statusKey)}`}
-                              >
-                                {statusLabel}
-                              </Badge>
-                            </td>
-                            <td className="px-3 py-2 text-xs text-muted-foreground max-w-[240px] truncate">
-                              {statusKey === 'Failed to Start' ||
-                              statusKey === 'failed_to_start'
-                                ? opp.error_message ||
-                                  opp.latest_job?.error_message ||
-                                  'Failed to start'
-                                : '—'}
                             </td>
                           </tr>
                         );

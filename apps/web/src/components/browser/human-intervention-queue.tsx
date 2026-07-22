@@ -86,6 +86,49 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
   const needsHelp = items.length;
   const current = items[Math.min(index, Math.max(0, items.length - 1))] ?? null;
 
+  const p = progress.data;
+  const submitted = p?.submitted ?? p?.completedJobs ?? 0;
+  const running = p?.running ?? 0;
+  const remaining = p?.remainingJobs ?? 0;
+  const showProgressStrip =
+    needsHelp > 0 ||
+    Boolean(campaignActive) ||
+    submitted > 0 ||
+    running > 0 ||
+    remaining > 0;
+
+  const progressStrip = showProgressStrip ? (
+    <Card className="rounded-2xl border-border/40">
+      <CardContent className="pt-5 pb-4">
+        <p className="text-sm font-medium mb-3 flex items-center gap-2">
+          <span aria-hidden>🤖</span> AI Progress
+        </p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {(
+            [
+              ['Submitted', submitted],
+              ['Running', running],
+              ['Remaining', remaining],
+              ['Needs Your Help', needsHelp],
+            ] as const
+          ).map(([label, value]) => (
+            <div key={label}>
+              <p className="text-xs text-muted-foreground">{label}</p>
+              <p
+                className={cn(
+                  'text-xl font-semibold tabular-nums mt-0.5',
+                  label === 'Needs Your Help' && value > 0 && 'text-amber-800 dark:text-amber-200'
+                )}
+              >
+                {value}
+              </p>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  ) : null;
+
   useEffect(() => {
     if (index >= items.length && items.length > 0) setIndex(0);
   }, [items.length, index]);
@@ -196,34 +239,35 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
     }
   };
 
-  const p = progress.data;
-  const submitted = p?.submitted ?? p?.completedJobs ?? 0;
-  const running = p?.running ?? 0;
-  const remaining = p?.remainingJobs ?? 0;
-
-  // Empty: no intervention section (calm message only when campaign is active)
+  // Empty: progress strip + calm message — never a status table
   if (needsHelp === 0) {
     if (justFinishedAll) {
       return (
-        <Card className="rounded-2xl border-emerald-500/25 bg-emerald-500/[0.04]">
-          <CardContent className="pt-6 pb-6 text-center space-y-2">
-            <p className="text-2xl" aria-hidden>
-              🎉
-            </p>
-            <p className="text-base font-semibold">All manual tasks completed.</p>
-            <p className="text-sm text-muted-foreground">AI continues automatically.</p>
-          </CardContent>
-        </Card>
+        <div className="space-y-4">
+          {progressStrip}
+          <Card className="rounded-2xl border-emerald-500/25 bg-emerald-500/[0.04]">
+            <CardContent className="pt-6 pb-6 text-center space-y-2">
+              <p className="text-2xl" aria-hidden>
+                🎉
+              </p>
+              <p className="text-base font-semibold">All manual tasks completed.</p>
+              <p className="text-sm text-muted-foreground">AI continues automatically.</p>
+            </CardContent>
+          </Card>
+        </div>
       );
     }
-    if (campaignActive) {
+    if (showProgressStrip || campaignActive) {
       return (
-        <Card className="rounded-2xl border-border/40">
-          <CardContent className="pt-5 pb-5">
-            <p className="text-sm font-medium">AI is handling all submissions.</p>
-            <p className="text-sm text-muted-foreground mt-1">No action required.</p>
-          </CardContent>
-        </Card>
+        <div className="space-y-4">
+          {progressStrip}
+          <Card className="rounded-2xl border-border/40">
+            <CardContent className="pt-5 pb-5">
+              <p className="text-sm font-medium">AI is handling all submissions.</p>
+              <p className="text-sm text-muted-foreground mt-1">No action required.</p>
+            </CardContent>
+          </Card>
+        </div>
       );
     }
     return null;
@@ -243,36 +287,7 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
 
   return (
     <div className="space-y-4">
-      {/* AI Progress */}
-      <Card className="rounded-2xl border-border/40">
-        <CardContent className="pt-5 pb-4">
-          <p className="text-sm font-medium mb-3 flex items-center gap-2">
-            <span aria-hidden>🤖</span> AI Progress
-          </p>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {(
-              [
-                ['Submitted', submitted],
-                ['Running', running],
-                ['Remaining', remaining],
-                ['Needs Your Help', needsHelp],
-              ] as const
-            ).map(([label, value]) => (
-              <div key={label}>
-                <p className="text-xs text-muted-foreground">{label}</p>
-                <p
-                  className={cn(
-                    'text-xl font-semibold tabular-nums mt-0.5',
-                    label === 'Needs Your Help' && 'text-amber-800 dark:text-amber-200'
-                  )}
-                >
-                  {value}
-                </p>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+      {progressStrip}
 
       {successFlash ? (
         <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm flex items-center gap-2">
