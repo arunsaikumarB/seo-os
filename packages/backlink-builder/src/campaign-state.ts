@@ -265,6 +265,126 @@ const SUBMITTED_OR_BEYOND: CampaignLifecycleStatus[] = [
 
 const VERIFIED_OR_BEYOND: CampaignLifecycleStatus[] = ['Verified', 'Completed'];
 
+/**
+ * Phase 6.1 — Campaign Items that belong on Track Results / Execution Summary.
+ * Denominator is this cohort (never raw job-row count, never full import total).
+ */
+export const EXECUTION_SUMMARY_LIFECYCLES: readonly CampaignLifecycleStatus[] = [
+  'Package Generated',
+  'Ready',
+  'Submitting',
+  'Waiting Human',
+  'Retrying',
+  'Submitted',
+  'Verified',
+  'Completed',
+  'Failed',
+  'Skipped',
+  'Rejected',
+  'Deleted',
+] as const;
+
+/** Map CSM lifecycle → raw execution job status for computeExecutionCounts. */
+export function lifecycleToExecutionJobStatus(life: CampaignLifecycleStatus): string {
+  switch (life) {
+    case 'Package Generated':
+    case 'Ready':
+      return 'queued';
+    case 'Retrying':
+      return 'retry_scheduled';
+    case 'Submitting':
+      return 'running';
+    case 'Waiting Human':
+      return 'waiting_human';
+    case 'Submitted':
+      return 'submitted';
+    case 'Verified':
+      return 'verified';
+    case 'Completed':
+      return 'completed';
+    case 'Failed':
+      return 'failed';
+    case 'Skipped':
+      return 'skipped';
+    case 'Rejected':
+      return 'rejected';
+    case 'Deleted':
+      return 'deleted';
+    case 'Ignored':
+      return 'ignored';
+    default:
+      return 'queued';
+  }
+}
+
+/**
+ * Build synthetic execution jobs from Campaign Items (CSM).
+ * Optional job overlay: when a live job exists for the item, prefer its status.
+ */
+export function campaignItemsToExecutionJobs(
+  items: Array<{
+    id: string;
+    currentStatus: CampaignLifecycleStatus;
+    domain?: string | null;
+  }>,
+  jobsByOpportunity?: Map<
+    string,
+    {
+      id: string;
+      status: string;
+      site_domain?: string | null;
+      opportunity_id?: string | null;
+      disposition?: string | null;
+      error_code?: string | null;
+      created_at?: string | null;
+    }
+  >
+): Array<{
+  id: string;
+  status: string;
+  site_domain?: string | null;
+  opportunity_id?: string | null;
+  disposition?: string | null;
+  error_code?: string | null;
+  created_at?: string | null;
+}> {
+  const out: Array<{
+    id: string;
+    status: string;
+    site_domain?: string | null;
+    opportunity_id?: string | null;
+    disposition?: string | null;
+    error_code?: string | null;
+    created_at?: string | null;
+  }> = [];
+  for (const item of items) {
+    if (!EXECUTION_SUMMARY_LIFECYCLES.includes(item.currentStatus)) continue;
+    const job = jobsByOpportunity?.get(item.id);
+    if (job) {
+      out.push({
+        id: String(job.id),
+        status: String(job.status),
+        site_domain: job.site_domain ?? item.domain ?? null,
+        opportunity_id: item.id,
+        disposition: job.disposition ?? null,
+        error_code: job.error_code ?? null,
+        created_at: job.created_at ?? null,
+      });
+      continue;
+    }
+    out.push({
+      id: item.id,
+      status: lifecycleToExecutionJobStatus(item.currentStatus),
+      site_domain: item.domain ?? null,
+      opportunity_id: item.id,
+      disposition: null,
+      error_code: null,
+      created_at: null,
+    });
+  }
+  return out;
+}
+
 /** Sole selector for campaign counters — every page must use this. */
 export function computeCampaignCounts(items: CampaignItemInput[]): CampaignCounts {
   const counts = emptyCampaignCounts();

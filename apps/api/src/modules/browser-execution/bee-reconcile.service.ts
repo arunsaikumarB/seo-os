@@ -173,6 +173,7 @@ export async function getExecutionAudit(workspaceId: string) {
   let leased = 0;
 
   const waitingStatuses = new Set<string>([
+    'waiting_human',
     'paused',
     'needs_approval',
     'blocked_captcha',

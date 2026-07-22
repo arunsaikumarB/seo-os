@@ -2,6 +2,7 @@
  * Campaign Health — internal audit table (plain HTML-ish UI).
  * Route is not linked from main nav; open directly for sync debugging.
  */
+import { useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useApi } from '@/hooks/use-api';
@@ -205,6 +206,37 @@ export function CampaignHealthPage() {
   const totals = data?.totals;
   const audit = data?.generationAudit;
   const orphans = data?.orphans;
+
+  // Phase 6.1 — Track Results ≡ Campaign Health Execution Summary ≡ CSM waiting / cohort
+  useEffect(() => {
+    if (!sum || !totals) return;
+    const submissionCohort =
+      (totals.byStatus?.['Package Generated'] ?? 0) +
+      (totals.ready ?? 0) +
+      (totals.submitting ?? 0) +
+      (totals.waiting ?? 0) +
+      (totals.retrying ?? 0) +
+      (totals.submitted ?? 0) +
+      (totals.verified ?? 0) +
+      (totals.completed ?? 0) +
+      (totals.failed ?? 0) +
+      (totals.skipped ?? 0) +
+      (totals.rejected ?? 0);
+    const waitingMismatch = sum.waitingHuman !== (totals.waiting ?? 0);
+    const totalMismatch = submissionCohort > 0 && sum.total !== submissionCohort;
+    if (waitingMismatch || totalMismatch) {
+      console.error(
+        '[truth] Cross-page invariant violated: Track Results / Execution Summary ≠ Campaign Health',
+        {
+          execWaitingHuman: sum.waitingHuman,
+          csmWaiting: totals.waiting,
+          execTotal: sum.total,
+          submissionCohort,
+          progressPercent: sum.progressPercent,
+        }
+      );
+    }
+  }, [sum, totals]);
 
   return (
     <div className="space-y-4 p-2 font-mono text-xs">

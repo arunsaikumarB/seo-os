@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assignReviewTier,
   assertPackageAssetsComplete,
+  campaignItemsToExecutionJobs,
   canTransitionCampaignLifecycle,
   computeAiReviewSummary,
   computeCampaignCounts,
@@ -12,9 +13,11 @@ import {
   decideAfterAnalysis,
   deriveCampaignLifecycle,
   furthestCampaignLifecycle,
+  lifecycleToExecutionJobStatus,
   normalizeCampaignWebsiteUrl,
   tierFromQualityScore,
 } from '../src/campaign-state.js';
+import { computeExecutionCounts } from '../src/execution-state.js';
 
 describe('campaign state manager', () => {
   it('rejects illegal transitions', () => {
@@ -152,5 +155,30 @@ describe('campaign state manager', () => {
     expect(p.needsReview).toBe(1);
     expect(p.failed).toBe(1);
     expect(p.active).toBe(true);
+  });
+
+  it('Phase 6.1 — Track Results cohort from CSM matches Waiting Human / remaining / progress', () => {
+    const items = [
+      ...Array.from({ length: 8 }, (_, i) => ({
+        id: `wh-${i}`,
+        currentStatus: 'Waiting Human' as const,
+        domain: `wh${i}.example`,
+      })),
+      ...Array.from({ length: 7 }, (_, i) => ({
+        id: `ready-${i}`,
+        currentStatus: 'Ready' as const,
+        domain: `ready${i}.example`,
+      })),
+    ];
+    const csm = computeCampaignCounts(items);
+    expect(csm.waiting).toBe(8);
+    expect(csm.ready).toBe(7);
+    expect(lifecycleToExecutionJobStatus('Waiting Human')).toBe('waiting_human');
+    const jobs = campaignItemsToExecutionJobs(items);
+    const exec = computeExecutionCounts(jobs);
+    expect(exec.totalExecutable).toBe(15);
+    expect(exec['Waiting Human']).toBe(8);
+    expect(exec.Queued).toBe(7);
+    expect(exec.progressPercent).toBe(53.3);
   });
 });

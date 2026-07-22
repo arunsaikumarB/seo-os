@@ -78,6 +78,7 @@ export function toPublicExecutionStatus(
     return s === 'completed' ? 'Completed' : 'Submitted';
   }
   if (
+    s === 'waiting_human' ||
     s.startsWith('watching') ||
     s.startsWith('blocked_') ||
     s === 'needs_approval' ||
@@ -125,6 +126,7 @@ export function liveExecutionStage(
   const s = String(status ?? '');
   const action = String(opts?.stepAction ?? '');
   if (
+    s === 'waiting_human' ||
     s.startsWith('watching_') ||
     s.startsWith('blocked_') ||
     s === 'needs_approval' ||

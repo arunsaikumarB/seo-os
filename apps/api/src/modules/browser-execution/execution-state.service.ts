@@ -2,8 +2,13 @@
  * Execution State Manager (API) — sole aggregator for campaign execution state.
  * Submit Backlinks, Track Results, Verification, Reports, Dashboard, Workflow
  * all read through getExecutionState().
+ *
+ * Phase 6.1 — Execution Summary / Track Results tiles derive from Campaign Items
+ * (CSM) via shared selectors; job rows only overlay live status when present.
  */
 import {
+  campaignItemsToExecutionJobs,
+  computeCampaignCounts,
   computeExecutionCounts,
   dedupeJobsByOpportunity,
   isHiddenFromProject,
@@ -51,7 +56,7 @@ export type ExecutionStateSnapshot = {
   totalExecutable: number;
   ignoreListCount: number;
   generatedAt: string;
-  metricsSource: 'live';
+  metricsSource: 'live' | 'campaign_state';
 };
 
 function dispositionOf(job: Record<string, unknown>): string | null {
@@ -103,23 +108,83 @@ export async function getExecutionState(workspaceId: string): Promise<ExecutionS
     };
   });
 
-  const counts = computeExecutionCounts(
-    jobs.map((j) => {
-      const row = j as Record<string, unknown>;
-      return {
-        id: String(j.id),
-        status: String(j.status),
-        site_domain: j.site_domain != null ? String(j.site_domain) : null,
-        opportunity_id: j.opportunity_id != null ? String(j.opportunity_id) : null,
-        pause_reason: j.pause_reason != null ? String(j.pause_reason) : null,
-        disposition: dispositionOf(row),
-        error_code: j.error_code != null ? String(j.error_code) : null,
-        error_message: j.error_message != null ? String(j.error_message) : null,
-        created_at: j.created_at != null ? String(j.created_at) : null,
-        metrics: (j.metrics as Record<string, unknown>) ?? null,
+  // Phase 6.1 — summary counts from CSM Campaign Items (shared selector).
+  // Job rows still drive Waiting Human / Failed queues below; tiles never read an empty job table.
+  let counts: ExecutionStateCounts;
+  let metricsSource: 'campaign_state' | 'live' = 'live';
+  try {
+    const { listCampaignItems } = await import('../campaigns/campaign-state.service.js');
+    const csmItems = await listCampaignItems(workspaceId, { includeDeleted: true });
+    const synthetic = campaignItemsToExecutionJobs(
+      csmItems.map((i) => ({
+        id: i.id,
+        currentStatus: i.currentStatus,
+        domain: i.domain ?? null,
+      }))
+    );
+    counts = computeExecutionCounts(synthetic);
+    metricsSource = 'campaign_state';
+
+    // Phase 6.1 — cross-page invariant (Track Results ≡ Campaign Health ≡ CSM cohort).
+    const csmCounts = computeCampaignCounts(csmItems);
+    const submissionCohort =
+      (csmCounts.byStatus['Package Generated'] ?? 0) +
+      csmCounts.ready +
+      csmCounts.submitting +
+      csmCounts.waiting +
+      csmCounts.retrying +
+      csmCounts.submitted +
+      csmCounts.verified +
+      csmCounts.completed +
+      csmCounts.failed +
+      csmCounts.skipped +
+      csmCounts.rejected;
+    if (
+      counts['Waiting Human'] !== csmCounts.waiting ||
+      (submissionCohort > 0 && counts.totalExecutable !== submissionCohort)
+    ) {
+      const detail = {
+        waitingHuman: counts['Waiting Human'],
+        csmWaiting: csmCounts.waiting,
+        totalExecutable: counts.totalExecutable,
+        submissionCohort,
+        packageGenerated: csmCounts.packageGenerated,
       };
-    })
-  );
+      console.error(
+        '[truth] Cross-page invariant violated: Track Results / Execution Summary ≠ Campaign Health (CSM)',
+        detail
+      );
+      try {
+        const { logTruthViolation } = await import('./bee-evidence.service.js');
+        await logTruthViolation({
+          workspaceId,
+          kind: 'cross_page_invariant',
+          source: 'execution_summary_vs_csm',
+          detail,
+        });
+      } catch {
+        /* best-effort */
+      }
+    }
+  } catch {
+    counts = computeExecutionCounts(
+      jobs.map((j) => {
+        const row = j as Record<string, unknown>;
+        return {
+          id: String(j.id),
+          status: String(j.status),
+          site_domain: j.site_domain != null ? String(j.site_domain) : null,
+          opportunity_id: j.opportunity_id != null ? String(j.opportunity_id) : null,
+          pause_reason: j.pause_reason != null ? String(j.pause_reason) : null,
+          disposition: dispositionOf(row),
+          error_code: j.error_code != null ? String(j.error_code) : null,
+          error_message: j.error_message != null ? String(j.error_message) : null,
+          created_at: j.created_at != null ? String(j.created_at) : null,
+          metrics: (j.metrics as Record<string, unknown>) ?? null,
+        };
+      })
+    );
+  }
 
   const campaignItems = items.filter((i) => !i.hidden && i.status !== 'Failed to Start');
   const failedToStart = items.filter((i) => i.status === 'Failed to Start');
@@ -156,7 +221,7 @@ export async function getExecutionState(workspaceId: string): Promise<ExecutionS
     totalExecutable: counts.totalExecutable,
     ignoreListCount: ignore.items?.length ?? 0,
     generatedAt: new Date().toISOString(),
-    metricsSource: 'live' as const,
+    metricsSource,
   };
 }
 
@@ -245,7 +310,7 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
     trackResults: state.trackResults,
     failedQueue: state.failedQueue,
     failedToStartQueue: state.failedToStart,
-    metricsSource: 'live' as const,
+    metricsSource: state.metricsSource,
     /** Phase 4.7 — one summary object for all surfaces */
     executionSummary: {
       queued: c.Queued,

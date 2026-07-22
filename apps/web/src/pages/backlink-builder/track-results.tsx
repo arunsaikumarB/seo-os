@@ -8,12 +8,14 @@ import { useExecutionSummary } from '@/hooks/use-execution-summary';
 
 /**
  * Step 7 — Track Results.
- * Reads exclusively from the shared Execution Summary (Phase 4.7).
+ * Phase 6.1 — tiles from shared Execution Summary (CSM Campaign Items via /browser/statistics).
+ * Same numbers as Campaign Health Execution Summary, Reports, and Submit Backlinks.
  */
 export function TrackResultsPage() {
   const { projectId = '' } = useParams();
   const state = useExecutionSummary(projectId, 2_000);
   const s = state.data;
+  const showTiles = Boolean(s) && !state.isLoading && !state.isPlaceholderData;
 
   const metrics = [
     { label: 'Completed', value: s?.completed ?? 0 },
@@ -33,22 +35,27 @@ export function TrackResultsPage() {
           <CheckCircle2 className="h-6 w-6" /> Track Results
         </h1>
         <p className="text-muted-foreground text-sm max-w-2xl">
-          Live campaign status from the Execution Summary — same numbers as Submit Backlinks.
+          Live campaign status from the Campaign State Manager — same Execution Summary as Campaign
+          Health, Reports, and Submit Backlinks.
         </p>
       </div>
 
-      {s ? (
+      {showTiles ? (
         <p className="text-sm text-muted-foreground">
           Campaign total{' '}
-          <span className="font-semibold tabular-nums text-foreground">{s.total}</span>
+          <span className="font-semibold tabular-nums text-foreground">{s!.total}</span>
           {' · '}
           Progress{' '}
-          <span className="font-semibold tabular-nums text-foreground">{s.progressPercent}%</span>
-          {s.executionComplete ? ' · Complete' : ''}
+          <span className="font-semibold tabular-nums text-foreground">{s!.progressPercent}%</span>
+          {s!.executionComplete ? ' · Complete' : ''}
         </p>
       ) : null}
 
-      {state.isLoading ? (
+      {state.isError ? (
+        <p className="text-sm text-destructive">
+          Could not load execution summary. Open Campaign Health to verify Campaign Items.
+        </p>
+      ) : state.isLoading || !showTiles ? (
         <AiLoadingState message="AI is checking execution status…" />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -66,7 +73,7 @@ export function TrackResultsPage() {
       <div className="h-2 rounded-full bg-muted overflow-hidden max-w-xl">
         <div
           className="h-full bg-primary transition-all duration-500"
-          style={{ width: `${Math.min(100, Math.max(0, s?.progressPercent ?? 0))}%` }}
+          style={{ width: `${Math.min(100, Math.max(0, showTiles ? s!.progressPercent : 0))}%` }}
         />
       </div>
 

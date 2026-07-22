@@ -27,28 +27,6 @@ export type ExecutionSummary = {
   activityFeed: Array<{ website: string; stage: string; at: string }>;
 };
 
-const EMPTY: ExecutionSummary = {
-  queued: 0,
-  running: 0,
-  completed: 0,
-  waitingHuman: 0,
-  skipped: 0,
-  failed: 0,
-  deleted: 0,
-  remaining: 0,
-  total: 0,
-  progressPercent: 0,
-  etaSeconds: 0,
-  executionComplete: false,
-  campaignState: 'Idle',
-  aiStatusLine: 'Ready to submit',
-  estimatedVerificationTime: '24 hours',
-  currentWebsite: null,
-  currentStep: null,
-  currentElapsedMs: 0,
-  activityFeed: [],
-};
-
 type StatsPayload = {
   executionSummary?: Partial<ExecutionSummary>;
   queued?: number;
@@ -127,8 +105,10 @@ export function useExecutionSummary(projectId: string, refetchInterval = 1_500) 
     },
     enabled: !!projectId,
     refetchInterval,
-    retry: false,
-    placeholderData: EMPTY,
+    retry: 1,
+    // Never placeholder zeros — that made Track Results look "loaded" with empty counters
+    // while Campaign Health / Reports already had live CSM-backed numbers.
+    placeholderData: undefined,
   });
 }
 
