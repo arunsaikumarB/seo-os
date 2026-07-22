@@ -1,0 +1,1899 @@
+{
+  "mode": "production_validation",
+  "startedAt": "2026-07-22T15:39:30.044Z",
+  "finishedAt": "2026-07-22T15:43:20.346Z",
+  "api": "https://api-production-48c9e.up.railway.app",
+  "apiVersion": "1.2.7-queue-init",
+  "workspaceId": "db9f83a2-f1db-4a9a-9afb-348402fd4d84",
+  "summary": {
+    "total": 19,
+    "complete": 0,
+    "failed": 19,
+    "homepageUnreachable": 7,
+    "noExecutionJob": 19,
+    "stuckGenerateStep": 0,
+    "sieUnsupported": 7,
+    "sieNoEntry": 0,
+    "profilesEnqueued": 12
+  },
+  "failureCodes": {
+    "NO_EXECUTION_JOB": 19,
+    "UNSUPPORTED_STRATEGY": 7,
+    "HOMEPAGE_UNREACHABLE": 7,
+    "NO_SITE_PROFILE_ROW": 7
+  },
+  "sites": [
+    {
+      "domain": "01webdirectory.com",
+      "url": "https://01webdirectory.com",
+      "complete": false,
+      "failures": [
+        {
+          "stage": "execution",
+          "code": "NO_EXECUTION_JOB",
+          "detail": "Ready + package approved but no execution_jobs row (Submit never started)"
+        },
+        {
+          "stage": "site_intelligence",
+          "code": "UNSUPPORTED_STRATEGY",
+          "detail": "No evidence-backed submission path found"
+        }
+      ],
+      "notes": [
+        {
+          "stage": "campaign_state",
+          "code": "READY_ON_GENERATE_STEP",
+          "detail": "lifecycle=Ready maps to generate-content step until Submitting — not a blocker by itself"
+        }
+      ],
+      "campaign": {
+        "lifecycle": "Ready",
+        "campaign_lifecycle": "Ready",
+        "campaign_step": "generate-content",
+        "generation_status": "Completed",
+        "quality_score": 79,
+        "package_approved_by": "user",
+        "package_status": "generated",
+        "submission_status": "pending",
+        "automation_status": "prepared",
+        "last_error": null,
+        "review_decision": "Approved",
+        "detected_pages": {
+          "qa": "https://01webdirectory.com/questions",
+          "contact": "https://01webdirectory.com/contact",
+          "directory": "https://01webdirectory.com/submit"
+        },
+        "qualification": {
+          "label": "Resource Page",
+          "reason": "Public contact/outreach path confirmed",
+          "signals": {
+            "spamRisk": 20,
+            "hasGuidelines": false,
+            "metricsSource": "live",
+            "hasContactLink": true,
+            "fetchStatusCode": 200,
+            "hasGuestPostHint": false,
+            "hasPublicSubmissionPath": true
+          },
+          "qualified": true
+        }
+      },
+      "fetch": {
+        "home": {
+          "status": "fetched",
+          "httpStatus": 200,
+          "error": null,
+          "elapsedMs": 1512
+        },
+        "pagesFetched": 3,
+        "pagesFailed": 1,
+        "pageUrls": [
+          {
+            "url": "https://www.01webdirectory.com/",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://www.01webdirectory.com/submitguide.aspx",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://www.01webdirectory.com/submitguide.aspx",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://www.01webdirectory.com/favicon.ico",
+            "status": "failed",
+            "http": null
+          }
+        ]
+      },
+      "sie": {
+        "profileStatus": "unsupported",
+        "strategy": {
+          "chosen": "Unsupported",
+          "reasoning": "No evidence-backed submission path found",
+          "entryUrl": null,
+          "expectedInterventions": [],
+          "payloadHints": {
+            "needsReview": false,
+            "paidListing": false,
+            "moveToOutreach": false,
+            "contactFormOutreach": false
+          }
+        },
+        "directory": null,
+        "contactForm": null,
+        "wordpress": null
+      },
+      "prodProfile": {
+        "status": "complete",
+        "last_error": null,
+        "entryUrl": "https://01webdirectory.com/health_info.htm",
+        "chosen": "Contact Form",
+        "directoryStrategy": null,
+        "contactFormStrategy": null
+      },
+      "execution": null
+    },
+    {
+      "domain": "1abc.org",
+      "url": "https://1abc.org",
+      "complete": false,
+      "failures": [
+        {
+          "stage": "execution",
+          "code": "NO_EXECUTION_JOB",
+          "detail": "Ready + package approved but no execution_jobs row (Submit never started)"
+        },
+        {
+          "stage": "site_intelligence",
+          "code": "UNSUPPORTED_STRATEGY",
+          "detail": "No evidence-backed submission path found"
+        }
+      ],
+      "notes": [
+        {
+          "stage": "campaign_state",
+          "code": "READY_ON_GENERATE_STEP",
+          "detail": "lifecycle=Ready maps to generate-content step until Submitting — not a blocker by itself"
+        }
+      ],
+      "campaign": {
+        "lifecycle": "Ready",
+        "campaign_lifecycle": "Ready",
+        "campaign_step": "generate-content",
+        "generation_status": "Completed",
+        "quality_score": 79,
+        "package_approved_by": "user",
+        "package_status": "generated",
+        "submission_status": "pending",
+        "automation_status": "prepared",
+        "last_error": null,
+        "review_decision": "Approved",
+        "detected_pages": null,
+        "qualification": {
+          "reason": "No public submission path",
+          "qualified": false
+        }
+      },
+      "fetch": {
+        "home": {
+          "status": "fetched",
+          "httpStatus": 200,
+          "error": null,
+          "elapsedMs": 69
+        },
+        "pagesFetched": 1,
+        "pagesFailed": 0,
+        "pageUrls": [
+          {
+            "url": "https://1abc.org/",
+            "status": "fetched",
+            "http": null
+          }
+        ]
+      },
+      "sie": {
+        "profileStatus": "unsupported",
+        "strategy": {
+          "chosen": "Unsupported",
+          "reasoning": "No evidence-backed submission path found",
+          "entryUrl": null,
+          "expectedInterventions": [],
+          "payloadHints": {
+            "needsReview": false,
+            "paidListing": false,
+            "moveToOutreach": false,
+            "contactFormOutreach": false
+          }
+        },
+        "directory": null,
+        "contactForm": null,
+        "wordpress": null
+      },
+      "prodProfile": {
+        "status": "unsupported",
+        "last_error": null,
+        "entryUrl": null,
+        "chosen": "Unsupported",
+        "directoryStrategy": null,
+        "contactFormStrategy": null
+      },
+      "execution": null
+    },
+    {
+      "domain": "a1webdirectory.org",
+      "url": "https://a1webdirectory.org",
+      "complete": false,
+      "failures": [
+        {
+          "stage": "execution",
+          "code": "NO_EXECUTION_JOB",
+          "detail": "Ready + package approved but no execution_jobs row (Submit never started)"
+        },
+        {
+          "stage": "fetch",
+          "code": "HOMEPAGE_UNREACHABLE",
+          "detail": "fetch failed"
+        },
+        {
+          "stage": "site_intelligence",
+          "code": "NO_SITE_PROFILE_ROW",
+          "detail": "site_profiles empty for this domain before/after enqueue"
+        }
+      ],
+      "notes": [
+        {
+          "stage": "campaign_state",
+          "code": "READY_ON_GENERATE_STEP",
+          "detail": "lifecycle=Ready maps to generate-content step until Submitting — not a blocker by itself"
+        }
+      ],
+      "campaign": {
+        "lifecycle": "Ready",
+        "campaign_lifecycle": "Ready",
+        "campaign_step": "generate-content",
+        "generation_status": "Completed",
+        "quality_score": 79,
+        "package_approved_by": "user",
+        "package_status": "generated",
+        "submission_status": "pending",
+        "automation_status": "prepared",
+        "last_error": null,
+        "review_decision": "Approved",
+        "detected_pages": null,
+        "qualification": {
+          "reason": "No public submission path",
+          "qualified": false
+        }
+      },
+      "fetch": {
+        "home": {
+          "status": "failed",
+          "httpStatus": 0,
+          "error": "fetch failed",
+          "elapsedMs": 1181
+        },
+        "pagesFetched": 0,
+        "pagesFailed": 1,
+        "pageUrls": [
+          {
+            "url": "https://a1webdirectory.org",
+            "status": "failed",
+            "http": null
+          }
+        ]
+      },
+      "sie": null,
+      "prodProfile": null,
+      "execution": null
+    },
+    {
+      "domain": "abc-directory.com",
+      "url": "https://abc-directory.com",
+      "complete": false,
+      "failures": [
+        {
+          "stage": "execution",
+          "code": "NO_EXECUTION_JOB",
+          "detail": "Ready + package approved but no execution_jobs row (Submit never started)"
+        }
+      ],
+      "notes": [
+        {
+          "stage": "campaign_state",
+          "code": "READY_ON_GENERATE_STEP",
+          "detail": "lifecycle=Ready maps to generate-content step until Submitting — not a blocker by itself"
+        }
+      ],
+      "campaign": {
+        "lifecycle": "Ready",
+        "campaign_lifecycle": "Ready",
+        "campaign_step": "generate-content",
+        "generation_status": "Completed",
+        "quality_score": 79,
+        "package_approved_by": "user",
+        "package_status": "generated",
+        "submission_status": "pending",
+        "automation_status": "prepared",
+        "last_error": null,
+        "review_decision": "Approved",
+        "detected_pages": null,
+        "qualification": {
+          "reason": "Homepage unreachable (HTTP 403)",
+          "qualified": false
+        }
+      },
+      "fetch": {
+        "home": {
+          "status": "fetched",
+          "httpStatus": 200,
+          "error": null,
+          "elapsedMs": 1122
+        },
+        "pagesFetched": 5,
+        "pagesFailed": 0,
+        "pageUrls": [
+          {
+            "url": "https://abc-directory.com/",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://www.abc-directory.com/submiturl",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://www.abc-directory.com/contactus/",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://www.abc-directory.com/contactus/",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://www.abc-directory.com/submiturl",
+            "status": "fetched",
+            "http": null
+          }
+        ]
+      },
+      "sie": {
+        "profileStatus": "complete",
+        "strategy": {
+          "chosen": "Contact Form",
+          "reasoning": "Verified Contact form at https://www.abc-directory.com/contactus/",
+          "entryUrl": "https://www.abc-directory.com/contactus/",
+          "expectedInterventions": [],
+          "payloadHints": {
+            "needsReview": false,
+            "paidListing": false,
+            "moveToOutreach": false,
+            "contactFormOutreach": false
+          }
+        },
+        "directory": null,
+        "contactForm": null,
+        "wordpress": null
+      },
+      "prodProfile": {
+        "status": "complete",
+        "last_error": null,
+        "entryUrl": "https://www.abc-directory.com/contactus",
+        "chosen": "Contact Form",
+        "directoryStrategy": null,
+        "contactFormStrategy": null
+      },
+      "execution": null
+    },
+    {
+      "domain": "aboutus.com",
+      "url": "https://aboutus.com",
+      "complete": false,
+      "failures": [
+        {
+          "stage": "execution",
+          "code": "NO_EXECUTION_JOB",
+          "detail": "Ready + package approved but no execution_jobs row (Submit never started)"
+        },
+        {
+          "stage": "fetch",
+          "code": "HOMEPAGE_UNREACHABLE",
+          "detail": "HTTP 429"
+        },
+        {
+          "stage": "site_intelligence",
+          "code": "NO_SITE_PROFILE_ROW",
+          "detail": "site_profiles empty for this domain before/after enqueue"
+        }
+      ],
+      "notes": [
+        {
+          "stage": "campaign_state",
+          "code": "READY_ON_GENERATE_STEP",
+          "detail": "lifecycle=Ready maps to generate-content step until Submitting — not a blocker by itself"
+        }
+      ],
+      "campaign": {
+        "lifecycle": "Ready",
+        "campaign_lifecycle": "Ready",
+        "campaign_step": "generate-content",
+        "generation_status": "Completed",
+        "quality_score": 79,
+        "package_approved_by": "user",
+        "package_status": "generated",
+        "submission_status": "pending",
+        "automation_status": "prepared",
+        "last_error": null,
+        "review_decision": "Approved",
+        "detected_pages": null,
+        "qualification": {
+          "reason": "Homepage unreachable (HTTP 429)",
+          "qualified": false
+        }
+      },
+      "fetch": {
+        "home": {
+          "status": "failed",
+          "httpStatus": 429,
+          "error": "HTTP 429",
+          "elapsedMs": 325
+        },
+        "pagesFetched": 0,
+        "pagesFailed": 1,
+        "pageUrls": [
+          {
+            "url": "https://aboutus.com/",
+            "status": "failed",
+            "http": null
+          }
+        ]
+      },
+      "sie": null,
+      "prodProfile": null,
+      "execution": null
+    },
+    {
+      "domain": "activesearchresults.com",
+      "url": "https://activesearchresults.com",
+      "complete": false,
+      "failures": [
+        {
+          "stage": "execution",
+          "code": "NO_EXECUTION_JOB",
+          "detail": "Ready + package approved but no execution_jobs row (Submit never started)"
+        },
+        {
+          "stage": "site_intelligence",
+          "code": "UNSUPPORTED_STRATEGY",
+          "detail": "Contact form missing core outreach fields"
+        }
+      ],
+      "notes": [
+        {
+          "stage": "campaign_state",
+          "code": "READY_ON_GENERATE_STEP",
+          "detail": "lifecycle=Ready maps to generate-content step until Submitting — not a blocker by itself"
+        }
+      ],
+      "campaign": {
+        "lifecycle": "Ready",
+        "campaign_lifecycle": "Ready",
+        "campaign_step": "generate-content",
+        "generation_status": "Completed",
+        "quality_score": 79,
+        "package_approved_by": "user",
+        "package_status": "generated",
+        "submission_status": "pending",
+        "automation_status": "prepared",
+        "last_error": null,
+        "review_decision": "Approved",
+        "detected_pages": {
+          "contact": "https://activesearchresults.com/contact"
+        },
+        "qualification": {
+          "label": "Press Release",
+          "reason": "Public contact/outreach path confirmed",
+          "signals": {
+            "spamRisk": 20,
+            "hasGuidelines": false,
+            "metricsSource": "live",
+            "hasContactLink": true,
+            "fetchStatusCode": 200,
+            "hasGuestPostHint": false,
+            "hasPublicSubmissionPath": true
+          },
+          "qualified": true
+        }
+      },
+      "fetch": {
+        "home": {
+          "status": "fetched",
+          "httpStatus": 200,
+          "error": null,
+          "elapsedMs": 1471
+        },
+        "pagesFetched": 3,
+        "pagesFailed": 0,
+        "pageUrls": [
+          {
+            "url": "https://www.activesearchresults.com/",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://www.activesearchresults.com/help/contactus.php",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://www.activesearchresults.com/login/register.php",
+            "status": "fetched",
+            "http": null
+          }
+        ]
+      },
+      "sie": {
+        "profileStatus": "unsupported",
+        "strategy": {
+          "chosen": "Unsupported",
+          "reasoning": "Contact form missing core outreach fields",
+          "entryUrl": "https://www.activesearchresults.com/login/register.php",
+          "contactFormStrategy": "Unsupported",
+          "expectedInterventions": [],
+          "payloadHints": {
+            "needsReview": false,
+            "paidListing": false,
+            "moveToOutreach": false,
+            "contactFormOutreach": false
+          }
+        },
+        "directory": null,
+        "contactForm": {
+          "detected": true,
+          "platform": "Custom HTML Forms",
+          "intent": "General Contact",
+          "entryUrl": "https://www.activesearchresults.com/login/register.php"
+        },
+        "wordpress": null
+      },
+      "prodProfile": {
+        "status": "unsupported",
+        "last_error": null,
+        "entryUrl": "https://activesearchresults.com/login/register.php",
+        "chosen": "Unsupported",
+        "directoryStrategy": null,
+        "contactFormStrategy": "Unsupported"
+      },
+      "execution": null
+    },
+    {
+      "domain": "addurl.nu",
+      "url": "https://addurl.nu",
+      "complete": false,
+      "failures": [
+        {
+          "stage": "execution",
+          "code": "NO_EXECUTION_JOB",
+          "detail": "Ready + package approved but no execution_jobs row (Submit never started)"
+        },
+        {
+          "stage": "fetch",
+          "code": "HOMEPAGE_UNREACHABLE",
+          "detail": "fetch failed"
+        },
+        {
+          "stage": "site_intelligence",
+          "code": "NO_SITE_PROFILE_ROW",
+          "detail": "site_profiles empty for this domain before/after enqueue"
+        }
+      ],
+      "notes": [
+        {
+          "stage": "campaign_state",
+          "code": "READY_ON_GENERATE_STEP",
+          "detail": "lifecycle=Ready maps to generate-content step until Submitting — not a blocker by itself"
+        }
+      ],
+      "campaign": {
+        "lifecycle": "Ready",
+        "campaign_lifecycle": "Ready",
+        "campaign_step": "generate-content",
+        "generation_status": "Completed",
+        "quality_score": 79,
+        "package_approved_by": "user",
+        "package_status": "generated",
+        "submission_status": "pending",
+        "automation_status": "prepared",
+        "last_error": null,
+        "review_decision": "Approved",
+        "detected_pages": null,
+        "qualification": {
+          "reason": "No public submission path",
+          "qualified": false
+        }
+      },
+      "fetch": {
+        "home": {
+          "status": "failed",
+          "httpStatus": 0,
+          "error": "fetch failed",
+          "elapsedMs": 10489
+        },
+        "pagesFetched": 0,
+        "pagesFailed": 1,
+        "pageUrls": [
+          {
+            "url": "https://addurl.nu",
+            "status": "failed",
+            "http": null
+          }
+        ]
+      },
+      "sie": null,
+      "prodProfile": null,
+      "execution": null
+    },
+    {
+      "domain": "alistdirectory.com",
+      "url": "https://alistdirectory.com",
+      "complete": false,
+      "failures": [
+        {
+          "stage": "execution",
+          "code": "NO_EXECUTION_JOB",
+          "detail": "Ready + package approved but no execution_jobs row (Submit never started)"
+        }
+      ],
+      "notes": [
+        {
+          "stage": "campaign_state",
+          "code": "READY_ON_GENERATE_STEP",
+          "detail": "lifecycle=Ready maps to generate-content step until Submitting — not a blocker by itself"
+        }
+      ],
+      "campaign": {
+        "lifecycle": "Ready",
+        "campaign_lifecycle": "Ready",
+        "campaign_step": "generate-content",
+        "generation_status": "Completed",
+        "quality_score": 79,
+        "package_approved_by": "user",
+        "package_status": "generated",
+        "submission_status": "pending",
+        "automation_status": "prepared",
+        "last_error": null,
+        "review_decision": "Approved",
+        "detected_pages": null,
+        "qualification": {
+          "reason": "Homepage unreachable (HTTP 403)",
+          "qualified": false
+        }
+      },
+      "fetch": {
+        "home": {
+          "status": "fetched",
+          "httpStatus": 200,
+          "error": null,
+          "elapsedMs": 1550
+        },
+        "pagesFetched": 4,
+        "pagesFailed": 1,
+        "pageUrls": [
+          {
+            "url": "https://alistdirectory.com/",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://alistdirectory.com/contact-us/",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://www.googletagmanager.com/",
+            "status": "failed",
+            "http": null
+          },
+          {
+            "url": "https://alistdirectory.com/listing-options/",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://alistdirectory.com/listing-options/",
+            "status": "fetched",
+            "http": null
+          }
+        ]
+      },
+      "sie": {
+        "profileStatus": "complete",
+        "strategy": {
+          "chosen": "Direct Submission Form",
+          "reasoning": "Directory listing form at https://alistdirectory.com/",
+          "entryUrl": "https://alistdirectory.com/",
+          "directoryStrategy": "Direct Submission",
+          "expectedInterventions": [],
+          "payloadHints": {
+            "needsReview": false,
+            "paidListing": false,
+            "moveToOutreach": false,
+            "contactFormOutreach": false
+          }
+        },
+        "directory": {
+          "detected": true,
+          "platform": "Directorist",
+          "entryUrl": "https://alistdirectory.com/",
+          "pricing": {
+            "free": false,
+            "paid": false
+          }
+        },
+        "contactForm": {
+          "detected": true,
+          "platform": "Contact Form 7",
+          "intent": "Business Listing",
+          "entryUrl": "https://alistdirectory.com/"
+        },
+        "wordpress": {
+          "detected": true,
+          "workflow": "guest_post"
+        }
+      },
+      "prodProfile": {
+        "status": "complete",
+        "last_error": null,
+        "entryUrl": "https://alistdirectory.com/",
+        "chosen": "Direct Submission Form",
+        "directoryStrategy": "Direct Submission",
+        "contactFormStrategy": null
+      },
+      "execution": null
+    },
+    {
+      "domain": "alivedirectory.com",
+      "url": "https://alivedirectory.com",
+      "complete": false,
+      "failures": [
+        {
+          "stage": "execution",
+          "code": "NO_EXECUTION_JOB",
+          "detail": "Ready + package approved but no execution_jobs row (Submit never started)"
+        },
+        {
+          "stage": "site_intelligence",
+          "code": "UNSUPPORTED_STRATEGY",
+          "detail": "Newsletter form is not suitable for backlink submission"
+        }
+      ],
+      "notes": [
+        {
+          "stage": "campaign_state",
+          "code": "READY_ON_GENERATE_STEP",
+          "detail": "lifecycle=Ready maps to generate-content step until Submitting — not a blocker by itself"
+        }
+      ],
+      "campaign": {
+        "lifecycle": "Ready",
+        "campaign_lifecycle": "Ready",
+        "campaign_step": "generate-content",
+        "generation_status": "Completed",
+        "quality_score": 79,
+        "package_approved_by": "user",
+        "package_status": "generated",
+        "submission_status": "pending",
+        "automation_status": "prepared",
+        "last_error": null,
+        "review_decision": "Approved",
+        "detected_pages": {
+          "contact": "https://alivedirectory.com/contact",
+          "resource": "https://alivedirectory.com/resources",
+          "directory": "https://alivedirectory.com/submit",
+          "guestPost": "https://alivedirectory.com/write-for-us",
+          "submission": "https://alivedirectory.com/contribute"
+        },
+        "qualification": {
+          "label": "Resource Page",
+          "reason": "Editorial guidelines detected",
+          "signals": {
+            "spamRisk": 45,
+            "hasGuidelines": true,
+            "metricsSource": "live",
+            "hasContactLink": true,
+            "fetchStatusCode": 200,
+            "hasGuestPostHint": false,
+            "hasPublicSubmissionPath": true
+          },
+          "qualified": true
+        }
+      },
+      "fetch": {
+        "home": {
+          "status": "fetched",
+          "httpStatus": 200,
+          "error": null,
+          "elapsedMs": 1601
+        },
+        "pagesFetched": 5,
+        "pagesFailed": 0,
+        "pageUrls": [
+          {
+            "url": "https://www.alivedirectory.com/",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://www.alivedirectory.com/contact.php",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://www.alivedirectory.com/contact.php",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://www.alivedirectory.com/contact.php",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://www.alivedirectory.com/submit.php",
+            "status": "fetched",
+            "http": null
+          }
+        ]
+      },
+      "sie": {
+        "profileStatus": "unsupported",
+        "strategy": {
+          "chosen": "Unsupported",
+          "reasoning": "Newsletter form is not suitable for backlink submission",
+          "entryUrl": "https://www.alivedirectory.com/contact.php",
+          "contactFormStrategy": "Unsupported",
+          "expectedInterventions": [],
+          "payloadHints": {
+            "needsReview": false,
+            "paidListing": false,
+            "moveToOutreach": false,
+            "contactFormOutreach": false
+          }
+        },
+        "directory": null,
+        "contactForm": {
+          "detected": true,
+          "platform": "Custom HTML Forms",
+          "intent": "Newsletter",
+          "entryUrl": "https://www.alivedirectory.com/contact.php"
+        },
+        "wordpress": null
+      },
+      "prodProfile": {
+        "status": "unsupported",
+        "last_error": null,
+        "entryUrl": "https://alivedirectory.com/contact.php",
+        "chosen": "Unsupported",
+        "directoryStrategy": null,
+        "contactFormStrategy": "Unsupported"
+      },
+      "execution": null
+    },
+    {
+      "domain": "bizsugar.com",
+      "url": "https://bizsugar.com",
+      "complete": false,
+      "failures": [
+        {
+          "stage": "execution",
+          "code": "NO_EXECUTION_JOB",
+          "detail": "Ready + package approved but no execution_jobs row (Submit never started)"
+        },
+        {
+          "stage": "site_intelligence",
+          "code": "UNSUPPORTED_STRATEGY",
+          "detail": "Contact form missing core outreach fields"
+        }
+      ],
+      "notes": [
+        {
+          "stage": "campaign_state",
+          "code": "READY_ON_GENERATE_STEP",
+          "detail": "lifecycle=Ready maps to generate-content step until Submitting — not a blocker by itself"
+        }
+      ],
+      "campaign": {
+        "lifecycle": "Ready",
+        "campaign_lifecycle": "Ready",
+        "campaign_step": "generate-content",
+        "generation_status": "Completed",
+        "quality_score": 79,
+        "package_approved_by": "user",
+        "package_status": "generated",
+        "submission_status": "pending",
+        "automation_status": "prepared",
+        "last_error": null,
+        "review_decision": "Approved",
+        "detected_pages": {
+          "contact": "https://bizsugar.com/contact",
+          "directory": "https://bizsugar.com/submit"
+        },
+        "qualification": {
+          "label": "Unknown",
+          "reason": "Public contact/outreach path confirmed",
+          "signals": {
+            "spamRisk": 20,
+            "hasGuidelines": false,
+            "metricsSource": "live",
+            "hasContactLink": true,
+            "fetchStatusCode": 200,
+            "hasGuestPostHint": false,
+            "hasPublicSubmissionPath": true
+          },
+          "qualified": true
+        }
+      },
+      "fetch": {
+        "home": {
+          "status": "fetched",
+          "httpStatus": 200,
+          "error": null,
+          "elapsedMs": 2893
+        },
+        "pagesFetched": 2,
+        "pagesFailed": 1,
+        "pageUrls": [
+          {
+            "url": "https://bizsugar.com/",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://bizsugar.com/contact/",
+            "status": "failed",
+            "http": null
+          },
+          {
+            "url": "https://bizsugar.com/contact/",
+            "status": "fetched",
+            "http": null
+          }
+        ]
+      },
+      "sie": {
+        "profileStatus": "unsupported",
+        "strategy": {
+          "chosen": "Unsupported",
+          "reasoning": "Contact form missing core outreach fields",
+          "entryUrl": "https://bizsugar.com/contact/",
+          "contactFormStrategy": "Unsupported",
+          "expectedInterventions": [],
+          "payloadHints": {
+            "needsReview": false,
+            "paidListing": false,
+            "moveToOutreach": false,
+            "contactFormOutreach": false
+          }
+        },
+        "directory": null,
+        "contactForm": {
+          "detected": true,
+          "platform": "Unknown Form",
+          "intent": "General Contact",
+          "entryUrl": "https://bizsugar.com/contact/"
+        },
+        "wordpress": {
+          "detected": true,
+          "workflow": "unsupported"
+        }
+      },
+      "prodProfile": {
+        "status": "complete",
+        "last_error": null,
+        "entryUrl": "https://bizsugar.com/write-for-us",
+        "chosen": "Guest Post",
+        "directoryStrategy": null,
+        "contactFormStrategy": null
+      },
+      "execution": null
+    },
+    {
+      "domain": "boingboing.net",
+      "url": "https://boingboing.net",
+      "complete": false,
+      "failures": [
+        {
+          "stage": "execution",
+          "code": "NO_EXECUTION_JOB",
+          "detail": "Ready + package approved but no execution_jobs row (Submit never started)"
+        },
+        {
+          "stage": "site_intelligence",
+          "code": "UNSUPPORTED_STRATEGY",
+          "detail": "WordPress dashboard / author system requires account"
+        }
+      ],
+      "notes": [
+        {
+          "stage": "campaign_state",
+          "code": "READY_ON_GENERATE_STEP",
+          "detail": "lifecycle=Ready maps to generate-content step until Submitting — not a blocker by itself"
+        }
+      ],
+      "campaign": {
+        "lifecycle": "Ready",
+        "campaign_lifecycle": "Ready",
+        "campaign_step": "generate-content",
+        "generation_status": "Completed",
+        "quality_score": 79,
+        "package_approved_by": "user",
+        "package_status": "generated",
+        "submission_status": "pending",
+        "automation_status": "prepared",
+        "last_error": null,
+        "review_decision": "Approved",
+        "detected_pages": {
+          "qa": "https://boingboing.net/questions",
+          "forum": "https://boingboing.net/forum",
+          "contact": "https://boingboing.net/contact",
+          "resource": "https://boingboing.net/resources",
+          "directory": "https://boingboing.net/submit",
+          "guestPost": "https://boingboing.net/write-for-us",
+          "submission": "https://boingboing.net/contribute"
+        },
+        "qualification": {
+          "label": "Forum Posting",
+          "reason": "Editorial guidelines detected",
+          "signals": {
+            "spamRisk": 20,
+            "hasGuidelines": true,
+            "metricsSource": "live",
+            "hasContactLink": true,
+            "fetchStatusCode": 200,
+            "hasGuestPostHint": false,
+            "hasPublicSubmissionPath": true
+          },
+          "qualified": true
+        }
+      },
+      "fetch": {
+        "home": {
+          "status": "fetched",
+          "httpStatus": 200,
+          "error": null,
+          "elapsedMs": 579
+        },
+        "pagesFetched": 1,
+        "pagesFailed": 4,
+        "pageUrls": [
+          {
+            "url": "https://boingboing.net/",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://boingboing.net/contact",
+            "status": "failed",
+            "http": null
+          },
+          {
+            "url": "https://boingboing.net/contact",
+            "status": "failed",
+            "http": null
+          },
+          {
+            "url": "https://www.stacksocial.com/contact",
+            "status": "failed",
+            "http": null
+          },
+          {
+            "url": "https://stackcommerce-vip.zendesk.com/hc/en-us/requests/new?source=boingboing&publisher_id=107&publisher_logo=https://cdnp0.stackassets.com/5890dc36dbd0554f9870267d7bf3a6e65063cfe9/store/91ea0e081aa18b603fbaa2a35e9255f31ec3b9821b6caf12abd4097c12ec/35c437db4cf7ea3711fe53bde67953ea369cc4f4_logo_main.png",
+            "status": "failed",
+            "http": null
+          }
+        ]
+      },
+      "sie": {
+        "profileStatus": "unsupported",
+        "strategy": {
+          "chosen": "Dashboard Submission",
+          "reasoning": "WordPress dashboard / author system requires account",
+          "entryUrl": "https://boingboing.net/",
+          "wordpressStrategy": "Dashboard Submission",
+          "expectedInterventions": [
+            "Login Required"
+          ],
+          "payloadHints": {
+            "needsReview": false,
+            "paidListing": false,
+            "moveToOutreach": false,
+            "contactFormOutreach": false
+          }
+        },
+        "directory": null,
+        "contactForm": null,
+        "wordpress": {
+          "detected": true,
+          "workflow": "dashboard"
+        }
+      },
+      "prodProfile": {
+        "status": "complete",
+        "last_error": null,
+        "entryUrl": "https://boingboing.net/signup",
+        "chosen": "Guest Post",
+        "directoryStrategy": null,
+        "contactFormStrategy": null
+      },
+      "execution": null
+    },
+    {
+      "domain": "bookmark4you.com",
+      "url": "https://bookmark4you.com",
+      "complete": false,
+      "failures": [
+        {
+          "stage": "execution",
+          "code": "NO_EXECUTION_JOB",
+          "detail": "Ready + package approved but no execution_jobs row (Submit never started)"
+        }
+      ],
+      "notes": [
+        {
+          "stage": "campaign_state",
+          "code": "READY_ON_GENERATE_STEP",
+          "detail": "lifecycle=Ready maps to generate-content step until Submitting — not a blocker by itself"
+        }
+      ],
+      "campaign": {
+        "lifecycle": "Ready",
+        "campaign_lifecycle": "Ready",
+        "campaign_step": "generate-content",
+        "generation_status": "Completed",
+        "quality_score": 79,
+        "package_approved_by": "user",
+        "package_status": "generated",
+        "submission_status": "pending",
+        "automation_status": "prepared",
+        "last_error": null,
+        "review_decision": "Approved",
+        "detected_pages": {
+          "contact": "https://bookmark4you.com/contact",
+          "directory": "https://bookmark4you.com/submit"
+        },
+        "qualification": {
+          "label": "Resource Page",
+          "reason": "Public contact/outreach path confirmed",
+          "signals": {
+            "spamRisk": 20,
+            "hasGuidelines": false,
+            "metricsSource": "live",
+            "hasContactLink": true,
+            "fetchStatusCode": 200,
+            "hasGuestPostHint": false,
+            "hasPublicSubmissionPath": true
+          },
+          "qualified": true
+        }
+      },
+      "fetch": {
+        "home": {
+          "status": "fetched",
+          "httpStatus": 200,
+          "error": null,
+          "elapsedMs": 1026
+        },
+        "pagesFetched": 5,
+        "pagesFailed": 0,
+        "pageUrls": [
+          {
+            "url": "https://www.bookmark4you.com/",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://www.bookmark4you.com/contact",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://www.bookmark4you.com/register",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://www.bookmark4you.com/register",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://webpoint.wordpress.com/",
+            "status": "fetched",
+            "http": null
+          }
+        ]
+      },
+      "sie": {
+        "profileStatus": "complete",
+        "strategy": {
+          "chosen": "Contact Form",
+          "reasoning": "Advertising — advertising inquiry strategy",
+          "entryUrl": "https://www.bookmark4you.com/contact",
+          "contactFormStrategy": "Advertising",
+          "expectedInterventions": [
+            "CAPTCHA"
+          ],
+          "payloadHints": {
+            "needsReview": false,
+            "paidListing": false,
+            "moveToOutreach": false,
+            "contactFormOutreach": false
+          }
+        },
+        "directory": null,
+        "contactForm": {
+          "detected": true,
+          "platform": "Custom HTML Forms",
+          "intent": "Advertising",
+          "entryUrl": "https://www.bookmark4you.com/contact"
+        },
+        "wordpress": null
+      },
+      "prodProfile": {
+        "status": "complete",
+        "last_error": null,
+        "entryUrl": "https://bookmark4you.com/contact",
+        "chosen": "Contact Form",
+        "directoryStrategy": null,
+        "contactFormStrategy": "Advertising"
+      },
+      "execution": null
+    },
+    {
+      "domain": "hotvsnot.com",
+      "url": "https://hotvsnot.com",
+      "complete": false,
+      "failures": [
+        {
+          "stage": "execution",
+          "code": "NO_EXECUTION_JOB",
+          "detail": "Ready + package approved but no execution_jobs row (Submit never started)"
+        },
+        {
+          "stage": "fetch",
+          "code": "HOMEPAGE_UNREACHABLE",
+          "detail": "fetch failed"
+        },
+        {
+          "stage": "site_intelligence",
+          "code": "NO_SITE_PROFILE_ROW",
+          "detail": "site_profiles empty for this domain before/after enqueue"
+        }
+      ],
+      "notes": [
+        {
+          "stage": "campaign_state",
+          "code": "READY_ON_GENERATE_STEP",
+          "detail": "lifecycle=Ready maps to generate-content step until Submitting — not a blocker by itself"
+        }
+      ],
+      "campaign": {
+        "lifecycle": "Ready",
+        "campaign_lifecycle": "Ready",
+        "campaign_step": "generate-content",
+        "generation_status": "Completed",
+        "quality_score": 79,
+        "package_approved_by": "user",
+        "package_status": "generated",
+        "submission_status": "pending",
+        "automation_status": "prepared",
+        "last_error": null,
+        "review_decision": "Approved",
+        "detected_pages": null,
+        "qualification": {
+          "reason": "No public submission path",
+          "qualified": false
+        }
+      },
+      "fetch": {
+        "home": {
+          "status": "failed",
+          "httpStatus": 0,
+          "error": "fetch failed",
+          "elapsedMs": 995
+        },
+        "pagesFetched": 0,
+        "pagesFailed": 1,
+        "pageUrls": [
+          {
+            "url": "https://hotvsnot.com",
+            "status": "failed",
+            "http": null
+          }
+        ]
+      },
+      "sie": null,
+      "prodProfile": null,
+      "execution": null
+    },
+    {
+      "domain": "topsiteswebdirectory.com",
+      "url": "https://topsiteswebdirectory.com",
+      "complete": false,
+      "failures": [
+        {
+          "stage": "execution",
+          "code": "NO_EXECUTION_JOB",
+          "detail": "Ready + package approved but no execution_jobs row (Submit never started)"
+        },
+        {
+          "stage": "fetch",
+          "code": "HOMEPAGE_UNREACHABLE",
+          "detail": "fetch failed"
+        },
+        {
+          "stage": "site_intelligence",
+          "code": "NO_SITE_PROFILE_ROW",
+          "detail": "site_profiles empty for this domain before/after enqueue"
+        }
+      ],
+      "notes": [
+        {
+          "stage": "campaign_state",
+          "code": "READY_ON_GENERATE_STEP",
+          "detail": "lifecycle=Ready maps to generate-content step until Submitting — not a blocker by itself"
+        }
+      ],
+      "campaign": {
+        "lifecycle": "Ready",
+        "campaign_lifecycle": "Ready",
+        "campaign_step": "generate-content",
+        "generation_status": "Completed",
+        "quality_score": 79,
+        "package_approved_by": "user",
+        "package_status": "generated",
+        "submission_status": "pending",
+        "automation_status": "prepared",
+        "last_error": null,
+        "review_decision": "Approved",
+        "detected_pages": null,
+        "qualification": {
+          "reason": "No public submission path",
+          "qualified": false
+        }
+      },
+      "fetch": {
+        "home": {
+          "status": "failed",
+          "httpStatus": 0,
+          "error": "fetch failed",
+          "elapsedMs": 10352
+        },
+        "pagesFetched": 0,
+        "pagesFailed": 1,
+        "pageUrls": [
+          {
+            "url": "https://topsiteswebdirectory.com",
+            "status": "failed",
+            "http": null
+          }
+        ]
+      },
+      "sie": null,
+      "prodProfile": null,
+      "execution": null
+    },
+    {
+      "domain": "tsection.com",
+      "url": "https://tsection.com",
+      "complete": false,
+      "failures": [
+        {
+          "stage": "execution",
+          "code": "NO_EXECUTION_JOB",
+          "detail": "Ready + package approved but no execution_jobs row (Submit never started)"
+        },
+        {
+          "stage": "site_intelligence",
+          "code": "UNSUPPORTED_STRATEGY",
+          "detail": "No evidence-backed submission path found"
+        }
+      ],
+      "notes": [
+        {
+          "stage": "campaign_state",
+          "code": "READY_ON_GENERATE_STEP",
+          "detail": "lifecycle=Ready maps to generate-content step until Submitting — not a blocker by itself"
+        }
+      ],
+      "campaign": {
+        "lifecycle": "Ready",
+        "campaign_lifecycle": "Ready",
+        "campaign_step": "generate-content",
+        "generation_status": "Completed",
+        "quality_score": 79,
+        "package_approved_by": "user",
+        "package_status": "generated",
+        "submission_status": "pending",
+        "automation_status": "prepared",
+        "last_error": null,
+        "review_decision": "Approved",
+        "detected_pages": {
+          "contact": "https://tsection.com/contact",
+          "directory": "https://tsection.com/submit"
+        },
+        "qualification": {
+          "label": "Unknown",
+          "reason": "Public contact/outreach path confirmed",
+          "signals": {
+            "spamRisk": 20,
+            "hasGuidelines": false,
+            "metricsSource": "live",
+            "hasContactLink": true,
+            "fetchStatusCode": 200,
+            "hasGuestPostHint": false,
+            "hasPublicSubmissionPath": true
+          },
+          "qualified": true
+        }
+      },
+      "fetch": {
+        "home": {
+          "status": "fetched",
+          "httpStatus": 200,
+          "error": null,
+          "elapsedMs": 1327
+        },
+        "pagesFetched": 1,
+        "pagesFailed": 3,
+        "pageUrls": [
+          {
+            "url": "http://www.tsection.com/",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "http://www.tsection.com/submit",
+            "status": "failed",
+            "http": null
+          },
+          {
+            "url": "http://www.tsection.com/submit",
+            "status": "failed",
+            "http": null
+          },
+          {
+            "url": "http://www.tsection.com/submit",
+            "status": "failed",
+            "http": null
+          }
+        ]
+      },
+      "sie": {
+        "profileStatus": "unsupported",
+        "strategy": {
+          "chosen": "Unsupported",
+          "reasoning": "No evidence-backed submission path found",
+          "entryUrl": null,
+          "expectedInterventions": [],
+          "payloadHints": {
+            "needsReview": false,
+            "paidListing": false,
+            "moveToOutreach": false,
+            "contactFormOutreach": false
+          }
+        },
+        "directory": null,
+        "contactForm": null,
+        "wordpress": null
+      },
+      "prodProfile": {
+        "status": "complete",
+        "last_error": null,
+        "entryUrl": "https://tsection.com/listings/browse/Business/B2B",
+        "chosen": "Contact Form",
+        "directoryStrategy": null,
+        "contactFormStrategy": null
+      },
+      "execution": null
+    },
+    {
+      "domain": "tubecities.com",
+      "url": "http://www.tubecities.com",
+      "complete": false,
+      "failures": [
+        {
+          "stage": "execution",
+          "code": "NO_EXECUTION_JOB",
+          "detail": "Ready + package approved but no execution_jobs row (Submit never started)"
+        },
+        {
+          "stage": "fetch",
+          "code": "HOMEPAGE_UNREACHABLE",
+          "detail": "fetch failed"
+        },
+        {
+          "stage": "site_intelligence",
+          "code": "NO_SITE_PROFILE_ROW",
+          "detail": "site_profiles empty for this domain before/after enqueue"
+        }
+      ],
+      "notes": [
+        {
+          "stage": "campaign_state",
+          "code": "READY_ON_GENERATE_STEP",
+          "detail": "lifecycle=Ready maps to generate-content step until Submitting — not a blocker by itself"
+        }
+      ],
+      "campaign": {
+        "lifecycle": "Ready",
+        "campaign_lifecycle": "Ready",
+        "campaign_step": "generate-content",
+        "generation_status": "Completed",
+        "quality_score": 79,
+        "package_approved_by": "user",
+        "package_status": "generated",
+        "submission_status": "pending",
+        "automation_status": "prepared",
+        "last_error": null,
+        "review_decision": "Approved",
+        "detected_pages": null,
+        "qualification": {
+          "reason": "No public submission path",
+          "qualified": false
+        }
+      },
+      "fetch": {
+        "home": {
+          "status": "failed",
+          "httpStatus": 0,
+          "error": "fetch failed",
+          "elapsedMs": 10485
+        },
+        "pagesFetched": 0,
+        "pagesFailed": 1,
+        "pageUrls": [
+          {
+            "url": "http://www.tubecities.com",
+            "status": "failed",
+            "http": null
+          }
+        ]
+      },
+      "sie": null,
+      "prodProfile": null,
+      "execution": null
+    },
+    {
+      "domain": "usalistingdirectory.com",
+      "url": "https://usalistingdirectory.com",
+      "complete": false,
+      "failures": [
+        {
+          "stage": "execution",
+          "code": "NO_EXECUTION_JOB",
+          "detail": "Ready + package approved but no execution_jobs row (Submit never started)"
+        }
+      ],
+      "notes": [
+        {
+          "stage": "campaign_state",
+          "code": "READY_ON_GENERATE_STEP",
+          "detail": "lifecycle=Ready maps to generate-content step until Submitting — not a blocker by itself"
+        }
+      ],
+      "campaign": {
+        "lifecycle": "Ready",
+        "campaign_lifecycle": "Ready",
+        "campaign_step": "generate-content",
+        "generation_status": "Completed",
+        "quality_score": 79,
+        "package_approved_by": "user",
+        "package_status": "generated",
+        "submission_status": "pending",
+        "automation_status": "prepared",
+        "last_error": null,
+        "review_decision": "Approved",
+        "detected_pages": {
+          "qa": "https://usalistingdirectory.com/questions",
+          "forum": "https://usalistingdirectory.com/forum",
+          "contact": "https://usalistingdirectory.com/contact",
+          "directory": "https://usalistingdirectory.com/submit"
+        },
+        "qualification": {
+          "label": "Forum Posting",
+          "reason": "Public contact/outreach path confirmed",
+          "signals": {
+            "spamRisk": 20,
+            "hasGuidelines": false,
+            "metricsSource": "live",
+            "hasContactLink": true,
+            "fetchStatusCode": 200,
+            "hasGuestPostHint": false,
+            "hasPublicSubmissionPath": true
+          },
+          "qualified": true
+        }
+      },
+      "fetch": {
+        "home": {
+          "status": "fetched",
+          "httpStatus": 200,
+          "error": null,
+          "elapsedMs": 653
+        },
+        "pagesFetched": 4,
+        "pagesFailed": 0,
+        "pageUrls": [
+          {
+            "url": "https://www.usalistingdirectory.com/",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://www.usalistingdirectory.com/submit.php",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://www.usalistingdirectory.com/submit_article.php",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://www.usalistingdirectory.com/contact.php",
+            "status": "fetched",
+            "http": null
+          }
+        ]
+      },
+      "sie": {
+        "profileStatus": "complete",
+        "strategy": {
+          "chosen": "Direct Submission Form",
+          "reasoning": "Directory listing form at https://www.usalistingdirectory.com/submit.php",
+          "entryUrl": "https://www.usalistingdirectory.com/submit.php",
+          "directoryStrategy": "Direct Submission",
+          "expectedInterventions": [],
+          "payloadHints": {
+            "needsReview": false,
+            "paidListing": false,
+            "moveToOutreach": false,
+            "contactFormOutreach": false
+          }
+        },
+        "directory": {
+          "detected": true,
+          "platform": "PHP Link Directory",
+          "entryUrl": null,
+          "pricing": {
+            "free": false,
+            "paid": false
+          }
+        },
+        "contactForm": {
+          "detected": true,
+          "platform": "Custom HTML Forms",
+          "intent": "Guest Post Submission",
+          "entryUrl": "https://www.usalistingdirectory.com/contact.php"
+        },
+        "wordpress": null
+      },
+      "prodProfile": {
+        "status": "complete",
+        "last_error": null,
+        "entryUrl": "https://usalistingdirectory.com/submit.php",
+        "chosen": "Direct Submission Form",
+        "directoryStrategy": "Direct Submission",
+        "contactFormStrategy": null
+      },
+      "execution": null
+    },
+    {
+      "domain": "viesearch.com",
+      "url": "https://viesearch.com",
+      "complete": false,
+      "failures": [
+        {
+          "stage": "execution",
+          "code": "NO_EXECUTION_JOB",
+          "detail": "Ready + package approved but no execution_jobs row (Submit never started)"
+        }
+      ],
+      "notes": [
+        {
+          "stage": "campaign_state",
+          "code": "READY_ON_GENERATE_STEP",
+          "detail": "lifecycle=Ready maps to generate-content step until Submitting — not a blocker by itself"
+        }
+      ],
+      "campaign": {
+        "lifecycle": "Ready",
+        "campaign_lifecycle": "Ready",
+        "campaign_step": "generate-content",
+        "generation_status": "Completed",
+        "quality_score": 79,
+        "package_approved_by": "user",
+        "package_status": "generated",
+        "submission_status": "pending",
+        "automation_status": "prepared",
+        "last_error": null,
+        "review_decision": "Approved",
+        "detected_pages": {
+          "forum": "https://viesearch.com/forum",
+          "contact": "https://viesearch.com/contact",
+          "resource": "https://viesearch.com/resources",
+          "directory": "https://viesearch.com/submit",
+          "guestPost": "https://viesearch.com/write-for-us",
+          "submission": "https://viesearch.com/contribute"
+        },
+        "qualification": {
+          "label": "Forum Posting",
+          "reason": "Editorial guidelines detected",
+          "signals": {
+            "spamRisk": 20,
+            "hasGuidelines": true,
+            "metricsSource": "live",
+            "hasContactLink": true,
+            "fetchStatusCode": 200,
+            "hasGuestPostHint": false,
+            "hasPublicSubmissionPath": true
+          },
+          "qualified": true
+        }
+      },
+      "fetch": {
+        "home": {
+          "status": "fetched",
+          "httpStatus": 200,
+          "error": null,
+          "elapsedMs": 1466
+        },
+        "pagesFetched": 5,
+        "pagesFailed": 0,
+        "pageUrls": [
+          {
+            "url": "https://viesearch.com/",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://viesearch.com/submit",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://viesearch.com/submit",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://viesearch.com/submit",
+            "status": "fetched",
+            "http": null
+          },
+          {
+            "url": "https://viesearch.com/contact",
+            "status": "fetched",
+            "http": null
+          }
+        ]
+      },
+      "sie": {
+        "profileStatus": "complete",
+        "strategy": {
+          "chosen": "Direct Submission Form",
+          "reasoning": "Directory listing form at https://viesearch.com/submit",
+          "entryUrl": "https://viesearch.com/submit",
+          "directoryStrategy": "Direct Submission",
+          "expectedInterventions": [],
+          "payloadHints": {
+            "needsReview": false,
+            "paidListing": false,
+            "moveToOutreach": false,
+            "contactFormOutreach": false
+          }
+        },
+        "directory": {
+          "detected": true,
+          "platform": "Unknown Directory",
+          "entryUrl": "https://viesearch.com/submit",
+          "pricing": {
+            "free": false,
+            "paid": false
+          }
+        },
+        "contactForm": {
+          "detected": true,
+          "platform": "Custom HTML Forms",
+          "intent": "Advertising",
+          "entryUrl": "https://viesearch.com/contact"
+        },
+        "wordpress": null
+      },
+      "prodProfile": {
+        "status": "complete",
+        "last_error": null,
+        "entryUrl": "https://viesearch.com/submit",
+        "chosen": "Direct Submission Form",
+        "directoryStrategy": "Direct Submission",
+        "contactFormStrategy": null
+      },
+      "execution": null
+    },
+    {
+      "domain": "yemle.com",
+      "url": "https://yemle.com",
+      "complete": false,
+      "failures": [
+        {
+          "stage": "execution",
+          "code": "NO_EXECUTION_JOB",
+          "detail": "Ready + package approved but no execution_jobs row (Submit never started)"
+        },
+        {
+          "stage": "fetch",
+          "code": "HOMEPAGE_UNREACHABLE",
+          "detail": "fetch failed"
+        },
+        {
+          "stage": "site_intelligence",
+          "code": "NO_SITE_PROFILE_ROW",
+          "detail": "site_profiles empty for this domain before/after enqueue"
+        }
+      ],
+      "notes": [
+        {
+          "stage": "campaign_state",
+          "code": "READY_ON_GENERATE_STEP",
+          "detail": "lifecycle=Ready maps to generate-content step until Submitting — not a blocker by itself"
+        }
+      ],
+      "campaign": {
+        "lifecycle": "Ready",
+        "campaign_lifecycle": "Ready",
+        "campaign_step": "generate-content",
+        "generation_status": "Completed",
+        "quality_score": 79,
+        "package_approved_by": "user",
+        "package_status": "generated",
+        "submission_status": "pending",
+        "automation_status": "prepared",
+        "last_error": null,
+        "review_decision": "Approved",
+        "detected_pages": null,
+        "qualification": {
+          "reason": "No public submission path",
+          "qualified": false
+        }
+      },
+      "fetch": {
+        "home": {
+          "status": "failed",
+          "httpStatus": 0,
+          "error": "fetch failed",
+          "elapsedMs": 413
+        },
+        "pagesFetched": 0,
+        "pagesFailed": 1,
+        "pageUrls": [
+          {
+            "url": "https://yemle.com",
+            "status": "failed",
+            "http": null
+          }
+        ]
+      },
+      "sie": null,
+      "prodProfile": null,
+      "execution": null
+    }
+  ]
+}

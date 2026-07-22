@@ -143,19 +143,21 @@ function classifyOutcome(row) {
     });
   }
   if (row.sie) {
-    if (row.sie.profileStatus === 'failed') {
+    const prodOk =
+      row.prodProfile?.status === 'complete' && Boolean(row.prodProfile?.entryUrl);
+    if (row.sie.profileStatus === 'failed' && !prodOk) {
       failures.push({
         stage: 'site_intelligence',
         code: 'PROFILE_FAILED',
         detail: 'analyzeFetchedSite returned failed',
       });
-    } else if (row.sie.profileStatus === 'unsupported') {
+    } else if (row.sie.profileStatus === 'unsupported' && !prodOk) {
       failures.push({
         stage: 'site_intelligence',
         code: 'UNSUPPORTED_STRATEGY',
         detail: row.sie.strategy?.reasoning || 'Unsupported',
       });
-    } else if (!row.sie.strategy?.entryUrl) {
+    } else if (!row.sie.strategy?.entryUrl && !prodOk) {
       failures.push({
         stage: 'site_intelligence',
         code: 'NO_ENTRY_URL',
@@ -169,7 +171,7 @@ function classifyOutcome(row) {
         detail: 'Paid listing — browser correctly blocked',
       });
     }
-  } else if (row.fetch.home.status === 'fetched') {
+  } else if (row.fetch.home.status === 'fetched' && !row.prodProfile?.entryUrl) {
     failures.push({
       stage: 'site_intelligence',
       code: 'SIE_NOT_RUN',
@@ -177,7 +179,7 @@ function classifyOutcome(row) {
     });
   }
 
-  if (!row.siteProfileId) {
+  if (!row.siteProfileId && row.fetch.home.status === 'fetched') {
     failures.push({
       stage: 'site_intelligence',
       code: 'NO_SITE_PROFILE_ROW',
@@ -185,13 +187,27 @@ function classifyOutcome(row) {
     });
   }
 
-  const complete =
-    failures.length === 0 &&
-    Boolean(row.sie?.strategy?.entryUrl || row.prodProfile?.entryUrl) &&
-    Boolean(row.siteProfileId) &&
-    (row.prodProfile?.status === 'complete' || row.sie?.profileStatus === 'complete');
+  if (row.prodProfile?.status === 'failed') {
+    failures.push({
+      stage: 'site_intelligence',
+      code: 'PROD_PROFILE_FAILED',
+      detail: row.prodProfile.last_error || 'profile_status=failed',
+    });
+  }
 
-  return { complete, failures, notes };
+  // SIE stage complete when prod profile has entry_url (execution may still be pending)
+  const sieReady =
+    (row.prodProfile?.status === 'complete' && Boolean(row.prodProfile?.entryUrl)) ||
+    (row.sie?.profileStatus === 'complete' && Boolean(row.sie?.strategy?.entryUrl));
+
+  const complete =
+    sieReady &&
+    Boolean(row.executionJobId) &&
+    !failures.some((f) =>
+      ['HOMEPAGE_UNREACHABLE', 'PROD_PROFILE_FAILED', 'PROFILE_INSERT_FAILED'].includes(f.code)
+    );
+
+  return { complete, failures, notes, sieReady };
 }
 
 async function main() {
@@ -393,7 +409,14 @@ async function main() {
           navigation_graph: {},
           page_classifications: [],
           strategy: {},
-          learning: {},
+          learning: {
+            successfulPaths: [],
+            submissionUrls: [],
+            strategyStats: {},
+            platformConfirmed: null,
+            lastSuccessAt: null,
+            lastFailureAt: null,
+          },
         });
         if (error) {
           row.outcome.failures.push({
@@ -403,6 +426,23 @@ async function main() {
           });
           continue;
         }
+      } else if (existing?.profile_status === 'failed') {
+        await sb
+          .from('site_profiles')
+          .update({
+            profile_status: 'pending',
+            last_error: null,
+            learning: {
+              successfulPaths: [],
+              submissionUrls: [],
+              strategyStats: {},
+              platformConfirmed: null,
+              lastSuccessAt: null,
+              lastFailureAt: null,
+            },
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', profileId);
       }
 
       await sb
