@@ -342,6 +342,8 @@ export async function approveOpportunityWorkflow(
       await updateCampaignItem(workspaceId, opportunityId, {
         currentStatus: 'Approved',
         approval: 'approved',
+        reviewDecision: 'Approved',
+        approvedBy: 'user',
         force: true,
       });
     } catch {
@@ -506,6 +508,8 @@ export async function reviewOpportunity(
     await updateCampaignItem(workspaceId, opportunityId, {
       currentStatus: 'Rejected',
       approval: 'rejected',
+      reviewDecision: 'Rejected',
+      approvedBy: 'user',
       force: true,
     });
   } catch {

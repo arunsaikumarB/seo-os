@@ -13,10 +13,13 @@ import {
   legacyFieldsForLifecycle,
   normalizeCampaignWebsiteUrl,
   toPublicExecutionStatus,
+  type ApprovedBy,
   type CampaignCounts,
   type CampaignDetailStatus,
   type CampaignItemInput,
   type CampaignLifecycleStatus,
+  type ReviewDecision,
+  type ReviewTier,
   type SubmissionStatus,
 } from '@seo-os/backlink-builder';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
@@ -57,7 +60,7 @@ export async function listCampaignItems(
   const { data: opps } = await getSupabaseAdmin()
     .from('opportunities')
     .select(
-      'id, campaign_id, url, domain, website_name, title, opportunity_type, status, queue_status, pipeline_stage, automation_status, campaign_lifecycle, campaign_step, package_status, image_status, metadata_status, video_metadata_status, submission_status, verification_status, last_error, metadata, import_id, domain_analysis_id, created_at, updated_at'
+      'id, campaign_id, url, domain, website_name, title, opportunity_type, status, queue_status, pipeline_stage, automation_status, campaign_lifecycle, campaign_step, package_status, image_status, metadata_status, video_metadata_status, submission_status, verification_status, last_error, metadata, import_id, domain_analysis_id, confidence_score, review_tier, review_decision, approved_by, duplicate_of_id, created_at, updated_at'
     )
     .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: true })
@@ -191,6 +194,16 @@ export async function listCampaignItems(
       createdAt: o.created_at != null ? String(o.created_at) : null,
       updatedAt: o.updated_at != null ? String(o.updated_at) : null,
       hidden: derived === 'Deleted',
+      confidenceScore:
+        o.confidence_score != null
+          ? Number(o.confidence_score)
+          : classification.confidence != null
+            ? Number(classification.confidence)
+            : null,
+      reviewTier: (o.review_tier as ReviewTier | null) ?? null,
+      reviewDecision: (o.review_decision as ReviewDecision | null) ?? null,
+      approvedBy: (o.approved_by as ApprovedBy) ?? null,
+      duplicateOfId: o.duplicate_of_id != null ? String(o.duplicate_of_id) : null,
       raw: o as Record<string, unknown>,
     });
   }
@@ -216,6 +229,11 @@ export type UpdateCampaignItemPatch = {
   submissionStatus?: SubmissionStatus | null;
   verificationStatus?: 'pending' | 'verified' | 'failed' | 'n/a' | null;
   lastError?: string | null;
+  confidenceScore?: number | null;
+  reviewTier?: ReviewTier | null;
+  reviewDecision?: ReviewDecision | null;
+  approvedBy?: ApprovedBy;
+  duplicateOfId?: string | null;
   /** Skip transition check (backfill only). */
   force?: boolean;
 };
@@ -294,6 +312,11 @@ export async function updateCampaignItem(
           : patch.verificationStatus;
   }
   if (patch.lastError !== undefined) update.last_error = patch.lastError;
+  if (patch.confidenceScore !== undefined) update.confidence_score = patch.confidenceScore;
+  if (patch.reviewTier !== undefined) update.review_tier = patch.reviewTier;
+  if (patch.reviewDecision !== undefined) update.review_decision = patch.reviewDecision;
+  if (patch.approvedBy !== undefined) update.approved_by = patch.approvedBy;
+  if (patch.duplicateOfId !== undefined) update.duplicate_of_id = patch.duplicateOfId;
   if (patch.classification != null) {
     const meta = (row.metadata as Record<string, unknown>) ?? {};
     const prev =

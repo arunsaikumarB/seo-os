@@ -132,6 +132,90 @@ automationRouter.get(
   }
 );
 
+/** Phase 2 AI Review board — additive; existing classification endpoints unchanged. */
+automationRouter.get(
+  '/ai-review',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const { getAiReviewBoard } = await import(
+        '../../modules/campaigns/ai-review.service.js'
+      );
+      res.json({ data: await getAiReviewBoard(param(req.params.projectId)) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+automationRouter.post(
+  '/ai-review/bulk',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const body = z
+        .object({
+          action: z.enum(['approve', 'reject', 'unsupported', 'outreach', 'retry_analysis']),
+          itemIds: z.array(z.string().uuid()).min(1).max(500),
+        })
+        .parse(req.body);
+      const { bulkAiReviewAction } = await import(
+        '../../modules/campaigns/ai-review.service.js'
+      );
+      res.json({
+        data: await bulkAiReviewAction(
+          param(req.params.projectId),
+          body.action,
+          body.itemIds
+        ),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+automationRouter.post(
+  '/ai-review/:opportunityId/classify',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const body = z.object({ classificationId: z.string().min(1) }).parse(req.body);
+      const { setAiReviewClassification } = await import(
+        '../../modules/campaigns/ai-review.service.js'
+      );
+      res.json({
+        data: await setAiReviewClassification(
+          param(req.params.projectId),
+          param(req.params.opportunityId),
+          body.classificationId
+        ),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+automationRouter.post(
+  '/ai-review/backfill',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const { backfillAiReviewFields } = await import(
+        '../../modules/campaigns/ai-review.service.js'
+      );
+      res.json({ data: await backfillAiReviewFields(param(req.params.projectId)) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 automationRouter.patch(
   '/classification/opportunities/:opportunityId',
   authMiddleware,

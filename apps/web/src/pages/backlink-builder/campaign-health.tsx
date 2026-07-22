@@ -18,6 +18,10 @@ type HealthRow = {
   submission: string | null;
   verification: string | null;
   currentStatus: string;
+  confidence: number | null;
+  tier: string | null;
+  reviewDecision: string | null;
+  approvedBy: string | null;
   lastError: string | null;
   updatedAt: string | null;
 };
@@ -86,6 +90,10 @@ export function CampaignHealthPage() {
                 'Submission',
                 'Verification',
                 'Current Status',
+                'Confidence',
+                'Tier',
+                'Review Decision',
+                'Approved By',
                 'Last Error',
                 'Updated At',
               ].map((h) => (
@@ -109,6 +117,10 @@ export function CampaignHealthPage() {
                 <td className="px-2 py-1">{row.submission}</td>
                 <td className="px-2 py-1">{row.verification}</td>
                 <td className="px-2 py-1">{row.currentStatus}</td>
+                <td className="px-2 py-1">{row.confidence ?? ''}</td>
+                <td className="px-2 py-1">{row.tier ?? ''}</td>
+                <td className="px-2 py-1">{row.reviewDecision ?? ''}</td>
+                <td className="px-2 py-1">{row.approvedBy ?? ''}</td>
                 <td className="px-2 py-1 max-w-[200px] truncate">{row.lastError}</td>
                 <td className="px-2 py-1 whitespace-nowrap">{row.updatedAt}</td>
               </tr>

@@ -499,8 +499,14 @@ export async function runAutomationPipeline(
             );
 
             if (!qualification.qualified) {
-              // Campaign State Manager: still create one Campaign Item per valid import
+              // Still create one Campaign Item — AI Review decides tier/decision via CSM
               const ignoredId = randomUUID();
+              const existingId = await import('../campaigns/ai-review.service.js').then((m) =>
+                m.findExistingByDomain(workspaceId, domain)
+              );
+              const deadWebsite =
+                (analysis.fetchStatusCode != null && analysis.fetchStatusCode >= 400) ||
+                analysis.robotsTxtStatus === 'unreachable';
               await getSupabaseAdmin()
                 .from('opportunities')
                 .insert({
@@ -511,10 +517,10 @@ export async function runAutomationPipeline(
                   url,
                   domain,
                   score: classification.opportunityScore,
-                  status: 'dismissed',
-                  pipeline_stage: 'lost',
-                  automation_status: 'analyzed',
-                  campaign_lifecycle: 'Ignored',
+                  status: 'qualified',
+                  pipeline_stage: 'qualified',
+                  automation_status: 'qualified',
+                  campaign_lifecycle: 'Classified',
                   campaign_step: 'ai-review',
                   website_name: analysis.websiteName,
                   domain_rating: analysis.domainRating,
@@ -522,8 +528,8 @@ export async function runAutomationPipeline(
                   import_id: importId,
                   domain_analysis_id: analysisId,
                   discovery_source: 'import',
-                  queue_status: 'archived',
-                  last_error: qualification.reason ?? 'Not qualified',
+                  queue_status: 'pending_review',
+                  confidence_score: classification.confidence,
                   metadata: {
                     qualification: {
                       qualified: false,
@@ -545,6 +551,20 @@ export async function runAutomationPipeline(
                 .update({ opportunity_id: ignoredId })
                 .eq('id', row.id);
 
+              try {
+                const { applyAnalysisToCampaignItem } = await import(
+                  '../campaigns/ai-review.service.js'
+                );
+                await applyAnalysisToCampaignItem(workspaceId, ignoredId, {
+                  confidenceScore: classification.confidence,
+                  classificationId: classification.classificationId,
+                  deadWebsite,
+                  duplicateOfId: existingId,
+                });
+              } catch (e) {
+                console.error('[CSM] apply analysis failed', e);
+              }
+
               await emitAutomationEvent({
                 workspaceId,
                 orgId,
@@ -565,6 +585,13 @@ export async function runAutomationPipeline(
               });
               return;
             }
+
+            const existingId = await import('../campaigns/ai-review.service.js').then((m) =>
+              m.findExistingByDomain(workspaceId, domain)
+            );
+            const deadWebsite =
+              (analysis.fetchStatusCode != null && analysis.fetchStatusCode >= 400) ||
+              analysis.robotsTxtStatus === 'unreachable';
 
             const oppId = randomUUID();
             const oppInsert = await getSupabaseAdmin().from('opportunities').insert({
@@ -600,6 +627,7 @@ export async function runAutomationPipeline(
               traffic_estimated: true,
               metrics_source: analysis.metricsSource === 'live' ? 'live' : 'estimated',
               queue_status: 'pending_review',
+              confidence_score: classification.confidence,
               metadata: {
                 detected_pages: analysis.detectedPages,
                 niche: analysis.niche,
@@ -638,6 +666,20 @@ export async function runAutomationPipeline(
             });
             await requireWrite(`opportunity:${domain}`, oppInsert);
             opportunitiesCreated++;
+
+            try {
+              const { applyAnalysisToCampaignItem } = await import(
+                '../campaigns/ai-review.service.js'
+              );
+              await applyAnalysisToCampaignItem(workspaceId, oppId, {
+                confidenceScore: classification.confidence,
+                classificationId: classification.classificationId,
+                deadWebsite,
+                duplicateOfId: existingId && existingId !== oppId ? existingId : null,
+              });
+            } catch (e) {
+              console.error('[CSM] apply analysis failed', e);
+            }
 
             await requireWrite(
               `link_row:${domain}`,

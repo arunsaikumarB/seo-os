@@ -165,6 +165,12 @@ export type CampaignItemInput = {
   updatedAt?: string | null;
   /** When true, excluded from user-facing counts (Deleted). */
   hidden?: boolean;
+  /** Phase 2 — AI Review */
+  confidenceScore?: number | null;
+  reviewTier?: ReviewTier | null;
+  reviewDecision?: ReviewDecision | null;
+  approvedBy?: ApprovedBy | null;
+  duplicateOfId?: string | null;
 };
 
 export type CampaignCounts = {
@@ -500,4 +506,220 @@ export function currentStepForLifecycle(status: CampaignLifecycleStatus): string
     default:
       return 'import';
   }
+}
+
+/* ─── Phase 2: AI Review confidence tiers ─── */
+
+export const REVIEW_TIERS = [
+  'auto_approved',
+  'recommended',
+  'needs_classification',
+] as const;
+export type ReviewTier = (typeof REVIEW_TIERS)[number];
+
+export const REVIEW_DECISIONS = [
+  'Pending',
+  'Approved',
+  'Rejected',
+  'Needs Classification',
+  'Unsupported',
+  'Duplicate',
+  'Dead Website',
+] as const;
+export type ReviewDecision = (typeof REVIEW_DECISIONS)[number];
+
+export type ApprovedBy = 'auto' | 'user' | null;
+
+/**
+ * Tier assignment — exact boundaries:
+ * > 90 → auto_approved
+ * 70–90 inclusive → recommended
+ * < 70 → needs_classification
+ * unknown type always needs_classification regardless of score
+ */
+export function assignReviewTier(
+  confidenceScore: number,
+  classificationId?: string | null
+): ReviewTier {
+  const unknown =
+    !classificationId ||
+    classificationId === 'unknown' ||
+    classificationId.toLowerCase() === 'unknown';
+  if (unknown) return 'needs_classification';
+  const score = Number(confidenceScore);
+  if (!Number.isFinite(score)) return 'needs_classification';
+  if (score > 90) return 'auto_approved';
+  if (score >= 70) return 'recommended';
+  return 'needs_classification';
+}
+
+/** Map review decision → Phase 1 lifecycle status. */
+export function lifecycleForReviewDecision(
+  decision: ReviewDecision
+): CampaignLifecycleStatus | null {
+  switch (decision) {
+    case 'Approved':
+      return 'Approved';
+    case 'Rejected':
+      return 'Rejected';
+    case 'Needs Classification':
+      return 'Classified'; // stays pending classification gate
+    case 'Unsupported':
+      return 'Ignored';
+    case 'Duplicate':
+      return 'Skipped';
+    case 'Dead Website':
+      return 'Failed';
+    case 'Pending':
+      return null;
+    default:
+      return null;
+  }
+}
+
+export type AiReviewSummary = {
+  imported: number;
+  approved: number;
+  rejected: number;
+  needsClassification: number;
+  unsupported: number;
+  duplicate: number;
+  dead: number;
+  pending: number;
+  /** true when Imported = sum of all buckets */
+  invariantOk: boolean;
+};
+
+/** Live AI Review summary — every item in exactly one bucket. */
+export function computeAiReviewSummary(items: CampaignItemInput[]): AiReviewSummary {
+  const visible = items.filter((i) => i.currentStatus !== 'Deleted');
+  const summary: AiReviewSummary = {
+    imported: visible.length,
+    approved: 0,
+    rejected: 0,
+    needsClassification: 0,
+    unsupported: 0,
+    duplicate: 0,
+    dead: 0,
+    pending: 0,
+    invariantOk: true,
+  };
+
+  for (const item of visible) {
+    const d = item.reviewDecision ?? 'Pending';
+    if (d === 'Approved') {
+      summary.approved++;
+    } else if (d === 'Rejected') {
+      summary.rejected++;
+    } else if (d === 'Needs Classification') {
+      summary.needsClassification++;
+    } else if (d === 'Unsupported') {
+      summary.unsupported++;
+    } else if (d === 'Duplicate') {
+      summary.duplicate++;
+    } else if (d === 'Dead Website') {
+      summary.dead++;
+    } else if (
+      item.currentStatus === 'Approved' ||
+      campaignLifecycleRank(item.currentStatus) > campaignLifecycleRank('Approved')
+    ) {
+      // Approved (or further) without explicit review_decision — treat as approved
+      summary.approved++;
+    } else if (item.reviewTier === 'needs_classification') {
+      summary.needsClassification++;
+    } else if (item.currentStatus === 'Rejected') {
+      summary.rejected++;
+    } else if (item.currentStatus === 'Ignored') {
+      summary.unsupported++;
+    } else if (item.currentStatus === 'Skipped') {
+      summary.duplicate++;
+    } else if (
+      item.currentStatus === 'Failed' &&
+      String(item.lastError ?? '').toLowerCase().includes('dead')
+    ) {
+      summary.dead++;
+    } else {
+      summary.pending++;
+    }
+  }
+
+  const sum =
+    summary.approved +
+    summary.rejected +
+    summary.needsClassification +
+    summary.unsupported +
+    summary.duplicate +
+    summary.dead +
+    summary.pending;
+  summary.invariantOk = sum === summary.imported;
+  if (!summary.invariantOk) {
+    console.error('[CSM] AI Review invariant violated', { summary, sum });
+  }
+  return summary;
+}
+
+/**
+ * Decide review outcome right after analysis.
+ * Does not mutate — caller writes through updateCampaignItem.
+ */
+export function decideAfterAnalysis(input: {
+  confidenceScore: number;
+  classificationId?: string | null;
+  deadWebsite?: boolean;
+  duplicateOfId?: string | null;
+}): {
+  confidenceScore: number;
+  reviewTier: ReviewTier;
+  reviewDecision: ReviewDecision;
+  approvedBy: ApprovedBy;
+  lifecycle: CampaignLifecycleStatus;
+  lastError?: string | null;
+  duplicateOfId?: string | null;
+} {
+  if (input.duplicateOfId) {
+    return {
+      confidenceScore: input.confidenceScore,
+      reviewTier: 'needs_classification',
+      reviewDecision: 'Duplicate',
+      approvedBy: null,
+      lifecycle: 'Skipped',
+      duplicateOfId: input.duplicateOfId,
+    };
+  }
+  if (input.deadWebsite) {
+    return {
+      confidenceScore: input.confidenceScore,
+      reviewTier: 'needs_classification',
+      reviewDecision: 'Dead Website',
+      approvedBy: null,
+      lifecycle: 'Failed',
+      lastError: 'Dead website — unreachable',
+    };
+  }
+  const tier = assignReviewTier(input.confidenceScore, input.classificationId);
+  if (tier === 'auto_approved') {
+    return {
+      confidenceScore: input.confidenceScore,
+      reviewTier: tier,
+      reviewDecision: 'Approved',
+      approvedBy: 'auto',
+      lifecycle: 'Approved',
+    };
+  }
+  if (tier === 'needs_classification') {
+    return {
+      confidenceScore: input.confidenceScore,
+      reviewTier: tier,
+      reviewDecision: 'Needs Classification',
+      approvedBy: null,
+      lifecycle: 'Classified',
+    };
+  }
+  return {
+    confidenceScore: input.confidenceScore,
+    reviewTier: tier,
+    reviewDecision: 'Pending',
+    approvedBy: null,
+    lifecycle: 'Classified',
+  };
 }
