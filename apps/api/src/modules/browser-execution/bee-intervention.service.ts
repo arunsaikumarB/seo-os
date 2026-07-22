@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import {
   isWatchableGate,
   interventionCopyForPauseReason,
+  toPublicExecutionStatus,
   workflowStepLabel,
   type ExecutionGate,
 } from '@seo-os/backlink-builder';
@@ -56,11 +57,15 @@ const INTERVENTION_STATUSES = [
 ] as const;
 
 export function isInterventionStatus(status: string): boolean {
-  return (
+  if (
     INTERVENTION_STATUSES.includes(status as (typeof INTERVENTION_STATUSES)[number]) ||
     status.startsWith('watching_') ||
     status.startsWith('blocked_')
-  );
+  ) {
+    return true;
+  }
+  // Any job CSM counts as Waiting Human must be actionable in the queue
+  return toPublicExecutionStatus(status) === 'Waiting Human';
 }
 
 type PauseMetrics = {
@@ -265,12 +270,12 @@ export async function listInterventions(workspaceId: string) {
     if (status === 'deleted' || status === 'ignored' || disposition === 'deleted_forever') {
       continue;
     }
-    // Phase 4.5: queue purity — only evidence-backed interventions
+    // Phase 4.7 trust: every Waiting Human job must be actionable.
+    // Evidence-backed rows are preferred; missing evidence still surfaces (legacy / heal path).
     const evidenceId =
       jobRec.evidence_id != null
         ? String(jobRec.evidence_id)
         : ((jobRec.metrics as { evidenceId?: string } | null)?.evidenceId ?? null);
-    if (!evidenceId) continue;
 
     const gate = resolveInterventionGate(jobRec);
     // Dedicated Human Intervention Queue — only protected human gates
@@ -279,10 +284,13 @@ export async function listInterventions(workspaceId: string) {
       gate !== 'unknown' &&
       gate !== 'category' &&
       gate !== 'manual_input' &&
-      gate !== 'unclassified'
+      gate !== 'security_question' &&
+      gate !== 'unclassified' &&
+      gate !== 'needs_ai_review'
     ) {
       continue;
     }
+    const missingEvidence = !evidenceId;
     const copy = humanInterventionCopy(gate, jobRec);
     const started = j.watch_started_at || j.started_at || j.created_at;
     const elapsedMs = started ? Date.now() - new Date(String(started)).getTime() : 0;
@@ -294,6 +302,7 @@ export async function listInterventions(workspaceId: string) {
     const isUnclassified =
       jobRec.unclassified === true ||
       gate === 'unclassified' ||
+      gate === 'needs_ai_review' ||
       String(jobRec.truth_claim ?? '') === 'Unclassified' ||
       String(j.pause_reason ?? '') === 'unclassified';
     const evidenceBlob =
@@ -310,17 +319,28 @@ export async function listInterventions(workspaceId: string) {
       opportunityId: j.opportunity_id ? String(j.opportunity_id) : null,
       sessionId: j.session_id ? String(j.session_id) : null,
       status,
-      displayStatus: isUnclassified ? 'Unclassified — needs diagnosis' : 'Needs You',
+      displayStatus: isUnclassified
+        ? 'Unclassified — needs diagnosis'
+        : missingEvidence
+          ? 'Needs You — open browser'
+          : 'Needs You',
       gate: isUnclassified ? 'unclassified' : gate,
       reason: isUnclassified
         ? 'Unclassified — needs diagnosis'
-        : (jobRec.truth_claim != null ? String(jobRec.truth_claim) : copy.reason),
+        : missingEvidence
+          ? copy.reason || 'This site is waiting for you. Open the browser to continue.'
+          : (jobRec.truth_claim != null ? String(jobRec.truth_claim) : copy.reason),
       title: isUnclassified
         ? 'Unclassified — needs diagnosis'
-        : copy.title,
+        : missingEvidence
+          ? copy.title || 'Action required'
+          : copy.title,
       instruction: isUnclassified
         ? 'The system could not determine what is blocking this. Review the evidence and diagnose.'
-        : copy.instruction,
+        : missingEvidence
+          ? copy.instruction ||
+            'Open the live browser, complete the required step, then continue.'
+          : copy.instruction,
       explanation: m.pauseExplanation || m.pauseContext?.explanation || copy.instruction,
       cta: copy.cta,
       pauseReason: j.pause_reason ? String(j.pause_reason) : null,
@@ -341,7 +361,8 @@ export async function listInterventions(workspaceId: string) {
           : null,
       stage: stepAction || m.currentStepLabel || null,
       unclassified: isUnclassified,
-      verified: !isUnclassified,
+      verified: Boolean(evidenceId) && !isUnclassified,
+      missingEvidence,
     };
     if (isUnclassified) unclassifiedGroup.push(row);
     else verified.push(row);

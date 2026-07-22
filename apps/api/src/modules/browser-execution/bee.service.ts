@@ -1246,11 +1246,14 @@ export async function getStatistics(workspaceId: string) {
     }
   }
   current.queueProgress = `${base.completedJobs}/${base.totalJobs}`;
-  // Rough ETA: ~45s per remaining queued site / active workers
+  // Rough ETA only while AI is actively working — not while Waiting Human
+  const waitingHuman = Number(base.waitingHuman ?? base.needsYou ?? 0);
   const etaSeconds =
-    base.remainingJobs > 0
-      ? Math.max(15, Math.round((base.remainingJobs * 45) / Math.max(1, maxWorkers)))
-      : 0;
+    waitingHuman > 0 && Number(base.running ?? 0) === 0
+      ? 0
+      : base.remainingJobs > 0
+        ? Math.max(15, Math.round((base.remainingJobs * 45) / Math.max(1, maxWorkers)))
+        : 0;
   const workers = Array.from({ length: maxWorkers }, (_, i) => {
     const job = runningJobs[i];
     if (!job) {

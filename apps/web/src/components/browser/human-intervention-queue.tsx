@@ -256,7 +256,7 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
     }
   };
 
-  // Empty: progress strip + calm message — never a status table
+  // Empty: progress strip — never claim "no action" while Waiting Human > 0
   if (needsHelp === 0) {
     if (justFinishedAll) {
       return (
@@ -269,6 +269,25 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
               </p>
               <p className="text-base font-semibold">All manual tasks completed.</p>
               <p className="text-sm text-muted-foreground">AI continues automatically.</p>
+            </CardContent>
+          </Card>
+        </div>
+      );
+    }
+    const waitingHuman = sum?.waitingHuman ?? 0;
+    if (waitingHuman > 0) {
+      return (
+        <div className="space-y-4">
+          {progressStrip}
+          <Card className="rounded-2xl border-amber-500/30 bg-amber-500/[0.04]">
+            <CardContent className="pt-5 pb-5 space-y-2">
+              <p className="text-sm font-medium">
+                {waitingHuman} website{waitingHuman === 1 ? '' : 's'} waiting for you
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Tasks are loading. Use View Details below, or refresh in a moment — Open Browser
+                will appear for each site.
+              </p>
             </CardContent>
           </Card>
         </div>

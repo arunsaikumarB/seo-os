@@ -82,6 +82,19 @@ describe('execution state manager', () => {
     expect(c.totalExecutable).toBe(8);
   });
 
+  it('prefers Waiting Human over Queued for campaign state', () => {
+    const c = computeExecutionCounts([
+      { id: '1', status: 'watching_login' },
+      { id: '2', status: 'watching_login' },
+      { id: '3', status: 'queued' },
+      { id: '4', status: 'queued' },
+    ]);
+    expect(c.campaignState).toBe('Waiting Human');
+    expect(c.aiStatusLine).toMatch(/waiting for you/i);
+    expect(c.Queued).toBe(2);
+    expect(c['Waiting Human']).toBe(2);
+  });
+
   it('progress includes running and waiting human (Phase 4.7)', () => {
     // 10 completed + 4 running + 2 waiting + 4 queued = 20 → 80%
     const jobs = [

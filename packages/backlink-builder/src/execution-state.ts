@@ -247,10 +247,11 @@ export function computeExecutionCounts(
   let campaignState: CampaignState = 'Idle';
   if (counts.Running > 0 || counts.Starting > 0) {
     campaignState = 'Running';
+  } else if (counts['Waiting Human'] > 0) {
+    // Prefer Waiting Human over Queued — user must act before remaining sites open
+    campaignState = 'Waiting Human';
   } else if (counts.Queued > 0) {
     campaignState = 'Starting';
-  } else if (counts['Waiting Human'] > 0) {
-    campaignState = 'Waiting Human';
   } else if (
     counts['Failed to Start'] > 0 &&
     counts.totalExecutable === 0 &&
