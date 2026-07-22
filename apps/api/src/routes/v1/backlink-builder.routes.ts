@@ -173,6 +173,47 @@ backlinkBuilderRouter.get(
           executionAudit,
           truthAudit,
           siteIntelligenceAudit,
+          executionDiagnostics: await (async () => {
+            try {
+              const { ensureExecutionJobsForReady } = await import(
+                '../../modules/browser-execution/execution-pipeline.service.js'
+              );
+              const ensured = await ensureExecutionJobsForReady({
+                workspaceId,
+                startImmediately: true,
+              });
+              return ensured.diagnostics;
+            } catch (err) {
+              try {
+                const { getExecutionDiagnostics } = await import(
+                  '../../modules/browser-execution/execution-pipeline.service.js'
+                );
+                const base = await getExecutionDiagnostics(workspaceId);
+                return {
+                  ...base,
+                  pipelineBroken: true,
+                  rootCause: err instanceof Error ? err.message : String(err),
+                  error: err instanceof Error ? err.message : String(err),
+                };
+              } catch {
+                return {
+                  readyItems: 0,
+                  executionJobsCreated: 0,
+                  jobsQueued: 0,
+                  jobsRunning: 0,
+                  jobsWaitingHuman: 0,
+                  jobsFailed: 0,
+                  jobsCompleted: 0,
+                  jobsSkipped: 0,
+                  missingExecutionJobs: 0,
+                  pipelineBroken: true,
+                  rootCause: err instanceof Error ? err.message : String(err),
+                  items: [],
+                  error: err instanceof Error ? err.message : String(err),
+                };
+              }
+            }
+          })(),
           items: items.map((i) => ({
             website: i.websiteUrl ?? i.domain ?? i.id,
             imported: true,

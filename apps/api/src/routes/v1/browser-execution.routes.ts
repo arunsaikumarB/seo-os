@@ -163,6 +163,51 @@ browserExecutionRouter.post(
 );
 
 browserExecutionRouter.post(
+  '/browser/executions/ensure-ready',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      const body = z
+        .object({
+          startImmediately: z.boolean().optional(),
+        })
+        .parse(req.body ?? {});
+      const { userId } = (req as AuthenticatedRequest).auth;
+      const { ensureExecutionJobsForReady } = await import(
+        '../../modules/browser-execution/execution-pipeline.service.js'
+      );
+      const data = await ensureExecutionJobsForReady({
+        workspaceId: param(req.params.projectId),
+        userId,
+        startImmediately: body.startImmediately,
+      });
+      res.status(200).json({ data });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.get(
+  '/browser/execution-diagnostics',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      const { getExecutionDiagnostics } = await import(
+        '../../modules/browser-execution/execution-pipeline.service.js'
+      );
+      res.json({ data: await getExecutionDiagnostics(param(req.params.projectId)) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+browserExecutionRouter.post(
   '/browser/preview',
   authMiddleware,
   requireRole('member'),

@@ -119,6 +119,40 @@ type HealthData = {
     }>;
     error?: string;
   };
+  executionDiagnostics?: {
+    readyItems: number;
+    executionJobsCreated: number;
+    jobsQueued: number;
+    jobsRunning: number;
+    jobsWaitingHuman: number;
+    jobsFailed: number;
+    jobsCompleted: number;
+    jobsSkipped: number;
+    missingExecutionJobs: number;
+    pipelineBroken: boolean;
+    rootCause: string | null;
+    ensureSummary?: {
+      created: number;
+      started: number;
+      skippedTerminal: number;
+      failed: number;
+      alreadyHadJob: number;
+    };
+    items?: Array<{
+      campaignItemId: string;
+      website: string;
+      domain: string | null;
+      currentStatus: string | null;
+      executionJobExists: boolean;
+      executionJobStatus: string | null;
+      whyNoJob: string | null;
+      verifiedBlocker: string | null;
+      creationError: string | null;
+      startApiCalled: boolean | null;
+      startApiResponse: string | null;
+    }>;
+    error?: string;
+  };
   items: HealthRow[];
 };
 
@@ -218,6 +252,79 @@ export function CampaignHealthPage() {
                   .join(', ')}`
               : ' (must be 0)'}
           </p>
+        </div>
+      ) : null}
+
+      {data?.executionDiagnostics ? (
+        <div
+          className={`border p-2 space-y-2 ${
+            data.executionDiagnostics.pipelineBroken
+              ? 'border-red-700 bg-red-950/20'
+              : 'border-emerald-700/40'
+          }`}
+        >
+          <p className="font-semibold">Execution Diagnostics (Production Validation)</p>
+          {data.executionDiagnostics.pipelineBroken ? (
+            <p className="text-red-400 font-semibold">
+              ❌ Execution pipeline broken — Ready ({data.executionDiagnostics.readyItems}) &gt;
+              Execution Jobs ({data.executionDiagnostics.executionJobsCreated})
+            </p>
+          ) : (
+            <p className="text-emerald-500">✓ Ready items covered by execution jobs or terminal skips</p>
+          )}
+          {data.executionDiagnostics.rootCause ? (
+            <p>Root cause: {data.executionDiagnostics.rootCause}</p>
+          ) : null}
+          <p>
+            Ready {data.executionDiagnostics.readyItems} · Jobs Created{' '}
+            {data.executionDiagnostics.executionJobsCreated} · Queued{' '}
+            {data.executionDiagnostics.jobsQueued} · Running{' '}
+            {data.executionDiagnostics.jobsRunning} · Waiting Human{' '}
+            {data.executionDiagnostics.jobsWaitingHuman} · Failed{' '}
+            {data.executionDiagnostics.jobsFailed} · Completed{' '}
+            {data.executionDiagnostics.jobsCompleted} · Skipped{' '}
+            {data.executionDiagnostics.jobsSkipped} · Missing{' '}
+            {data.executionDiagnostics.missingExecutionJobs}
+          </p>
+          {data.executionDiagnostics.ensureSummary ? (
+            <p>
+              Ensure: created={data.executionDiagnostics.ensureSummary.created} started=
+              {data.executionDiagnostics.ensureSummary.started} skippedTerminal=
+              {data.executionDiagnostics.ensureSummary.skippedTerminal} failed=
+              {data.executionDiagnostics.ensureSummary.failed} alreadyHad=
+              {data.executionDiagnostics.ensureSummary.alreadyHadJob}
+            </p>
+          ) : null}
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="border-b">
+                <th className="text-left py-1">Website</th>
+                <th className="text-left py-1">Job?</th>
+                <th className="text-left py-1">Status</th>
+                <th className="text-left py-1">Start API</th>
+                <th className="text-left py-1">Why / Blocker</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(data.executionDiagnostics.items ?? []).slice(0, 40).map((row) => (
+                <tr key={row.campaignItemId} className="border-b">
+                  <td className="py-1">{row.website}</td>
+                  <td className="py-1">{row.executionJobExists ? 'yes' : 'NO'}</td>
+                  <td className="py-1">{row.executionJobStatus ?? '—'}</td>
+                  <td className="py-1">
+                    {row.startApiCalled == null
+                      ? '—'
+                      : row.startApiCalled
+                        ? String(row.startApiResponse ?? 'called')
+                        : 'not called'}
+                  </td>
+                  <td className="py-1 max-w-[320px] truncate">
+                    {row.verifiedBlocker || row.whyNoJob || row.creationError || '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       ) : null}
 

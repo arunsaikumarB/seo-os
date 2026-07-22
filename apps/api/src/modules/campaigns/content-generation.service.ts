@@ -588,6 +588,20 @@ async function approvePackages(workspaceId: string, itemIds: string[]) {
       );
     }
   }
+
+  // Production Validation: Ready packages must become execution jobs (or verified terminal)
+  try {
+    const { ensureExecutionJobsForReady } = await import(
+      '../browser-execution/execution-pipeline.service.js'
+    );
+    await ensureExecutionJobsForReady({
+      workspaceId,
+      startImmediately: true,
+    });
+  } catch (err) {
+    logger.error({ err, workspaceId }, 'ensureExecutionJobsForReady after approvePackages failed');
+  }
+
   return {
     queued: 0,
     skipped,
@@ -908,6 +922,17 @@ async function finalizeQuality(
         .from('content_packs')
         .update({ status: 'ready', updated_at: new Date().toISOString() })
         .eq('id', packRow.id);
+    }
+    try {
+      const { ensureExecutionJobsForReady } = await import(
+        '../browser-execution/execution-pipeline.service.js'
+      );
+      await ensureExecutionJobsForReady({
+        workspaceId,
+        startImmediately: true,
+      });
+    } catch (err) {
+      logger.error({ err, opportunityId }, 'ensureExecutionJobsForReady after quality Completed');
     }
     return;
   }
