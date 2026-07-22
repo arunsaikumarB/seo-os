@@ -31,6 +31,7 @@ export type BeeExecutionProgress = {
   campaignState?: string;
   campaignIsRunning?: boolean;
   aiStatusLine?: string;
+  current?: { website?: string; step?: string; browser?: string };
 };
 
 const EMPTY: BeeExecutionProgress = {
@@ -109,6 +110,13 @@ export function useBeeExecutionProgress(projectId: string, refetchInterval = 2_0
         campaignState: String(d.campaignState ?? 'Idle'),
         campaignIsRunning: Boolean(d.campaignIsRunning),
         aiStatusLine: String(d.aiStatusLine ?? 'Ready to submit'),
+        current: d.current
+          ? {
+              website: d.current.website,
+              step: d.current.step,
+              browser: d.current.browser,
+            }
+          : undefined,
       };
     },
     enabled: !!projectId,

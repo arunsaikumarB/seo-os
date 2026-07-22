@@ -15,8 +15,17 @@ type Props = {
  * Collapses to nothing when no AI work is active (empty-state rule).
  */
 export function CampaignAiStatus({ projectId, className, forceHide }: Props) {
-  const { aiActive, currentLabel, completed, remaining, percent, eta } =
-    useCampaignAiStatus(projectId);
+  const {
+    aiActive,
+    currentLabel,
+    currentWebsite,
+    currentStep,
+    currentActivity,
+    completed,
+    remaining,
+    percent,
+    eta,
+  } = useCampaignAiStatus(projectId);
 
   if (forceHide || !aiActive) return null;
 
@@ -33,7 +42,29 @@ export function CampaignAiStatus({ projectId, className, forceHide }: Props) {
         <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
         AI Status
       </div>
-      <p className="text-xs text-muted-foreground">Current: {currentLabel}</p>
+      {currentActivity || currentWebsite ? (
+        <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
+          {currentActivity ? (
+            <p>
+              <span className="text-foreground/70">Current</span> · {currentActivity}
+            </p>
+          ) : null}
+          {currentWebsite ? (
+            <p className="truncate">
+              <span className="text-foreground/70">Website</span> · {currentWebsite}
+            </p>
+          ) : null}
+          {currentStep ? (
+            <p className="truncate sm:col-span-2">
+              <span className="text-foreground/70">Step</span> · {currentStep}
+            </p>
+          ) : (
+            <p className="sm:col-span-2">Current: {currentLabel}</p>
+          )}
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">Current: {currentLabel}</p>
+      )}
       <div className="h-2 rounded-full bg-muted overflow-hidden">
         <div
           className="h-full bg-primary transition-all duration-500"

@@ -92,6 +92,9 @@ export function useCampaignAiStatus(projectId: string) {
   const aiActive = genActive || beeRunning;
 
   let currentLabel = '';
+  let currentWebsite: string | null = null;
+  let currentStep: string | null = null;
+  let currentActivity = '';
   let completed = 0;
   let remaining = 0;
   let percent = 0;
@@ -99,19 +102,39 @@ export function useCampaignAiStatus(projectId: string) {
 
   if (genActive && progress) {
     currentLabel = 'Generating Packages';
+    currentActivity = 'Generating';
     const cur = board?.current?.[0];
-    if (cur) currentLabel = `${cur.website} — ${cur.stage}`;
+    if (cur) {
+      currentLabel = `${cur.website} — ${cur.stage}`;
+      currentWebsite = cur.website;
+      currentStep = cur.stage;
+    }
     completed = progress.completed;
     remaining = progress.queued + progress.generating;
     percent = Math.round(progress.percent);
     eta = board?.eta ?? null;
   } else if (beeRunning && bee.data) {
-    currentLabel =
+    currentActivity =
       campaignState === 'Waiting Human'
         ? 'Waiting for you'
         : campaignState === 'Paused'
           ? 'Paused'
-          : 'Submitting Backlinks';
+          : campaignState === 'Starting'
+            ? 'Starting'
+            : 'Submitting';
+    currentLabel = currentActivity;
+    const cur = bee.data.current;
+    if (cur?.website) {
+      currentWebsite = cur.website;
+      currentStep = cur.step ?? null;
+      currentLabel = cur.step ? `${cur.website} — ${cur.step}` : cur.website;
+    } else if (campaignState === 'Waiting Human') {
+      currentLabel = 'Waiting for you';
+    } else if (campaignState === 'Paused') {
+      currentLabel = 'Paused';
+    } else {
+      currentLabel = 'Submitting Backlinks';
+    }
     completed = bee.data.completedJobs ?? 0;
     remaining = Math.max(0, (bee.data.totalJobs ?? 0) - completed);
     percent = Math.round(bee.data.progressPercent ?? 0);
@@ -145,6 +168,9 @@ export function useCampaignAiStatus(projectId: string) {
     beeRunning,
     aiActive,
     currentLabel,
+    currentWebsite,
+    currentStep,
+    currentActivity,
     completed,
     remaining,
     percent,

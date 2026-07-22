@@ -39,21 +39,21 @@ type InterventionDetail = {
 };
 
 /**
- * Minimal OAuth-style helper — never embeds Playwright / Live Browser.
- * Opens the exact paused URL in a normal browser tab; SEO OS only shows this banner
- * and monitors completion via the existing intervention/check API.
+ * Minimal helper — opens the exact paused URL; monitors completion via existing APIs.
+ * Phase 4.6: guided copy, success handoff, no technical tables.
  */
 export function InterventionWindowPage() {
   const { projectId = '' } = useParams();
   const [params, setParams] = useSearchParams();
   const jobId = params.get('jobId');
+  const completeAll = params.get('completeAll') === '1';
   const { request } = useApi();
   const qc = useQueryClient();
   const interventions = useInterventions(projectId, 2_000);
   const siteOpenedRef = useRef(false);
   const [done, setDone] = useState(false);
   const [closeFailed, setCloseFailed] = useState(false);
-  const [showDom, setShowDom] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   useEffect(() => {
     if (jobId) return;
@@ -89,12 +89,16 @@ export function InterventionWindowPage() {
   const finishSuccess = (message: string) => {
     if (done) return;
     setDone(true);
-    toast.success(message);
+    const friendly =
+      d?.gate === 'human_approval'
+        ? '✓ Submission Approved — Resuming automation…'
+        : message || '✓ Completed — AI resumed.';
+    toast.success(friendly);
     notifyInterventionResumed({
       projectId,
       jobId: jobId!,
       website: d?.website,
-      message,
+      message: friendly,
     });
     qc.invalidateQueries({ queryKey: ['bee-intervention', projectId, jobId] });
     qc.invalidateQueries({ queryKey: ['bee-interventions', projectId] });
@@ -109,7 +113,7 @@ export function InterventionWindowPage() {
       } catch {
         setCloseFailed(true);
       }
-    }, 1_400);
+    }, 1_600);
   };
 
   const checkClear = useMutation({
@@ -183,12 +187,15 @@ export function InterventionWindowPage() {
         <div className="max-w-sm w-full rounded-2xl border border-emerald-500/30 bg-emerald-500/5 px-5 py-6 text-center space-y-3">
           <CheckCircle2 className="h-9 w-9 text-emerald-600 mx-auto" />
           <p className="text-base font-semibold">
-            {d.successToast || 'AI resumed successfully'}
+            {d.gate === 'human_approval' ? '✓ Submission Approved' : '✓ Completed'}
+          </p>
+          <p className="text-sm text-muted-foreground">
+            {completeAll
+              ? 'AI resumed. Opening next website…'
+              : 'Resuming automation…'}
           </p>
           {closeFailed ? (
-            <p className="text-sm text-muted-foreground">
-              AI resumed successfully. You may close this tab.
-            </p>
+            <p className="text-sm text-muted-foreground">You may close this tab.</p>
           ) : (
             <p className="text-sm text-muted-foreground">Closing this helper…</p>
           )}
@@ -197,8 +204,11 @@ export function InterventionWindowPage() {
     );
   }
 
-  const step = d.currentStepLabel || d.stepLabel;
   const explanation = d.explanation || d.instruction;
+  const doneList =
+    d.completedByAi?.length > 0
+      ? d.completedByAi
+      : ['Website navigation', 'Form detection', 'Content generation', 'Image upload'];
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-muted/40">
@@ -207,61 +217,45 @@ export function InterventionWindowPage() {
           <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             SEO OS
           </p>
-          <h1 className="text-lg font-semibold tracking-tight">AI paused this website.</h1>
+          <h1 className="text-lg font-semibold tracking-tight">
+            {d.title?.replace(/^AI needs your help —\s*/i, '') || d.reason}
+          </h1>
           <p className="text-sm text-muted-foreground">{explanation}</p>
         </div>
 
-        <div className="rounded-xl bg-muted/50 px-3 py-2.5 text-sm space-y-2">
-          <p>
-            <span className="text-muted-foreground">Website · </span>
-            <span className="font-medium">{d.website}</span>
-          </p>
-          <p className="break-all">
-            <span className="text-muted-foreground">Paused URL · </span>
-            <span className="font-medium text-xs">
-              {d.pausedUrl || siteUrl || 'Restoring exact page…'}
-            </span>
-          </p>
-          <p>
-            <span className="text-muted-foreground">Current Step · </span>
-            <span className="font-medium">{step}</span>
-          </p>
-          <p>
-            <span className="text-muted-foreground">Reason · </span>
-            <span className="font-medium text-amber-800 dark:text-amber-200">{d.reason}</span>
+        <div className="space-y-2 text-sm">
+          <div>
+            <p className="text-muted-foreground text-xs">Website</p>
+            <p className="font-medium">{d.website}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground text-xs">Reason</p>
+            <p className="font-medium text-amber-800 dark:text-amber-200">{d.reason}</p>
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <p className="text-sm font-medium">AI has already completed</p>
+          <ul className="space-y-1">
+            {doneList.map((line) => (
+              <li key={line} className="text-sm text-muted-foreground flex gap-2">
+                <span className="text-emerald-600">✓</span>
+                <span>{line}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-sm pt-1">
+            You only need to{' '}
+            {d.gate === 'human_approval'
+              ? 'approve this submission'
+              : 'finish this step on the paused page'}
+            .
           </p>
         </div>
 
-        {d.screenshot?.url ? (
-          <div className="overflow-hidden rounded-xl border border-border/50">
-            <img
-              src={d.screenshot.url}
-              alt="Paused page screenshot"
-              className="w-full max-h-48 object-cover object-top bg-muted"
-            />
-          </div>
-        ) : null}
-
-        {d.domEvidence ? (
-          <div className="space-y-1">
-            <button
-              type="button"
-              className="text-[11px] text-muted-foreground underline"
-              onClick={() => setShowDom((v) => !v)}
-            >
-              {showDom ? 'Hide DOM evidence' : 'Show DOM evidence (debug)'}
-            </button>
-            {showDom ? (
-              <pre className="max-h-28 overflow-auto rounded-lg bg-muted/80 p-2 text-[10px] leading-snug text-muted-foreground">
-                {d.domEvidence}
-              </pre>
-            ) : null}
-          </div>
-        ) : null}
-
         <p className="text-xs text-muted-foreground leading-relaxed">
-          Use the real browser tab that just opened on the paused page — interact normally. SEO OS
-          does not embed Playwright here.
+          Use the browser tab that opened on the exact paused page. AI continues automatically when
+          you are done.
         </p>
 
         <div className="flex flex-col gap-2">
@@ -272,13 +266,13 @@ export function InterventionWindowPage() {
             </Button>
           ) : (
             <p className="text-xs text-amber-800 dark:text-amber-200 text-center">
-              Exact paused URL is not available yet. Wait a moment or reopen from Submit Backlinks.
+              Exact paused URL is not available yet. Wait a moment…
             </p>
           )}
 
           {d.gate === 'human_approval' ? (
             <Button onClick={() => approve.mutate()} disabled={approve.isPending}>
-              {approve.isPending ? 'Approving…' : 'I approved — continue AI'}
+              {approve.isPending ? 'Approving…' : 'Complete Now — Approve'}
             </Button>
           ) : (
             <div className="inline-flex items-center justify-center gap-2 text-xs text-muted-foreground py-2">
@@ -287,6 +281,32 @@ export function InterventionWindowPage() {
             </div>
           )}
         </div>
+
+        <button
+          type="button"
+          className="text-[11px] text-muted-foreground underline"
+          onClick={() => setShowAdvanced((v) => !v)}
+        >
+          {showAdvanced ? 'Hide technical details' : 'Advanced (support)'}
+        </button>
+        {showAdvanced ? (
+          <div className="space-y-2 rounded-xl border border-dashed p-3 text-xs text-muted-foreground">
+            <p className="break-all">Paused URL: {d.pausedUrl || siteUrl || '—'}</p>
+            <p>Step: {d.currentStepLabel || d.stepLabel}</p>
+            {d.screenshot?.url ? (
+              <img
+                src={d.screenshot.url}
+                alt="Paused page"
+                className="w-full max-h-36 object-cover rounded-md border"
+              />
+            ) : null}
+            {d.domEvidence ? (
+              <pre className="max-h-24 overflow-auto rounded bg-muted/80 p-2 text-[10px]">
+                {d.domEvidence}
+              </pre>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </div>
   );
