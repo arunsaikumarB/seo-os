@@ -146,6 +146,14 @@ backlinkBuilderRouter.get(
       const workspaceId = param(req.params.projectId);
       const items = await listCampaignItems(workspaceId, { includeDeleted: true });
       const counts = await getCampaignCounts(workspaceId);
+      const { sweepOrphanAssets } = await import(
+        '../../modules/campaigns/content-generation.service.js'
+      );
+      const orphanSweep = await sweepOrphanAssets(workspaceId).catch(() => ({
+        deleted: 0,
+        remaining: -1,
+        byTable: {} as Record<string, number>,
+      }));
       const gen = await getContentGenerationBoard(workspaceId);
       const { getExecutionAudit } = await import(
         '../../modules/browser-execution/bee-reconcile.service.js'
@@ -169,6 +177,7 @@ backlinkBuilderRouter.get(
           totals: counts,
           generationAudit: gen.generationAudit,
           orphans: gen.orphans,
+          orphanSweep,
           generationProgress: gen.progress,
           executionAudit,
           truthAudit,

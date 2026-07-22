@@ -16,6 +16,7 @@ import { useApi } from '@/hooks/use-api';
 import {
   useInterventions,
   type InterventionItem,
+  type InterventionsPayload,
 } from '@/components/browser/needs-your-action-queue';
 import { useBeeExecutionProgress } from '@/hooks/use-bee-execution-progress';
 import {
@@ -44,6 +45,7 @@ type InterventionDetail = {
   pausedUrl?: string | null;
   currentStepLabel?: string;
   stepLabel?: string;
+  screenshot?: { url?: string | null } | null;
 };
 
 function gateHeadline(item: InterventionItem, detail?: InterventionDetail | null): string {
@@ -67,9 +69,23 @@ const DEFAULT_DONE = [
   'Image upload',
 ];
 
+function lanePayload(data: InterventionsPayload | undefined) {
+  const laneBItems = data?.laneB?.items ?? data?.items?.filter((i) => i.lane !== 'auto') ?? [];
+  const laneAItems = data?.laneA?.items ?? data?.items?.filter((i) => i.lane === 'auto') ?? [];
+  const autoSubmitting = data?.autoSubmitting ?? data?.lanes?.autoSubmitting ?? 0;
+  return {
+    laneAItems,
+    laneBItems,
+    laneACount: data?.laneA?.count ?? laneAItems.length,
+    laneBCount: data?.laneB?.count ?? laneBItems.length,
+    autoSubmitting,
+  };
+}
+
 /**
- * Phase 4.6 — Human Intervention as a task list (one card at a time).
- * Uses existing intervention APIs only — no engine/API/DB changes.
+ * Phase 6.2 — Two-lane submission surface:
+ * Lane A = AI submitting (+ batch publish confirm)
+ * Lane B = genuine human gates only (CAPTCHA / Login / Manual / Unclassified)
  */
 export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
   const { request } = useApi();
@@ -77,7 +93,9 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
   const progress = useBeeExecutionProgress(projectId, 2_000);
   const summary = useExecutionSummary(projectId, 1_500);
   const interventions = useInterventions(projectId, 2_000);
-  const items = interventions.data?.data.items ?? [];
+  const payload = interventions.data?.data;
+  const { laneAItems, laneBItems, laneACount, laneBCount, autoSubmitting } = lanePayload(payload);
+
   const [index, setIndex] = useState(0);
   const [showDetails, setShowDetails] = useState(false);
   const [completeAllRunning, setCompleteAllRunning] = useState(false);
@@ -85,7 +103,8 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
   const [justFinishedAll, setJustFinishedAll] = useState(false);
   const [successFlash, setSuccessFlash] = useState<string | null>(null);
 
-  const needsHelp = items.length;
+  const items = laneBItems;
+  const needsHelp = laneBCount;
   const current = items[Math.min(index, Math.max(0, items.length - 1))] ?? null;
 
   const p = progress.data;
@@ -95,6 +114,8 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
   const remaining = sum?.remaining ?? p?.remainingJobs ?? 0;
   const showProgressStrip =
     needsHelp > 0 ||
+    laneACount > 0 ||
+    autoSubmitting > 0 ||
     Boolean(campaignActive) ||
     submitted > 0 ||
     running > 0 ||
@@ -108,19 +129,19 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
         </p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {(
-              [
-                ['Completed', submitted],
-                ['Running', running],
-                ['Waiting Human', sum?.waitingHuman ?? needsHelp],
-                ['Remaining', remaining],
-              ] as const
-            ).map(([label, value]) => (
+            [
+              ['Completed', submitted],
+              ['Running', running],
+              ['Need you', needsHelp],
+              ['Remaining', remaining],
+            ] as const
+          ).map(([label, value]) => (
             <div key={label}>
               <p className="text-xs text-muted-foreground">{label}</p>
               <p
                 className={cn(
                   'text-xl font-semibold tabular-nums mt-0.5',
-                  label === 'Waiting Human' && value > 0 && 'text-amber-800 dark:text-amber-200'
+                  label === 'Need you' && value > 0 && 'text-amber-800 dark:text-amber-200'
                 )}
               >
                 {value}
@@ -128,6 +149,11 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
             </div>
           ))}
         </div>
+        <p className="text-xs text-muted-foreground mt-3">
+          Lane A: {laneACount + autoSubmitting} submitting automatically
+          {' · '}
+          Lane B: {needsHelp} need you (CAPTCHA / Login / Manual)
+        </p>
         {sum && sum.total > 0 ? (
           <div className="mt-3 space-y-1">
             <p className="text-xs text-muted-foreground tabular-nums">
@@ -175,7 +201,7 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
     qc.invalidateQueries({ queryKey: ['backlink-pending', projectId] });
   };
 
-  const allIds = useMemo(() => items.map((i) => i.jobId), [items]);
+  const laneBIds = useMemo(() => items.map((i) => i.jobId), [items]);
 
   const bulk = useMutation({
     mutationFn: (action: 'skip' | 'delete_forever' | 'retry') =>
@@ -183,7 +209,7 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
         `/v1/projects/${projectId}/browser/interventions/bulk`,
         {
           method: 'POST',
-          body: JSON.stringify({ jobIds: allIds, action }),
+          body: JSON.stringify({ jobIds: laneBIds, action }),
         }
       ),
     onSuccess: (res, action) => {
@@ -194,6 +220,19 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
       };
       toast.success(`${labels[action] ?? action}: ${res.data.ok} site(s)`);
       setIndex(0);
+      invalidate();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const submitLaneA = useMutation({
+    mutationFn: () =>
+      request<{ data: { ok: number; failed: number } }>(
+        `/v1/projects/${projectId}/browser/interventions/approve-lane-a`,
+        { method: 'POST', body: JSON.stringify({}) }
+      ),
+    onSuccess: (res) => {
+      toast.success(`Submitted ${res.data.ok} site(s) — AI continues`);
       invalidate();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -227,12 +266,12 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const runCompleteAll = async () => {
-    if (completeAllRunning || allIds.length === 0) return;
+  const runCompleteAllLaneB = async () => {
+    if (completeAllRunning || laneBIds.length === 0) return;
     setCompleteAllRunning(true);
     setJustFinishedAll(false);
     try {
-      await runCompleteAllSequence(projectId, allIds, ({ index: i, total, phase }) => {
+      await runCompleteAllSequence(projectId, laneBIds, ({ index: i, total, phase }) => {
         if (phase === 'opening' || phase === 'waiting') {
           setCompleteAllStep(`Website ${i + 1} of ${total}`);
         }
@@ -246,7 +285,7 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
           setCompleteAllStep(null);
         }
       });
-      toast.success('All manual tasks completed. AI continues automatically.');
+      toast.success('All Lane B gates cleared. AI continues automatically.');
       invalidate();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Complete All stopped');
@@ -256,57 +295,93 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
     }
   };
 
-  // Empty: progress strip — never claim "no action" while Waiting Human > 0
-  if (needsHelp === 0) {
+  const laneASection =
+    laneACount > 0 || autoSubmitting > 0 ? (
+      <Card className="rounded-2xl border-emerald-500/25 bg-emerald-500/[0.03]">
+        <CardContent className="pt-5 pb-5 space-y-3">
+          <div>
+            <h2 className="text-base font-semibold tracking-tight">Lane A — AI is submitting</h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              {autoSubmitting > 0
+                ? `${autoSubmitting} site${autoSubmitting === 1 ? '' : 's'} in progress automatically.`
+                : null}
+              {laneACount > 0
+                ? ` ${laneACount} ready to publish — one confirmation covers all.`
+                : autoSubmitting > 0
+                  ? ' No human action needed.'
+                  : null}
+            </p>
+          </div>
+          {laneAItems.length > 0 ? (
+            <ul className="text-sm space-y-1 max-h-36 overflow-y-auto">
+              {laneAItems.slice(0, 12).map((i) => (
+                <li key={i.jobId} className="flex justify-between gap-2">
+                  <span className="truncate">{i.website}</span>
+                  <span className="text-muted-foreground shrink-0">Ready to publish</span>
+                </li>
+              ))}
+              {laneAItems.length > 12 ? (
+                <li className="text-muted-foreground">+{laneAItems.length - 12} more</li>
+              ) : null}
+            </ul>
+          ) : null}
+          {laneACount > 0 ? (
+            <Button
+              size="sm"
+              onClick={() => submitLaneA.mutate()}
+              disabled={submitLaneA.isPending}
+            >
+              {submitLaneA.isPending ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                  Submitting…
+                </>
+              ) : (
+                `Submit all ready (${laneACount})`
+              )}
+            </Button>
+          ) : null}
+        </CardContent>
+      </Card>
+    ) : null;
+
+  if (needsHelp === 0 && laneACount === 0 && autoSubmitting === 0) {
     if (justFinishedAll) {
       return (
         <div className="space-y-4">
           {progressStrip}
           <Card className="rounded-2xl border-emerald-500/25 bg-emerald-500/[0.04]">
             <CardContent className="pt-6 pb-6 text-center space-y-2">
-              <p className="text-2xl" aria-hidden>
-                🎉
-              </p>
-              <p className="text-base font-semibold">All manual tasks completed.</p>
+              <p className="text-base font-semibold">All manual gates cleared.</p>
               <p className="text-sm text-muted-foreground">AI continues automatically.</p>
             </CardContent>
           </Card>
         </div>
       );
     }
-    const waitingHuman = sum?.waitingHuman ?? 0;
-    if (waitingHuman > 0) {
-      return (
-        <div className="space-y-4">
-          {progressStrip}
-          <Card className="rounded-2xl border-amber-500/30 bg-amber-500/[0.04]">
-            <CardContent className="pt-5 pb-5 space-y-2">
-              <p className="text-sm font-medium">
-                {waitingHuman} website{waitingHuman === 1 ? '' : 's'} waiting for you
-              </p>
-              <p className="text-sm text-muted-foreground">
-                Tasks are loading. Use View Details below, or refresh in a moment — Open Browser
-                will appear for each site.
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      );
-    }
-    if (showProgressStrip || campaignActive) {
+    if (campaignActive || (sum?.waitingHuman ?? 0) > 0) {
       return (
         <div className="space-y-4">
           {progressStrip}
           <Card className="rounded-2xl border-border/40">
             <CardContent className="pt-5 pb-5">
               <p className="text-sm font-medium">AI is handling all submissions.</p>
-              <p className="text-sm text-muted-foreground mt-1">No action required.</p>
+              <p className="text-sm text-muted-foreground mt-1">No human gates right now.</p>
             </CardContent>
           </Card>
         </div>
       );
     }
-    return null;
+    return progressStrip;
+  }
+
+  if (needsHelp === 0) {
+    return (
+      <div className="space-y-4">
+        {progressStrip}
+        {laneASection}
+      </div>
+    );
   }
 
   const doneList =
@@ -327,6 +402,7 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
       ? waitExplain.title
       : gateHeadline(current, detail)
     : '';
+  const screenshotUrl = detail?.screenshot?.url ?? null;
 
   return (
     <div className="space-y-4">
@@ -339,41 +415,36 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
         </div>
       ) : null}
 
+      {laneASection}
+
       {completeAllRunning ? (
         <div className="rounded-2xl border border-border/40 bg-muted/30 px-4 py-3 text-sm flex items-center gap-2">
           <Loader2 className="h-4 w-4 animate-spin shrink-0" />
           <span>
-            Completing tasks… {completeAllStep ?? ''} Finish each paused site — the next opens
+            Completing Lane B… {completeAllStep ?? ''} Finish each gated site — the next opens
             automatically.
           </span>
         </div>
       ) : null}
 
-      {/* Bulk — only Complete All / Skip All / Delete All / Retry Failed */}
       <div className="flex flex-wrap items-center gap-2">
-        {needsHelp > 1 ? (
-          <p className="text-sm text-muted-foreground mr-auto w-full sm:w-auto">
-            {needsHelp} websites need your help.
-          </p>
-        ) : (
-          <p className="text-sm text-muted-foreground mr-auto w-full sm:w-auto">
-            1 website needs your help.
-          </p>
-        )}
-        <Button size="sm" onClick={() => void runCompleteAll()} disabled={completeAllRunning}>
+        <p className="text-sm text-muted-foreground mr-auto w-full sm:w-auto">
+          Lane B — {needsHelp} need you (CAPTCHA / Login / Manual)
+        </p>
+        <Button size="sm" onClick={() => void runCompleteAllLaneB()} disabled={completeAllRunning}>
           {completeAllRunning ? (
             <>
               <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
               Completing…
             </>
           ) : (
-            'Complete All'
+            'Complete All in Lane B'
           )}
         </Button>
         <Button
           size="sm"
           variant="outline"
-          disabled={bulk.isPending || completeAllRunning}
+          disabled={bulk.isPending || completeAllRunning || laneBIds.length === 0}
           onClick={() => bulk.mutate('skip')}
         >
           <SkipForward className="h-3.5 w-3.5 mr-1" />
@@ -382,7 +453,7 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
         <Button
           size="sm"
           variant="outline"
-          disabled={bulk.isPending || completeAllRunning}
+          disabled={bulk.isPending || completeAllRunning || laneBIds.length === 0}
           onClick={() => {
             if (
               !window.confirm(
@@ -402,25 +473,33 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
           variant="outline"
           disabled={bulk.isPending || completeAllRunning || (p?.failed ?? 0) === 0}
           onClick={() => bulk.mutate('retry')}
-          title="Retry failed intervention jobs in this queue"
+          title="Retry failed intervention jobs in Lane B"
         >
           <RotateCcw className="h-3.5 w-3.5 mr-1" />
           Retry Failed
         </Button>
       </div>
 
-      {/* One intervention card */}
       {current ? (
         <Card className="rounded-2xl border-amber-500/30 bg-amber-500/[0.04]">
           <CardContent className="pt-6 space-y-4">
             <div>
+              <p className="text-xs uppercase tracking-wide text-amber-800/80 dark:text-amber-200/80 mb-1">
+                Lane B · Human gate
+              </p>
               <h2 className="text-lg font-semibold tracking-tight">{headline}</h2>
               <p className="text-sm text-muted-foreground mt-3">
                 <span className="text-foreground/70">Website</span>
               </p>
               <p className="text-base font-medium">{current.website}</p>
               <p className="text-sm text-muted-foreground mt-3">
-                <span className="text-foreground/70">Reason</span>
+                <span className="text-foreground/70">Gate</span>
+              </p>
+              <p className="text-sm mt-0.5 font-medium">
+                {current.truthClaim || waitExplain.title || headline}
+              </p>
+              <p className="text-sm text-muted-foreground mt-3">
+                <span className="text-foreground/70">Evidence</span>
               </p>
               <p className="text-sm mt-0.5">{waitExplain.detail || reason}</p>
               {detail?.pausedUrl || current.pausedUrl ? (
@@ -432,6 +511,15 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
                     {detail?.pausedUrl || current.pausedUrl}
                   </p>
                 </>
+              ) : null}
+              {screenshotUrl ? (
+                <div className="mt-3 rounded-lg overflow-hidden border border-border/40 max-w-md">
+                  <img
+                    src={screenshotUrl}
+                    alt={`Evidence for ${current.website}`}
+                    className="w-full h-auto"
+                  />
+                </div>
               ) : null}
               {(detail?.currentStepLabel || detail?.stepLabel) && (
                 <>
@@ -447,37 +535,24 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
 
             <div className="space-y-1.5">
               <p className="text-sm font-medium">AI has already completed</p>
-              <ul className="space-y-1">
-                {doneList.map((line) => (
-                  <li key={line} className="text-sm text-muted-foreground flex items-start gap-2">
-                    <span className="text-emerald-600 shrink-0">✓</span>
-                    <span>{line}</span>
-                  </li>
+              <ul className="text-sm text-muted-foreground list-disc pl-5 space-y-0.5">
+                {doneList.map((d) => (
+                  <li key={d}>{d}</li>
                 ))}
               </ul>
-              <p className="text-sm pt-2">
-                You only need to{' '}
-                {current.gate === 'human_approval'
-                  ? 'approve this submission'
-                  : current.gate === 'login'
-                    ? 'sign in on the paused page'
-                    : current.gate === 'captcha' || current.gate === 'cloudflare'
-                      ? 'complete the security check'
-                      : 'finish this step on the paused page'}
-                .
-              </p>
             </div>
 
             <div className="flex flex-wrap gap-2 pt-1">
               <Button
-                onClick={() => openInterventionWindow(projectId, current.jobId)}
+                onClick={() =>
+                  openInterventionWindow(projectId, current.jobId)
+                }
                 disabled={completeAllRunning}
               >
                 Complete Now
               </Button>
               <Button
                 variant="outline"
-                size="default"
                 disabled={skipOne.isPending || completeAllRunning}
                 onClick={() => skipOne.mutate(current.jobId)}
               >
@@ -485,7 +560,6 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
               </Button>
               <Button
                 variant="outline"
-                size="default"
                 disabled={deleteOne.isPending || completeAllRunning}
                 onClick={() => {
                   if (
@@ -503,73 +577,43 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
               {items.length > 1 ? (
                 <Button
                   variant="ghost"
-                  size="default"
-                  disabled={completeAllRunning}
+                  size="sm"
                   onClick={() => setIndex((i) => (i + 1) % items.length)}
                 >
-                  Next task
+                  Next ({index + 1}/{items.length})
                 </Button>
               ) : null}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowDetails((v) => !v)}
+              >
+                {showDetails ? (
+                  <>
+                    <ChevronUp className="h-3.5 w-3.5 mr-1" /> Hide details
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="h-3.5 w-3.5 mr-1" /> Details
+                  </>
+                )}
+              </Button>
             </div>
 
-            <button
-              type="button"
-              className="text-xs text-muted-foreground inline-flex items-center gap-1 hover:text-foreground"
-              onClick={() => setShowDetails((v) => !v)}
-            >
-              {showDetails ? (
-                <ChevronUp className="h-3.5 w-3.5" />
-              ) : (
-                <ChevronDown className="h-3.5 w-3.5" />
-              )}
-              View Details
-            </button>
-
             {showDetails ? (
-              <div className="rounded-xl border border-border/50 bg-background/60 px-3 py-3 space-y-2 text-sm">
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                  Timeline
-                </p>
-                <ol className="space-y-1.5 text-sm">
-                  {[
-                    'Imported',
-                    'Reviewed',
-                    'Approved',
-                    'Generated',
-                    'Browser Opened',
-                    'Form Found',
-                    'Upload Complete',
-                    'Waiting Approval',
-                  ].map((step, i, arr) => {
-                    const isCurrent = i === arr.length - 1;
-                    return (
-                      <li
-                        key={step}
-                        className={cn(
-                          'flex items-center gap-2',
-                          isCurrent ? 'font-medium text-amber-900 dark:text-amber-100' : 'text-muted-foreground'
-                        )}
-                      >
-                        <span className={isCurrent ? 'text-amber-600' : 'text-emerald-600'}>
-                          {isCurrent ? '●' : '✓'}
-                        </span>
-                        {step}
-                        {isCurrent ? (
-                          <span className="text-[10px] uppercase tracking-wide text-amber-700 dark:text-amber-300">
-                            Current
-                          </span>
-                        ) : null}
-                      </li>
-                    );
-                  })}
-                </ol>
-                <p className="text-xs text-muted-foreground pt-2">
-                  Step: {detail?.currentStepLabel || detail?.stepLabel || current.detectedStep || '—'}
-                </p>
-                <p className="text-[11px] text-muted-foreground">
-                  Evidence, screenshots, workers, and DOM live in Advanced Tools.
-                </p>
-              </div>
+              <pre className="text-xs bg-muted/40 rounded-lg p-3 overflow-x-auto">
+                {JSON.stringify(
+                  {
+                    gate: current.gate,
+                    truthClaim: current.truthClaim,
+                    evidenceId: current.evidenceId,
+                    matchedSignals: current.matchedSignals,
+                    stage: current.stage,
+                  },
+                  null,
+                  2
+                )}
+              </pre>
             ) : null}
           </CardContent>
         </Card>

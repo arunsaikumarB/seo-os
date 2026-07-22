@@ -10,12 +10,15 @@ type Props = {
 };
 
 /**
- * Compact banner — points users to Complete Now / Complete All (task flow).
+ * Compact banner — Lane B human gates only (Phase 6.2).
  */
 export function InterventionBanner({ projectId, className }: Props) {
   const q = useInterventions(projectId, 2_500);
-  const items = q.data?.data.items ?? [];
-  const count = q.data?.data.count ?? items.length;
+  const items =
+    q.data?.data.laneB?.items ??
+    q.data?.data.items?.filter((i) => i.lane !== 'auto') ??
+    [];
+  const count = q.data?.data.laneB?.count ?? items.length;
 
   if (count === 0) return null;
 
@@ -30,11 +33,11 @@ export function InterventionBanner({ projectId, className }: Props) {
       <div className="flex items-start gap-2 min-w-0">
         <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
         <div className="min-w-0">
-          <p className="font-medium text-sm">Needs Your Help</p>
+          <p className="font-medium text-sm">Lane B — Needs you</p>
           <p className="text-sm text-muted-foreground">
             {count === 1
-              ? '1 website needs a quick human step — AI keeps submitting the rest.'
-              : `${count} websites need your help — complete them one by one.`}
+              ? '1 site needs a CAPTCHA / Login / Manual step — AI keeps submitting the rest.'
+              : `${count} sites need you (CAPTCHA / Login / Manual) — Complete All in Lane B.`}
           </p>
         </div>
       </div>
@@ -49,7 +52,7 @@ export function InterventionBanner({ projectId, className }: Props) {
           );
         }}
       >
-        {items.length === 1 ? 'Complete Now' : 'Complete All'}
+        {items.length === 1 ? 'Complete Now' : 'Complete All in Lane B'}
       </Button>
     </div>
   );

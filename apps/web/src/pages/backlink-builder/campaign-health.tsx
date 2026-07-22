@@ -45,6 +45,7 @@ type HealthData = {
     schema: AssetAudit;
   };
   orphans?: { count: number; items: Array<{ table: string; id: string; opportunityId: string | null }> };
+  orphanSweep?: { deleted: number; remaining: number; byTable: Record<string, number> };
   generationProgress?: Record<string, number | boolean>;
   executionAudit?: {
     workers: { healthy: number; idle: number; running: number; stuck: number };
@@ -307,6 +308,9 @@ export function CampaignHealthPage() {
           </table>
           <p>
             Orphan assets: {orphans?.count ?? 0}
+            {data.orphanSweep
+              ? ` · swept ${data.orphanSweep.deleted} (remaining ${data.orphanSweep.remaining})`
+              : ''}
             {orphans && orphans.count > 0
               ? ` · ${orphans.items
                   .slice(0, 5)

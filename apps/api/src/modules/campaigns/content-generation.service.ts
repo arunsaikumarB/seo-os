@@ -391,6 +391,95 @@ async function findOrphanAssets(workspaceId: string, items: CampaignItemRow[]) {
   return { count: orphans.length, items: orphans.slice(0, 50) };
 }
 
+/**
+ * Phase 6.2 cleanup — delete content_packs / media_asset_briefs / image_assets
+ * whose Campaign Item is Deleted or absent. Returns remaining orphan count (must be 0).
+ */
+export async function sweepOrphanAssets(workspaceId: string): Promise<{
+  deleted: number;
+  remaining: number;
+  byTable: Record<string, number>;
+}> {
+  // Active items only — assets for Deleted/absent owners are orphans
+  const items = await listCampaignItems(workspaceId, { includeDeleted: false });
+  const byTable: Record<string, number> = {};
+  let deleted = 0;
+
+  // Active items only — assets for Deleted/absent owners are orphans
+  const activeIds = new Set(items.map((i) => i.id));
+  const { data: allPacks } = await getSupabaseAdmin()
+    .from('content_packs')
+    .select('id, opportunity_id')
+    .eq('workspace_id', workspaceId)
+    .limit(5000);
+  const packDelete = (allPacks ?? [])
+    .filter((p) => {
+      const oid = p.opportunity_id != null ? String(p.opportunity_id) : null;
+      return !oid || !activeIds.has(oid);
+    })
+    .map((p) => String(p.id));
+  const { data: allBriefs } = await getSupabaseAdmin()
+    .from('media_asset_briefs')
+    .select('id, opportunity_id')
+    .eq('workspace_id', workspaceId)
+    .limit(5000);
+  const briefDelete = (allBriefs ?? [])
+    .filter((b) => {
+      const oid = b.opportunity_id != null ? String(b.opportunity_id) : null;
+      return !oid || !activeIds.has(oid);
+    })
+    .map((b) => String(b.id));
+  const { data: allImages } = await getSupabaseAdmin()
+    .from('image_assets')
+    .select('id, opportunity_id')
+    .eq('workspace_id', workspaceId)
+    .not('opportunity_id', 'is', null)
+    .limit(5000);
+  const imageDelete = (allImages ?? [])
+    .filter((img) => {
+      const oid = img.opportunity_id != null ? String(img.opportunity_id) : null;
+      return oid != null && !activeIds.has(oid);
+    })
+    .map((img) => String(img.id));
+
+  if (packDelete.length) {
+    const { error } = await getSupabaseAdmin()
+      .from('content_packs')
+      .delete()
+      .eq('workspace_id', workspaceId)
+      .in('id', packDelete);
+    if (!error) {
+      deleted += packDelete.length;
+      byTable.content_packs = packDelete.length;
+    }
+  }
+  if (briefDelete.length) {
+    const { error } = await getSupabaseAdmin()
+      .from('media_asset_briefs')
+      .delete()
+      .eq('workspace_id', workspaceId)
+      .in('id', briefDelete);
+    if (!error) {
+      deleted += briefDelete.length;
+      byTable.media_asset_briefs = briefDelete.length;
+    }
+  }
+  if (imageDelete.length) {
+    const { error } = await getSupabaseAdmin()
+      .from('image_assets')
+      .delete()
+      .eq('workspace_id', workspaceId)
+      .in('id', imageDelete);
+    if (!error) {
+      deleted += imageDelete.length;
+      byTable.image_assets = imageDelete.length;
+    }
+  }
+
+  const remaining = (await findOrphanAssets(workspaceId, items)).count;
+  return { deleted, remaining, byTable };
+}
+
 export async function enqueueContentGeneration(
   workspaceId: string,
   opts: {

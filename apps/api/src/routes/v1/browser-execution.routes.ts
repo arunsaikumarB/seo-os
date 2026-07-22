@@ -55,6 +55,7 @@ import {
   getIntervention,
   getInterventionFrame,
   listInterventions,
+  approveLaneABatch,
 } from '../../modules/browser-execution/bee-intervention.service.js';
 
 function param(value: string | string[]): string {
@@ -401,6 +402,27 @@ browserExecutionRouter.get(
     try {
       requireBee();
       res.json({ data: await listInterventions(param(req.params.projectId)) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/** Phase 6.2 §4(a) — one-click batch publish confirm for Lane A (auto) only. */
+browserExecutionRouter.post(
+  '/browser/interventions/approve-lane-a',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      requireBee();
+      const body = z
+        .object({ jobIds: z.array(z.string().uuid()).optional() })
+        .parse(req.body ?? {});
+      const userId = (req as AuthenticatedRequest).auth.userId;
+      res.json({
+        data: await approveLaneABatch(param(req.params.projectId), userId, body.jobIds),
+      });
     } catch (err) {
       next(err);
     }

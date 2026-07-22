@@ -8,6 +8,7 @@ import {
   interventionCopyForPauseReason,
   toPublicExecutionStatus,
   workflowStepLabel,
+  submissionLaneForIntervention,
   type ExecutionGate,
 } from '@seo-os/backlink-builder';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
@@ -370,6 +371,14 @@ export async function listInterventions(workspaceId: string) {
       unclassified: isUnclassified,
       verified: Boolean(evidenceId) && !isUnclassified,
       missingEvidence,
+      truthClaim: jobRec.truth_claim != null ? String(jobRec.truth_claim) : null,
+      lane: submissionLaneForIntervention({
+        gate: isUnclassified ? 'unclassified' : gate,
+        pauseReason: j.pause_reason != null ? String(j.pause_reason) : null,
+        truthClaim: jobRec.truth_claim != null ? String(jobRec.truth_claim) : null,
+        unclassified: isUnclassified,
+        status,
+      }),
     };
     if (isUnclassified) unclassifiedGroup.push(row);
     else verified.push(row);
@@ -396,6 +405,27 @@ export async function listInterventions(workspaceId: string) {
   const verifiedDeduped = dedupeByOpp(verified);
   const unclassifiedDeduped = dedupeByOpp(unclassifiedGroup);
   const items = [...verifiedDeduped, ...unclassifiedDeduped];
+
+  // Phase 6.2 — split Auto (publish batch) vs Human-gate lanes
+  const laneA = items.filter((r) => r.lane === 'auto');
+  const laneB = items.filter((r) => r.lane !== 'auto');
+
+  // Actively auto-submitting (not paused) — for Lane A progress strip
+  let autoSubmitting = 0;
+  const seenAuto = new Set<string>();
+  for (const j of jobs) {
+    const pub = toPublicExecutionStatus(String(j.status), {
+      disposition:
+        (j as { disposition?: string }).disposition ??
+        ((j.metrics as { disposition?: string } | null)?.disposition ?? null),
+    });
+    if (pub !== 'Running' && pub !== 'Starting' && pub !== 'Queued') continue;
+    const oid = j.opportunity_id != null ? String(j.opportunity_id) : `job:${j.id}`;
+    if (seenAuto.has(oid)) continue;
+    seenAuto.add(oid);
+    autoSubmitting++;
+  }
+
   return {
     count: items.length,
     verifiedCount: verifiedDeduped.length,
@@ -403,7 +433,52 @@ export async function listInterventions(workspaceId: string) {
     items,
     verified: verifiedDeduped,
     unclassified: unclassifiedDeduped,
+    /** @deprecated use laneB — kept for older clients */
+    needsYouCount: laneB.length,
+    laneA: {
+      count: laneA.length,
+      items: laneA,
+      label: 'AI is submitting',
+    },
+    laneB: {
+      count: laneB.length,
+      items: laneB,
+      label: 'Needs you',
+    },
+    autoSubmitting,
+    lanes: {
+      laneA: laneA.length,
+      laneB: laneB.length,
+      autoSubmitting,
+    },
   };
+}
+
+/** Phase 6.2 §4(a) — batch approve Lane A publish-ready jobs (one click). */
+export async function approveLaneABatch(
+  workspaceId: string,
+  userId?: string,
+  jobIds?: string[]
+): Promise<{ ok: number; failed: number; jobIds: string[] }> {
+  const { approveJob } = await import('./bee.service.js');
+  const listed = await listInterventions(workspaceId);
+  const targets = (listed.laneA.items as Array<{ jobId: string }>).filter((i) =>
+    jobIds?.length ? jobIds.includes(i.jobId) : true
+  );
+  let ok = 0;
+  let failed = 0;
+  const done: string[] = [];
+  for (const item of targets) {
+    try {
+      await approveJob(workspaceId, item.jobId, userId);
+      ok++;
+      done.push(item.jobId);
+    } catch (err) {
+      logger.warn({ err, jobId: item.jobId }, 'Lane A batch approve failed');
+      failed++;
+    }
+  }
+  return { ok, failed, jobIds: done };
 }
 
 export async function getIntervention(workspaceId: string, jobId: string) {

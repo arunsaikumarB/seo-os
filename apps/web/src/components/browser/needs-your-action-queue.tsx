@@ -27,6 +27,19 @@ export type InterventionItem = {
   stage?: string | null;
   unclassified?: boolean;
   verified?: boolean;
+  /** Phase 6.2 */
+  lane?: 'auto' | 'human_gate';
+  truthClaim?: string | null;
+};
+
+export type InterventionsPayload = {
+  count: number;
+  items: InterventionItem[];
+  laneA?: { count: number; items: InterventionItem[]; label?: string };
+  laneB?: { count: number; items: InterventionItem[]; label?: string };
+  autoSubmitting?: number;
+  lanes?: { laneA: number; laneB: number; autoSubmitting: number };
+  needsYouCount?: number;
 };
 
 export function useInterventions(projectId: string, refetchInterval = 2_000) {
@@ -34,7 +47,7 @@ export function useInterventions(projectId: string, refetchInterval = 2_000) {
   return useQuery({
     queryKey: ['bee-interventions', projectId],
     queryFn: () =>
-      request<{ data: { count: number; items: InterventionItem[] } }>(
+      request<{ data: InterventionsPayload }>(
         `/v1/projects/${projectId}/browser/interventions`
       ),
     enabled: !!projectId,
@@ -48,59 +61,42 @@ export function useInterventions(projectId: string, refetchInterval = 2_000) {
 export function NeedsYourActionQueue({
   projectId,
   activeJobId,
-  className,
 }: {
   projectId: string;
   activeJobId?: string | null;
-  compact?: boolean;
-  className?: string;
 }) {
-  const q = useInterventions(projectId);
-  const items = q.data?.data.items ?? [];
-  if (items.length === 0) return null;
-  return (
-    <div className={className ?? 'rounded-xl border border-dashed p-3 text-sm space-y-2'}>
-      <p className="text-xs text-muted-foreground font-medium">Advanced · waiting jobs</p>
-      {items.map((item) => (
-        <button
-          key={item.jobId}
-          type="button"
-          className={`flex w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-left hover:bg-muted/40 ${
-            activeJobId === item.jobId ? 'ring-1 ring-amber-500' : ''
-          }`}
-          onClick={() => openInterventionWindow(projectId, item.jobId)}
-        >
-          <span className="truncate font-medium">{item.website}</span>
-          <span className="text-xs text-amber-700 shrink-0">{item.reason}</span>
-        </button>
-      ))}
-      <p className="text-[11px] text-muted-foreground">
-        Prefer the compact banner — or{' '}
-        <Link className="underline" to={`/projects/${projectId}/backlink-builder/execution`}>
-          return to Submit Backlinks
-        </Link>
-        .
-      </p>
-    </div>
-  );
-}
+  const interventions = useInterventions(projectId, 3_000);
+  const items =
+    interventions.data?.data.laneB?.items ??
+    interventions.data?.data.items?.filter((i) => i.lane !== 'auto') ??
+    interventions.data?.data.items ??
+    [];
 
-/** @deprecated Use InterventionBanner + openInterventionWindow */
-export function ActionRequiredCard({
-  projectId,
-  item,
-}: {
-  projectId: string;
-  item: InterventionItem;
-}) {
+  if (!items.length) return null;
+
   return (
-    <button
-      type="button"
-      className="w-full rounded-xl border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-left text-sm"
-      onClick={() => openInterventionWindow(projectId, item.jobId)}
-    >
-      <p className="font-medium">{item.website}</p>
-      <p className="text-amber-800 dark:text-amber-200 text-xs mt-0.5">{item.reason}</p>
-    </button>
+    <div className="space-y-2 text-sm">
+      <p className="font-medium">{items.length} need you (Lane B)</p>
+      <ul className="space-y-1">
+        {items.slice(0, 8).map((i) => (
+          <li key={i.jobId}>
+            <button
+              type="button"
+              className="text-left underline-offset-2 hover:underline"
+              onClick={() => openInterventionWindow(projectId, i.jobId)}
+            >
+              {i.website} — {i.truthClaim || i.gate}
+            </button>
+            {activeJobId === i.jobId ? ' (open)' : ''}
+          </li>
+        ))}
+      </ul>
+      <Link
+        to={`/projects/${projectId}/backlink-builder/execution`}
+        className="text-xs text-muted-foreground underline"
+      >
+        Open Submit Backlinks
+      </Link>
+    </div>
   );
 }
