@@ -238,7 +238,7 @@ async function pauseForGate(params: {
 
   const { data: jobRow } = await getSupabaseAdmin()
     .from('execution_jobs')
-    .select('opportunity_id, lease_generation, lease_holder')
+    .select('opportunity_id, lease_generation, lease_holder, metrics, site_domain')
     .eq('id', jobId)
     .maybeSingle();
   const opportunityId = jobRow?.opportunity_id ? String(jobRow.opportunity_id) : null;
@@ -246,6 +246,8 @@ async function pauseForGate(params: {
     params.leaseGeneration ??
     (jobRow?.lease_generation != null ? Number(jobRow.lease_generation) : null);
   const workerId = params.workerId ?? (jobRow?.lease_holder != null ? String(jobRow.lease_holder) : null);
+  const expectedInterventions = ((jobRow?.metrics as { expectedInterventions?: string[] } | null)
+    ?.expectedInterventions ?? []) as string[];
 
   const htmlForDetect = liveHtml ?? '';
   const truth = evaluateDetectors(
@@ -502,6 +504,13 @@ async function pauseForGate(params: {
     truthClaim: claim,
     unclassified,
     verifiedIntervention: verified && !unclassified,
+    expectedIntervention: expectedInterventions.some((e) => {
+      const el = e.toLowerCase();
+      return (
+        el.includes(String(gate).toLowerCase()) ||
+        String(claim).toLowerCase().includes(el.replace(/\s+required$/i, ''))
+      );
+    }),
     pauseContext: {
       ...(params.context ?? {}),
       url: pausedUrl,
@@ -514,13 +523,20 @@ async function pauseForGate(params: {
       pageTitle,
       evidenceId: evidenceRec!.id,
       claim,
+      expected: expectedInterventions.some((e) =>
+        e.toLowerCase().includes(String(gate).toLowerCase())
+      ),
     },
   });
   await appendTimelineEvent({
     workspaceId,
     jobId,
     opportunityId,
-    event: unclassified ? 'Unclassified Gate' : 'Verified Intervention',
+    event: unclassified
+      ? 'Unclassified Gate'
+      : expectedInterventions.some((e) => e.toLowerCase().includes(String(gate).toLowerCase()))
+        ? 'Expected Intervention'
+        : 'Verified Intervention',
     stage: stepAction,
     workerId,
     payload: { claim, gate, evidenceId: evidenceRec!.id },
@@ -1111,6 +1127,22 @@ async function runBeeExecutionJobInner(
             return;
           }
           await updateJob(jobId, { status: 'submitted' });
+          try {
+            const { writeLearningOutcome } = await import('./site-intelligence.service.js');
+            const m = (job.metrics as {
+              siteStrategy?: string;
+              siteIntelligenceEntryUrl?: string;
+            } | null) ?? {};
+            await writeLearningOutcome({
+              workspaceId,
+              domainOrUrl: String(job.site_domain ?? ''),
+              strategy: m.siteStrategy || 'Direct Submission Form',
+              entryUrl: m.siteIntelligenceEntryUrl ?? null,
+              success: true,
+            });
+          } catch {
+            /* SIE learning optional */
+          }
           if (job.opportunity_id) {
             await getSupabaseAdmin()
               .from('opportunities')

@@ -330,11 +330,18 @@ export async function listInterventions(workspaceId: string) {
         : missingEvidence
           ? copy.reason || 'This site is waiting for you. Open the browser to continue.'
           : (jobRec.truth_claim != null ? String(jobRec.truth_claim) : copy.reason),
-      title: isUnclassified
-        ? 'Unclassified — needs diagnosis'
-        : missingEvidence
-          ? copy.title || 'Action required'
-          : copy.title,
+      title: (() => {
+        const expected = Boolean(
+          (m as { expectedIntervention?: boolean }).expectedIntervention ||
+            ((m as { expectedInterventions?: string[] }).expectedInterventions ?? []).length
+        );
+        if (isUnclassified) return 'Unclassified — needs diagnosis';
+        if (missingEvidence) return copy.title || 'Action required';
+        if (expected && (gate === 'login' || gate === 'signup')) {
+          return `${copy.title} (expected)`;
+        }
+        return copy.title;
+      })(),
       instruction: isUnclassified
         ? 'The system could not determine what is blocking this. Review the evidence and diagnose.'
         : missingEvidence

@@ -155,6 +155,15 @@ backlinkBuilderRouter.get(
         '../../modules/browser-execution/bee-evidence.service.js'
       );
       const truthAudit = await getTruthAudit(workspaceId);
+      const { getSiteProfileAudit } = await import(
+        '../../modules/browser-execution/site-intelligence.service.js'
+      );
+      let siteIntelligenceAudit = null;
+      try {
+        siteIntelligenceAudit = await getSiteProfileAudit(workspaceId);
+      } catch {
+        siteIntelligenceAudit = { total: 0, error: 'unavailable' };
+      }
       res.json({
         data: {
           totals: counts,
@@ -163,6 +172,7 @@ backlinkBuilderRouter.get(
           generationProgress: gen.progress,
           executionAudit,
           truthAudit,
+          siteIntelligenceAudit,
           items: items.map((i) => ({
             website: i.websiteUrl ?? i.domain ?? i.id,
             imported: true,

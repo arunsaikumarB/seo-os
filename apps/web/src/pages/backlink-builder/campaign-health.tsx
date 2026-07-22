@@ -70,6 +70,22 @@ type HealthData = {
     rejectedWrites: Array<{ kind: string; source: string; created_at?: string }>;
     invariants: { missingEvidenceZero: boolean; phantomStatesZero: boolean };
   };
+  siteIntelligenceAudit?: {
+    total: number;
+    byStatus?: Record<string, number>;
+    byStrategy?: Record<string, number>;
+    avgPagesFetched?: number;
+    avgElapsedMs?: number;
+    profiles?: Array<{
+      domain: string;
+      status: string;
+      platform: string | null;
+      strategy: string | null;
+      entryUrl: string | null;
+      expectedInterventions: string[];
+    }>;
+    error?: string;
+  };
   items: HealthRow[];
 };
 
@@ -223,6 +239,57 @@ export function CampaignHealthPage() {
               .map((v) => `${v.kind}@${v.source}`)
               .join(' · ') || 'none'}
           </p>
+        </div>
+      ) : null}
+
+      {data?.siteIntelligenceAudit ? (
+        <div className="border p-2 space-y-2">
+          <p className="font-semibold">Site Intelligence (Phase 5)</p>
+          {'error' in data.siteIntelligenceAudit && data.siteIntelligenceAudit.error ? (
+            <p>unavailable — apply migration 092</p>
+          ) : (
+            <>
+              <p>
+                Profiles {data.siteIntelligenceAudit.total} · avg pages{' '}
+                {data.siteIntelligenceAudit.avgPagesFetched ?? 0} · avg ms{' '}
+                {data.siteIntelligenceAudit.avgElapsedMs ?? 0}
+              </p>
+              <p>
+                Status:{' '}
+                {Object.entries(data.siteIntelligenceAudit.byStatus ?? {})
+                  .map(([k, v]) => `${k}=${v}`)
+                  .join(' · ') || 'none'}
+              </p>
+              <p>
+                Strategy:{' '}
+                {Object.entries(data.siteIntelligenceAudit.byStrategy ?? {})
+                  .map(([k, v]) => `${k}=${v}`)
+                  .join(' · ') || 'none'}
+              </p>
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left py-1">Domain</th>
+                    <th className="text-left py-1">Status</th>
+                    <th className="text-left py-1">Platform</th>
+                    <th className="text-left py-1">Strategy</th>
+                    <th className="text-left py-1">Entry</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(data.siteIntelligenceAudit.profiles ?? []).slice(0, 40).map((p) => (
+                    <tr key={p.domain} className="border-b">
+                      <td className="py-1">{p.domain}</td>
+                      <td className="py-1">{p.status}</td>
+                      <td className="py-1">{p.platform ?? '—'}</td>
+                      <td className="py-1">{p.strategy ?? '—'}</td>
+                      <td className="py-1 max-w-[220px] truncate">{p.entryUrl ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
         </div>
       ) : null}
 

@@ -544,6 +544,109 @@ export async function startJob(workspaceId: string, jobId: string, userId?: stri
   const job = await getJob(workspaceId, jobId);
   if (!job) throw Object.assign(new Error('Job not found'), { status: 404 });
 
+  // Phase 5 — Site Intelligence gate: no execution until profile complete with entry_url
+  try {
+    const {
+      ensureSiteIntelligence,
+      getSiteProfileByDomain,
+      isProfileExecutionReady,
+    } = await import('./site-intelligence.service.js');
+    const domain = String(job.site_domain ?? '');
+    if (domain && domain !== 'unknown') {
+      const ensured = await ensureSiteIntelligence({
+        workspaceId,
+        domainOrUrl: domain,
+        opportunityId: job.opportunity_id ? String(job.opportunity_id) : null,
+      });
+      const profile =
+        ensured.profile ?? (await getSiteProfileByDomain(workspaceId, domain));
+      if (profile?.profile_status === 'unsupported') {
+        throw Object.assign(
+          new Error('Site unsupported for submission — no evidence-backed path'),
+          { status: 400, code: 'SITE_UNSUPPORTED' }
+        );
+      }
+      if (profile?.profile_status === 'failed') {
+        throw Object.assign(new Error('Site unprofilable — profiling failed'), {
+          status: 400,
+          code: 'SITE_UNPROFILABLE',
+        });
+      }
+      if (!isProfileExecutionReady(profile)) {
+        const metrics = {
+          ...((job.metrics as Record<string, unknown>) ?? {}),
+          waitingForSiteProfile: true,
+          siteProfileId: profile?.id ?? null,
+        };
+        await getSupabaseAdmin()
+          .from('execution_jobs')
+          .update({
+            status: 'queued',
+            metrics,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', jobId)
+          .eq('workspace_id', workspaceId);
+        await appendLog(workspaceId, jobId, 'info', 'Queued — AI is analyzing website…', {
+          domain,
+          profileStatus: profile?.profile_status ?? 'pending',
+        });
+        return getJob(workspaceId, jobId);
+      }
+
+      // Apply entry_url so execution never starts at homepage guessing
+      const entryUrl = String(
+        (profile!.strategy as { entryUrl?: string } | null)?.entryUrl ?? ''
+      );
+      const expected =
+        ((profile!.strategy as { expectedInterventions?: string[] } | null)
+          ?.expectedInterventions as string[]) ?? [];
+      if (entryUrl) {
+        await getSupabaseAdmin()
+          .from('execution_steps')
+          .update({
+            detail: { url: entryUrl, fromSiteIntelligence: true },
+            updated_at: new Date().toISOString(),
+          })
+          .eq('job_id', jobId)
+          .in('action', ['open', 'navigate']);
+        await getSupabaseAdmin()
+          .from('execution_jobs')
+          .update({
+            metrics: {
+              ...((job.metrics as Record<string, unknown>) ?? {}),
+              waitingForSiteProfile: false,
+              siteProfileId: profile!.id,
+              siteIntelligenceEntryUrl: entryUrl,
+              expectedInterventions: expected,
+              siteStrategy: (profile!.strategy as { chosen?: string } | null)?.chosen ?? null,
+            },
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', jobId);
+      }
+    }
+  } catch (sieErr) {
+    const msg = sieErr instanceof Error ? sieErr.message : String(sieErr);
+    // Missing table before migration — do not hard-break deploys; log and continue
+    if (/site_profiles|schema cache|does not exist/i.test(msg)) {
+      await appendLog(workspaceId, jobId, 'warn', 'SIE unavailable — continuing without profile gate', {
+        error: msg,
+      });
+    } else if (
+      sieErr &&
+      typeof sieErr === 'object' &&
+      'code' in sieErr &&
+      ['SITE_UNSUPPORTED', 'SITE_UNPROFILABLE'].includes(String((sieErr as { code: string }).code))
+    ) {
+      throw sieErr;
+    } else if (sieErr && typeof sieErr === 'object' && 'status' in sieErr) {
+      throw sieErr;
+    } else {
+      await appendLog(workspaceId, jobId, 'warn', 'SIE gate error — continuing', { error: msg });
+    }
+  }
+
   // Browser runtime guard — never start without healthy Chromium
   const {
     ensureBrowserRuntimeReady,

@@ -27,6 +27,24 @@ export async function handlePlaywrightJobs(
       continue;
     }
 
+    if (type === 'bee_profile') {
+      try {
+        const { runSiteProfileJob } = await import(
+          '../../modules/browser-execution/site-intelligence.service.js'
+        );
+        await runSiteProfileJob({
+          workspaceId: String(job.data.workspaceId ?? ''),
+          profileId: String(job.data.profileId ?? ''),
+          profileJobId: String(job.data.profileJobId ?? ''),
+          domain: String(job.data.domain ?? ''),
+        });
+      } catch (err) {
+        logger.error({ jobId: job.id, err }, 'SIE profile job failed');
+        throw err;
+      }
+      continue;
+    }
+
     // V1.1 compatibility layer — delegates pause semantics; new runs should use bee_execute
     if (type === 'browser_assist_fill') {
       const planId = String(job.data.planId ?? '');
