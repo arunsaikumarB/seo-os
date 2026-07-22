@@ -1080,13 +1080,36 @@ async function runBeeExecutionJobInner(
           await storeScreenshot(workspaceId, jobId, step.id, 'preview', cap.screenshotBase64);
           await updateJob(jobId, { status: 'ready_for_review' });
         } else if (action === 'submit') {
-          // Phase 6.3 — zero-click auto-publish when campaign toggle is ON
+          // Phase 6.3 / 6.3.1 — zero-click auto-publish only for clean Automable (never Manual)
           let autoPublish = Boolean(job.approved_at) || job.mode === 'automatic_eligible';
           if (!autoPublish) {
             try {
               const { getOrCreatePolicy } = await import('./bee.service.js');
               const policy = await getOrCreatePolicy(workspaceId);
-              if (policy.auto_publish_automatable === true) {
+              let isManualLane = false;
+              if (job.opportunity_id) {
+                const { data: oppRow } = await getSupabaseAdmin()
+                  .from('opportunities')
+                  .select('metadata')
+                  .eq('id', job.opportunity_id)
+                  .eq('workspace_id', workspaceId)
+                  .maybeSingle();
+                const m = (oppRow?.metadata as Record<string, unknown> | null) ?? {};
+                const { readLaneMeta, inferManualReasonFromEvidence } = await import(
+                  '@seo-os/backlink-builder'
+                );
+                isManualLane =
+                  readLaneMeta(m).submissionLane === 'manual' ||
+                  Boolean(
+                    inferManualReasonFromEvidence({
+                      metadata: m,
+                      pauseReason: job.pause_reason != null ? String(job.pause_reason) : null,
+                      truthClaim: job.truth_claim != null ? String(job.truth_claim) : null,
+                      unclassified: job.unclassified === true,
+                    })
+                  );
+              }
+              if (policy.auto_publish_automatable === true && !isManualLane) {
                 autoPublish = true;
                 await updateJob(jobId, {
                   approved_at: new Date().toISOString(),

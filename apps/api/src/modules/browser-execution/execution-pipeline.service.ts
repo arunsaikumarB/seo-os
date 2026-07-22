@@ -528,14 +528,33 @@ export async function ensureExecutionJobsForReady(params: {
     const domain = String(item.domain ?? 'unknown');
     const website = String(item.website_name || item.domain || item.id);
     try {
-      // Phase 6.3 — Manual lane never enters auto execution
+      // Phase 6.3.1 — Manual lane (stamped or inferred from existing gates) never auto-executes
       const meta = (item.metadata as Record<string, unknown> | null) ?? {};
-      if (meta.submissionLane === 'manual') {
+      const { inferManualReasonFromEvidence, readLaneMeta } = await import(
+        '@seo-os/backlink-builder'
+      );
+      const laneMeta = readLaneMeta(meta);
+      const inferredManual =
+        laneMeta.submissionLane === 'manual'
+          ? String(laneMeta.manualReason ?? 'Manual')
+          : inferManualReasonFromEvidence({
+              currentStatus: item.campaign_lifecycle != null ? String(item.campaign_lifecycle) : null,
+              metadata: meta,
+              strategyChosen:
+                meta.workflowQueue != null
+                  ? String(meta.workflowQueue)
+                  : (meta.siteIntelligence as { strategy?: string } | null)?.strategy ?? null,
+              requiresHuman:
+                (meta.siteIntelligence as { requiresHuman?: boolean } | null)?.requiresHuman ===
+                  true || meta.requiresHuman === true,
+            });
+      if (inferredManual) {
         summary.skippedTerminal++;
         await writeOppPipelineMeta(params.workspaceId, item.id, {
           whyNoJob: 'Manual — user handling offline',
-          verifiedBlocker: String(meta.manualReason ?? 'Manual'),
+          verifiedBlocker: String(inferredManual),
           submissionLane: 'manual',
+          manualReason: String(inferredManual),
         });
         continue;
       }

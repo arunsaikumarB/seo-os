@@ -41,7 +41,12 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
     queryFn: () =>
       request<{
         data: {
-          counts: { automatable: number; manual: number };
+          counts: {
+            automatable: number;
+            manual: number;
+            active?: number;
+            confidence?: string;
+          };
           items: Array<{
             id: string;
             website: string;
@@ -176,6 +181,9 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
           {autoCount != null ? (
             <p className="text-xs text-muted-foreground">
               Automatable {autoCount} · Manual {manualCount}
+              {manualBoard.data?.data.counts.active != null
+                ? ` · Active ${manualBoard.data.data.counts.active}`
+                : ''}
               {autoPublish
                 ? ' · Auto-publish ON (zero clicks)'
                 : ' · Auto-publish OFF'}

@@ -972,12 +972,19 @@ export async function exportBacklinkOpsWorkbook(
   };
 }
 
-/** Phase 6.3 — Manual submissions Excel (offline hand-submit list). */
+/** Phase 6.3.1 — Manual submissions Excel (evidence-aware after backfill). */
 export async function exportManualLinksWorkbook(
   workspaceId: string,
   format: 'xlsx' | 'csv' | 'pdf' = 'xlsx'
 ) {
-  const { readLaneMeta } = await import('@seo-os/backlink-builder');
+  const { resolveItemLane } = await import('@seo-os/backlink-builder');
+  const {
+    backfillManualLanes,
+    loadLaneEvidenceForWorkspace,
+  } = await import('../browser-execution/manual-lane-backfill.service.js');
+  await backfillManualLanes(workspaceId);
+  const evidence = await loadLaneEvidenceForWorkspace(workspaceId);
+
   const { data: opps } = await getSupabaseAdmin()
     .from('opportunities')
     .select(
@@ -986,6 +993,7 @@ export async function exportManualLinksWorkbook(
     .eq('workspace_id', workspaceId)
     .neq('campaign_lifecycle', 'Deleted')
     .limit(2000);
+  const oppById = new Map((opps ?? []).map((o) => [String(o.id), o]));
 
   const header = [
     'Website',
@@ -996,24 +1004,27 @@ export async function exportManualLinksWorkbook(
     'Backlink Type',
     'Notes',
     'Anchor / Content Ref',
+    'Confidence',
   ];
   const rows: string[][] = [header];
-  for (const o of opps ?? []) {
-    const meta = (o.metadata as Record<string, unknown> | null) ?? {};
-    const lane = readLaneMeta(meta);
-    if (lane.submissionLane !== 'manual') continue;
+  for (const row of evidence) {
+    const resolved = resolveItemLane(row);
+    if (!resolved.inActiveCohort || resolved.lane !== 'manual') continue;
+    const o = oppById.get(row.id);
+    const meta = (row.metadata as Record<string, unknown> | null) ?? {};
     const enrichment = (meta.importEnrichment as Record<string, unknown> | null) ?? {};
     const classification = (meta.classification as Record<string, unknown> | null) ?? {};
     const sie = (meta.siteIntelligence as Record<string, unknown> | null) ?? {};
     rows.push([
-      String(o.website_name ?? o.title ?? o.domain ?? ''),
-      String(lane.manualReason ?? 'Manual'),
-      String(meta.divertedUrl ?? o.url ?? ''),
+      String(o?.website_name ?? o?.title ?? row.domain ?? ''),
+      String(resolved.reason ?? 'Manual'),
+      String(meta.divertedUrl ?? o?.url ?? row.websiteUrl ?? ''),
       String(sie.platform ?? meta.cms ?? classification.displayName ?? ''),
       String(sie.strategy ?? meta.workflowQueue ?? ''),
-      String(o.opportunity_type ?? classification.id ?? ''),
-      String(o.last_error ?? enrichment.notes ?? ''),
+      String(o?.opportunity_type ?? classification.id ?? ''),
+      String(o?.last_error ?? enrichment.notes ?? ''),
       String(enrichment.anchorText ?? enrichment.description ?? enrichment.targetPage ?? ''),
+      resolved.confidence,
     ]);
   }
 
