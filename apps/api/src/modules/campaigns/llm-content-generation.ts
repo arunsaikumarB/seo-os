@@ -1,5 +1,6 @@
 /**
- * Phase 5.6 — Real LLM content pack generation (no silent template path).
+ * Phase 5.6/5.8 — Real LLM content pack generation with provider selection + failover.
+ * Templates are ONLY used when GENERATION_MOCK=true.
  */
 import {
   generateContentPack,
@@ -9,11 +10,10 @@ import {
   type BrandContext,
   type OpportunityAiContext,
 } from '@seo-os/backlink-builder';
-import { getAIRuntime } from '../ai/runtime.js';
-import { recordProviderInvocation } from '../providers/pif.service.js';
+import { completeLlmWithFailover } from '../providers/llm-failover.service.js';
 import { logger } from '../../lib/logger.js';
 
-const MAX_ATTEMPTS = 3;
+const MAX_PARSE_ATTEMPTS = 2;
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -89,12 +89,14 @@ function scoreLivePack(pack: Record<string, unknown>, brandName: string): Record
   const base = scoreContentPackQuality(pack);
   const blob = JSON.stringify(pack);
   const brandHits = blob.split(brandName).length - 1;
-  // Vary score by real content signals — forbid identical constants across a batch
   const words = String(pack.body ?? '')
     .split(/\s+/)
     .filter(Boolean).length;
   const variance = (words % 17) + brandHits * 3 + (String(pack.seoTitle ?? '').length % 7);
-  let overall = Math.min(96, Math.max(55, base.overall + Math.min(12, brandHits * 2) + (variance % 9) - 4));
+  let overall = Math.min(
+    96,
+    Math.max(55, base.overall + Math.min(12, brandHits * 2) + (variance % 9) - 4)
+  );
   if (brandHits < 1) overall = Math.min(overall, 68);
   return {
     ...base,
@@ -110,8 +112,7 @@ function scoreLivePack(pack: Record<string, unknown>, brandName: string): Record
 }
 
 /**
- * Generate a content pack via the default LLM provider (same router as chat/planner).
- * Templates are ONLY used when GENERATION_MOCK=true.
+ * Generate a content pack via selected/failover LLM providers.
  */
 export async function generateLiveContentPack(params: {
   workspaceId: string;
@@ -149,29 +150,26 @@ export async function generateLiveContentPack(params: {
     reason: params.reason,
   });
 
+  const messages = [
+    {
+      role: 'system',
+      content:
+        'You write original SEO submission copy. Respond with JSON only. Never use template placeholders.',
+    },
+    { role: 'user', content: prompt },
+  ];
+
   let lastErr: Error | null = null;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const t0 = Date.now();
+  let lastChain = '';
+
+  for (let attempt = 1; attempt <= MAX_PARSE_ATTEMPTS; attempt++) {
     try {
-      const rt = getAIRuntime();
-      const result = await rt.providers.getAIProviderRouter().completeWithFailover(
-        [
-          {
-            role: 'system',
-            content:
-              'You write original SEO submission copy. Respond with JSON only. Never use template placeholders.',
-          },
-          { role: 'user', content: prompt },
-        ],
-        { temperature: 0.7, maxTokens: 4096 }
-      );
-      const latencyMs = Date.now() - t0;
-      await recordProviderInvocation({
+      const result = await completeLlmWithFailover({
         workspaceId: params.workspaceId,
-        providerKey: 'llm.gemini',
-        success: true,
-        latencyMs,
-      }).catch(() => undefined);
+        messages,
+        options: { temperature: 0.7, maxTokens: 4096 },
+      });
+      lastChain = result.chainSummary;
 
       const llm = parseJsonObject(result.text);
       const domain = params.brand.projectDomain || 'unknown';
@@ -222,7 +220,9 @@ export async function generateLiveContentPack(params: {
           video: 'n/a',
         },
         generatedBy: 'llm',
-        provider: result.provider ?? 'llm.gemini',
+        provider: result.provider,
+        providerChain: result.chainSummary,
+        failoverUsed: result.failoverUsed,
       };
 
       const scan = scanPackForPlaceholders(pack);
@@ -233,36 +233,40 @@ export async function generateLiveContentPack(params: {
       }
 
       pack.quality = scoreLivePack(pack, brandName);
-      // Interim Phase 5.6: never auto-complete on stub-like constant — force human review band
-      // by clearing overall when we want Needs Review. Keep varied score for display when > 90
-      // path is undesired for first live batch — use Needs Review via null overall when score < 91
-      // Actually: keep varied scores; if all pass tripwire, finalizeQuality can Needs Review for 70-90.
       return pack;
     } catch (err) {
       lastErr = err instanceof Error ? err : new Error(String(err));
-      const latencyMs = Date.now() - t0;
-      await recordProviderInvocation({
-        workspaceId: params.workspaceId,
-        providerKey: 'llm.gemini',
-        success: false,
-        latencyMs,
-      }).catch(() => undefined);
+      const chain =
+        (err as { chainSummary?: string })?.chainSummary ||
+        lastChain ||
+        '';
+      if (chain) lastChain = chain;
       logger.warn(
-        { attempt, err: lastErr.message, opportunity: params.opp.domain },
+        {
+          attempt,
+          err: lastErr.message,
+          chain: lastChain || undefined,
+          opportunity: params.opp.domain,
+        },
         'LLM content generation attempt failed'
       );
-      if (attempt < MAX_ATTEMPTS) {
-        await sleep(Math.min(8000, 1000 * 2 ** (attempt - 1)));
-      }
+      // Provider failover already exhausted inside completeLlmWithFailover —
+      // only re-try for parse/placeholder issues on a successful provider hop.
+      const isProviderExhausted =
+        lastErr.message.includes('LLM failover exhausted') ||
+        (lastErr as { code?: string }).code === 'LLM_FAILOVER_EXHAUSTED';
+      if (isProviderExhausted || attempt >= MAX_PARSE_ATTEMPTS) break;
+      await sleep(800);
     }
   }
 
+  const chainSuffix = lastChain ? ` [${lastChain}]` : '';
   throw Object.assign(
     new Error(
       lastErr?.message
-        ? `LLM content generation failed: ${lastErr.message}`
-        : 'LLM content generation failed'
+        ? `LLM content generation failed: ${lastErr.message}${chainSuffix}`
+        : `LLM content generation failed${chainSuffix}`
     ),
-    { code: 'LLM_GENERATION_FAILED' }
+    { code: 'LLM_GENERATION_FAILED', chainSummary: lastChain }
   );
 }

@@ -4,6 +4,10 @@ export interface AICompleteResult {
   text: string;
   usage: { inputTokens: number; outputTokens: number };
   provider: string;
+  /** Set when a later provider in the chain produced the result. */
+  failoverUsed?: boolean;
+  attempted?: string[];
+  chainSummary?: string;
 }
 
 export interface AIProviderRouterOptions {

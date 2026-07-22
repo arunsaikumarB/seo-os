@@ -68,21 +68,36 @@ export async function listProviders(workspaceId: string, type?: string) {
   const orgId = await resolveOrgId(workspaceId);
   const { data: configs } = await getSupabaseAdmin()
     .from('provider_configs')
-    .select('provider_key, enabled, priority, fallback_provider_key')
+    .select('provider_key, enabled, priority, fallback_provider_key, settings')
     .eq('org_id', orgId)
     .is('deleted_at', null);
 
   const configMap = new Map((configs ?? []).map((c) => [c.provider_key, c]));
+  const preferredByType = new Map<string, string>();
+  for (const c of configs ?? []) {
+    const key = String(c.provider_key);
+    const type = key.split('.')[0] ?? '';
+    const rowSettings = (c.settings ?? {}) as Record<string, unknown>;
+    if (Number(c.priority) === 1 || rowSettings.is_preferred) {
+      preferredByType.set(type, key);
+    }
+  }
+
   return catalog
     .filter((p) => flagForType(p.type))
     .map((p) => {
       const cfg = configMap.get(p.key);
+      const isPreferred =
+        preferredByType.get(p.type) === p.key ||
+        (!preferredByType.has(p.type) && p.isDefault);
       return {
         ...p,
         enabled: cfg?.enabled ?? p.enabled,
         priority: cfg?.priority ?? p.priority,
         fallbackProviderKey: cfg?.fallback_provider_key ?? null,
         featureEnabled: flagForType(p.type),
+        isPreferred,
+        isDefault: isPreferred,
       };
     });
 }
@@ -255,6 +270,67 @@ export async function setProviderEnabled(
   userId?: string
 ) {
   return configureProvider({ workspaceId, providerKey, enabled, userId });
+}
+
+/**
+ * Phase 5.8 — Persist preferred provider for its type (Select in Providers UI).
+ * Takes effect on the next LLM call (no API restart).
+ */
+export async function selectPreferredProvider(params: {
+  workspaceId: string;
+  providerKey: string;
+  userId?: string;
+}) {
+  const orgId = await resolveOrgId(params.workspaceId);
+  const manager = getProviderManager();
+  const provider = manager.get(params.providerKey);
+
+  // Demote siblings that were preferred
+  const { data: siblings } = await getSupabaseAdmin()
+    .from('provider_configs')
+    .select('id, provider_key, settings, priority, enabled')
+    .eq('org_id', orgId)
+    .like('provider_key', `${provider.type}.%`)
+    .is('deleted_at', null);
+
+  for (const row of siblings ?? []) {
+    if (String(row.provider_key) === params.providerKey) continue;
+    const settings = {
+      ...((row.settings as Record<string, unknown> | null) ?? {}),
+      is_preferred: false,
+    };
+    const nextPriority = Number(row.priority) === 1 ? 100 : Number(row.priority ?? 100);
+    await getSupabaseAdmin()
+      .from('provider_configs')
+      .update({
+        priority: nextPriority,
+        settings,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', row.id);
+  }
+
+  const selected = await configureProvider({
+    workspaceId: params.workspaceId,
+    providerKey: params.providerKey,
+    enabled: true,
+    priority: 1,
+    settings: { is_preferred: true },
+    userId: params.userId,
+  });
+
+  manager.setPreferred(provider.type, params.providerKey);
+
+  await audit({
+    orgId,
+    workspaceId: params.workspaceId,
+    providerKey: params.providerKey,
+    action: 'select',
+    message: `Selected ${params.providerKey} as default ${provider.type} provider`,
+    userId: params.userId,
+  });
+
+  return selected;
 }
 
 export async function connectProvider(params: {
@@ -452,12 +528,13 @@ async function recordUsage(
   }
 }
 
-/** Phase 5.6 — content generation records LLM/image calls on the same metrics path as Test. */
+/** Phase 5.6/5.8 — content generation records LLM/image calls on the same metrics path as Test. */
 export async function recordProviderInvocation(params: {
   workspaceId: string;
   providerKey: string;
   success: boolean;
   latencyMs: number;
+  failoverEvents?: number;
 }) {
   const orgId = await resolveOrgId(params.workspaceId);
   await recordUsage(
@@ -465,8 +542,29 @@ export async function recordProviderInvocation(params: {
     params.workspaceId,
     params.providerKey,
     params.success,
-    params.latencyMs
+    params.latencyMs,
+    params.failoverEvents ?? 0
   );
+}
+
+/** Record an automatic failover hop for the Failovers metric + audit trail. */
+export async function recordProviderFailoverHop(params: {
+  workspaceId: string;
+  fromProviderKey: string;
+  toProviderKey: string;
+  reason?: string;
+}) {
+  const orgId = await resolveOrgId(params.workspaceId);
+  await getSupabaseAdmin().from('provider_failover').insert({
+    id: randomUUID(),
+    org_id: orgId,
+    workspace_id: params.workspaceId,
+    from_provider_key: params.fromProviderKey,
+    to_provider_key: params.toProviderKey,
+    reason: params.reason ?? 'auto_failover',
+    success: true,
+    notified: false,
+  });
 }
 
 export async function listProviderLogs(workspaceId: string) {

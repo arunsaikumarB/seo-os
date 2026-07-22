@@ -14,6 +14,7 @@ import {
   listProviderTypes,
   listProviders,
   setProviderEnabled,
+  selectPreferredProvider,
   testProvider,
   triggerFailover,
   configureProvider,
@@ -181,6 +182,27 @@ providerFrameworkRouter.post(
       const { userId } = (req as AuthenticatedRequest).auth;
       res.json({
         data: await testProvider(param(req.params.projectId), body.providerKey, userId),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+providerFrameworkRouter.post(
+  '/providers/select',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const body = z.object({ providerKey: z.string().min(1) }).parse(req.body);
+      const { userId } = (req as AuthenticatedRequest).auth;
+      res.json({
+        data: await selectPreferredProvider({
+          workspaceId: param(req.params.projectId),
+          providerKey: body.providerKey,
+          userId,
+        }),
       });
     } catch (err) {
       next(err);

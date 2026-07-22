@@ -119,6 +119,21 @@ export class ProviderManager {
     return fallback;
   }
 
+  /** Persist preferred provider for a type (in-process; DB write is caller's job). */
+  setPreferred(type: FrameworkProviderType, key: string): void {
+    if (!this.providers.has(key)) throw new Error(`Unknown provider: ${key}`);
+    const p = this.providers.get(key)!;
+    if (p.type !== type) {
+      throw new Error(`Provider ${key} is type ${p.type}, not ${type}`);
+    }
+    this.preferred[type] = key;
+    this.enable(key);
+  }
+
+  getPreferredKey(type: FrameworkProviderType): string {
+    return this.preferred[type] ?? DEFAULTS[type];
+  }
+
   list(type?: FrameworkProviderType): FrameworkProviderDescriptor[] {
     return [...this.providers.values()]
       .filter((p) => !type || p.type === type)

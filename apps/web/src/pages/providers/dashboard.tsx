@@ -25,6 +25,7 @@ type ProviderRow = {
   type: string;
   enabled: boolean;
   isDefault: boolean;
+  isPreferred?: boolean;
   isEstimated: boolean;
   costTier: string;
   capabilities: string[];
@@ -158,6 +159,20 @@ export function ProviderDashboardPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const selectPreferred = useMutation({
+    mutationFn: (providerKey: string) =>
+      request(`/v1/projects/${projectId}/providers/select`, {
+        method: 'POST',
+        body: JSON.stringify({ providerKey }),
+      }),
+    onSuccess: (_data, providerKey) => {
+      setSelectedKey(providerKey);
+      toast.success(`Selected ${providerKey} as default`);
+      invalidate();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const refreshWorkers = useMutation({
     mutationFn: () =>
       request(`/v1/projects/${projectId}/providers/workers/refresh`, { method: 'POST' }),
@@ -268,7 +283,9 @@ export function ProviderDashboardPage() {
                   <div>
                     <p className="text-sm font-medium">
                       {p.displayName}{' '}
-                      {p.isDefault && <Badge className="text-[10px] ml-1">default</Badge>}
+                      {(p.isPreferred || p.isDefault) && (
+                        <Badge className="text-[10px] ml-1">selected</Badge>
+                      )}
                       {p.isEstimated && <Badge className="text-[10px] ml-1">estimated</Badge>}
                     </p>
                     <p className="text-xs text-muted-foreground">
@@ -295,8 +312,13 @@ export function ProviderDashboardPage() {
                       </Button>
                     )}
                     {tab === 'configure' && (
-                      <Button size="sm" variant="ghost" onClick={() => setSelectedKey(p.key)}>
-                        Select
+                      <Button
+                        size="sm"
+                        variant={p.isPreferred ? 'default' : 'ghost'}
+                        disabled={selectPreferred.isPending}
+                        onClick={() => selectPreferred.mutate(p.key)}
+                      >
+                        {p.isPreferred ? 'Selected' : 'Select'}
                       </Button>
                     )}
                   </div>
