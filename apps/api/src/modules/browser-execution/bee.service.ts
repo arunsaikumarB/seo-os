@@ -687,6 +687,7 @@ export async function startJob(workspaceId: string, jobId: string, userId?: stri
               fromSiteIntelligence: true,
               wordpressPayloadHints: payloadHints,
               directoryPayloadHints: payloadHints,
+              contactFormPayloadHints: payloadHints,
             },
             updated_at: new Date().toISOString(),
           })
@@ -708,8 +709,12 @@ export async function startJob(workspaceId: string, jobId: string, userId?: stri
               directoryStrategy:
                 (profile!.strategy as { directoryStrategy?: string } | null)
                   ?.directoryStrategy ?? null,
+              contactFormStrategy:
+                (profile!.strategy as { contactFormStrategy?: string } | null)
+                  ?.contactFormStrategy ?? null,
               wordpressPayloadHints: payloadHints,
               directoryPayloadHints: payloadHints,
+              contactFormPayloadHints: payloadHints,
             },
             updated_at: new Date().toISOString(),
           })

@@ -98,6 +98,17 @@ type HealthData = {
       unsupported: number;
       successRate: number | null;
     };
+    contactFormHealth?: {
+      detected: number;
+      supported: number;
+      unsupported: number;
+      successful: number;
+      failed: number;
+      captcha: number;
+      manualReview: number;
+      averageCompletionTimeMs: number | null;
+      successRate: number | null;
+    };
     profiles?: Array<{
       domain: string;
       status: string;
@@ -316,6 +327,23 @@ export function CampaignHealthPage() {
                     {data.siteIntelligenceAudit.directoryHealth.contactForm} · Unsupported{' '}
                     {data.siteIntelligenceAudit.directoryHealth.unsupported} · Success Rate{' '}
                     {data.siteIntelligenceAudit.directoryHealth.successRate ?? '—'}
+                  </p>
+                </div>
+              ) : null}
+              {data.siteIntelligenceAudit.contactFormHealth ? (
+                <div className="border border-dashed p-2 space-y-1">
+                  <p className="font-semibold">Contact Form Health (Capability 3)</p>
+                  <p>
+                    Detected {data.siteIntelligenceAudit.contactFormHealth.detected} · Supported{' '}
+                    {data.siteIntelligenceAudit.contactFormHealth.supported} · Unsupported{' '}
+                    {data.siteIntelligenceAudit.contactFormHealth.unsupported} · Successful{' '}
+                    {data.siteIntelligenceAudit.contactFormHealth.successful} · Failed{' '}
+                    {data.siteIntelligenceAudit.contactFormHealth.failed} · CAPTCHA{' '}
+                    {data.siteIntelligenceAudit.contactFormHealth.captcha} · Manual Review{' '}
+                    {data.siteIntelligenceAudit.contactFormHealth.manualReview} · Avg Time{' '}
+                    {data.siteIntelligenceAudit.contactFormHealth.averageCompletionTimeMs ?? '—'}
+                    ms · Success Rate{' '}
+                    {data.siteIntelligenceAudit.contactFormHealth.successRate ?? '—'}
                   </p>
                 </div>
               ) : null}

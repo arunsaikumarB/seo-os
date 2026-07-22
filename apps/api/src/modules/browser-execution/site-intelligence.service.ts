@@ -14,6 +14,7 @@ import {
   recordStrategyOutcome,
   summarizeWordPressHealth,
   summarizeDirectoryHealth,
+  summarizeContactFormHealth,
   SIE_CRAWL_DEFAULTS,
   type SiteIntelligenceResult,
   type SiteLearning,
@@ -274,15 +275,19 @@ export async function saveIntelligenceResult(
 
   const row = data as SiteProfileRow;
 
-  // Seed WordPress + Directory learning from fingerprint (additive)
+  // Seed WordPress + Directory + Contact Form learning (additive)
   const wp = result.wordpress ?? (result.fingerprint as { wordpress?: unknown }).wordpress;
   const dir =
     result.directory ?? (result.fingerprint as { directory?: unknown }).directory;
-  if (wp || dir) {
+  const cf =
+    result.contactForm ?? (result.fingerprint as { contactForm?: unknown }).contactForm;
+  if (wp || dir || cf) {
     const {
       recordWordPressLearning,
       recordDirectoryLearning,
       emptyDirectoryLearning,
+      recordContactFormLearning,
+      emptyContactFormLearning,
     } = await import('@seo-os/backlink-builder');
     let nextLearning: SiteLearning = {
       ...((learning as SiteLearning) ?? emptyLearning()),
@@ -346,6 +351,40 @@ export async function saveIntelligenceResult(
         ),
       };
     }
+    if (cf) {
+      const c = cf as {
+        platform?: string | null;
+        entryUrl?: string | null;
+        fieldMap?: { requiredFields?: string[] } | null;
+        attachments?: { accepted?: boolean } | null;
+        validation?: { requiredFields?: string[]; acceptedFormats?: string[] } | null;
+        successIndicators?: { patterns?: string[] } | null;
+        antiSpam?: { requiresHuman?: boolean } | null;
+      };
+      const validationRules = [
+        ...(c.validation?.requiredFields ?? []).map((f) => `required:${f}`),
+        ...(c.validation?.acceptedFormats ?? []).map((f) => `accept:${f}`),
+        c.antiSpam?.requiresHuman ? 'captcha' : null,
+      ].filter(Boolean) as string[];
+      nextLearning = {
+        ...nextLearning,
+        contactForm: recordContactFormLearning(
+          nextLearning.contactForm ?? emptyContactFormLearning(),
+          {
+            platform: c.platform ?? null,
+            successfulStrategy:
+              (result.strategy as { contactFormStrategy?: string }).contactFormStrategy ??
+              result.strategy.chosen,
+            requiredFields: c.fieldMap?.requiredFields ?? [],
+            attachmentSupport: c.attachments?.accepted ?? null,
+            validationRules,
+            submissionUrl: c.entryUrl ?? null,
+            knownSuccessIndicators: c.successIndicators?.patterns ?? [],
+            knownSelectors: c.platform ? [c.platform] : [],
+          }
+        ),
+      };
+    }
     await admin()
       .from('site_profiles')
       .update({
@@ -371,6 +410,8 @@ export async function saveIntelligenceResult(
       needsReview?: boolean;
       paidListing?: boolean;
       categorySuggestion?: unknown;
+      contactFormOutreach?: boolean;
+      messageTemplate?: { subject?: string; bodyOutline?: string } | null;
     } }).payloadHints;
     if (hints?.moveToOutreach || result.strategy.chosen === 'Email Outreach') {
       try {
@@ -395,6 +436,39 @@ export async function saveIntelligenceResult(
               outreach_email: hints?.emailAddress ?? result.guidelines?.emailAddress ?? null,
               outreach_subject: hints?.emailSubject ?? 'Guest post submission',
               skip_browser_automation: true,
+            },
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', oppId)
+          .eq('workspace_id', workspaceId);
+      } catch {
+        /* optional */
+      }
+    }
+
+    // Capability 3 Step 13 — editorial/general contact → Outreach (still browser-submits form)
+    if (hints?.contactFormOutreach) {
+      try {
+        const { data: opp } = await admin()
+          .from('opportunities')
+          .select('id, metadata')
+          .eq('id', oppId)
+          .maybeSingle();
+        const meta = (opp?.metadata as Record<string, unknown> | null) ?? {};
+        await admin()
+          .from('opportunities')
+          .update({
+            pipeline_stage: 'outreach',
+            metadata: {
+              ...meta,
+              contact_form_outreach: true,
+              contact_form_strategy:
+                (result.strategy as { contactFormStrategy?: string }).contactFormStrategy ??
+                null,
+              outreach_subject: hints.messageTemplate?.subject ?? 'Introduction',
+              outreach_message_outline: hints.messageTemplate?.bodyOutline ?? null,
+              // Browser still populates + submits the form — do not skip automation
+              skip_browser_automation: false,
             },
             updated_at: new Date().toISOString(),
           })
@@ -554,6 +628,20 @@ export async function getSiteProfileAudit(workspaceId: string) {
         learning: p.learning as SiteLearning,
       }))
     ),
+    contactFormHealth: summarizeContactFormHealth(
+      profiles.map((p) => ({
+        fingerprint: p.fingerprint as {
+          contactForm?: import('@seo-os/backlink-builder').ContactFormKnowledge;
+        },
+        strategy: p.strategy as {
+          contactFormStrategy?: string;
+          chosen?: string;
+          expectedInterventions?: string[];
+          payloadHints?: { needsReview?: boolean };
+        },
+        learning: p.learning as SiteLearning,
+      }))
+    ),
     profiles: profiles.map((p) => ({
       domain: p.domain,
       status: p.profile_status,
@@ -563,15 +651,21 @@ export async function getSiteProfileAudit(workspaceId: string) {
         (p.strategy as { wordpressStrategy?: string } | null)?.wordpressStrategy ?? null,
       directoryStrategy:
         (p.strategy as { directoryStrategy?: string } | null)?.directoryStrategy ?? null,
+      contactFormStrategy:
+        (p.strategy as { contactFormStrategy?: string } | null)?.contactFormStrategy ?? null,
       workflow:
         (p.fingerprint as { wordpress?: { workflow?: string } })?.wordpress?.workflow ??
         (p.fingerprint as { directory?: { workflow?: string } })?.directory?.workflow ??
+        (p.fingerprint as { contactForm?: { workflow?: string } })?.contactForm?.workflow ??
         null,
       theme: (p.fingerprint as { wordpress?: { theme?: string } })?.wordpress?.theme ?? null,
       plugins:
         (p.fingerprint as { wordpress?: { plugins?: string[] } })?.wordpress?.plugins ?? [],
       directoryPlatform:
         (p.fingerprint as { directory?: { platform?: string } })?.directory?.platform ?? null,
+      contactFormPlatform:
+        (p.fingerprint as { contactForm?: { platform?: string } })?.contactForm?.platform ??
+        null,
       entryUrl: (p.strategy as { entryUrl?: string } | null)?.entryUrl ?? null,
       expectedInterventions:
         (p.strategy as { expectedInterventions?: string[] } | null)?.expectedInterventions ??

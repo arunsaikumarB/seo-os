@@ -32,6 +32,8 @@ export type SiteFingerprint = {
   wordpress?: Record<string, unknown>;
   /** Capability 2 — DirectoryKnowledge when enrichment ran */
   directory?: Record<string, unknown>;
+  /** Capability 3 — ContactFormKnowledge when enrichment ran */
+  contactForm?: Record<string, unknown>;
 };
 
 type FpInput = {

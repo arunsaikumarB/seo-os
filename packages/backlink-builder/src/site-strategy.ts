@@ -33,6 +33,8 @@ export type StrategyPlan = {
   wordpressStrategy?: string;
   /** Capability 2 */
   directoryStrategy?: string;
+  /** Capability 3 */
+  contactFormStrategy?: string;
   payloadHints?: {
     fields?: string[];
     skip?: string[];
@@ -44,6 +46,15 @@ export type StrategyPlan = {
     categorySuggestion?: unknown;
     fieldMap?: unknown;
     approval?: unknown;
+    contactFormPlatform?: string;
+    contactFormIntent?: string;
+    messageTemplate?: unknown;
+    attachments?: unknown;
+    validation?: unknown;
+    successIndicators?: unknown;
+    antiSpam?: unknown;
+    contactFormOutreach?: boolean;
+    neverAutoSolveCaptcha?: boolean;
   };
 };
 

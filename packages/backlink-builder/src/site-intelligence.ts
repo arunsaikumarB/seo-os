@@ -27,6 +27,12 @@ import {
   type DirectoryKnowledge,
   type DirectoryLearning,
 } from './directory-intelligence.js';
+import {
+  enrichWithContactFormIntelligence,
+  emptyContactFormLearning,
+  type ContactFormKnowledge,
+  type ContactFormLearning,
+} from './contact-form-intelligence.js';
 
 export type SiteProfileStatus =
   | 'pending'
@@ -53,6 +59,8 @@ export type SiteLearning = {
   wordpress?: WordPressLearning;
   /** Capability 2 */
   directory?: DirectoryLearning;
+  /** Capability 3 */
+  contactForm?: ContactFormLearning;
 };
 
 export type FetchedPage = {
@@ -84,6 +92,8 @@ export type SiteIntelligenceResult = {
   wordpress?: WordPressKnowledge | null;
   /** Capability 2 — null when not a directory */
   directory?: DirectoryKnowledge | null;
+  /** Capability 3 — null when no contact form */
+  contactForm?: ContactFormKnowledge | null;
 };
 
 export function emptyLearning(): SiteLearning {
@@ -96,6 +106,7 @@ export function emptyLearning(): SiteLearning {
     lastFailureAt: null,
     wordpress: emptyWordPressLearning(),
     directory: emptyDirectoryLearning(),
+    contactForm: emptyContactFormLearning(),
   };
 }
 
@@ -257,14 +268,44 @@ export function analyzeFetchedSite(params: {
     allowAlongsideWordPress: false,
   });
 
-  const enriched = {
+  // Capability 3 — Contact Form Intelligence (additive; does not modify WP/Directory)
+  const wpOwnsStrongPath = Boolean(
+    wpEnriched.wordpress?.workflow &&
+      ['guest_post', 'comment', 'dashboard', 'registration', 'email'].includes(
+        wpEnriched.wordpress.workflow
+      )
+  );
+  const dirOwnsPath = Boolean(
+    dirEnriched.directory?.detected &&
+      dirEnriched.strategy.directoryStrategy &&
+      dirEnriched.strategy.directoryStrategy !== 'Unsupported'
+  );
+  // Soft-attach when WP/Directory already chose a stronger path; still deepen CF7 contact
+  const softAttachContact =
+    (wpOwnsStrongPath || dirOwnsPath) &&
+    !(
+      dirEnriched.strategy.chosen === 'Contact Form' ||
+      wpEnriched.wordpress?.workflow === 'contact_form'
+    );
+
+  const cfEnriched = enrichWithContactFormIntelligence({
     fingerprint: dirEnriched.fingerprint,
     pageClassifications: dirEnriched.pageClassifications,
-    // Soft-attach keeps WP strategy; full enrich replaces with directory strategy
     strategy: dirEnriched.strategy,
+    pages: params.pages,
+    homepageUrl: params.homepageUrl,
+    businessText: params.businessText ?? null,
+    softAttachOnly: softAttachContact,
+  });
+
+  const enriched = {
+    fingerprint: cfEnriched.fingerprint,
+    pageClassifications: cfEnriched.pageClassifications,
+    strategy: cfEnriched.strategy,
     guidelines: wpEnriched.guidelines,
     wordpress: wpEnriched.wordpress,
     directory: dirEnriched.directory,
+    contactForm: cfEnriched.contactForm,
   };
 
   let finalStatus = profileStatus;
@@ -274,6 +315,10 @@ export function analyzeFetchedSite(params: {
   }
   if (enriched.strategy.payloadHints?.needsReview && enriched.strategy.payloadHints?.paidListing) {
     // Paid directory profile is complete but execution blocked pending review
+    finalStatus = 'complete';
+  }
+  // Media / general contact form outreach is a completed profile (browser may still submit)
+  if (enriched.strategy.payloadHints?.contactFormOutreach) {
     finalStatus = 'complete';
   }
 
@@ -295,6 +340,7 @@ export function analyzeFetchedSite(params: {
     },
     wordpress: enriched.wordpress,
     directory: enriched.directory,
+    contactForm: enriched.contactForm,
   };
 }
 
