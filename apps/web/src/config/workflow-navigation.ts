@@ -111,7 +111,7 @@ export const workflowNavSections: WorkflowNavSection[] = [
   },
   {
     id: 'advanced',
-    label: 'Advanced',
+    label: 'Advanced Tools',
     advanced: true,
     items: [
       { label: 'Campaigns', href: 'campaigns', icon: Target, featureFlag: 'backlink_builder' },

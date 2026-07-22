@@ -410,9 +410,7 @@ export function ClassificationDashboardPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
-              {visibleItems.length === 0 ? (
-                <p className="text-sm text-muted-foreground py-4">No items in this view.</p>
-              ) : (
+              {visibleItems.length === 0 ? null : (
                 visibleItems.map((item) => (
                   <ReviewRow
                     key={item.id}

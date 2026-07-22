@@ -1,22 +1,23 @@
-import { Link } from 'react-router-dom';
-import { ArrowRight, Clock, Sparkles } from 'lucide-react';
+import { Link, useLocation } from 'react-router-dom';
+import { ArrowRight, Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useWorkflow } from '@/hooks/use-workflow';
-import { formatEta } from '@/lib/bee-execution-ui';
+import { useCampaignAiStatus } from '@/hooks/use-campaign-ai-status';
 
 interface NextActionPanelProps {
   projectId: string;
-  title?: string;
   className?: string;
 }
 
 /**
- * Single Next Action card. Human interventions are handled by InterventionBanner
- * + auto-opened browser windows — not duplicated here.
+ * Exactly ONE primary action card (Phase 3.6).
+ * Pure function of workflow + CSM generation status — no per-page duplicate Continues.
+ * Hidden on Generate Content page (that page owns States A/B/C primary action).
  */
-export function NextActionPanel({ projectId, title = 'Next Action', className }: NextActionPanelProps) {
+export function NextActionPanel({ projectId, className }: NextActionPanelProps) {
+  const location = useLocation();
   const {
     currentStep,
     nextUnlockedStep,
@@ -25,14 +26,28 @@ export function NextActionPanel({ projectId, title = 'Next Action', className }:
     allComplete,
     jobsOpen,
     needsHumanAction,
-    bee,
-    etaLabel,
+    activeStep,
   } = useWorkflow(projectId);
+  const { generateState, exceptionCount, progress, genActive } = useCampaignAiStatus(projectId);
+
+  const onGeneratePage = location.pathname.includes('/content/library');
+  if (onGeneratePage) return null;
 
   // Banner + auto window own the human-action state
   if (needsHumanAction) return null;
 
-  if (jobsOpen && bee) {
+  // Run in progress — Continue hidden; AI Status block owns the fold
+  if (jobsOpen || genActive) {
+    return null;
+  }
+
+  // User is on the step that needs work — that page owns the one primary CTA
+  if (activeStep && activeStep.id === nextUnlockedStep.id) {
+    return null;
+  }
+
+  // Exceptions need attention before continuing
+  if (exceptionCount > 0 && generateState === 'complete') {
     return (
       <motion.div
         initial={{ opacity: 0, y: 8 }}
@@ -41,26 +56,15 @@ export function NextActionPanel({ projectId, title = 'Next Action', className }:
       >
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">AI is working</CardTitle>
+            <CardTitle className="text-base">Current: Generate Content</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
-            <p className="text-muted-foreground">No action required.</p>
             <p className="text-muted-foreground">
-              {bee.completedJobs}/{bee.totalJobs} finished
-              {bee.etaSeconds > 0 ? ` · Estimated completion ${formatEta(bee.etaSeconds)}` : ''}
+              AI finished generating. {exceptionCount} package
+              {exceptionCount === 1 ? '' : 's'} need your review before continuing.
             </p>
-            <div className="h-2 rounded-full bg-muted overflow-hidden">
-              <motion.div
-                className="h-full bg-primary"
-                initial={{ width: 0 }}
-                animate={{ width: `${Math.min(100, bee.progressPercent)}%` }}
-              />
-            </div>
-            <Button asChild size="sm" variant="outline">
-              <Link to={continueHref}>
-                {continueLabel}
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
+            <Button asChild size="sm">
+              <Link to={`/projects/${projectId}/content/library`}>Review →</Link>
             </Button>
           </CardContent>
         </Card>
@@ -98,6 +102,11 @@ export function NextActionPanel({ projectId, title = 'Next Action', className }:
     );
   }
 
+  const completedSummary =
+    generateState === 'complete' && progress
+      ? `AI completed package generation. ${progress.completed} websites are ready.`
+      : null;
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -106,22 +115,17 @@ export function NextActionPanel({ projectId, title = 'Next Action', className }:
     >
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">{title}</CardTitle>
+          <CardTitle className="text-base">Current: {currentStep.title}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
+          {completedSummary ? (
+            <p className="text-muted-foreground">{completedSummary}</p>
+          ) : (
+            <p className="text-muted-foreground">{currentStep.purpose}</p>
+          )}
           <div>
-            <p className="text-xs text-muted-foreground">Current Step</p>
-            <p className="font-medium">{currentStep.title}</p>
+            <p className="text-xs text-muted-foreground">Next: {nextUnlockedStep.title}</p>
           </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Next</p>
-            <p className="font-medium">{nextUnlockedStep.title}</p>
-          </div>
-          {etaLabel ? (
-            <p className="text-xs text-muted-foreground flex items-center gap-1">
-              <Clock className="h-3 w-3" /> Estimated {etaLabel}
-            </p>
-          ) : null}
           <Button asChild size="sm">
             <Link to={continueHref}>
               Continue

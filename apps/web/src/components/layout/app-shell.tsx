@@ -12,7 +12,7 @@ import { LearningModeBanner } from '@/components/workflow/learning-mode-banner';
 import { NextActionPanel } from '@/components/workflow/next-action-panel';
 import { WorkflowProgressHeader } from '@/components/workflow/workflow-progress-header';
 import { WorkflowCelebration } from '@/components/workflow/workflow-celebration';
-import { GlobalStatusBar } from '@/components/workflow/global-status-bar';
+import { CampaignAiStatus } from '@/components/workflow/campaign-ai-status';
 import { InterventionBanner } from '@/components/browser/intervention-banner';
 import { OfflineBanner } from '@/components/beta/offline-banner';
 import { BetaAnnouncementBar } from '@/components/beta/beta-announcement-bar';
@@ -23,7 +23,7 @@ interface AppShellProps {
   projectId: string;
 }
 
-/** One progress header · one next action · one intervention banner. */
+/** One progress header · AI status · one next action · one intervention banner. */
 export function AppShell({ projectId }: AppShellProps) {
   const breadcrumbs = useBreadcrumbs(projectId);
   const location = useLocation();
@@ -31,6 +31,7 @@ export function AppShell({ projectId }: AppShellProps) {
   const isHome =
     location.pathname.endsWith('/home') ||
     location.pathname.replace(/\/$/, '') === `/projects/${projectId}`;
+  const onGeneratePage = location.pathname.includes('/content/library');
 
   useAutoInterventionWindows(projectId);
 
@@ -52,7 +53,6 @@ export function AppShell({ projectId }: AppShellProps) {
         <OfflineBanner />
         <BetaAnnouncementBar />
         <Topbar projectId={projectId} showProjectSwitcher />
-        <GlobalStatusBar projectId={projectId} />
         <LearningModeBanner projectId={projectId} />
         <div className="flex items-center justify-between gap-3 border-b border-border/50 px-4 py-2 md:px-6">
           <Breadcrumbs items={breadcrumbs} className="min-w-0 flex-1" />
@@ -65,6 +65,7 @@ export function AppShell({ projectId }: AppShellProps) {
           <WorkflowProgressHeader projectId={projectId} />
           <InterventionBanner projectId={projectId} />
           <WorkflowCelebration projectId={projectId} />
+          {!onGeneratePage ? <CampaignAiStatus projectId={projectId} /> : null}
           {!isHome ? (
             <div className="mb-6 max-w-xl">
               <NextActionPanel projectId={projectId} />

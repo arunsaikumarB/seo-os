@@ -117,7 +117,7 @@ export const WORKFLOW_STEP_ALIASES: Record<string, string[]> = {
 
 /** Compact labels for the workflow progress strip */
 export const WORKFLOW_PIPELINE_LABELS: Array<{ id: string; label: string }> = [
-  { id: 'create-project', label: 'Create Project' },
+  { id: 'create-project', label: 'Create' },
   { id: 'import-websites', label: 'Import' },
   { id: 'ai-review', label: 'AI Review' },
   { id: 'approve-opportunities', label: 'Approve' },

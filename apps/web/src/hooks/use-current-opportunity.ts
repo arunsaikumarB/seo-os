@@ -33,7 +33,7 @@ export const useCurrentOpportunityStore = create<CurrentOpportunityState>()(
 );
 
 /**
- * Shared Current Opportunity Context for Opportunity Queue, Content Studio,
+ * Shared Current Opportunity Context for Opportunity Queue, Generate Content,
  * Image / Video Studio, Browser Assistant, Submission Center, and Execution Center.
  */
 export function useCurrentOpportunity(projectId: string) {

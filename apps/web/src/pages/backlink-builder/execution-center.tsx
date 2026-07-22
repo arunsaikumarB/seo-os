@@ -1081,7 +1081,7 @@ export function BrowserExecutionCenterPage() {
           className="text-muted-foreground"
           onClick={() => setShowAdvanced((v) => !v)}
         >
-          {showAdvanced ? 'Hide' : 'Show'} Advanced
+          {showAdvanced ? 'Hide' : 'Show'} Advanced Tools
         </Button>
       </div>
 
