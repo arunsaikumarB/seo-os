@@ -30,6 +30,7 @@ export * from './site-strategy.js';
 export * from './site-guidelines.js';
 export * from './site-intelligence.js';
 export * from './wordpress-intelligence.js';
+export * from './directory-intelligence.js';
 export * from './execution-failures.js';
 export * from './page-watcher.js';
 export * from './image-intelligence.js';

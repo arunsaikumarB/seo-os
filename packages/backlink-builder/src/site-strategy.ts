@@ -31,12 +31,19 @@ export type StrategyPlan = {
   }>;
   /** Capability 1 */
   wordpressStrategy?: string;
+  /** Capability 2 */
+  directoryStrategy?: string;
   payloadHints?: {
     fields?: string[];
     skip?: string[];
     emailAddress?: string | null;
     emailSubject?: string | null;
     moveToOutreach?: boolean;
+    needsReview?: boolean;
+    paidListing?: boolean;
+    categorySuggestion?: unknown;
+    fieldMap?: unknown;
+    approval?: unknown;
   };
 };
 

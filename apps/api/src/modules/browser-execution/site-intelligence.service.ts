@@ -13,6 +13,7 @@ import {
   profileExpiresAt,
   recordStrategyOutcome,
   summarizeWordPressHealth,
+  summarizeDirectoryHealth,
   SIE_CRAWL_DEFAULTS,
   type SiteIntelligenceResult,
   type SiteLearning,
@@ -110,10 +111,19 @@ export function isProfileExecutionReady(profile: SiteProfileRow | null): boolean
   const strategy = profile.strategy as {
     entryUrl?: string | null;
     chosen?: string;
-    payloadHints?: { moveToOutreach?: boolean };
+    payloadHints?: { moveToOutreach?: boolean; needsReview?: boolean; paidListing?: boolean };
   } | null;
-  // Email WordPress strategy → outreach queue, never browser automation
+  // Email WordPress / directory strategy → outreach queue, never browser automation
   if (strategy?.payloadHints?.moveToOutreach || strategy?.chosen === 'Email Outreach') {
+    return false;
+  }
+  // Capability 2 — paid directory → Needs Review; never auto-pay / browser
+  if (
+    strategy?.payloadHints?.needsReview ||
+    strategy?.payloadHints?.paidListing ||
+    (profile.strategy as { directoryStrategy?: string } | null)?.directoryStrategy ===
+      'Premium Listing'
+  ) {
     return false;
   }
   return Boolean(strategy?.entryUrl);
@@ -128,6 +138,20 @@ export function isOutreachOnlyProfile(profile: SiteProfileRow | null): boolean {
   } | null;
   return Boolean(
     strategy?.payloadHints?.moveToOutreach || strategy?.chosen === 'Email Outreach'
+  );
+}
+
+/** Capability 2 — paid / premium directory requires human review (never payment). */
+export function isPaidDirectoryNeedsReview(profile: SiteProfileRow | null): boolean {
+  if (!profile || profile.profile_status !== 'complete') return false;
+  const strategy = profile.strategy as {
+    directoryStrategy?: string;
+    payloadHints?: { needsReview?: boolean; paidListing?: boolean };
+  } | null;
+  return Boolean(
+    strategy?.payloadHints?.needsReview ||
+      strategy?.payloadHints?.paidListing ||
+      strategy?.directoryStrategy === 'Premium Listing'
   );
 }
 
@@ -250,24 +274,82 @@ export async function saveIntelligenceResult(
 
   const row = data as SiteProfileRow;
 
-  // Seed WordPress learning from fingerprint
+  // Seed WordPress + Directory learning from fingerprint (additive)
   const wp = result.wordpress ?? (result.fingerprint as { wordpress?: unknown }).wordpress;
-  if (wp && learning) {
-    const { recordWordPressLearning } = await import('@seo-os/backlink-builder');
-    const wpLearn = recordWordPressLearning(
-      (learning as SiteLearning).wordpress,
-      {
-        theme: (wp as { theme?: string | null }).theme ?? null,
-        plugins: ((wp as { plugins?: string[] }).plugins ?? []) as string[],
-        submissionMethod:
-          (result.strategy as { wordpressStrategy?: string; chosen?: string }).wordpressStrategy ??
-          result.strategy.chosen,
-      }
-    );
+  const dir =
+    result.directory ?? (result.fingerprint as { directory?: unknown }).directory;
+  if (wp || dir) {
+    const {
+      recordWordPressLearning,
+      recordDirectoryLearning,
+      emptyDirectoryLearning,
+    } = await import('@seo-os/backlink-builder');
+    let nextLearning: SiteLearning = {
+      ...((learning as SiteLearning) ?? emptyLearning()),
+    };
+    if (wp) {
+      nextLearning = {
+        ...nextLearning,
+        wordpress: recordWordPressLearning(nextLearning.wordpress, {
+          theme: (wp as { theme?: string | null }).theme ?? null,
+          plugins: ((wp as { plugins?: string[] }).plugins ?? []) as string[],
+          submissionMethod:
+            (result.strategy as { wordpressStrategy?: string; chosen?: string })
+              .wordpressStrategy ?? result.strategy.chosen,
+        }),
+      };
+    }
+    if (dir) {
+      const d = dir as {
+        platform?: string | null;
+        categories?: Array<{ name: string }>;
+        entryUrl?: string | null;
+        fieldMap?: Record<string, unknown> | null;
+        approval?: { expectedTimeline?: string | null } | null;
+        pricing?: {
+          freeListing?: boolean;
+          paidListing?: boolean;
+          sponsored?: boolean;
+          featured?: boolean;
+        } | null;
+      };
+      const requiredFields = d.fieldMap
+        ? Object.entries(d.fieldMap)
+            .filter(([k, v]) => k !== 'rawFields' && v === true)
+            .map(([k]) => k)
+        : [];
+      const pricingLabel = d.pricing
+        ? [
+            d.pricing.freeListing ? 'free' : null,
+            d.pricing.paidListing ? 'paid' : null,
+            d.pricing.sponsored ? 'sponsored' : null,
+            d.pricing.featured ? 'featured' : null,
+          ]
+            .filter(Boolean)
+            .join('+') || null
+        : null;
+      nextLearning = {
+        ...nextLearning,
+        directory: recordDirectoryLearning(
+          nextLearning.directory ?? emptyDirectoryLearning(),
+          {
+            platform: d.platform ?? null,
+            categories: (d.categories ?? []).map((c) => c.name),
+            submissionUrl: d.entryUrl ?? null,
+            requiredFields,
+            approvalFlow: d.approval?.expectedTimeline ?? null,
+            pricing: pricingLabel,
+            knownStrategy:
+              (result.strategy as { directoryStrategy?: string }).directoryStrategy ??
+              result.strategy.chosen,
+          }
+        ),
+      };
+    }
     await admin()
       .from('site_profiles')
       .update({
-        learning: { ...((learning as SiteLearning) ?? emptyLearning()), wordpress: wpLearn },
+        learning: nextLearning,
         updated_at: new Date().toISOString(),
       })
       .eq('id', profileId);
@@ -286,8 +368,49 @@ export async function saveIntelligenceResult(
       moveToOutreach?: boolean;
       emailAddress?: string | null;
       emailSubject?: string | null;
+      needsReview?: boolean;
+      paidListing?: boolean;
+      categorySuggestion?: unknown;
     } }).payloadHints;
     if (hints?.moveToOutreach || result.strategy.chosen === 'Email Outreach') {
+      try {
+        const { data: opp } = await admin()
+          .from('opportunities')
+          .select('id, metadata')
+          .eq('id', oppId)
+          .maybeSingle();
+        const meta = (opp?.metadata as Record<string, unknown> | null) ?? {};
+        const isDirectoryEmail =
+          (result.strategy as { directoryStrategy?: string }).directoryStrategy ===
+          'Email Submission';
+        await admin()
+          .from('opportunities')
+          .update({
+            pipeline_stage: 'outreach',
+            metadata: {
+              ...meta,
+              ...(isDirectoryEmail
+                ? { directory_email_strategy: true }
+                : { wordpress_email_strategy: true }),
+              outreach_email: hints?.emailAddress ?? result.guidelines?.emailAddress ?? null,
+              outreach_subject: hints?.emailSubject ?? 'Guest post submission',
+              skip_browser_automation: true,
+            },
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', oppId)
+          .eq('workspace_id', workspaceId);
+      } catch {
+        /* optional */
+      }
+    }
+
+    // Capability 2 Step 8 — paid listing → Needs Review (additive flags; never payment)
+    if (
+      hints?.needsReview ||
+      hints?.paidListing ||
+      (result.strategy as { directoryStrategy?: string }).directoryStrategy === 'Premium Listing'
+    ) {
       try {
         const { data: opp } = await admin()
           .from('opportunities')
@@ -298,12 +421,12 @@ export async function saveIntelligenceResult(
         await admin()
           .from('opportunities')
           .update({
-            pipeline_stage: 'outreach',
             metadata: {
               ...meta,
-              wordpress_email_strategy: true,
-              outreach_email: hints?.emailAddress ?? result.guidelines?.emailAddress ?? null,
-              outreach_subject: hints?.emailSubject ?? 'Guest post submission',
+              directory_paid_listing: true,
+              needs_human_review: true,
+              needs_review_reason: 'Paid / premium directory — never auto-pay',
+              directory_category_suggestion: hints?.categorySuggestion ?? null,
               skip_browser_automation: true,
             },
             updated_at: new Date().toISOString(),
@@ -418,6 +541,19 @@ export async function getSiteProfileAudit(workspaceId: string) {
         learning: p.learning as SiteLearning,
       }))
     ),
+    directoryHealth: summarizeDirectoryHealth(
+      profiles.map((p) => ({
+        fingerprint: p.fingerprint as {
+          directory?: import('@seo-os/backlink-builder').DirectoryKnowledge;
+        },
+        strategy: p.strategy as {
+          directoryStrategy?: string;
+          chosen?: string;
+          payloadHints?: { paidListing?: boolean; needsReview?: boolean };
+        },
+        learning: p.learning as SiteLearning,
+      }))
+    ),
     profiles: profiles.map((p) => ({
       domain: p.domain,
       status: p.profile_status,
@@ -425,11 +561,17 @@ export async function getSiteProfileAudit(workspaceId: string) {
       strategy: (p.strategy as { chosen?: string } | null)?.chosen ?? null,
       wordpressStrategy:
         (p.strategy as { wordpressStrategy?: string } | null)?.wordpressStrategy ?? null,
+      directoryStrategy:
+        (p.strategy as { directoryStrategy?: string } | null)?.directoryStrategy ?? null,
       workflow:
-        (p.fingerprint as { wordpress?: { workflow?: string } })?.wordpress?.workflow ?? null,
+        (p.fingerprint as { wordpress?: { workflow?: string } })?.wordpress?.workflow ??
+        (p.fingerprint as { directory?: { workflow?: string } })?.directory?.workflow ??
+        null,
       theme: (p.fingerprint as { wordpress?: { theme?: string } })?.wordpress?.theme ?? null,
       plugins:
         (p.fingerprint as { wordpress?: { plugins?: string[] } })?.wordpress?.plugins ?? [],
+      directoryPlatform:
+        (p.fingerprint as { directory?: { platform?: string } })?.directory?.platform ?? null,
       entryUrl: (p.strategy as { entryUrl?: string } | null)?.entryUrl ?? null,
       expectedInterventions:
         (p.strategy as { expectedInterventions?: string[] } | null)?.expectedInterventions ??

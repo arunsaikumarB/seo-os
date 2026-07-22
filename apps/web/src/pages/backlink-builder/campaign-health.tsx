@@ -87,6 +87,17 @@ type HealthData = {
       unsupported: number;
       successRate: number | null;
     };
+    directoryHealth?: {
+      detected: number;
+      supported: number;
+      free: number;
+      paid: number;
+      dashboard: number;
+      email: number;
+      contactForm: number;
+      unsupported: number;
+      successRate: number | null;
+    };
     profiles?: Array<{
       domain: string;
       status: string;
@@ -289,6 +300,22 @@ export function CampaignHealthPage() {
                     {data.siteIntelligenceAudit.wordpressHealth.email} · Unsupported{' '}
                     {data.siteIntelligenceAudit.wordpressHealth.unsupported} · Success Rate{' '}
                     {data.siteIntelligenceAudit.wordpressHealth.successRate ?? '—'}
+                  </p>
+                </div>
+              ) : null}
+              {data.siteIntelligenceAudit.directoryHealth ? (
+                <div className="border border-dashed p-2 space-y-1">
+                  <p className="font-semibold">Directory Health (Capability 2)</p>
+                  <p>
+                    Detected {data.siteIntelligenceAudit.directoryHealth.detected} · Supported{' '}
+                    {data.siteIntelligenceAudit.directoryHealth.supported} · Free{' '}
+                    {data.siteIntelligenceAudit.directoryHealth.free} · Paid{' '}
+                    {data.siteIntelligenceAudit.directoryHealth.paid} · Dashboard{' '}
+                    {data.siteIntelligenceAudit.directoryHealth.dashboard} · Email{' '}
+                    {data.siteIntelligenceAudit.directoryHealth.email} · Contact{' '}
+                    {data.siteIntelligenceAudit.directoryHealth.contactForm} · Unsupported{' '}
+                    {data.siteIntelligenceAudit.directoryHealth.unsupported} · Success Rate{' '}
+                    {data.siteIntelligenceAudit.directoryHealth.successRate ?? '—'}
                   </p>
                 </div>
               ) : null}

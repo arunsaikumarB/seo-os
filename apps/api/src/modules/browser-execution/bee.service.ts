@@ -551,6 +551,7 @@ export async function startJob(workspaceId: string, jobId: string, userId?: stri
       getSiteProfileByDomain,
       isProfileExecutionReady,
       isOutreachOnlyProfile,
+      isPaidDirectoryNeedsReview,
     } = await import('./site-intelligence.service.js');
     const domain = String(job.site_domain ?? '');
     if (domain && domain !== 'unknown') {
@@ -608,6 +609,43 @@ export async function startJob(workspaceId: string, jobId: string, userId?: stri
         return getJob(workspaceId, jobId);
       }
 
+      // Capability 2 Step 8 — paid directory: Needs Review; never attempt payment
+      if (isPaidDirectoryNeedsReview(profile)) {
+        await getSupabaseAdmin()
+          .from('execution_jobs')
+          .update({
+            status: 'skipped',
+            finished_at: new Date().toISOString(),
+            error_message: 'Paid directory — Needs Review (never auto-pay)',
+            metrics: {
+              ...((job.metrics as Record<string, unknown>) ?? {}),
+              waitingForSiteProfile: false,
+              siteProfileId: profile!.id,
+              siteStrategy:
+                (profile!.strategy as { directoryStrategy?: string } | null)
+                  ?.directoryStrategy ?? 'Premium Listing',
+              needsHumanReview: true,
+              paidListing: true,
+              skipBrowserAutomation: true,
+              disposition: 'skipped',
+            },
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', jobId)
+          .eq('workspace_id', workspaceId);
+        await appendLog(
+          workspaceId,
+          jobId,
+          'info',
+          'Paid / premium directory — moved to Needs Review (no payment, no browser)',
+          {
+            directoryStrategy: (profile!.strategy as { directoryStrategy?: string } | null)
+              ?.directoryStrategy,
+          }
+        );
+        return getJob(workspaceId, jobId);
+      }
+
       if (!isProfileExecutionReady(profile)) {
         const metrics = {
           ...((job.metrics as Record<string, unknown>) ?? {}),
@@ -648,6 +686,7 @@ export async function startJob(workspaceId: string, jobId: string, userId?: stri
               url: entryUrl,
               fromSiteIntelligence: true,
               wordpressPayloadHints: payloadHints,
+              directoryPayloadHints: payloadHints,
             },
             updated_at: new Date().toISOString(),
           })
@@ -666,7 +705,11 @@ export async function startJob(workspaceId: string, jobId: string, userId?: stri
               wordpressStrategy:
                 (profile!.strategy as { wordpressStrategy?: string } | null)
                   ?.wordpressStrategy ?? null,
+              directoryStrategy:
+                (profile!.strategy as { directoryStrategy?: string } | null)
+                  ?.directoryStrategy ?? null,
               wordpressPayloadHints: payloadHints,
+              directoryPayloadHints: payloadHints,
             },
             updated_at: new Date().toISOString(),
           })

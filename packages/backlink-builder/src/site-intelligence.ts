@@ -21,6 +21,12 @@ import {
   type WordPressKnowledge,
   type WordPressLearning,
 } from './wordpress-intelligence.js';
+import {
+  enrichWithDirectoryIntelligence,
+  emptyDirectoryLearning,
+  type DirectoryKnowledge,
+  type DirectoryLearning,
+} from './directory-intelligence.js';
 
 export type SiteProfileStatus =
   | 'pending'
@@ -45,6 +51,8 @@ export type SiteLearning = {
   lastFailureAt: string | null;
   /** Capability 1 */
   wordpress?: WordPressLearning;
+  /** Capability 2 */
+  directory?: DirectoryLearning;
 };
 
 export type FetchedPage = {
@@ -74,6 +82,8 @@ export type SiteIntelligenceResult = {
   };
   /** Capability 1 — null when not WordPress */
   wordpress?: WordPressKnowledge | null;
+  /** Capability 2 — null when not a directory */
+  directory?: DirectoryKnowledge | null;
 };
 
 export function emptyLearning(): SiteLearning {
@@ -85,6 +95,7 @@ export function emptyLearning(): SiteLearning {
     lastSuccessAt: null,
     lastFailureAt: null,
     wordpress: emptyWordPressLearning(),
+    directory: emptyDirectoryLearning(),
   };
 }
 
@@ -149,6 +160,8 @@ export function analyzeFetchedSite(params: {
   maxPages?: number;
   timeBudgetMs?: number;
   truncated?: boolean;
+  /** Optional business text for smart directory category matching */
+  businessText?: string | null;
 }): SiteIntelligenceResult {
   const domain = normalizeSiteDomain(params.homepageUrl);
   const homepage =
@@ -223,7 +236,7 @@ export function analyzeFetchedSite(params: {
   const failed = params.pages.filter((p) => p.status === 'failed').length;
 
   // Capability 1 — enrich when WordPress (additive; does not redesign SIE)
-  const enriched = enrichWithWordPressIntelligence({
+  const wpEnriched = enrichWithWordPressIntelligence({
     fingerprint,
     pageClassifications: classifications,
     strategy,
@@ -232,10 +245,35 @@ export function analyzeFetchedSite(params: {
     homepageUrl: params.homepageUrl,
   });
 
+  // Capability 2 — Directory Intelligence (additive; does not modify WP module)
+  const dirEnriched = enrichWithDirectoryIntelligence({
+    fingerprint: wpEnriched.fingerprint,
+    pageClassifications: wpEnriched.pageClassifications,
+    strategy: wpEnriched.strategy,
+    pages: params.pages,
+    homepageUrl: params.homepageUrl,
+    businessText: params.businessText ?? null,
+    // Soft-attach on WP blogs unless an explicit directory plugin is detected
+    allowAlongsideWordPress: false,
+  });
+
+  const enriched = {
+    fingerprint: dirEnriched.fingerprint,
+    pageClassifications: dirEnriched.pageClassifications,
+    // Soft-attach keeps WP strategy; full enrich replaces with directory strategy
+    strategy: dirEnriched.strategy,
+    guidelines: wpEnriched.guidelines,
+    wordpress: wpEnriched.wordpress,
+    directory: dirEnriched.directory,
+  };
+
   let finalStatus = profileStatus;
   if (enriched.strategy.chosen === 'Unsupported') finalStatus = 'unsupported';
   if (enriched.strategy.payloadHints?.moveToOutreach) {
-    // Email strategy is a completed profile that routes to outreach (not browser execute)
+    finalStatus = 'complete';
+  }
+  if (enriched.strategy.payloadHints?.needsReview && enriched.strategy.payloadHints?.paidListing) {
+    // Paid directory profile is complete but execution blocked pending review
     finalStatus = 'complete';
   }
 
@@ -256,6 +294,7 @@ export function analyzeFetchedSite(params: {
       truncated: Boolean(params.truncated),
     },
     wordpress: enriched.wordpress,
+    directory: enriched.directory,
   };
 }
 

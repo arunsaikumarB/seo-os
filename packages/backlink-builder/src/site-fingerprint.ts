@@ -30,6 +30,8 @@ export type SiteFingerprint = {
   };
   /** Capability 1 — WordPressKnowledge when SIE enrichment ran */
   wordpress?: Record<string, unknown>;
+  /** Capability 2 — DirectoryKnowledge when enrichment ran */
+  directory?: Record<string, unknown>;
 };
 
 type FpInput = {
