@@ -40,6 +40,46 @@ let playwrightMod: PlaywrightModule | null | undefined;
 /** Shared Chromium processes — contexts are cheap; browsers are expensive. */
 const browserPool = new Map<BrowserMode, PlaywrightBrowser>();
 let poolLaunchInFlight: Map<BrowserMode, Promise<PlaywrightBrowser>> = new Map();
+const browserJobCounts = new Map<BrowserMode, number>();
+const browserLaunchedAt = new Map<BrowserMode, number>();
+const acquireWaiters: Array<() => void> = [];
+
+function notifyAcquireWaiters() {
+  while (acquireWaiters.length) acquireWaiters.shift()?.();
+}
+
+/** FIFO wait when at session ceiling — acquisition never fails due to the limit. */
+export async function waitForBrowserSlot(
+  getRunningCount: () => Promise<number>,
+  maxSessions: number
+): Promise<void> {
+  for (;;) {
+    if ((await getRunningCount()) < maxSessions) return;
+    await new Promise<void>((resolve) => {
+      acquireWaiters.push(resolve);
+      setTimeout(resolve, 2_000).unref?.();
+    });
+  }
+}
+
+async function maybeRecycleBrowser(mode: BrowserMode): Promise<void> {
+  const { BEE_RELIABILITY } = await import('./bee-config.js');
+  const jobs = browserJobCounts.get(mode) ?? 0;
+  const launched = browserLaunchedAt.get(mode) ?? Date.now();
+  const age = Date.now() - launched;
+  if (
+    jobs < BEE_RELIABILITY.BROWSER_RECYCLE_AFTER_JOBS &&
+    age < BEE_RELIABILITY.BROWSER_RECYCLE_AFTER_MS
+  ) {
+    return;
+  }
+  const existing = browserPool.get(mode);
+  if (!existing) return;
+  browserPool.delete(mode);
+  browserJobCounts.set(mode, 0);
+  await existing.close().catch(() => undefined);
+  logger.info({ mode, jobs, ageMs: age }, 'BEE browser recycled');
+}
 
 async function loadPlaywright(): Promise<PlaywrightModule | null> {
   if (playwrightMod !== undefined) return playwrightMod;
@@ -53,8 +93,12 @@ async function loadPlaywright(): Promise<PlaywrightModule | null> {
 }
 
 async function acquirePooledBrowser(mode: BrowserMode, timeoutMs: number): Promise<PlaywrightBrowser> {
+  await maybeRecycleBrowser(mode);
   const existing = browserPool.get(mode);
-  if (existing?.isConnected()) return existing;
+  if (existing?.isConnected()) {
+    browserJobCounts.set(mode, (browserJobCounts.get(mode) ?? 0) + 1);
+    return existing;
+  }
 
   const inFlight = poolLaunchInFlight.get(mode);
   if (inFlight) return inFlight;
@@ -70,8 +114,11 @@ async function acquirePooledBrowser(mode: BrowserMode, timeoutMs: number): Promi
       executablePath,
     });
     browserPool.set(mode, browser);
+    browserJobCounts.set(mode, 1);
+    browserLaunchedAt.set(mode, Date.now());
     browser.on('disconnected', () => {
       if (browserPool.get(mode) === browser) browserPool.delete(mode);
+      notifyAcquireWaiters();
     });
     logger.info({ mode }, 'BEE browser pool launched Chromium');
     return browser;
@@ -649,4 +696,5 @@ export async function disposeSessionRuntime(sessionId: string): Promise<void> {
     await svc.close();
     sessionRuntimes.delete(sessionId);
   }
+  notifyAcquireWaiters();
 }

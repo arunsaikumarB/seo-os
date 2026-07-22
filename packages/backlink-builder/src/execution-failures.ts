@@ -9,8 +9,10 @@ export const EXECUTION_FAILURE_CODES = [
   'DNS_FAILED',
   'SSL_CERTIFICATE_ERROR',
   'HTTP_403_FORBIDDEN',
+  'HTTP_404',
   'HTTP_429_RATE_LIMITED',
   'CAPTCHA_DETECTED',
+  'CLOUDFLARE_ANTIBOT',
   'LOGIN_REQUIRED',
   'EMAIL_VERIFICATION_REQUIRED',
   'PHONE_VERIFICATION_REQUIRED',
@@ -18,8 +20,13 @@ export const EXECUTION_FAILURE_CODES = [
   'REQUIRED_FIELD_MISSING',
   'SELECTOR_NOT_FOUND',
   'FORM_CHANGED',
+  'FORM_MISSING',
   'SUBMIT_BUTTON_MISSING',
   'SUBMIT_FAILED',
+  'SUBMISSION_REJECTED',
+  'UNEXPECTED_NAVIGATION',
+  'SITE_OFFLINE',
+  'UNSUPPORTED',
   'PLAYWRIGHT_LAUNCH_FAILED',
   'BROWSER_RUNTIME_MISSING',
   'BROWSER_CLOSED',
@@ -49,32 +56,39 @@ export type ClassifiedFailure = {
 };
 
 const LABELS: Record<ExecutionFailureCode, string> = {
-  NAVIGATION_TIMEOUT: 'Navigation Timeout',
+  NAVIGATION_TIMEOUT: 'Timeout',
   WEBSITE_UNREACHABLE: 'Website Unreachable',
   DNS_FAILED: 'DNS Failed',
   SSL_CERTIFICATE_ERROR: 'SSL Certificate Error',
   HTTP_403_FORBIDDEN: '403 Forbidden',
-  HTTP_429_RATE_LIMITED: '429 Rate Limited',
-  CAPTCHA_DETECTED: 'CAPTCHA Detected',
+  HTTP_404: '404 Not Found',
+  HTTP_429_RATE_LIMITED: 'Rate Limited',
+  CAPTCHA_DETECTED: 'CAPTCHA',
+  CLOUDFLARE_ANTIBOT: 'Cloudflare / Anti-Bot',
   LOGIN_REQUIRED: 'Login Required',
   EMAIL_VERIFICATION_REQUIRED: 'Email Verification Required',
   PHONE_VERIFICATION_REQUIRED: 'Phone Verification Required',
   ACCOUNT_SUSPENDED: 'Account Suspended',
   REQUIRED_FIELD_MISSING: 'Required Field Missing',
   SELECTOR_NOT_FOUND: 'Selector Not Found',
-  FORM_CHANGED: 'Form Changed',
+  FORM_CHANGED: 'DOM Changed',
+  FORM_MISSING: 'Form Missing',
   SUBMIT_BUTTON_MISSING: 'Submit Button Missing',
   SUBMIT_FAILED: 'Submit Failed',
+  SUBMISSION_REJECTED: 'Submission Rejected',
+  UNEXPECTED_NAVIGATION: 'Unexpected Navigation',
+  SITE_OFFLINE: 'Site Offline',
+  UNSUPPORTED: 'Unsupported',
   PLAYWRIGHT_LAUNCH_FAILED: 'Playwright Launch Failed',
   BROWSER_RUNTIME_MISSING: 'Browser Runtime Missing',
-  BROWSER_CLOSED: 'Browser Closed',
-  WORKER_OFFLINE: 'Worker Offline',
+  BROWSER_CLOSED: 'Browser Crash',
+  WORKER_OFFLINE: 'Worker Lost',
   QUEUE_TIMEOUT: 'Queue Timeout',
   INTERNAL_ERROR: 'Internal Error',
   PROVIDER_OFFLINE: 'Provider Offline',
   CONNECTION_RESET: 'Connection Reset',
   HTTP_5XX: 'Server Error (5xx)',
-  NETWORK_FAILURE: 'Network Failure',
+  NETWORK_FAILURE: 'Network Error',
   VALIDATION_FAILED: 'Validation Failed',
   UNKNOWN_EXCEPTION: 'Unknown Exception',
 };
@@ -85,17 +99,24 @@ const RETRY_CLASS: Record<ExecutionFailureCode, FailureRetryClass> = {
   DNS_FAILED: 'auto_retry',
   SSL_CERTIFICATE_ERROR: 'permanent',
   HTTP_403_FORBIDDEN: 'permanent',
-  HTTP_429_RATE_LIMITED: 'permanent',
+  HTTP_404: 'permanent',
+  HTTP_429_RATE_LIMITED: 'auto_retry',
   CAPTCHA_DETECTED: 'needs_user',
+  CLOUDFLARE_ANTIBOT: 'needs_user',
   LOGIN_REQUIRED: 'needs_user',
   EMAIL_VERIFICATION_REQUIRED: 'needs_user',
   PHONE_VERIFICATION_REQUIRED: 'needs_user',
   ACCOUNT_SUSPENDED: 'permanent',
   REQUIRED_FIELD_MISSING: 'permanent',
   SELECTOR_NOT_FOUND: 'permanent',
-  FORM_CHANGED: 'permanent',
+  FORM_CHANGED: 'auto_retry',
+  FORM_MISSING: 'permanent',
   SUBMIT_BUTTON_MISSING: 'permanent',
   SUBMIT_FAILED: 'permanent',
+  SUBMISSION_REJECTED: 'permanent',
+  UNEXPECTED_NAVIGATION: 'auto_retry',
+  SITE_OFFLINE: 'auto_retry',
+  UNSUPPORTED: 'permanent',
   PLAYWRIGHT_LAUNCH_FAILED: 'auto_retry',
   BROWSER_RUNTIME_MISSING: 'needs_user',
   BROWSER_CLOSED: 'auto_retry',
@@ -116,23 +137,31 @@ const FIXES: Record<ExecutionFailureCode, string> = {
   DNS_FAILED: 'Temporary DNS issue. Auto-retry. If persistent, verify the domain spelling.',
   SSL_CERTIFICATE_ERROR: 'Certificate problem on the destination. Contact site admin or skip this website.',
   HTTP_403_FORBIDDEN: 'Access forbidden — do not retry. Review IP/bot blocks or credentials.',
-  HTTP_429_RATE_LIMITED: 'Rate limited — do not hammer retries. Slow down submissions and try later.',
-  CAPTCHA_DETECTED: 'Complete the CAPTCHA in the browser session. Resume will continue automatically when cleared.',
+  HTTP_404: 'Page not found. Do not retry — mark Failed.',
+  HTTP_429_RATE_LIMITED: 'Rate limited — auto-retry with long backoff. Do not hammer the site.',
+  CAPTCHA_DETECTED: 'Complete the CAPTCHA in the browser session. Never auto-solved. Resume when cleared.',
+  CLOUDFLARE_ANTIBOT:
+    'Cloudflare / anti-bot challenge. Complete it manually — never auto-bypassed. Resume when cleared.',
   LOGIN_REQUIRED: 'Sign in manually in the headed browser session, then resume.',
   EMAIL_VERIFICATION_REQUIRED: 'Complete email verification, then resume execution.',
   PHONE_VERIFICATION_REQUIRED: 'Complete phone/SMS verification, then resume.',
   ACCOUNT_SUSPENDED: 'Account is suspended. Resolve with the destination site before retrying.',
   REQUIRED_FIELD_MISSING: 'Generate missing content fields in Content Studio, then retry.',
   SELECTOR_NOT_FOUND: 'Form selectors changed. Run selector learning or update the form profile, then retry.',
-  FORM_CHANGED: 'Destination form layout changed. Re-analyze the page and update field mapping.',
+  FORM_CHANGED: 'Destination form layout changed. Auto-retry once, then re-analyze if it persists.',
+  FORM_MISSING: 'No submittable form found. Mark Failed — do not retry.',
   SUBMIT_BUTTON_MISSING: 'Submit control not found. Re-scan the form or submit manually.',
   SUBMIT_FAILED: 'Submit did not complete. Inspect the screenshot and validation messages, then retry manually.',
+  SUBMISSION_REJECTED: 'Site rejected the submission. Do not auto-retry.',
+  UNEXPECTED_NAVIGATION: 'Unexpected redirect. Auto-retry once.',
+  SITE_OFFLINE: 'Site appears offline. Auto-retry with long backoff, then Failed.',
+  UNSUPPORTED: 'Unsupported site workflow. Mark Ignored.',
   PLAYWRIGHT_LAUNCH_FAILED:
     'Browser failed to launch. Install Chromium (`npx playwright install chromium`) or use Repair Browser on the Browser Runtime page.',
   BROWSER_RUNTIME_MISSING:
     'Browser Runtime Missing — Administrator Action Required. Suggested Fix: Install Chromium. Jobs wait for infrastructure and resume automatically.',
-  BROWSER_CLOSED: 'Browser closed unexpectedly. Auto-retry with a fresh session.',
-  WORKER_OFFLINE: 'Execution worker is offline. Restore worker health, then retry.',
+  BROWSER_CLOSED: 'Browser crashed unexpectedly. Infrastructure auto-retry with a fresh session.',
+  WORKER_OFFLINE: 'Execution worker lost (lease expired). Job requeued — infrastructure retry, no site retry consumed.',
   QUEUE_TIMEOUT: 'Job waited too long in queue. Check worker capacity and retry.',
   INTERNAL_ERROR: 'Unexpected internal error. Auto-retry; if it persists, inspect worker logs.',
   PROVIDER_OFFLINE: 'A required provider is offline. Restore provider health, then retry.',
@@ -143,11 +172,19 @@ const FIXES: Record<ExecutionFailureCode, string> = {
   UNKNOWN_EXCEPTION: 'Inspect stack trace and screenshots. Retry only if the error looks transient.',
 };
 
-/** Backoff seconds by 1-based attempt number after a failure (attempt 1 → 5s, 2 → 20s). */
-export function retryBackoffSeconds(attemptAfterFailure: number): number | null {
-  if (attemptAfterFailure === 1) return 5;
-  if (attemptAfterFailure === 2) return 20;
-  return null;
+/**
+ * Exponential backoff with jitter (Phase 4): attempt 1 → ~10s, 2 → ~40s, 3 → ~160s.
+ * Rate-limit uses longer delays. Returns null when retries exhausted.
+ */
+export function retryBackoffSeconds(
+  attemptAfterFailure: number,
+  opts?: { rateLimited?: boolean; siteOffline?: boolean }
+): number | null {
+  if (attemptAfterFailure < 1 || attemptAfterFailure > 3) return null;
+  const base = opts?.rateLimited || opts?.siteOffline ? 60 : 10;
+  const sec = base * Math.pow(4, attemptAfterFailure - 1);
+  const jitter = Math.floor(Math.random() * Math.max(3, sec * 0.2));
+  return sec + jitter;
 }
 
 export function failureLabel(code: string | null | undefined): string {
@@ -179,14 +216,21 @@ export function classifyExecutionError(
   let code: ExecutionFailureCode = 'UNKNOWN_EXCEPTION';
 
   if (context.statusCode === 403 || /\b403\b|forbidden/.test(blob)) code = 'HTTP_403_FORBIDDEN';
+  else if (context.statusCode === 404 || /\b404\b|not found/.test(blob)) code = 'HTTP_404';
   else if (context.statusCode === 429 || /\b429\b|rate.?limit|too many requests/.test(blob))
     code = 'HTTP_429_RATE_LIMITED';
   else if (context.statusCode && context.statusCode >= 500) code = 'HTTP_5XX';
+  else if (/cloudflare|cf-challenge|just a moment|anti-?bot|challenge-platform/.test(blob))
+    code = 'CLOUDFLARE_ANTIBOT';
   else if (/captcha|recaptcha|hcaptcha|cf-challenge/.test(blob)) code = 'CAPTCHA_DETECTED';
   else if (/email.?verif|verify your email/.test(blob)) code = 'EMAIL_VERIFICATION_REQUIRED';
   else if (/phone.?verif|sms.?code|otp/.test(blob)) code = 'PHONE_VERIFICATION_REQUIRED';
   else if (/login required|sign in|unauthorized|401/.test(blob)) code = 'LOGIN_REQUIRED';
   else if (/suspended|banned|disabled account/.test(blob)) code = 'ACCOUNT_SUSPENDED';
+  else if (/form.?missing|no form|form not found/.test(blob)) code = 'FORM_MISSING';
+  else if (/form.?changed|dom.?changed|selector/.test(blob)) code = 'FORM_CHANGED';
+  else if (/unexpected.?nav|redirect/.test(blob)) code = 'UNEXPECTED_NAVIGATION';
+  else if (/site.?offline|err_connection_refused|econnrefused/.test(blob)) code = 'SITE_OFFLINE';
   else if (/timeout|timed out|navigation.?timeout|net::err_timed_out/.test(blob))
     code = 'NAVIGATION_TIMEOUT';
   else if (/err_name_not_resolved|dns|getaddrinfo|enotfound/.test(blob)) code = 'DNS_FAILED';

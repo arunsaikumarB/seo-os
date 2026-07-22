@@ -44,6 +44,21 @@ type HealthData = {
   };
   orphans?: { count: number; items: Array<{ table: string; id: string; opportunityId: string | null }> };
   generationProgress?: Record<string, number | boolean>;
+  executionAudit?: {
+    workers: { healthy: number; idle: number; running: number; stuck: number };
+    browsers: { allocated: number; free: number; contexts: number; max: number };
+    queue: {
+      queued: number;
+      running: number;
+      waitingHuman: number;
+      completed: number;
+      failed: number;
+      retrying: number;
+      deleted: number;
+      ignored: number;
+    };
+    invariants: { stuckWorkersZero: boolean; browsersWithinCeiling: boolean };
+  };
   items: HealthRow[];
 };
 
@@ -126,6 +141,35 @@ export function CampaignHealthPage() {
                   .map((o) => `${o.table}:${o.id}`)
                   .join(', ')}`
               : ' (must be 0)'}
+          </p>
+        </div>
+      ) : null}
+
+      {data?.executionAudit ? (
+        <div className="border p-2 space-y-2">
+          <p className="font-semibold">Execution audit (Phase 4)</p>
+          <p>
+            Workers: Healthy {data.executionAudit.workers.healthy} · Idle{' '}
+            {data.executionAudit.workers.idle} · Running {data.executionAudit.workers.running} ·
+            Stuck {data.executionAudit.workers.stuck} (must be 0)
+          </p>
+          <p>
+            Browsers: Allocated {data.executionAudit.browsers.allocated} · Free{' '}
+            {data.executionAudit.browsers.free} · Contexts {data.executionAudit.browsers.contexts}{' '}
+            (Allocated + Free ≤ {data.executionAudit.browsers.max})
+          </p>
+          <p>
+            Queue: Queued {data.executionAudit.queue.queued} · Running{' '}
+            {data.executionAudit.queue.running} · Waiting Human{' '}
+            {data.executionAudit.queue.waitingHuman} · Completed{' '}
+            {data.executionAudit.queue.completed} · Failed {data.executionAudit.queue.failed} ·
+            Retrying {data.executionAudit.queue.retrying} · Deleted{' '}
+            {data.executionAudit.queue.deleted} · Ignored {data.executionAudit.queue.ignored}
+          </p>
+          <p>
+            Invariants: stuck=0{' '}
+            {data.executionAudit.invariants.stuckWorkersZero ? 'OK' : 'FAIL'} · ceiling{' '}
+            {data.executionAudit.invariants.browsersWithinCeiling ? 'OK' : 'FAIL'}
           </p>
         </div>
       ) : null}

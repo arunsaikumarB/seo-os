@@ -147,12 +147,17 @@ backlinkBuilderRouter.get(
       const items = await listCampaignItems(workspaceId, { includeDeleted: true });
       const counts = await getCampaignCounts(workspaceId);
       const gen = await getContentGenerationBoard(workspaceId);
+      const { getExecutionAudit } = await import(
+        '../../modules/browser-execution/bee-reconcile.service.js'
+      );
+      const executionAudit = await getExecutionAudit(workspaceId);
       res.json({
         data: {
           totals: counts,
           generationAudit: gen.generationAudit,
           orphans: gen.orphans,
           generationProgress: gen.progress,
+          executionAudit,
           items: items.map((i) => ({
             website: i.websiteUrl ?? i.domain ?? i.id,
             imported: true,

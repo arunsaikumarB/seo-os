@@ -1,0 +1,140 @@
+{
+  "reports": [
+    {
+      "size": 20,
+      "chaos": false,
+      "maxBrowsers": 4,
+      "completed": 15,
+      "failed": 1,
+      "waitingHuman": 4,
+      "stuck": 0,
+      "terminal": 20,
+      "completionPct": 100,
+      "successRate": 75,
+      "retryRate": 15,
+      "infraRetries": 0,
+      "peakBrowsers": 4,
+      "peakMemoryMb": 260,
+      "peakCpuPct": 68,
+      "avgRuntimePerItemMs": 233,
+      "wallTimeMs": 4658,
+      "classifications": {
+        "CAPTCHA_DETECTED": 1,
+        "HTTP_404": 1,
+        "CLOUDFLARE_ANTIBOT": 2,
+        "LOGIN_REQUIRED": 1
+      },
+      "leakAssertions": {
+        "openPages": 0,
+        "activeContexts": 0,
+        "browsersWithinMax": true,
+        "tempClean": true
+      },
+      "pass": true,
+      "elapsedMs": 0
+    },
+    {
+      "size": 100,
+      "chaos": false,
+      "maxBrowsers": 4,
+      "completed": 78,
+      "failed": 10,
+      "waitingHuman": 12,
+      "stuck": 0,
+      "terminal": 100,
+      "completionPct": 100,
+      "successRate": 78,
+      "retryRate": 26,
+      "infraRetries": 0,
+      "peakBrowsers": 4,
+      "peakMemoryMb": 260,
+      "peakCpuPct": 68,
+      "avgRuntimePerItemMs": 226,
+      "wallTimeMs": 22590,
+      "classifications": {
+        "CAPTCHA_DETECTED": 5,
+        "HTTP_404": 4,
+        "CLOUDFLARE_ANTIBOT": 3,
+        "LOGIN_REQUIRED": 4,
+        "FORM_MISSING": 6
+      },
+      "leakAssertions": {
+        "openPages": 0,
+        "activeContexts": 0,
+        "browsersWithinMax": true,
+        "tempClean": true
+      },
+      "pass": true,
+      "elapsedMs": 0
+    },
+    {
+      "size": 500,
+      "chaos": false,
+      "maxBrowsers": 4,
+      "completed": 390,
+      "failed": 50,
+      "waitingHuman": 60,
+      "stuck": 0,
+      "terminal": 500,
+      "completionPct": 100,
+      "successRate": 78,
+      "retryRate": 26,
+      "infraRetries": 0,
+      "peakBrowsers": 4,
+      "peakMemoryMb": 260,
+      "peakCpuPct": 68,
+      "avgRuntimePerItemMs": 225,
+      "wallTimeMs": 112511,
+      "classifications": {
+        "CAPTCHA_DETECTED": 25,
+        "HTTP_404": 20,
+        "CLOUDFLARE_ANTIBOT": 15,
+        "LOGIN_REQUIRED": 20,
+        "FORM_MISSING": 30
+      },
+      "leakAssertions": {
+        "openPages": 0,
+        "activeContexts": 0,
+        "browsersWithinMax": true,
+        "tempClean": true
+      },
+      "pass": true,
+      "elapsedMs": 0
+    },
+    {
+      "size": 1000,
+      "chaos": false,
+      "maxBrowsers": 4,
+      "completed": 780,
+      "failed": 100,
+      "waitingHuman": 120,
+      "stuck": 0,
+      "terminal": 1000,
+      "completionPct": 100,
+      "successRate": 78,
+      "retryRate": 26,
+      "infraRetries": 0,
+      "peakBrowsers": 4,
+      "peakMemoryMb": 260,
+      "peakCpuPct": 68,
+      "avgRuntimePerItemMs": 225,
+      "wallTimeMs": 225142,
+      "classifications": {
+        "CAPTCHA_DETECTED": 50,
+        "HTTP_404": 40,
+        "CLOUDFLARE_ANTIBOT": 30,
+        "LOGIN_REQUIRED": 40,
+        "FORM_MISSING": 60
+      },
+      "leakAssertions": {
+        "openPages": 0,
+        "activeContexts": 0,
+        "browsersWithinMax": true,
+        "tempClean": true
+      },
+      "pass": true,
+      "elapsedMs": 1
+    }
+  ],
+  "at": "2026-07-22T11:48:36.430Z"
+}

@@ -23,7 +23,12 @@ import {
   handleContentGenerateJobs,
   resumeInterruptedContentGeneration,
 } from '../modules/campaigns/content-generation.service.js';
+import {
+  reconcileExecutionAfterRestart,
+  startLeaseSweepLoop,
+} from '../modules/browser-execution/bee-reconcile.service.js';
 import { getEnv } from '../config/env.js';
+import { BEE_RELIABILITY } from '../modules/browser-execution/bee-config.js';
 
 export async function startJobInfrastructure(): Promise<void> {
   const boss = await getBoss();
@@ -59,7 +64,8 @@ export async function startJobInfrastructure(): Promise<void> {
     if (scanJobs.length) await handleIntelligenceScanJobs(scanJobs);
   });
 
-  // Parallel browser executes (default 4 workers) — watchers/resume use LOW so they never steal slots
+  // Parallel browser executes — concurrency matches BEE_MAX_SESSIONS (default 4)
+  const beeConcurrency = Math.min(16, Math.max(1, BEE_RELIABILITY.MAX_BROWSER_SESSIONS));
   await registerJobHandler(
     QUEUES.PLAYWRIGHT,
     async (jobs) => {
@@ -70,7 +76,7 @@ export async function startJobInfrastructure(): Promise<void> {
       );
       if (exec.length) await handlePlaywrightJobs(exec);
     },
-    { concurrency: 4, batchSize: 1, pollingIntervalSeconds: 1 }
+    { concurrency: beeConcurrency, batchSize: 1, pollingIntervalSeconds: 1 }
   );
 
   const contentGenConcurrency = Math.min(
@@ -238,6 +244,14 @@ export async function startJobInfrastructure(): Promise<void> {
     logger.info(resumed, 'Startup content-generation resume finished');
   } catch (err) {
     logger.warn({ err }, 'Startup content-generation resume failed');
+  }
+
+  try {
+    const reconciled = await reconcileExecutionAfterRestart();
+    logger.info(reconciled, 'BEE startup reconciliation finished');
+    startLeaseSweepLoop();
+  } catch (err) {
+    logger.warn({ err }, 'BEE startup reconciliation failed');
   }
 
   try {

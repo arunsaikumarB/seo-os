@@ -1,0 +1,34 @@
+{
+  "size": 100,
+  "chaos": false,
+  "maxBrowsers": 4,
+  "completed": 78,
+  "failed": 10,
+  "waitingHuman": 12,
+  "stuck": 0,
+  "terminal": 100,
+  "completionPct": 100,
+  "successRate": 78,
+  "retryRate": 26,
+  "infraRetries": 0,
+  "peakBrowsers": 4,
+  "peakMemoryMb": 260,
+  "peakCpuPct": 68,
+  "avgRuntimePerItemMs": 226,
+  "wallTimeMs": 22590,
+  "classifications": {
+    "CAPTCHA_DETECTED": 5,
+    "HTTP_404": 4,
+    "CLOUDFLARE_ANTIBOT": 3,
+    "LOGIN_REQUIRED": 4,
+    "FORM_MISSING": 6
+  },
+  "leakAssertions": {
+    "openPages": 0,
+    "activeContexts": 0,
+    "browsersWithinMax": true,
+    "tempClean": true
+  },
+  "pass": true,
+  "elapsedMs": 0
+}

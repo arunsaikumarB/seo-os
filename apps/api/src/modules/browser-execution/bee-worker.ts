@@ -291,7 +291,10 @@ async function pauseForGate(params: {
     });
   }
 
-  // Immediately fill free workers with next queued websites
+  // Immediately fill free workers with next queued websites — item waits, worker frees
+  if (sessionId) {
+    await disposeSessionRuntime(sessionId).catch(() => undefined);
+  }
   await enqueueJob(
     QUEUES.LOW,
     'bee_queue',
@@ -322,6 +325,58 @@ export async function runBeeExecutionJob(data: {
     await startJob(workspaceId, jobId);
     return;
   }
+
+  const {
+    acquireJobLease,
+    releaseJobLease,
+    startLeaseHeartbeat,
+  } = await import('./bee-lease.service.js');
+  const { beeWorkerId } = await import('./bee-config.js');
+  const { BEE_RELIABILITY } = await import('./bee-config.js');
+  const { appendTimelineEvent } = await import('./bee-timeline.service.js');
+
+  const workerId = beeWorkerId();
+  const lease = await acquireJobLease(workspaceId, jobId, workerId);
+  if (!lease) {
+    logger.warn({ jobId }, 'Could not acquire lease — skipping (another worker owns job)');
+    return;
+  }
+  const heartbeat = startLeaseHeartbeat(workspaceId, lease);
+  const jobStartedAt = Date.now();
+  let ceilingTimer: NodeJS.Timeout | null = setTimeout(() => {
+    logger.warn({ jobId }, 'Whole-job ceiling exceeded — forcing cleanup');
+  }, BEE_RELIABILITY.JOB_CEILING_MS);
+  ceilingTimer.unref?.();
+
+  try {
+    await runBeeExecutionJobInner(data, lease);
+  } finally {
+    clearInterval(heartbeat);
+    if (ceilingTimer) clearTimeout(ceilingTimer);
+    await releaseJobLease(workspaceId, jobId, lease).catch(() => undefined);
+    if (Date.now() - jobStartedAt > BEE_RELIABILITY.JOB_CEILING_MS) {
+      await appendTimelineEvent({
+        workspaceId,
+        jobId,
+        event: 'Job Ceiling Exceeded',
+        stage: 'recovery',
+        workerId,
+      });
+    }
+  }
+}
+
+async function runBeeExecutionJobInner(
+  data: {
+    jobId: string;
+    workspaceId: string;
+    sessionId?: string;
+    action?: string;
+    restoreStorage?: boolean;
+  },
+  _lease: { jobId: string; workerId: string; generation: number; expiresAt: string }
+): Promise<void> {
+  const { jobId, workspaceId } = data;
 
   const { data: job } = await getSupabaseAdmin()
     .from('execution_jobs')
@@ -932,6 +987,44 @@ export async function runBeeExecutionJob(data: {
       },
     };
     await mergeJobMetrics(workspaceId, jobId, metricsPatch);
+
+    // CAPTCHA / Cloudflare / anti-bot → Waiting Human only (never auto-solve / auto-retry)
+    const needsHuman =
+      nav.waitingHuman === true ||
+      failureCode === 'CAPTCHA_DETECTED' ||
+      failureCode === 'CLOUDFLARE_ANTIBOT' ||
+      failureCode === 'LOGIN_REQUIRED';
+    if (needsHuman) {
+      const gate =
+        failureCode === 'LOGIN_REQUIRED'
+          ? 'login'
+          : failureCode === 'CLOUDFLARE_ANTIBOT'
+            ? 'captcha'
+            : 'captcha';
+      await pauseForGate({
+        workspaceId,
+        jobId,
+        sessionId: String(sessionId || ''),
+        stepIndex: Number(liveJob?.current_step_index ?? 0),
+        stepId: null,
+        gate,
+        context: {
+          failureCode,
+          message: nav.message || classified.failureMessage,
+          neverAutoSolve: true,
+        },
+      });
+      await updateJob(jobId, {
+        failure_classification: failureCode,
+        evidence: {
+          classification: failureCode,
+          reason: nav.message || classified.failureMessage,
+          stage: classified.failureStep,
+          timestamp: classified.failureTimestamp,
+        },
+      });
+      return;
+    }
 
     // Browser-missing must park as Waiting Infrastructure — never Failed
     {

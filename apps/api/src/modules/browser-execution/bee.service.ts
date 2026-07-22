@@ -604,7 +604,18 @@ export async function startJob(workspaceId: string, jobId: string, userId?: stri
     .eq('status', 'running')
     .is('deleted_at', null);
   if ((count ?? 0) >= Number(policy.max_parallel_sessions ?? 4)) {
-    throw Object.assign(new Error('Max parallel browser sessions reached'), { status: 429 });
+    // Never fail with "browser limit reached" — leave/keep queued; scheduler fills slots
+    if (String(job.status) !== 'queued') {
+      await getSupabaseAdmin()
+        .from('execution_jobs')
+        .update({ status: 'queued', updated_at: new Date().toISOString() })
+        .eq('id', jobId)
+        .eq('workspace_id', workspaceId);
+    }
+    await appendLog(workspaceId, jobId, 'info', 'Queued — waiting for free browser slot', {
+      maxParallel: policy.max_parallel_sessions,
+    });
+    return getJob(workspaceId, jobId);
   }
 
   const headed = DEFAULT_FEATURE_FLAGS.bee_headed_debug === true;
@@ -701,11 +712,53 @@ export async function setJobStatus(
   status: string,
   extra: Record<string, unknown> = {}
 ) {
+  const lease = extra.__lease as
+    | { workerId: string; generation: number }
+    | undefined;
+  if (lease) {
+    const { assertLeaseAllowsWrite } = await import('./bee-lease.service.js');
+    await assertLeaseAllowsWrite(workspaceId, jobId, {
+      jobId,
+      workerId: lease.workerId,
+      generation: lease.generation,
+      expiresAt: '',
+    });
+    delete extra.__lease;
+  }
+
+  const patch: Record<string, unknown> = {
+    status,
+    updated_at: new Date().toISOString(),
+    ...extra,
+  };
   await getSupabaseAdmin()
     .from('execution_jobs')
-    .update({ status, updated_at: new Date().toISOString(), ...extra })
+    .update(patch)
     .eq('id', jobId)
     .eq('workspace_id', workspaceId);
+
+  try {
+    const { timelineEventForStatus, appendTimelineEvent } = await import(
+      './bee-timeline.service.js'
+    );
+    const ev = timelineEventForStatus(status);
+    if (ev) {
+      const job = await getJob(workspaceId, jobId);
+      await appendTimelineEvent({
+        workspaceId,
+        jobId,
+        opportunityId: job?.opportunity_id ? String(job.opportunity_id) : null,
+        event: ev,
+        stage: status,
+        workerId: lease?.workerId ?? null,
+        payload: extra.failure_classification
+          ? { classification: extra.failure_classification }
+          : {},
+      });
+    }
+  } catch {
+    /* timeline optional */
+  }
 
   // Campaign State Manager write-back only — does not alter BEE engine behavior
   try {
@@ -840,14 +893,16 @@ export async function continueQueuedJobs(
   const slots = Math.max(0, maxParallel - (running ?? 0));
   if (slots <= 0) return [];
 
-  // Fill all free worker slots immediately (never wait for manual refresh)
   const take = Math.min(slots, Math.max(1, opts.limit ?? slots));
+  // Priority: retries / recovered first, then FIFO by created_at
   let q = getSupabaseAdmin()
     .from('execution_jobs')
-    .select('id')
+    .select('id, retry_count, infra_retry_count, created_at')
     .eq('workspace_id', workspaceId)
     .eq('status', 'queued')
     .is('deleted_at', null)
+    .order('infra_retry_count', { ascending: false })
+    .order('retry_count', { ascending: false })
     .order('created_at', { ascending: true })
     .limit(take);
   if (opts.batchId) q = q.eq('queue_batch_id', opts.batchId);
