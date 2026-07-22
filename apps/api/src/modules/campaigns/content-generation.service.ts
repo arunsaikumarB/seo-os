@@ -544,6 +544,13 @@ async function approvePackages(workspaceId: string, itemIds: string[]) {
       continue;
     }
     if (item.generationStatus === 'Completed' && item.currentStatus === 'Ready') {
+      // Clear stale quality last_error left from Needs Review → user approve path
+      if (item.lastError && /quality needs review/i.test(item.lastError)) {
+        await updateCampaignItem(workspaceId, id, {
+          lastError: null,
+          force: true,
+        });
+      }
       succeeded++;
       continue;
     }
@@ -553,6 +560,7 @@ async function approvePackages(workspaceId: string, itemIds: string[]) {
         currentStatus: 'Package Generated',
         generationStatus: 'Completed',
         packageApprovedBy: 'user',
+        lastError: null,
         force: true,
       });
       await updateCampaignItem(workspaceId, id, {

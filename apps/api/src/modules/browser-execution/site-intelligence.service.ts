@@ -806,7 +806,22 @@ export async function runSiteProfileJob(params: {
 
   try {
     const existing = await getSiteProfileByDomain(params.workspaceId, params.domain);
-    const learning = (existing?.learning as SiteLearning) ?? emptyLearning();
+    // Normalize learning — DB rows may store `{}` which must not skip emptyLearning()
+    const rawLearn = (existing?.learning ?? null) as Partial<SiteLearning> | null;
+    const learning: SiteLearning = {
+      ...emptyLearning(),
+      ...(rawLearn ?? {}),
+      successfulPaths: Array.isArray(rawLearn?.successfulPaths)
+        ? rawLearn!.successfulPaths!
+        : [],
+      submissionUrls: Array.isArray(rawLearn?.submissionUrls)
+        ? rawLearn!.submissionUrls!
+        : [],
+      strategyStats:
+        rawLearn?.strategyStats && typeof rawLearn.strategyStats === 'object'
+          ? rawLearn.strategyStats
+          : {},
+    };
 
     // Reuse proven entry_url with verification when learning has a path and profile not forced
     const proven = learning.successfulPaths[0];
