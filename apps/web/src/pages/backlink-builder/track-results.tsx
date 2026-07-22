@@ -1,66 +1,29 @@
 import { Link, useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
 import { Download, FileBarChart, CheckCircle2 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { PageTransition } from '@/components/demo/page-transition';
-import { useApi } from '@/hooks/use-api';
 import { AiLoadingState } from '@/components/workflow/ai-activity-card';
-
-type TrackResults = {
-  Submitted: number;
-  Running: number;
-  'Waiting Human': number;
-  Failed: number;
-  Skipped: number;
-  Deleted: number;
-  Verified: number;
-  Approved: number;
-  Rejected: number;
-};
-
-type ExecutionState = {
-  trackResults: TrackResults;
-  counts: {
-    campaignTotal: number;
-    campaignResolved: number;
-    progressPercent: number;
-    executionComplete: boolean;
-  };
-};
+import { useExecutionSummary } from '@/hooks/use-execution-summary';
 
 /**
  * Step 7 — Track Results.
- * Reads exclusively from the Execution State Manager.
+ * Reads exclusively from the shared Execution Summary (Phase 4.7).
  */
 export function TrackResultsPage() {
   const { projectId = '' } = useParams();
-  const { request } = useApi();
-
-  const state = useQuery({
-    queryKey: ['execution-state', projectId],
-    queryFn: () =>
-      request<{ data: ExecutionState }>(
-        `/v1/projects/${projectId}/browser/execution-state`
-      ),
-    enabled: !!projectId,
-    refetchInterval: 3_000,
-    retry: false,
-  });
-
-  const tr = state.data?.data.trackResults;
-  const counts = state.data?.data.counts;
+  const state = useExecutionSummary(projectId, 2_000);
+  const s = state.data;
 
   const metrics = [
-    { label: 'Submitted', value: tr?.Submitted ?? 0 },
-    { label: 'Running', value: tr?.Running ?? 0 },
-    { label: 'Waiting Human', value: tr?.['Waiting Human'] ?? 0 },
-    { label: 'Failed', value: tr?.Failed ?? 0 },
-    { label: 'Skipped', value: tr?.Skipped ?? 0 },
-    { label: 'Deleted', value: tr?.Deleted ?? 0 },
-    { label: 'Verified', value: tr?.Verified ?? 0 },
-    { label: 'Approved', value: tr?.Approved ?? 0 },
-    { label: 'Rejected', value: tr?.Rejected ?? 0 },
+    { label: 'Completed', value: s?.completed ?? 0 },
+    { label: 'Running', value: s?.running ?? 0 },
+    { label: 'Waiting Human', value: s?.waitingHuman ?? 0 },
+    { label: 'Remaining', value: s?.remaining ?? 0 },
+    { label: 'Failed', value: s?.failed ?? 0 },
+    { label: 'Skipped', value: s?.skipped ?? 0 },
+    { label: 'Deleted', value: s?.deleted ?? 0 },
+    { label: 'Queued', value: s?.queued ?? 0 },
   ] as const;
 
   return (
@@ -70,25 +33,25 @@ export function TrackResultsPage() {
           <CheckCircle2 className="h-6 w-6" /> Track Results
         </h1>
         <p className="text-muted-foreground text-sm max-w-2xl">
-          Live campaign status from the Execution State Manager — not verification alone.
+          Live campaign status from the Execution Summary — same numbers as Submit Backlinks.
         </p>
       </div>
 
-      {counts ? (
+      {s ? (
         <p className="text-sm text-muted-foreground">
           Campaign total{' '}
-          <span className="font-semibold tabular-nums text-foreground">
-            {counts.campaignTotal}
-          </span>
+          <span className="font-semibold tabular-nums text-foreground">{s.total}</span>
           {' · '}
-          {counts.campaignResolved} resolved · {counts.progressPercent}% complete
+          Progress{' '}
+          <span className="font-semibold tabular-nums text-foreground">{s.progressPercent}%</span>
+          {s.executionComplete ? ' · Complete' : ''}
         </p>
       ) : null}
 
       {state.isLoading ? (
         <AiLoadingState message="AI is checking execution status…" />
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {metrics.map((m) => (
             <Card key={m.label} className="border-border/40 shadow-sm rounded-2xl">
               <CardContent className="pt-4">
@@ -99,6 +62,13 @@ export function TrackResultsPage() {
           ))}
         </div>
       )}
+
+      <div className="h-2 rounded-full bg-muted overflow-hidden max-w-xl">
+        <div
+          className="h-full bg-primary transition-all duration-500"
+          style={{ width: `${Math.min(100, Math.max(0, s?.progressPercent ?? 0))}%` }}
+        />
+      </div>
 
       <Card className="border-border/40 shadow-sm rounded-2xl">
         <CardHeader className="pb-2">

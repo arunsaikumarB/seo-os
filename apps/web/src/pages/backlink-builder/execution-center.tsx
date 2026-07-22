@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useMemo, useState, Fragment } from 'react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -29,8 +29,12 @@ import {
   useInterventions,
 } from '@/components/browser/needs-your-action-queue';
 import { openInterventionWindow } from '@/lib/intervention-window';
-import { AiActivityCard, AiLoadingState } from '@/components/workflow/ai-activity-card';
+import { AiLoadingState } from '@/components/workflow/ai-activity-card';
 import { HumanInterventionQueue } from '@/components/browser/human-intervention-queue';
+import { ExecutionLiveFeed } from '@/components/browser/execution-live-feed';
+import { WebsiteExecutionTimeline } from '@/components/browser/website-execution-timeline';
+import { useExecutionSummary } from '@/hooks/use-execution-summary';
+import { explainFailure, explainWaitingHuman } from '@/hooks/use-execution-summary';
 
 type BeeJob = {
   id: string;
@@ -123,6 +127,7 @@ type ExecutionOpportunity = {
     status: string;
     created_at: string;
     disposition?: string | null;
+    error_code?: string | null;
     error_message?: string | null;
   } | null;
 };
@@ -147,8 +152,8 @@ const TABS = [
 
 const ROW_STATUS_LABEL: Record<string, string> = {
   Ready: 'Ready',
-  Starting: 'Starting',
-  Queued: 'Starting',
+  Starting: 'Opening Website',
+  Queued: 'Queued',
   Running: 'Running',
   'Waiting Human': 'Waiting Human',
   Completed: 'Completed',
@@ -158,9 +163,8 @@ const ROW_STATUS_LABEL: Record<string, string> = {
   'Failed to Start': 'Failed to Start',
   Skipped: 'Skipped',
   Deleted: 'Deleted',
-  // legacy readiness keys
   ready: 'Ready',
-  starting: 'Starting',
+  starting: 'Opening Website',
   running: 'Running',
   waiting_human: 'Waiting Human',
   completed: 'Completed',
@@ -169,7 +173,7 @@ const ROW_STATUS_LABEL: Record<string, string> = {
   failed_to_start: 'Failed to Start',
   skipped: 'Skipped',
   deleted: 'Deleted',
-  in_progress: 'Starting',
+  in_progress: 'Opening Website',
   needs_approval: 'Waiting Human',
   needs_domain: 'Needs domain',
   not_ready: 'Not ready',
@@ -185,6 +189,8 @@ export function BrowserExecutionCenterPage() {
   const [selectedOppIds, setSelectedOppIds] = useState<Set<string>>(new Set());
   const [bulkProgress, setBulkProgress] = useState<BulkProgressItem[]>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showWebsiteDetails, setShowWebsiteDetails] = useState(false);
+  const [expandedOppId, setExpandedOppId] = useState<string | null>(null);
   const { setOpportunity } = useCurrentOpportunity(projectId);
 
   const setTab = (t: (typeof TABS)[number]) => {
@@ -194,6 +200,8 @@ export function BrowserExecutionCenterPage() {
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['bee-jobs', projectId] });
     qc.invalidateQueries({ queryKey: ['bee-stats', projectId] });
+    qc.invalidateQueries({ queryKey: ['execution-summary', projectId] });
+    qc.invalidateQueries({ queryKey: ['bee-execution-progress', projectId] });
     qc.invalidateQueries({ queryKey: ['bee-job', projectId] });
     qc.invalidateQueries({ queryKey: ['bee-opportunities', projectId] });
   };
@@ -528,13 +536,20 @@ export function BrowserExecutionCenterPage() {
     return { total, started, failed, active };
   }, [bulkProgress]);
 
-  const totalJobs = s?.totalJobs ?? 0;
-  const completedJobs = s?.completedJobs ?? 0;
-  const remainingJobs = s?.remainingJobs ?? Math.max(0, totalJobs - completedJobs);
-  /** Progress ONLY from Execution State Manager — never recalculate locally */
-  const progressPercent = Math.round(s?.progressPercent ?? 0);
-  const campaignState = s?.campaignState ?? 'Idle';
-  const campaignIsRunning = Boolean(s?.campaignIsRunning);
+  const interventions = useInterventions(projectId);
+  const actionItems = interventions.data?.data.items ?? [];
+  const execSummary = useExecutionSummary(projectId, 1_500);
+  const sum = execSummary.data;
+
+  /** Phase 4.7 — always from Execution Summary (never local recalculation) */
+  const progressPercent = Math.round(sum?.progressPercent ?? s?.progressPercent ?? 0);
+  const totalJobs = sum?.total ?? s?.totalJobs ?? 0;
+  const completedJobs = sum?.completed ?? s?.completedJobs ?? 0;
+  const remainingJobs = sum?.remaining ?? s?.remainingJobs ?? 0;
+  const campaignState = sum?.campaignState ?? s?.campaignState ?? 'Idle';
+  const campaignIsRunning = Boolean(
+    (sum?.running ?? 0) > 0 || s?.campaignIsRunning || campaignState === 'Running'
+  );
   const campaignControlsVisible =
     campaignIsRunning ||
     campaignState === 'Starting' ||
@@ -561,10 +576,10 @@ export function BrowserExecutionCenterPage() {
           );
         });
   const showExecutionSummary = Boolean(
-    s?.executionComplete || ((s?.totalJobs ?? 0) > 0 && (s?.remainingJobs ?? 0) === 0)
+    sum?.executionComplete ||
+      s?.executionComplete ||
+      (totalJobs > 0 && remainingJobs === 0 && (sum?.running ?? 0) === 0 && (sum?.waitingHuman ?? 0) === 0)
   );
-  const interventions = useInterventions(projectId);
-  const actionItems = interventions.data?.data.items ?? [];
 
   return (
     <div className="space-y-6">
@@ -610,6 +625,8 @@ export function BrowserExecutionCenterPage() {
             }
           />
 
+          <ExecutionLiveFeed projectId={projectId} />
+
           {showFailedToStart && !campaignIsRunning && campaignState !== 'Starting' ? (
             <Card className="rounded-2xl border-red-500/30 bg-red-500/5">
               <CardHeader className="pb-2">
@@ -641,25 +658,32 @@ export function BrowserExecutionCenterPage() {
           campaignState === 'Starting' ||
           campaignState === 'Waiting Human' ||
           campaignState === 'Paused' ? (
-            <AiActivityCard
-              title={s?.aiStatusLine ?? 'Submitting backlinks'}
-              percent={progressPercent}
-              current={
-                s?.current?.website
-                  ? `${s.current.website}${s.current.step ? ` · ${s.current.step}` : ''}`
-                  : workerSlots.find((w) => w.status === 'busy')?.website ??
-                    (campaignState === 'Starting' ? 'Starting…' : 'Working…')
-              }
-              next={
-                remainingJobs > 0
-                  ? `${remainingJobs} website${remainingJobs === 1 ? '' : 's'} remaining`
-                  : actionItems.length > 0
-                    ? 'A few sites need your help — one task at a time'
-                    : 'Finishing up'
-              }
-              eta={s?.etaSeconds ? formatEta(s.etaSeconds) : null}
-            />
-          ) : !showFailedToStart ? (
+            <Card className="rounded-2xl border-border/40">
+              <CardContent className="pt-5 space-y-3">
+                <div className="flex flex-wrap items-end justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-medium">{sum?.aiStatusLine ?? s?.aiStatusLine ?? 'Submitting backlinks'}</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Progress {progressPercent}% · Completed {completedJobs} · Running{' '}
+                      {sum?.running ?? s?.running ?? 0} · Waiting Human{' '}
+                      {sum?.waitingHuman ?? actionItems.length} · Remaining {remainingJobs}
+                    </p>
+                  </div>
+                  {sum?.etaSeconds || s?.etaSeconds ? (
+                    <p className="text-xs text-muted-foreground tabular-nums">
+                      ETA {formatEta(sum?.etaSeconds || s?.etaSeconds || 0)}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="h-2 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full bg-primary transition-all duration-500"
+                    style={{ width: `${Math.min(100, Math.max(0, progressPercent))}%` }}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          ) : !showFailedToStart && !showExecutionSummary ? (
             <Card className="rounded-2xl border-border/40">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">Ready to submit</CardTitle>
@@ -806,9 +830,11 @@ export function BrowserExecutionCenterPage() {
             <CardHeader className="pb-3">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <CardTitle className="text-base">Approved websites</CardTitle>
+                  <CardTitle className="text-base">Campaign websites</CardTitle>
                   <CardDescription>
-                    Select sites and start submission — AI handles the rest.
+                    {totalJobs > 0
+                      ? 'Live counts from the Execution Summary — expand only when you need the list.'
+                      : 'Select sites and start submission — AI handles the rest.'}
                   </CardDescription>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -910,61 +936,152 @@ export function BrowserExecutionCenterPage() {
                   No approved websites yet. Approve items in Approve Opportunities first.
                 </p>
               ) : (
-                <div className="overflow-x-auto rounded-md border">
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
-                      <tr>
-                        <th className="px-3 py-2 w-10">
-                          <input
-                            type="checkbox"
-                            aria-label="Select all ready opportunities"
-                            checked={allSelectableSelected}
-                            onChange={toggleAll}
-                            disabled={selectableOpps.length === 0 || startExecutions.isPending}
-                          />
-                        </th>
-                        <th className="px-3 py-2 font-medium">Website</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {oppList
-                        .filter((opp) => {
-                          const waiting = actionItems.find(
-                            (a) =>
-                              a.website === opp.website ||
-                              (opp.domain && a.website.includes(opp.domain))
-                          );
-                          return !waiting;
-                        })
-                        .map((opp) => {
-                        const checked = selectedOppIds.has(opp.id);
-                        return (
-                          <tr key={opp.id} className="border-t">
-                            <td className="px-3 py-2">
+                <>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {(
+                      [
+                        ['Running', sum?.running ?? s?.running ?? 0],
+                        ['Completed', completedJobs],
+                        ['Waiting Human', sum?.waitingHuman ?? actionItems.length],
+                        ['Remaining', remainingJobs],
+                      ] as const
+                    ).map(([label, value]) => (
+                      <div key={label}>
+                        <p className="text-xs text-muted-foreground">{label}</p>
+                        <p className="text-xl font-semibold tabular-nums">{value}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setShowWebsiteDetails((v) => !v)}
+                  >
+                    {showWebsiteDetails ? 'Hide Details' : 'View Details'}
+                  </Button>
+                  {showWebsiteDetails ? (
+                    <div className="overflow-x-auto rounded-md border">
+                      <table className="w-full text-sm">
+                        <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
+                          <tr>
+                            <th className="px-3 py-2 w-10">
                               <input
                                 type="checkbox"
-                                aria-label={`Select ${opp.website}`}
-                                checked={checked}
-                                disabled={!opp.selectable || startExecutions.isPending}
-                                onChange={() => toggleOpp(opp.id, opp.selectable)}
+                                aria-label="Select all ready opportunities"
+                                checked={allSelectableSelected}
+                                onChange={toggleAll}
+                                disabled={selectableOpps.length === 0 || startExecutions.isPending}
                               />
-                            </td>
-                            <td className="px-3 py-2">
-                              <p className="font-medium">{opp.website}</p>
-                            </td>
+                            </th>
+                            <th className="px-3 py-2 font-medium">Website</th>
+                            <th className="px-3 py-2 font-medium">Status</th>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                        </thead>
+                        <tbody>
+                          {oppList.map((opp) => {
+                            const checked = selectedOppIds.has(opp.id);
+                            const waiting = actionItems.find(
+                              (a) =>
+                                a.website === opp.website ||
+                                (opp.domain && a.website.includes(opp.domain))
+                            );
+                            const statusKey = waiting
+                              ? 'Waiting Human'
+                              : (opp.rowStatus ?? opp.readiness);
+                            const statusLabel = ROW_STATUS_LABEL[statusKey] ?? statusKey;
+                            const fail = explainFailure(
+                              opp.latest_job?.error_code,
+                              opp.error_message || opp.latest_job?.error_message
+                            );
+                            const wait = waiting
+                              ? explainWaitingHuman(waiting.gate, waiting.reason)
+                              : null;
+                            return (
+                              <Fragment key={opp.id}>
+                              <tr className="border-t">
+                                <td className="px-3 py-2">
+                                  <input
+                                    type="checkbox"
+                                    aria-label={`Select ${opp.website}`}
+                                    checked={checked}
+                                    disabled={!opp.selectable || startExecutions.isPending}
+                                    onChange={() => toggleOpp(opp.id, opp.selectable)}
+                                  />
+                                </td>
+                                <td className="px-3 py-2">
+                                  <button
+                                    type="button"
+                                    className="text-left w-full"
+                                    onClick={() =>
+                                      setExpandedOppId((id) => (id === opp.id ? null : opp.id))
+                                    }
+                                  >
+                                    <p className="font-medium">{opp.website}</p>
+                                    {wait ? (
+                                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                                        {wait.title} — {wait.detail}
+                                        {waiting?.pausedUrl ? (
+                                          <>
+                                            <br />
+                                            Current URL · {waiting.pausedUrl}
+                                          </>
+                                        ) : null}
+                                      </p>
+                                    ) : statusKey === 'Failed' ||
+                                      statusKey === 'failed' ||
+                                      statusKey === 'Failed to Start' ? (
+                                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                                        {fail.title} — {fail.detail}
+                                        {fail.retry ? ' · Retry Available' : ''}
+                                        {fail.needsHuman ? ' · Needs Human' : ''}
+                                      </p>
+                                    ) : (
+                                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                                        {expandedOppId === opp.id
+                                          ? 'Hide timeline'
+                                          : 'Show timeline'}
+                                      </p>
+                                    )}
+                                  </button>
+                                </td>
+                                <td className="px-3 py-2">
+                                  <Badge className={`text-[10px] ${statusBadge(statusKey)}`}>
+                                    {statusLabel}
+                                  </Badge>
+                                </td>
+                              </tr>
+                              {expandedOppId === opp.id ? (
+                                <tr className="border-t bg-muted/10">
+                                  <td colSpan={3} className="px-3 py-2">
+                                    <WebsiteExecutionTimeline
+                                      projectId={projectId}
+                                      jobId={opp.latest_job?.id}
+                                      status={opp.latest_job?.status ?? statusKey}
+                                      createdAt={opp.latest_job?.created_at}
+                                      failed={
+                                        statusKey === 'Failed' ||
+                                        statusKey === 'failed' ||
+                                        statusKey === 'Failed to Start'
+                                      }
+                                    />
+                                  </td>
+                                </tr>
+                              ) : null}
+                              </Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : null}
+                </>
               )}
 
               {(startExecutions.isPending || progressCounts.total > 0) &&
               !(s?.totalJobs && s.totalJobs > 0) ? (
                 <div className="rounded-md border p-3 space-y-2">
                   <div className="flex items-center justify-between gap-2 text-sm">
-                    <p className="font-medium">Starting jobs…</p>
+                    <p className="font-medium">Opening websites…</p>
                     <p className="text-xs text-muted-foreground tabular-nums">
                       {progressCounts.started + progressCounts.failed}/{progressCounts.total}
                     </p>
@@ -982,7 +1099,7 @@ export function BrowserExecutionCenterPage() {
                             : item.phase === 'started'
                               ? 'Queued'
                               : item.phase === 'starting'
-                                ? 'Starting…'
+                                ? 'Opening Website…'
                                 : 'Queued'}
                         </span>
                       </li>
@@ -996,28 +1113,23 @@ export function BrowserExecutionCenterPage() {
           {showExecutionSummary ? (
             <Card className="border-emerald-500/30">
               <CardHeader className="pb-2">
-                <CardTitle className="text-base">Submission complete</CardTitle>
+                <CardTitle className="text-base">Campaign Finished</CardTitle>
                 <CardDescription>
-                  AI finished this batch. Track results or download a report.
+                  Submitted {completedJobs} · Waiting Human{' '}
+                  {sum?.waitingHuman ?? 0} · Skipped {sum?.skipped ?? s?.skipped ?? 0} · Failed{' '}
+                  {sum?.failed ?? s?.failed ?? 0}
                 </CardDescription>
               </CardHeader>
-              <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
-                {(
-                  [
-                    ['Submitted', s?.submitted ?? 0],
-                    ['Pending', s?.waitingApproval ?? 0],
-                    ['Verifying', s?.waitingVerification ?? 0],
-                    [
-                      'Success',
-                      s?.successRate != null ? `${s.successRate}%` : '—',
-                    ],
-                  ] as const
-                ).map(([label, value]) => (
-                  <div key={label}>
-                    <p className="text-xs text-muted-foreground">{label}</p>
-                    <p className="text-lg font-semibold tabular-nums">{value}</p>
-                  </div>
-                ))}
+              <CardContent className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Estimated Verification Time ·{' '}
+                  {sum?.estimatedVerificationTime ?? s?.estimatedApprovalTime ?? '24 hours'}
+                </p>
+                <Button asChild size="sm">
+                  <Link to={`/projects/${projectId}/backlink-builder/track-results`}>
+                    Continue · Track Results
+                  </Link>
+                </Button>
               </CardContent>
             </Card>
           ) : null}

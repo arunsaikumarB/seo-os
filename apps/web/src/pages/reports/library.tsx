@@ -26,6 +26,7 @@ import { getApiErrorMessage } from '@/lib/api';
 import { toast } from 'sonner';
 import { OpportunitySelector } from '@/components/opportunities/opportunity-selector';
 import { useCurrentOpportunity } from '@/hooks/use-current-opportunity';
+import { useExecutionSummary } from '@/hooks/use-execution-summary';
 
 type ReportTypeMeta = { type: string; label: string; description: string };
 type ReportRow = {
@@ -72,6 +73,8 @@ export function ReportsLibraryPage() {
   const [emailTo, setEmailTo] = useState('');
   const { opportunity: selectedOpp, setOpportunity: handleSelectOpp } =
     useCurrentOpportunity(projectId);
+  const execSummary = useExecutionSummary(projectId, 5_000);
+  const es = execSummary.data;
 
   const types = useQuery({
     queryKey: ['report-types', projectId],
@@ -251,6 +254,35 @@ export function ReportsLibraryPage() {
           </Button>
         </div>
       </div>
+
+      {es && es.total > 0 ? (
+        <Card className="border-border/40 rounded-2xl">
+          <CardContent className="pt-4 flex flex-wrap gap-4 text-sm">
+            <span className="text-muted-foreground">
+              Campaign progress{' '}
+              <span className="font-semibold tabular-nums text-foreground">
+                {Math.round(es.progressPercent)}%
+              </span>
+            </span>
+            <span>
+              Completed <span className="font-semibold tabular-nums">{es.completed}</span>
+            </span>
+            <span>
+              Running <span className="font-semibold tabular-nums">{es.running}</span>
+            </span>
+            <span>
+              Waiting Human{' '}
+              <span className="font-semibold tabular-nums">{es.waitingHuman}</span>
+            </span>
+            <span>
+              Remaining <span className="font-semibold tabular-nums">{es.remaining}</span>
+            </span>
+            <span>
+              Failed <span className="font-semibold tabular-nums">{es.failed}</span>
+            </span>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <StaggerGrid className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {[

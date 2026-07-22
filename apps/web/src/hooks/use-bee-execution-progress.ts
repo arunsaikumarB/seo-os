@@ -70,28 +70,29 @@ export function useBeeExecutionProgress(projectId: string, refetchInterval = 2_0
   return useQuery({
     queryKey: ['bee-execution-progress', projectId],
     queryFn: async (): Promise<BeeExecutionProgress> => {
-      const res = await request<{ data: Partial<BeeExecutionProgress> }>(
-        `/v1/projects/${projectId}/browser/statistics`
-      );
+      const res = await request<{
+        data: Partial<BeeExecutionProgress> & { completed?: number };
+      }>(`/v1/projects/${projectId}/browser/statistics`);
       const d = res.data ?? {};
       const max = Number(d.maxParallelSessions ?? 0);
       const active = Number(d.activeWorkerCount ?? 0);
       const needsYou = Number(
         d.needsYou ?? d.needsYourAction ?? d.waitingApproval ?? 0
       );
+      const completedCount = Number(d.completed ?? d.submitted ?? d.completedJobs ?? 0);
       return {
         ...EMPTY,
         ...d,
         totalJobs: Number(d.totalJobs ?? 0),
-        completedJobs: Number(d.completedJobs ?? 0),
-        remainingJobs: Number(d.remainingJobs ?? 0),
+        completedJobs: completedCount,
+        remainingJobs: Number(d.remainingJobs ?? d.queued ?? 0),
         progressPercent: Number(d.progressPercent ?? 0),
         executionComplete: Boolean(d.executionComplete),
         running: Number(d.running ?? 0),
         queued: Number(d.queued ?? 0),
         failed: Number(d.failed ?? 0),
         failedToStart: Number(d.failedToStart ?? 0),
-        submitted: Number(d.submitted ?? 0),
+        submitted: Number(d.submitted ?? completedCount),
         skipped: Number(d.skipped ?? 0),
         deleted: Number(d.deleted ?? 0),
         waitingApproval: Number(d.waitingApproval ?? 0),

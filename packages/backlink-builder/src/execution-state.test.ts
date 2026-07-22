@@ -82,6 +82,23 @@ describe('execution state manager', () => {
     expect(c.totalExecutable).toBe(8);
   });
 
+  it('progress includes running and waiting human (Phase 4.7)', () => {
+    // 10 completed + 4 running + 2 waiting + 4 queued = 20 → 80%
+    const jobs = [
+      ...Array.from({ length: 10 }, (_, i) => ({ id: `c${i}`, status: 'submitted' })),
+      ...Array.from({ length: 4 }, (_, i) => ({ id: `r${i}`, status: 'navigating' })),
+      ...Array.from({ length: 2 }, (_, i) => ({ id: `w${i}`, status: 'watching_login' })),
+      ...Array.from({ length: 4 }, (_, i) => ({ id: `q${i}`, status: 'queued' })),
+    ];
+    const c = computeExecutionCounts(jobs);
+    expect(c.totalExecutable).toBe(20);
+    expect(c.Submitted + c.Completed).toBe(10);
+    expect(c.Running).toBe(4);
+    expect(c['Waiting Human']).toBe(2);
+    expect(c.Queued).toBe(4);
+    expect(c.progressPercent).toBe(80);
+  });
+
   it('hides deleted from project and verification', () => {
     expect(isHiddenFromProject('deleted')).toBe(true);
     expect(isVerificationEligible('failed')).toBe(false);

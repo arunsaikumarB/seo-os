@@ -149,21 +149,25 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
   const policy = await getOrCreatePolicy(workspaceId);
   const maxWorkers = Math.max(1, Number(policy.max_parallel_sessions ?? 4));
   const c = state.counts;
+  const completed =
+    c.Submitted + c.Completed + c.Verified + c.Approved;
+  const remaining = c.Queued; // not yet started — never includes Running
 
   return {
     state,
-    running: c.Running,
+    running: c.Running + c.Starting,
     queued: c.Queued,
     ready: c.Ready,
     paused: 0,
     needs_approval: c['Waiting Human'],
-    completed: c.Submitted + c.Completed + c.Verified + c.Approved,
+    /** Success completions — same as submitted / aiSubmitted (Phase 4.7 consistency) */
+    completed,
     failed: c.Failed,
     failedToStart: c['Failed to Start'],
     blocked: 0,
     cancelled: c.Deleted,
     watching: c['Waiting Human'],
-    submitted: c.Submitted + c.Completed,
+    submitted: completed,
     skipped: c.Skipped,
     deleted: c.Deleted,
     ignored: c.Ignored,
@@ -173,35 +177,53 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
     needsYou: c['Waiting Human'],
     waitingUser: c['Waiting Human'],
     waitingApproval: c['Waiting Human'],
+    waitingHuman: c['Waiting Human'],
     waitingVerification: 0,
     waitingLogin: 0,
     waitingMfa: 0,
     retrying: 0,
-    aiSubmitted: c.Submitted + c.Completed + c.Verified,
+    aiSubmitted: completed,
     totalJobs: c.totalExecutable,
-    completedJobs: c.campaignResolved,
-    remainingJobs: c.Running + c.Queued,
+    /** Same numerator base as `completed` — never campaignResolved (Failed/Skipped) */
+    completedJobs: completed,
+    remainingJobs: remaining,
     progressPercent: c.progressPercent,
     executionComplete: c.executionComplete,
     campaignState: c.campaignState,
     campaignIsRunning: c.campaignIsRunning,
     aiStatusLine: c.aiStatusLine,
     successRate:
-      c.Submitted + c.Completed + c.Failed > 0
-        ? Math.round(
-            ((c.Submitted + c.Completed) / (c.Submitted + c.Completed + c.Failed)) * 1000
-          ) / 10
+      completed + c.Failed > 0
+        ? Math.round((completed / (completed + c.Failed)) * 1000) / 10
         : null,
     maxParallelSessions: maxWorkers,
-    activeWorkerCount: Math.min(maxWorkers, c.Running),
-    workerUsage: `${Math.min(maxWorkers, c.Running)}/${maxWorkers}`,
+    activeWorkerCount: Math.min(maxWorkers, c.Running + c.Starting),
+    workerUsage: `${Math.min(maxWorkers, c.Running + c.Starting)}/${maxWorkers}`,
     etaSeconds: 0,
     estimatedApprovalTime: '7–14 days',
+    estimatedVerificationTime: '24 hours',
     needsYourAction: c['Waiting Human'],
     trackResults: state.trackResults,
     failedQueue: state.failedQueue,
     failedToStartQueue: state.failedToStart,
     metricsSource: 'live' as const,
+    /** Phase 4.7 — one summary object for all surfaces */
+    executionSummary: {
+      queued: c.Queued,
+      running: c.Running + c.Starting,
+      completed,
+      waitingHuman: c['Waiting Human'],
+      skipped: c.Skipped,
+      failed: c.Failed,
+      deleted: c.Deleted,
+      remaining,
+      total: c.totalExecutable,
+      progressPercent: c.progressPercent,
+      etaSeconds: 0,
+      executionComplete: c.executionComplete,
+      campaignState: c.campaignState,
+      aiStatusLine: c.aiStatusLine,
+    },
   };
 }
 

@@ -22,6 +22,7 @@ import {
   openInterventionWindow,
   runCompleteAllSequence,
 } from '@/lib/intervention-window';
+import { useExecutionSummary, explainWaitingHuman } from '@/hooks/use-execution-summary';
 import { cn } from '@/lib/utils';
 
 type Props = {
@@ -74,6 +75,7 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
   const { request } = useApi();
   const qc = useQueryClient();
   const progress = useBeeExecutionProgress(projectId, 2_000);
+  const summary = useExecutionSummary(projectId, 1_500);
   const interventions = useInterventions(projectId, 2_000);
   const items = interventions.data?.data.items ?? [];
   const [index, setIndex] = useState(0);
@@ -87,9 +89,10 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
   const current = items[Math.min(index, Math.max(0, items.length - 1))] ?? null;
 
   const p = progress.data;
-  const submitted = p?.submitted ?? p?.completedJobs ?? 0;
-  const running = p?.running ?? 0;
-  const remaining = p?.remainingJobs ?? 0;
+  const sum = summary.data;
+  const submitted = sum?.completed ?? p?.submitted ?? p?.completedJobs ?? 0;
+  const running = sum?.running ?? p?.running ?? 0;
+  const remaining = sum?.remaining ?? p?.remainingJobs ?? 0;
   const showProgressStrip =
     needsHelp > 0 ||
     Boolean(campaignActive) ||
@@ -105,19 +108,19 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
         </p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {(
-            [
-              ['Submitted', submitted],
-              ['Running', running],
-              ['Remaining', remaining],
-              ['Needs Your Help', needsHelp],
-            ] as const
-          ).map(([label, value]) => (
+              [
+                ['Completed', submitted],
+                ['Running', running],
+                ['Waiting Human', sum?.waitingHuman ?? needsHelp],
+                ['Remaining', remaining],
+              ] as const
+            ).map(([label, value]) => (
             <div key={label}>
               <p className="text-xs text-muted-foreground">{label}</p>
               <p
                 className={cn(
                   'text-xl font-semibold tabular-nums mt-0.5',
-                  label === 'Needs Your Help' && value > 0 && 'text-amber-800 dark:text-amber-200'
+                  label === 'Waiting Human' && value > 0 && 'text-amber-800 dark:text-amber-200'
                 )}
               >
                 {value}
@@ -125,6 +128,19 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
             </div>
           ))}
         </div>
+        {sum && sum.total > 0 ? (
+          <div className="mt-3 space-y-1">
+            <p className="text-xs text-muted-foreground tabular-nums">
+              Progress {Math.round(sum.progressPercent)}%
+            </p>
+            <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+              <div
+                className="h-full bg-primary transition-all duration-500"
+                style={{ width: `${Math.min(100, Math.max(0, sum.progressPercent))}%` }}
+              />
+            </div>
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   ) : null;
@@ -154,6 +170,7 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
     qc.invalidateQueries({ queryKey: ['bee-stats', projectId] });
     qc.invalidateQueries({ queryKey: ['bee-opportunities', projectId] });
     qc.invalidateQueries({ queryKey: ['execution-state', projectId] });
+    qc.invalidateQueries({ queryKey: ['execution-summary', projectId] });
     qc.invalidateQueries({ queryKey: ['bee-execution-progress', projectId] });
     qc.invalidateQueries({ queryKey: ['backlink-pending', projectId] });
   };
@@ -283,7 +300,14 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
     current?.explanation ||
     current?.instruction ||
     current?.reason;
-  const headline = current ? gateHeadline(current, detail) : '';
+  const waitExplain = current
+    ? explainWaitingHuman(current.gate, reason)
+    : { title: 'Waiting Human', detail: '' };
+  const headline = current
+    ? waitExplain.title !== 'Waiting Human'
+      ? waitExplain.title
+      : gateHeadline(current, detail)
+    : '';
 
   return (
     <div className="space-y-4">
@@ -379,7 +403,27 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
               <p className="text-sm text-muted-foreground mt-3">
                 <span className="text-foreground/70">Reason</span>
               </p>
-              <p className="text-sm mt-0.5">{reason}</p>
+              <p className="text-sm mt-0.5">{waitExplain.detail || reason}</p>
+              {detail?.pausedUrl || current.pausedUrl ? (
+                <>
+                  <p className="text-sm text-muted-foreground mt-3">
+                    <span className="text-foreground/70">Current URL</span>
+                  </p>
+                  <p className="text-sm mt-0.5 break-all">
+                    {detail?.pausedUrl || current.pausedUrl}
+                  </p>
+                </>
+              ) : null}
+              {(detail?.currentStepLabel || detail?.stepLabel) && (
+                <>
+                  <p className="text-sm text-muted-foreground mt-3">
+                    <span className="text-foreground/70">Current Step</span>
+                  </p>
+                  <p className="text-sm mt-0.5">
+                    {detail.currentStepLabel || detail.stepLabel}
+                  </p>
+                </>
+              )}
             </div>
 
             <div className="space-y-1.5">

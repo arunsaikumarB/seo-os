@@ -117,6 +117,48 @@ export function toPublicExecutionStatus(
   return 'Ready';
 }
 
+/** Human-readable live stage — never show generic "Starting". */
+export function liveExecutionStage(
+  status: string,
+  opts?: { stepAction?: string | null; pauseReason?: string | null }
+): string {
+  const s = String(status ?? '');
+  const action = String(opts?.stepAction ?? '');
+  if (
+    s.startsWith('watching_') ||
+    s.startsWith('blocked_') ||
+    s === 'needs_approval' ||
+    s === 'paused' ||
+    s === 'awaiting_user' ||
+    s === 'ready_for_review' ||
+    s === 'ready_to_continue'
+  ) {
+    return 'Waiting Human';
+  }
+  if (s === 'failed') return 'Failed';
+  if (s === 'submitted' || s === 'completed' || s === 'verified' || s === 'waiting_verification') {
+    return 'Completed';
+  }
+  if (s === 'skipped' || s === 'unsupported' || s === 'cancelled') return 'Skipped';
+  if (s === 'submitting' || action === 'submit') return 'Submitting';
+  if (s === 'waiting_verification') return 'Waiting Response';
+  if (s === 'uploading_assets' || action.startsWith('upload')) {
+    if (action.includes('logo')) return 'Uploading Assets';
+    if (action.includes('image')) return 'Uploading Images';
+    return 'Uploading Assets';
+  }
+  if (s === 'filling_fields' || s === 'validating' || action === 'fill' || action === 'select') {
+    return 'Generating Payload';
+  }
+  if (s === 'analyzing_form' || action === 'analyze_form') return 'Detecting Submission Form';
+  if (s === 'navigating' || action === 'navigate') return 'Reading Page';
+  if (s === 'launching_browser' || s === 'authenticating' || s === 'preparing' || action === 'open') {
+    return 'Opening Website';
+  }
+  if (s === 'queued' || s === 'retry_scheduled') return 'Queued';
+  return s.replace(/_/g, ' ') || 'Working';
+}
+
 export type ExecutionStateCounts = Record<ExecutionPublicStatus, number> & {
   /** Sites that count toward campaign progress (excludes Deleted / Ignored / Failed to Start). */
   totalExecutable: number;
@@ -189,15 +231,23 @@ export function computeExecutionCounts(
     counts.totalExecutable - counts.campaignResolved
   );
 
-  counts.campaignIsRunning = counts.Running > 0;
+  counts.campaignIsRunning = counts.Running > 0 || counts.Starting > 0;
 
-  // Phase 4.5 progress truth: bar advances only on verified-terminal items
-  const progressed = completedLike;
+  // Phase 4.7: Progress = (terminal + running + waiting human + starting) ÷ total
+  // Example: 10 completed + 4 running + 2 waiting = 16/20 → 80%
+  const progressed =
+    completedLike +
+    counts.Failed +
+    counts.Skipped +
+    counts.Rejected +
+    counts.Running +
+    counts.Starting +
+    counts['Waiting Human'];
 
   let campaignState: CampaignState = 'Idle';
-  if (counts.campaignIsRunning) {
+  if (counts.Running > 0 || counts.Starting > 0) {
     campaignState = 'Running';
-  } else if (counts.Queued > 0 || counts.Starting > 0) {
+  } else if (counts.Queued > 0) {
     campaignState = 'Starting';
   } else if (counts['Waiting Human'] > 0) {
     campaignState = 'Waiting Human';
@@ -210,23 +260,24 @@ export function computeExecutionCounts(
   } else if (
     counts.totalExecutable > 0 &&
     counts.Running === 0 &&
+    counts.Starting === 0 &&
     counts.Queued === 0 &&
     counts.campaignOpen === 0
   ) {
     campaignState = 'Completed';
   } else if (counts.totalExecutable > 0 && counts.Failed === counts.totalExecutable) {
-    campaignState = 'Completed'; // all failed after start — still a finished campaign
+    campaignState = 'Completed';
   }
 
   counts.campaignState = campaignState;
 
-  // Campaign cannot report Running progress until at least one site is Running
-  // Failed To Start → always 0%
   if (campaignState === 'Failed To Start' || campaignState === 'Idle') {
     counts.progressPercent = 0;
   } else if (counts.totalExecutable > 0) {
-    counts.progressPercent =
-      Math.round((progressed / counts.totalExecutable) * 1000) / 10;
+    counts.progressPercent = Math.min(
+      100,
+      Math.round((progressed / counts.totalExecutable) * 1000) / 10
+    );
   } else {
     counts.progressPercent = 0;
   }
@@ -247,7 +298,7 @@ export function aiStatusForCampaign(c: ExecutionStateCounts): string {
     case 'Failed To Start':
       return 'Execution failed before submission began.';
     case 'Starting':
-      return 'Starting submissions…';
+      return 'Opening websites…';
     case 'Running':
       return 'Submitting backlinks';
     case 'Waiting Human':

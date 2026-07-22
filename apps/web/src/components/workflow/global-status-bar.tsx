@@ -4,7 +4,7 @@ import { Bell, Loader2 } from 'lucide-react';
 import { useApi } from '@/hooks/use-api';
 import { useAppStore } from '@/stores/app-store';
 import { useWorkflow } from '@/hooks/use-workflow';
-import { useBeeExecutionProgress } from '@/hooks/use-bee-execution-progress';
+import { useExecutionSummary } from '@/hooks/use-execution-summary';
 import { useInterventions } from '@/components/browser/needs-your-action-queue';
 import { formatEta } from '@/lib/bee-execution-ui';
 import { cn } from '@/lib/utils';
@@ -14,13 +14,13 @@ type Props = {
   className?: string;
 };
 
-/** Always-visible AI status — reads ONLY from Execution State Manager */
+/** Always-visible AI status — reads ONLY from Execution Summary (Phase 4.7) */
 export function GlobalStatusBar({ projectId, className }: Props) {
   const { request, fetchProjects } = useApi();
   const currentOrgId = useAppStore((s) => s.currentOrgId);
   const { completedCount, totalSteps, currentStep, aiStatusLine: workflowAi } =
     useWorkflow(projectId);
-  const bee = useBeeExecutionProgress(projectId, 2_000);
+  const summary = useExecutionSummary(projectId, 2_000);
   const interventions = useInterventions(projectId, 3_000);
 
   const project = useQuery({
@@ -41,17 +41,19 @@ export function GlobalStatusBar({ projectId, className }: Props) {
     retry: false,
   });
 
-  const p = bee.data;
+  const p = summary.data;
   const actionItems = interventions.data?.data.items ?? [];
   const needsAction = actionItems.length > 0;
   const campaignState = p?.campaignState ?? 'Idle';
   const campaignActive =
-    Boolean(p?.campaignIsRunning) ||
+    (p?.running ?? 0) > 0 ||
     campaignState === 'Waiting Human' ||
     campaignState === 'Paused' ||
     campaignState === 'Starting' ||
+    campaignState === 'Running' ||
     campaignState === 'Completed' ||
-    campaignState === 'Failed To Start';
+    campaignState === 'Failed To Start' ||
+    (p?.total ?? 0) > 0;
   const unread = Array.isArray(notifications.data?.data)
     ? 0
     : Number((notifications.data?.data as { unread?: number })?.unread ?? 0);
@@ -60,16 +62,18 @@ export function GlobalStatusBar({ projectId, className }: Props) {
   const aiTask =
     needsAction && firstAction
       ? 'waiting for you'
-      : p?.aiStatusLine || workflowAi || currentStep.title;
+      : p?.currentStep
+        ? `${p.currentWebsite ?? ''} · ${p.currentStep}`.replace(/^ · /, '')
+        : p?.aiStatusLine || workflowAi || currentStep.title;
 
   const pct = campaignActive
     ? Math.round(p?.progressPercent ?? 0)
     : Math.round((completedCount / Math.max(totalSteps, 1)) * 100);
   const progressLabel = campaignActive
-    ? `${p?.completedJobs ?? 0}/${p?.totalJobs ?? 0}`
+    ? `${p?.completed ?? 0}/${p?.total ?? 0}`
     : `${completedCount}/${totalSteps}`;
   const showSpin = Boolean(
-    p && (p.campaignIsRunning || campaignState === 'Starting' || needsAction)
+    p && ((p.running ?? 0) > 0 || campaignState === 'Starting' || campaignState === 'Running' || needsAction)
   );
 
   return (
@@ -88,7 +92,7 @@ export function GlobalStatusBar({ projectId, className }: Props) {
       <span className="text-muted-foreground tabular-nums">
         {progressLabel}
         {campaignActive ? ` (${pct}%)` : ''}
-        {campaignActive && p && p.campaignIsRunning && p.etaSeconds > 0
+        {campaignActive && p && (p.running > 0 || p.etaSeconds > 0) && p.etaSeconds > 0
           ? ` · ETA ${formatEta(p.etaSeconds)}`
           : ''}
       </span>

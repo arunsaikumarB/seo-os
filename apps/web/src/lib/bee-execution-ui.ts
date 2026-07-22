@@ -84,6 +84,15 @@ export function executionStatusLabel(
       'submitting',
     ].includes(s)
   ) {
+    // Phase 4.7 — never show "Starting"; show live stage when possible via caller
+    if (s === 'launching_browser' || s === 'authenticating' || s === 'preparing') {
+      return 'Opening Website';
+    }
+    if (s === 'navigating') return 'Reading Page';
+    if (s === 'analyzing_form') return 'Detecting Submission Form';
+    if (s === 'filling_fields' || s === 'validating') return 'Generating Payload';
+    if (s === 'uploading_assets') return 'Uploading Assets';
+    if (s === 'submitting') return 'Submitting';
     return 'Running';
   }
   return s.replace(/_/g, ' ');

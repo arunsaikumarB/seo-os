@@ -1,10 +1,10 @@
 /**
  * Shared campaign AI / generation status for progressive disclosure.
- * Reads existing content-generation board (CSM-backed) — no new APIs.
+ * Bee path reads ONE Execution Summary (Phase 4.7) — never recalculates.
  */
 import { useQuery } from '@tanstack/react-query';
 import { useApi } from '@/hooks/use-api';
-import { useBeeExecutionProgress } from '@/hooks/use-bee-execution-progress';
+import { useExecutionSummary } from '@/hooks/use-execution-summary';
 
 export type ContentGenBoard = {
   progress: {
@@ -65,7 +65,8 @@ export type GeneratePageState = 'idle' | 'running' | 'complete' | 'empty';
 
 export function useCampaignAiStatus(projectId: string) {
   const { request } = useApi();
-  const bee = useBeeExecutionProgress(projectId, 3_000);
+  const summaryQ = useExecutionSummary(projectId, 2_000);
+  const s = summaryQ.data;
 
   const boardQ = useQuery({
     queryKey: ['content-generation', projectId],
@@ -81,9 +82,10 @@ export function useCampaignAiStatus(projectId: string) {
   const progress = board?.progress;
   const genActive = Boolean(progress?.active);
 
-  const campaignState = bee.data?.campaignState ?? 'Idle';
+  const campaignState = s?.campaignState ?? 'Idle';
   const beeRunning = Boolean(
-    bee.data?.campaignIsRunning ||
+    (s?.running ?? 0) > 0 ||
+      campaignState === 'Running' ||
       campaignState === 'Starting' ||
       campaignState === 'Paused' ||
       campaignState === 'Waiting Human'
@@ -113,36 +115,27 @@ export function useCampaignAiStatus(projectId: string) {
     remaining = progress.queued + progress.generating;
     percent = Math.round(progress.percent);
     eta = board?.eta ?? null;
-  } else if (beeRunning && bee.data) {
+  } else if (beeRunning && s) {
     currentActivity =
       campaignState === 'Waiting Human'
         ? 'Waiting for you'
         : campaignState === 'Paused'
           ? 'Paused'
-          : campaignState === 'Starting'
-            ? 'Starting'
-            : 'Submitting';
-    currentLabel = currentActivity;
-    const cur = bee.data.current;
-    if (cur?.website) {
-      currentWebsite = cur.website;
-      currentStep = cur.step ?? null;
-      currentLabel = cur.step ? `${cur.website} — ${cur.step}` : cur.website;
-    } else if (campaignState === 'Waiting Human') {
-      currentLabel = 'Waiting for you';
-    } else if (campaignState === 'Paused') {
-      currentLabel = 'Paused';
-    } else {
-      currentLabel = 'Submitting Backlinks';
-    }
-    completed = bee.data.completedJobs ?? 0;
-    remaining = Math.max(0, (bee.data.totalJobs ?? 0) - completed);
-    percent = Math.round(bee.data.progressPercent ?? 0);
+          : s.currentStep || 'Submitting';
+    currentWebsite = s.currentWebsite;
+    currentStep = s.currentStep;
+    currentLabel =
+      s.currentWebsite && s.currentStep
+        ? `${s.currentWebsite} — ${s.currentStep}`
+        : s.aiStatusLine || 'Submitting Backlinks';
+    completed = s.completed;
+    remaining = s.remaining;
+    percent = Math.round(s.progressPercent);
     eta =
-      bee.data.etaSeconds > 0
-        ? bee.data.etaSeconds < 60
-          ? `${bee.data.etaSeconds} sec`
-          : `${Math.ceil(bee.data.etaSeconds / 60)}m`
+      s.etaSeconds > 0
+        ? s.etaSeconds < 60
+          ? `${s.etaSeconds} sec`
+          : `${Math.ceil(s.etaSeconds / 60)}m`
         : null;
   }
 
@@ -183,5 +176,6 @@ export function useCampaignAiStatus(projectId: string) {
     reviewQueue: board?.reviewQueue ?? [],
     generationAudit: board?.generationAudit,
     invalidateKeys: ['content-generation', projectId] as const,
+    executionSummary: s,
   };
 }

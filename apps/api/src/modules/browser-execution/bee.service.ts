@@ -1189,7 +1189,7 @@ export async function getStatistics(workspaceId: string) {
     /* optional */
   }
 
-  const { toPublicExecutionStatus } = await import('@seo-os/backlink-builder');
+  const { toPublicExecutionStatus, liveExecutionStage } = await import('@seo-os/backlink-builder');
   const runningJobs: Array<{
     website: string;
     step: string;
@@ -1199,34 +1199,58 @@ export async function getStatistics(workspaceId: string) {
     elapsedMs: number;
     etaMs: number | null;
   }> = [];
-  let current: { website?: string; step?: string; browser?: string; queueProgress?: string } = {};
+  let current: {
+    website?: string;
+    step?: string;
+    browser?: string;
+    queueProgress?: string;
+    elapsedMs?: number;
+  } = {};
+  const activityFeed: Array<{ website: string; stage: string; at: string }> = [];
   for (const j of jobs) {
     const disposition =
       j.disposition != null
         ? String(j.disposition)
         : ((j.metrics as { disposition?: string } | null)?.disposition ?? null);
     const pub = toPublicExecutionStatus(String(j.status), { disposition });
-    if (pub !== 'Running') continue;
-    const startedAt = j.started_at ? String(j.started_at) : null;
-    const elapsedMs = startedAt ? Date.now() - new Date(startedAt).getTime() : 0;
-    runningJobs.push({
-      website: String(j.site_domain ?? ''),
-      step: String(j.status),
-      stepLabel: String(j.status).replace(/_/g, ' '),
-      sessionId: String(j.session_id ?? ''),
-      startedAt,
-      elapsedMs,
-      etaMs: null,
+    const stage = liveExecutionStage(String(j.status), {
+      pauseReason: j.pause_reason != null ? String(j.pause_reason) : null,
     });
-    if (!current.website) {
-      current = {
+    if (pub === 'Running' || pub === 'Starting' || pub === 'Waiting Human') {
+      const startedAt = j.started_at ? String(j.started_at) : null;
+      const elapsedMs = startedAt ? Date.now() - new Date(startedAt).getTime() : 0;
+      if (pub === 'Running' || pub === 'Starting') {
+        runningJobs.push({
+          website: String(j.site_domain ?? ''),
+          step: String(j.status),
+          stepLabel: stage,
+          sessionId: String(j.session_id ?? ''),
+          startedAt,
+          elapsedMs,
+          etaMs: null,
+        });
+        if (!current.website) {
+          current = {
+            website: String(j.site_domain ?? ''),
+            step: stage,
+            browser: String(j.session_id ?? ''),
+            elapsedMs,
+          };
+        }
+      }
+      activityFeed.push({
         website: String(j.site_domain ?? ''),
-        step: String(j.status).replace(/_/g, ' '),
-        browser: String(j.session_id ?? ''),
-      };
+        stage,
+        at: j.updated_at ? String(j.updated_at) : new Date().toISOString(),
+      });
     }
   }
   current.queueProgress = `${base.completedJobs}/${base.totalJobs}`;
+  // Rough ETA: ~45s per remaining queued site / active workers
+  const etaSeconds =
+    base.remainingJobs > 0
+      ? Math.max(15, Math.round((base.remainingJobs * 45) / Math.max(1, maxWorkers)))
+      : 0;
   const workers = Array.from({ length: maxWorkers }, (_, i) => {
     const job = runningJobs[i];
     if (!job) {
@@ -1251,9 +1275,15 @@ export async function getStatistics(workspaceId: string) {
 
   return {
     ...base,
+    etaSeconds,
+    executionSummary: {
+      ...(base as { executionSummary?: Record<string, unknown> }).executionSummary,
+      etaSeconds,
+    },
     workers,
     browserPool: poolStats,
     current,
+    activityFeed: activityFeed.slice(0, 12),
     maxParallelSessions: maxWorkers,
     activeWorkerCount: Math.min(maxWorkers, runningJobs.length),
     workerUsage: `${Math.min(maxWorkers, runningJobs.length)}/${maxWorkers}`,

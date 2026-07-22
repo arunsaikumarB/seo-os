@@ -7,6 +7,7 @@ import {
 } from '@/config/workflow-steps';
 import { useAppStore, WORKFLOW_GLOBAL_KEY } from '@/stores/app-store';
 import { useBeeExecutionProgress } from '@/hooks/use-bee-execution-progress';
+import { useExecutionSummary } from '@/hooks/use-execution-summary';
 import { useInterventions } from '@/components/browser/needs-your-action-queue';
 import { formatEta } from '@/lib/bee-execution-ui';
 
@@ -68,13 +69,17 @@ export function useWorkflow(projectId: string) {
   }, [projectId, markGlobalStepComplete]);
 
   const bee = useBeeExecutionProgress(projectId, 5_000);
+  const execSummary = useExecutionSummary(projectId, 2_000);
+  const summary = execSummary.data;
   const interventions = useInterventions(projectId, 3_000);
   const actionItems = interventions.data?.data.items ?? [];
   const needsHumanAction = actionItems.length > 0;
   const firstAction = actionItems[0] ?? null;
 
-  const campaignState = bee.data?.campaignState ?? 'Idle';
-  const campaignIsRunning = Boolean(bee.data?.campaignIsRunning);
+  const campaignState = summary?.campaignState ?? bee.data?.campaignState ?? 'Idle';
+  const campaignIsRunning = Boolean(
+    (summary?.running ?? 0) > 0 || bee.data?.campaignIsRunning
+  );
   /** Active campaign — never from Failed To Start / Idle alone */
   const jobsOpen =
     campaignIsRunning ||
@@ -83,10 +88,19 @@ export function useWorkflow(projectId: string) {
     campaignState === 'Starting';
 
   useEffect(() => {
-    if (bee.data?.executionComplete && campaignState === 'Completed') {
+    if (
+      (summary?.executionComplete || bee.data?.executionComplete) &&
+      campaignState === 'Completed'
+    ) {
       markStepComplete(projectId, 'submit-backlinks');
     }
-  }, [bee.data?.executionComplete, campaignState, projectId, markStepComplete]);
+  }, [
+    summary?.executionComplete,
+    bee.data?.executionComplete,
+    campaignState,
+    projectId,
+    markStepComplete,
+  ]);
 
   const completedCount = WORKFLOW_STEPS.filter((s) => {
     if (s.id === 'submit-backlinks' && jobsOpen) return false;
@@ -124,10 +138,10 @@ export function useWorkflow(projectId: string) {
 
   const allComplete = completedCount >= WORKFLOW_STEPS.length && !jobsOpen;
 
-  /** Progress ONLY from Execution State Manager when a campaign is active */
+  /** Progress ONLY from Execution Summary when a campaign is active */
   const progressPercent =
     jobsOpen || campaignState === 'Completed' || campaignState === 'Failed To Start'
-      ? Math.round(bee.data?.progressPercent ?? 0)
+      ? Math.round(summary?.progressPercent ?? bee.data?.progressPercent ?? 0)
       : Math.round((completedCount / Math.max(WORKFLOW_STEPS.length, 1)) * 100);
 
   const continueHref = jobsOpen
@@ -144,14 +158,16 @@ export function useWorkflow(projectId: string) {
 
   const aiStatusLine = needsHumanAction && firstAction
     ? `${firstAction.reason} — ${firstAction.website}`
-    : bee.data?.aiStatusLine
+    : summary?.aiStatusLine
+      ? summary.aiStatusLine
+      : bee.data?.aiStatusLine
       ? bee.data.aiStatusLine
       : allComplete
         ? 'Campaign complete'
         : `Working on ${currentStep.title}`;
 
-  const etaLabel = jobsOpen && bee.data?.etaSeconds
-    ? formatEta(bee.data.etaSeconds)
+  const etaLabel = jobsOpen && (summary?.etaSeconds || bee.data?.etaSeconds)
+    ? formatEta(summary?.etaSeconds || bee.data?.etaSeconds || 0)
     : currentStep.estimatedMinutes
       ? `~${currentStep.estimatedMinutes} min`
       : null;

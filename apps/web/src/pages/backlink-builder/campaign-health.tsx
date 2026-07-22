@@ -5,6 +5,7 @@
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useApi } from '@/hooks/use-api';
+import { useExecutionSummary } from '@/hooks/use-execution-summary';
 
 type HealthRow = {
   website: string;
@@ -75,6 +76,8 @@ type HealthData = {
 export function CampaignHealthPage() {
   const { projectId = '' } = useParams();
   const { request } = useApi();
+  const execSummary = useExecutionSummary(projectId, 2_000);
+  const sum = execSummary.data;
 
   const health = useQuery({
     queryKey: ['campaign-health', projectId],
@@ -99,6 +102,20 @@ export function CampaignHealthPage() {
           Dev-only · every Campaign Item once · totals from Campaign State Manager
         </p>
       </div>
+
+      {sum ? (
+        <div className="flex flex-wrap gap-3 border border-emerald-700/40 p-2">
+          <span className="font-semibold">Execution Summary</span>
+          <span>progress={sum.progressPercent}%</span>
+          <span>completed={sum.completed}</span>
+          <span>running={sum.running}</span>
+          <span>waitingHuman={sum.waitingHuman}</span>
+          <span>remaining={sum.remaining}</span>
+          <span>failed={sum.failed}</span>
+          <span>skipped={sum.skipped}</span>
+          <span>state={sum.campaignState}</span>
+        </div>
+      ) : null}
 
       {totals ? (
         <div className="flex flex-wrap gap-3 border p-2">
