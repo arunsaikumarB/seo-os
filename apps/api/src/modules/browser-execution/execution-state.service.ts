@@ -211,15 +211,26 @@ export async function removeOpportunityFromProject(
   opportunityId: string | null | undefined
 ) {
   if (!opportunityId) return;
-  await getSupabaseAdmin()
-    .from('opportunities')
-    .update({
-      automation_status: 'deleted',
-      pipeline_stage: 'lost',
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', opportunityId)
-    .eq('workspace_id', workspaceId);
+  try {
+    const { updateCampaignItem } = await import('../campaigns/campaign-state.service.js');
+    await updateCampaignItem(workspaceId, opportunityId, {
+      currentStatus: 'Deleted',
+      submissionStatus: 'Deleted',
+      lastError: null,
+      force: true,
+    });
+  } catch {
+    await getSupabaseAdmin()
+      .from('opportunities')
+      .update({
+        automation_status: 'deleted',
+        campaign_lifecycle: 'Deleted',
+        pipeline_stage: 'lost',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', opportunityId)
+      .eq('workspace_id', workspaceId);
+  }
 
   // Drop pending verification rows for this opportunity
   await getSupabaseAdmin()

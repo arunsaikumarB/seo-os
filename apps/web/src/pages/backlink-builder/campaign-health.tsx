@@ -1,0 +1,121 @@
+/**
+ * Campaign Health — internal audit table (plain HTML-ish UI).
+ * Route is not linked from main nav; open directly for sync debugging.
+ */
+import { useParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { useApi } from '@/hooks/use-api';
+
+type HealthRow = {
+  website: string;
+  imported: boolean;
+  analyzed: boolean;
+  approved: boolean;
+  package: string | null;
+  images: string | null;
+  metadata: string | null;
+  videoMeta: string | null;
+  submission: string | null;
+  verification: string | null;
+  currentStatus: string;
+  lastError: string | null;
+  updatedAt: string | null;
+};
+
+type HealthData = {
+  totals: Record<string, number> & { byStatus?: Record<string, number> };
+  items: HealthRow[];
+};
+
+export function CampaignHealthPage() {
+  const { projectId = '' } = useParams();
+  const { request } = useApi();
+
+  const health = useQuery({
+    queryKey: ['campaign-health', projectId],
+    queryFn: () =>
+      request<{ data: HealthData }>(
+        `/v1/projects/${projectId}/backlink-builder/campaign-health`
+      ),
+    enabled: !!projectId,
+    refetchInterval: 5_000,
+  });
+
+  const data = health.data?.data;
+  const totals = data?.totals;
+
+  return (
+    <div className="space-y-4 p-2 font-mono text-xs">
+      <div>
+        <h1 className="text-sm font-semibold">Campaign Health (audit)</h1>
+        <p className="text-muted-foreground">
+          Dev-only · every Campaign Item once · totals from Campaign State Manager
+        </p>
+      </div>
+
+      {totals ? (
+        <div className="flex flex-wrap gap-3 border p-2">
+          <span>imported={totals.imported}</span>
+          <span>approved={totals.approved}</span>
+          <span>ready={totals.ready}</span>
+          <span>submitted={totals.submitted}</span>
+          <span>verified={totals.verified}</span>
+          <span>failed={totals.failed}</span>
+          <span>waiting={totals.waiting}</span>
+          <span>deleted={totals.deleted}</span>
+          <span>total={totals.totalIncludingDeleted ?? totals.total}</span>
+        </div>
+      ) : null}
+
+      {health.isLoading ? <p>Loading…</p> : null}
+      {health.isError ? <p className="text-red-600">Failed to load campaign health</p> : null}
+
+      <div className="overflow-x-auto border">
+        <table className="w-full border-collapse text-left">
+          <thead>
+            <tr className="border-b bg-muted/40">
+              {[
+                'Website',
+                'Imported',
+                'Analyzed',
+                'Approved',
+                'Package',
+                'Images',
+                'Metadata',
+                'Video Meta',
+                'Submission',
+                'Verification',
+                'Current Status',
+                'Last Error',
+                'Updated At',
+              ].map((h) => (
+                <th key={h} className="px-2 py-1 font-medium whitespace-nowrap">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {(data?.items ?? []).map((row) => (
+              <tr key={`${row.website}-${row.updatedAt}`} className="border-b">
+                <td className="px-2 py-1 max-w-[180px] truncate">{row.website}</td>
+                <td className="px-2 py-1">{row.imported ? 'Y' : ''}</td>
+                <td className="px-2 py-1">{row.analyzed ? 'Y' : ''}</td>
+                <td className="px-2 py-1">{row.approved ? 'Y' : ''}</td>
+                <td className="px-2 py-1">{row.package}</td>
+                <td className="px-2 py-1">{row.images}</td>
+                <td className="px-2 py-1">{row.metadata}</td>
+                <td className="px-2 py-1">{row.videoMeta}</td>
+                <td className="px-2 py-1">{row.submission}</td>
+                <td className="px-2 py-1">{row.verification}</td>
+                <td className="px-2 py-1">{row.currentStatus}</td>
+                <td className="px-2 py-1 max-w-[200px] truncate">{row.lastError}</td>
+                <td className="px-2 py-1 whitespace-nowrap">{row.updatedAt}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}

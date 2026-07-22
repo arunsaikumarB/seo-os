@@ -369,6 +369,19 @@ export async function createContentPack(
     .single();
   if (error) throw error;
 
+  if (opportunityId) {
+    try {
+      const { updateCampaignItem } = await import('../campaigns/campaign-state.service.js');
+      await updateCampaignItem(workspaceId, opportunityId, {
+        currentStatus: 'Package Generated',
+        packageStatus: 'generated',
+        force: true,
+      });
+    } catch {
+      /* CSM optional until migration */
+    }
+  }
+
   const domain = String(opp.domain ?? '')
     .toLowerCase()
     .replace(/^www\./, '');
@@ -421,6 +434,16 @@ export async function updateContentPack(
   if (error || !data) throw new Error('Content pack not found');
 
   if (status === 'ready' && data.opportunity_id) {
+    try {
+      const { updateCampaignItem } = await import('../campaigns/campaign-state.service.js');
+      await updateCampaignItem(workspaceId, String(data.opportunity_id), {
+        currentStatus: 'Ready',
+        packageStatus: 'generated',
+        force: true,
+      });
+    } catch {
+      /* CSM optional */
+    }
     const { data: opp } = await getSupabaseAdmin()
       .from('opportunities')
       .select('domain, opportunity_type, metadata')

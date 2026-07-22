@@ -706,6 +706,21 @@ export async function setJobStatus(
     .update({ status, updated_at: new Date().toISOString(), ...extra })
     .eq('id', jobId)
     .eq('workspace_id', workspaceId);
+
+  // Campaign State Manager write-back only — does not alter BEE engine behavior
+  try {
+    const job = await getJob(workspaceId, jobId);
+    const opportunityId = job?.opportunity_id ? String(job.opportunity_id) : null;
+    const disposition =
+      (extra.disposition as string | undefined) ??
+      (job?.disposition != null ? String(job.disposition) : null);
+    const { syncCampaignItemFromExecution } = await import(
+      '../campaigns/campaign-state.service.js'
+    );
+    await syncCampaignItemFromExecution(workspaceId, opportunityId, status, disposition);
+  } catch {
+    /* optional until migration 087 */
+  }
 }
 
 export async function pauseJob(workspaceId: string, jobId: string) {

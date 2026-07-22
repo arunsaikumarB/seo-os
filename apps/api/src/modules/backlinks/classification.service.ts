@@ -173,12 +173,16 @@ export async function recordClassificationCorrection(params: {
 }
 
 export async function getClassificationAnalytics(workspaceId: string) {
+  const { getCampaignCounts } = await import('../campaigns/campaign-state.service.js');
+  const counts = await getCampaignCounts(workspaceId);
+
   const { data: opps } = await getSupabaseAdmin()
     .from('opportunities')
     .select(
       'id, domain, website_name, opportunity_type, queue_status, status, priority, metadata, automation_status, created_at'
     )
     .eq('workspace_id', workspaceId)
+    .neq('automation_status', 'deleted')
     .order('created_at', { ascending: false })
     .limit(2000);
 
@@ -227,9 +231,9 @@ export async function getClassificationAnalytics(workspaceId: string) {
   const learning = await loadClassificationLearning(workspaceId);
 
   return {
-    imported: rows.length,
-    classified: decisions.filter((d) => d.classificationId !== 'unknown').length,
-    unknown: decisions.filter((d) => d.classificationId === 'unknown').length,
+    imported: counts.imported,
+    classified: counts.classified,
+    unknown: Math.max(0, counts.imported - counts.classified),
     byType,
     byQueue,
     avgConfidence,
@@ -252,6 +256,8 @@ export async function getClassificationAnalytics(workspaceId: string) {
       qa: byQueue.find((q) => q.queue === 'qa')?.count ?? 0,
       unknown: byQueue.find((q) => q.queue === 'unknown')?.count ?? 0,
     },
+    campaignCounts: counts,
+    metricsSource: 'campaign_state' as const,
   };
 }
 

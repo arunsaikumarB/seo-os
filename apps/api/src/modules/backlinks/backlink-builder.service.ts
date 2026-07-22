@@ -106,50 +106,42 @@ async function logHistory(
 }
 
 export async function getBacklinkDashboard(workspaceId: string) {
-  const [opps, backlinks, campaigns] = await Promise.all([
+  const { getCampaignCounts, projectDashboardFromCounts } = await import(
+    '../campaigns/campaign-state.service.js'
+  );
+  const counts = await getCampaignCounts(workspaceId);
+  const fromCsm = projectDashboardFromCounts(counts);
+
+  const [opps, campaigns] = await Promise.all([
     getSupabaseAdmin()
       .from('opportunities')
-      .select('pipeline_stage, domain_rating, success_probability, score')
-      .eq('workspace_id', workspaceId),
-    getSupabaseAdmin()
-      .from('backlinks')
-      .select('verification_status, da_score')
-      .eq('workspace_id', workspaceId),
+      .select('domain_rating, success_probability, score')
+      .eq('workspace_id', workspaceId)
+      .neq('automation_status', 'deleted'),
     listCampaigns(workspaceId),
   ]);
 
   const opportunities = opps.data ?? [];
-  const bl = backlinks.data ?? [];
-
-  const stageCounts = Object.fromEntries(PIPELINE_STAGES.map((s) => [s, 0])) as Record<
-    PipelineStage,
-    number
-  >;
-  for (const o of opportunities) {
-    const stage = normalizePipelineStage(String(o.pipeline_stage ?? 'discovered'));
-    stageCounts[stage] = (stageCounts[stage] ?? 0) + 1;
-  }
-
   const drValues = opportunities.map((o) => Number(o.domain_rating ?? 0)).filter((v) => v > 0);
   const avgDr = drValues.length
     ? Math.round(drValues.reduce((a, b) => a + b, 0) / drValues.length)
     : 0;
 
-  const won = stageCounts.won + stageCounts.verified;
-  const attempted = won + stageCounts.lost;
+  const won = fromCsm.won + fromCsm.verified;
+  const attempted = won + fromCsm.lost;
   const successRate = attempted > 0 ? Math.round((won / attempted) * 100) : 0;
 
   return {
-    totalOpportunities: opportunities.length,
-    discovered: stageCounts.discovered,
-    qualified: stageCounts.qualified,
-    approved: stageCounts.approved,
-    campaign_ready: stageCounts.campaign_ready,
-    outreach_running: stageCounts.outreach + stageCounts.negotiation,
-    won: stageCounts.won,
-    lost: stageCounts.lost,
-    verified: stageCounts.verified + bl.filter((b) => b.verification_status === 'verified').length,
-    pending: bl.filter((b) => b.verification_status === 'pending').length,
+    totalOpportunities: fromCsm.totalOpportunities,
+    discovered: fromCsm.discovered,
+    qualified: fromCsm.qualified,
+    approved: fromCsm.approved,
+    campaign_ready: fromCsm.campaign_ready,
+    outreach_running: fromCsm.outreach_running,
+    won: fromCsm.won,
+    lost: fromCsm.lost,
+    verified: fromCsm.verified,
+    pending: fromCsm.pending,
     avgDomainRating: avgDr,
     successRate,
     activeCampaigns: campaigns.filter((c) => c.status === 'active').length,
@@ -165,7 +157,9 @@ export async function getBacklinkDashboard(workspaceId: string) {
       progress: 40 + ((i * 7) % 55),
     })),
     // legacy keys for widget compat
-    outreach_ready: stageCounts.campaign_ready,
+    outreach_ready: fromCsm.outreach_ready,
+    campaignCounts: counts,
+    metricsSource: 'campaign_state' as const,
   };
 }
 

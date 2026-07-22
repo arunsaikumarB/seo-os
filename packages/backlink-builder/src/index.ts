@@ -20,6 +20,7 @@ export * from './content-packs.js';
 export * from './browser-plans.js';
 export * from './browser-execution.js';
 export * from './execution-state.js';
+export * from './campaign-state.js';
 export * from './intervention-signals.js';
 export * from './execution-failures.js';
 export * from './page-watcher.js';

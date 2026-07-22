@@ -115,6 +115,11 @@ const TrackResultsPage = lazy(() =>
 const BacklinkAuditPage = lazy(() =>
   import('@/pages/backlink-builder/audit').then((m) => ({ default: m.BacklinkAuditPage }))
 );
+const CampaignHealthPage = lazy(() =>
+  import('@/pages/backlink-builder/campaign-health').then((m) => ({
+    default: m.CampaignHealthPage,
+  }))
+);
 const BacklinkRelationshipsPage = lazy(() =>
   import('@/pages/backlink-builder/relationships').then((m) => ({
     default: m.BacklinkRelationshipsPage,
@@ -434,6 +439,10 @@ export function AppRouter() {
                       element={lazyEl(BacklinkCampaignsPage)}
                     />
                     <Route path="backlink-builder/audit" element={lazyEl(BacklinkAuditPage)} />
+                    <Route
+                      path="backlink-builder/campaign-health"
+                      element={lazyEl(CampaignHealthPage)}
+                    />
                     <Route path="backlink-builder/import" element={lazyEl(BacklinkImportPage)} />
                     <Route
                       path="backlink-builder/classification"

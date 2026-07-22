@@ -326,13 +326,27 @@ export async function approveOpportunityWorkflow(
         status: 'approved',
         pipeline_stage: 'campaign_ready',
         automation_status: 'approved',
+        campaign_lifecycle: 'Approved',
+        campaign_step: 'approve',
         metadata: nextMeta,
+        updated_at: new Date().toISOString(),
       })
       .eq('id', opportunityId)
       .eq('workspace_id', workspaceId)
       .select()
       .single();
     if (updErr || !updated) throw updErr ?? new Error('Failed to update opportunity');
+
+    try {
+      const { updateCampaignItem } = await import('./campaign-state.service.js');
+      await updateCampaignItem(workspaceId, opportunityId, {
+        currentStatus: 'Approved',
+        approval: 'approved',
+        force: true,
+      });
+    } catch {
+      /* CSM columns may not exist until migration 087 */
+    }
 
     // 5) Activity / history (skip duplicate history on idempotent re-approve)
     if (!alreadyApproved) {
@@ -477,13 +491,26 @@ export async function reviewOpportunity(
       status: 'dismissed',
       pipeline_stage: 'lost',
       automation_status: 'rejected',
+      campaign_lifecycle: 'Rejected',
+      campaign_step: 'approve',
       metadata: meta,
+      updated_at: new Date().toISOString(),
     })
     .eq('id', opportunityId)
     .eq('workspace_id', workspaceId)
     .select()
     .single();
   if (error) throw error;
+  try {
+    const { updateCampaignItem } = await import('./campaign-state.service.js');
+    await updateCampaignItem(workspaceId, opportunityId, {
+      currentStatus: 'Rejected',
+      approval: 'rejected',
+      force: true,
+    });
+  } catch {
+    /* optional */
+  }
 
   await getSupabaseAdmin().from('backlink_history').insert({
     id: randomUUID(),

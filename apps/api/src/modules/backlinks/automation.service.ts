@@ -499,6 +499,52 @@ export async function runAutomationPipeline(
             );
 
             if (!qualification.qualified) {
+              // Campaign State Manager: still create one Campaign Item per valid import
+              const ignoredId = randomUUID();
+              await getSupabaseAdmin()
+                .from('opportunities')
+                .insert({
+                  id: ignoredId,
+                  workspace_id: workspaceId,
+                  opportunity_type: classification.backlinkType,
+                  title: analysis.websiteName,
+                  url,
+                  domain,
+                  score: classification.opportunityScore,
+                  status: 'dismissed',
+                  pipeline_stage: 'lost',
+                  automation_status: 'analyzed',
+                  campaign_lifecycle: 'Ignored',
+                  campaign_step: 'ai-review',
+                  website_name: analysis.websiteName,
+                  domain_rating: analysis.domainRating,
+                  monthly_traffic: analysis.monthlyTraffic,
+                  import_id: importId,
+                  domain_analysis_id: analysisId,
+                  discovery_source: 'import',
+                  queue_status: 'archived',
+                  last_error: qualification.reason ?? 'Not qualified',
+                  metadata: {
+                    qualification: {
+                      qualified: false,
+                      reason: qualification.reason,
+                    },
+                    classification: {
+                      id: classification.classificationId,
+                      displayName: classification.classificationLabel,
+                      confidence: classification.confidence,
+                      reason: classification.reason,
+                    },
+                  },
+                })
+                .then((r) => {
+                  if (!r.error) opportunitiesCreated++;
+                });
+              await getSupabaseAdmin()
+                .from('backlink_import_rows')
+                .update({ opportunity_id: ignoredId })
+                .eq('id', row.id);
+
               await emitAutomationEvent({
                 workspaceId,
                 orgId,
@@ -532,6 +578,8 @@ export async function runAutomationPipeline(
               status: 'qualified',
               pipeline_stage: 'qualified',
               automation_status: 'qualified',
+              campaign_lifecycle: 'Classified',
+              campaign_step: 'ai-review',
               website_name: analysis.websiteName,
               domain_rating: analysis.domainRating,
               monthly_traffic: analysis.monthlyTraffic,
@@ -1301,11 +1349,13 @@ export async function getAutomationSummary(workspaceId: string) {
     return null;
   });
 
-  const [opps, submissions, runs, drafts] = await Promise.all([
-    getSupabaseAdmin()
-      .from('opportunities')
-      .select('automation_status, import_id, queue_status')
-      .eq('workspace_id', workspaceId),
+  const { getCampaignCounts, projectAutomationSummaryFromCounts } = await import(
+    '../campaigns/campaign-state.service.js'
+  );
+  const counts = await getCampaignCounts(workspaceId);
+  const fromCsm = projectAutomationSummaryFromCounts(counts);
+
+  const [submissions, runs, drafts] = await Promise.all([
     getSupabaseAdmin()
       .from('backlink_submissions')
       .select('status, queue_stage')
@@ -1322,49 +1372,35 @@ export async function getAutomationSummary(workspaceId: string) {
       .eq('workspace_id', workspaceId),
   ]);
 
-  const statusCounts: Record<string, number> = {};
-  for (const o of opps.data ?? []) {
-    const s = String(o.automation_status ?? 'imported');
-    statusCounts[s] = (statusCounts[s] ?? 0) + 1;
-  }
-
   const subCounts: Record<string, number> = {};
   for (const s of submissions.data ?? []) {
     const st = String(s.status);
     subCounts[st] = (subCounts[st] ?? 0) + 1;
   }
 
-  const importedWebsites =
-    analytics?.imported_websites ?? (opps.data ?? []).filter((o) => o.import_id).length;
-  const analyzedWebsites =
-    analytics?.analyzed_websites ??
-    (statusCounts.analyzed ?? 0) + (statusCounts.prepared ?? 0) + (statusCounts.qualified ?? 0);
-  const pendingApproval =
-    analytics?.pending_approvals ??
-    (opps.data ?? []).filter((o) => o.queue_status === 'pending_review').length;
-  const contentGenerated = analytics?.generated_drafts ?? drafts.count ?? 0;
-
   return {
-    importedWebsites,
-    totalImports: importedWebsites,
-    analyzedWebsites,
-    qualifiedOpportunities: analytics?.qualified_opportunities ?? (opps.data ?? []).length,
-    contentGenerated,
-    pendingApproval,
-    submitted: subCounts.submitted ?? 0,
-    published: subCounts.published ?? 0,
-    verified: analytics?.verified_backlinks ?? statusCounts.verified ?? 0,
-    rejected: subCounts.rejected ?? 0,
-    waiting: subCounts.waiting ?? 0,
-    accepted: subCounts.accepted ?? 0,
+    importedWebsites: fromCsm.importedWebsites,
+    totalImports: fromCsm.totalImports,
+    analyzedWebsites: fromCsm.analyzedWebsites,
+    qualifiedOpportunities: fromCsm.qualifiedOpportunities,
+    contentGenerated: analytics?.generated_drafts ?? drafts.count ?? fromCsm.contentGenerated,
+    pendingApproval: fromCsm.pendingApproval,
+    submitted: fromCsm.submitted || (subCounts.submitted ?? 0),
+    published: subCounts.published ?? fromCsm.published,
+    verified: fromCsm.verified,
+    rejected: fromCsm.rejected || (subCounts.rejected ?? 0),
+    waiting: fromCsm.waiting || (subCounts.waiting ?? 0),
+    accepted: subCounts.accepted ?? fromCsm.accepted,
     relationships: analytics?.relationships ?? 0,
     submissions: analytics?.submissions ?? (submissions.data ?? []).length,
     campaigns: analytics?.campaigns ?? 0,
     pipelineSteps: AUTOMATION_PIPELINE_STEPS,
     recentRuns: runs.data ?? [],
-    statusBreakdown: statusCounts,
+    statusBreakdown: fromCsm.statusBreakdown,
     submissionBreakdown: subCounts,
     analytics,
+    campaignCounts: counts,
+    metricsSource: 'campaign_state' as const,
     disclaimer:
       'SEO OS automates preparation, classification, and tracking. Third-party websites control publication — backlinks are never guaranteed.',
   };

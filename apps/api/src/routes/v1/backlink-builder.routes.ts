@@ -84,6 +84,108 @@ backlinkBuilderRouter.get(
   }
 );
 
+/** Campaign State Manager — shared selectors (additive; does not change existing shapes). */
+backlinkBuilderRouter.get(
+  '/campaign-state',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const {
+        getCampaignCounts,
+        listCampaignItems,
+      } = await import('../../modules/campaigns/campaign-state.service.js');
+      const workspaceId = param(req.params.projectId);
+      const includeDeleted = req.query.includeDeleted === '1';
+      const [counts, items] = await Promise.all([
+        getCampaignCounts(workspaceId),
+        listCampaignItems(workspaceId, { includeDeleted }),
+      ]);
+      res.json({
+        data: {
+          counts,
+          items: items.map((i) => ({
+            id: i.id,
+            website: i.websiteUrl ?? i.domain,
+            currentStatus: i.currentStatus,
+            currentStep: i.currentStep,
+            classification: i.classification,
+            approval: i.approval,
+            packageStatus: i.packageStatus,
+            imageStatus: i.imageStatus,
+            metadataStatus: i.metadataStatus,
+            videoMetadataStatus: i.videoMetadataStatus,
+            submissionStatus: i.submissionStatus,
+            verificationStatus: i.verificationStatus,
+            lastError: i.lastError,
+            updatedAt: i.updatedAt,
+          })),
+          metricsSource: 'campaign_state',
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/** Dev-only Campaign Health audit — all items including Deleted. */
+backlinkBuilderRouter.get(
+  '/campaign-health',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const {
+        getCampaignCounts,
+        listCampaignItems,
+      } = await import('../../modules/campaigns/campaign-state.service.js');
+      const workspaceId = param(req.params.projectId);
+      const items = await listCampaignItems(workspaceId, { includeDeleted: true });
+      const counts = await getCampaignCounts(workspaceId);
+      res.json({
+        data: {
+          totals: counts,
+          items: items.map((i) => ({
+            website: i.websiteUrl ?? i.domain ?? i.id,
+            imported: true,
+            analyzed: ['Analyzed', 'Classified', 'Approved', 'Package Generated', 'Ready', 'Submitting', 'Waiting Human', 'Retrying', 'Submitted', 'Verified', 'Completed', 'Failed', 'Ignored'].includes(i.currentStatus),
+            approved: ['Approved', 'Package Generated', 'Ready', 'Submitting', 'Waiting Human', 'Retrying', 'Submitted', 'Verified', 'Completed'].includes(i.currentStatus),
+            package: i.packageStatus,
+            images: i.imageStatus,
+            metadata: i.metadataStatus,
+            videoMeta: i.videoMetadataStatus,
+            submission: i.submissionStatus,
+            verification: i.verificationStatus,
+            currentStatus: i.currentStatus,
+            lastError: i.lastError,
+            updatedAt: i.updatedAt,
+          })),
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+backlinkBuilderRouter.post(
+  '/campaign-state/backfill',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const { backfillCampaignState } = await import(
+        '../../modules/campaigns/campaign-state.service.js'
+      );
+      const result = await backfillCampaignState(param(req.params.projectId));
+      res.json({ data: result });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 backlinkBuilderRouter.get(
   '/types',
   authMiddleware,
