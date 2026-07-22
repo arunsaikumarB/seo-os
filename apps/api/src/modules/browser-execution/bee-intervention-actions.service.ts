@@ -85,6 +85,18 @@ export async function skipInterventionJob(
     disposition: 'skipped',
     dispositionReason: opts?.reason ?? 'skipped_campaign',
   });
+  // Phase 4.5: track false-intervention rate when human marks no action needed
+  if (
+    opts?.reason === 'no_action_needed' ||
+    opts?.reason === 'false_intervention' ||
+    opts?.reason === 'auto_skip_login'
+  ) {
+    await getSupabaseAdmin()
+      .from('execution_jobs')
+      .update({ false_intervention: true, updated_at: new Date().toISOString() })
+      .eq('id', jobId)
+      .eq('workspace_id', workspaceId);
+  }
   await syncOpportunityStatus(workspaceId, job.opportunity_id as string | null, 'skipped');
   await appendLog(workspaceId, jobId, 'warn', 'Skipped for this campaign', {
     reason: opts?.reason ?? 'skipped_campaign',

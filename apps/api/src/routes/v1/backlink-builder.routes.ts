@@ -151,6 +151,10 @@ backlinkBuilderRouter.get(
         '../../modules/browser-execution/bee-reconcile.service.js'
       );
       const executionAudit = await getExecutionAudit(workspaceId);
+      const { getTruthAudit } = await import(
+        '../../modules/browser-execution/bee-evidence.service.js'
+      );
+      const truthAudit = await getTruthAudit(workspaceId);
       res.json({
         data: {
           totals: counts,
@@ -158,6 +162,7 @@ backlinkBuilderRouter.get(
           orphans: gen.orphans,
           generationProgress: gen.progress,
           executionAudit,
+          truthAudit,
           items: items.map((i) => ({
             website: i.websiteUrl ?? i.domain ?? i.id,
             imported: true,

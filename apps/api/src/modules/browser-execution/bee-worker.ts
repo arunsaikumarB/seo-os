@@ -141,12 +141,21 @@ async function pauseForGate(params: {
   sessionId: string;
   stepIndex: number;
   stepId: string | null;
-  gate: NonNullable<ExecutionGate>;
+  gate: NonNullable<ExecutionGate> | 'cloudflare' | 'unclassified' | 'needs_ai_review';
   screenshotBase64?: string;
   htmlSnippet?: string;
   context?: Record<string, unknown>;
+  /** When true, page is blocked but no detector matched yet */
+  blockedButUnknown?: boolean;
+  leaseGeneration?: number;
+  workerId?: string;
 }): Promise<void> {
-  const { workspaceId, jobId, sessionId, stepIndex, stepId, gate } = params;
+  const { workspaceId, jobId, sessionId, stepIndex, stepId } = params;
+  let gate:
+    | NonNullable<ExecutionGate>
+    | 'cloudflare'
+    | 'unclassified'
+    | 'needs_ai_review' = params.gate;
 
   // Preferences: auto-skip optional human gates so the campaign keeps moving
   try {
@@ -182,18 +191,8 @@ async function pauseForGate(params: {
     /* fall through to normal pause */
   }
 
-  const gateStatus = gateStatusFromBlocker(gate) ?? 'needs_approval';
   const stepAction = params.context?.stepAction != null ? String(params.context.stepAction) : null;
 
-  await updateStep(jobId, stepIndex, {
-    status: 'paused',
-    finished_at: new Date().toISOString(),
-  });
-  await updateJob(jobId, {
-    status: gateStatus,
-    pause_reason: gate,
-    current_step_index: stepIndex,
-  });
   let pageUrl: string | undefined;
   let pageTitle: string | undefined;
   let liveHtml: string | undefined = params.htmlSnippet;
@@ -222,7 +221,264 @@ async function pauseForGate(params: {
     /* optional */
   }
   const pausedUrl = String(pageUrl ?? params.context?.url ?? '') || null;
-  const { workflowStepLabel } = await import('@seo-os/backlink-builder');
+
+  // Phase 4.5 — Detector Registry + Evidence (never classify without proof)
+  const {
+    detectInterventionSignals,
+    evaluateDetectors,
+    workflowStepLabel,
+  } = await import('@seo-os/backlink-builder');
+  const {
+    captureEvidenceRecord,
+    assertEvidenceForClassification,
+    logTruthViolation,
+  } = await import('./bee-evidence.service.js');
+  const { runNeedsAiReviewPass } = await import('./bee-truth.service.js');
+  const { appendTimelineEvent } = await import('./bee-timeline.service.js');
+
+  const { data: jobRow } = await getSupabaseAdmin()
+    .from('execution_jobs')
+    .select('opportunity_id, lease_generation, lease_holder')
+    .eq('id', jobId)
+    .maybeSingle();
+  const opportunityId = jobRow?.opportunity_id ? String(jobRow.opportunity_id) : null;
+  const leaseGen =
+    params.leaseGeneration ??
+    (jobRow?.lease_generation != null ? Number(jobRow.lease_generation) : null);
+  const workerId = params.workerId ?? (jobRow?.lease_holder != null ? String(jobRow.lease_holder) : null);
+
+  const htmlForDetect = liveHtml ?? '';
+  const truth = evaluateDetectors(
+    { html: htmlForDetect, url: pausedUrl ?? '', targetingSubmissionForm: true },
+    { blockedButUnknown: params.blockedButUnknown || gate === 'needs_ai_review' }
+  );
+  const signals = detectInterventionSignals(htmlForDetect, pausedUrl ?? '', {
+    blockedButUnknown: params.blockedButUnknown || gate === 'needs_ai_review',
+  });
+
+  let claim = signals.claim ?? reasonLabel ?? String(gate);
+  let detectorId: string | null =
+    truth.primary?.detectorId != null
+      ? String(truth.primary.detectorId)
+      : typeof gate === 'string'
+        ? gate
+        : null;
+  let detectorSignals: Array<{ id: string; kind: string; detail: string } | string> =
+    signals.detectorSignals ??
+    (evidence.length
+      ? evidence.map((e) => ({ id: e, kind: 'dom', detail: e }))
+      : []);
+  let unclassified = false;
+  let verified = Boolean(signals.verified);
+
+  // Planned gate that fails detector verification → AI review / unclassified — never fake Login
+  if (
+    gate === 'login' &&
+    (!truth.primary || truth.primary.detectorId !== 'login')
+  ) {
+    if (truth.primary) {
+      gate = truth.primary.detectorId as typeof gate;
+      claim = truth.primary.claim;
+      detectorId = truth.primary.detectorId;
+      detectorSignals = truth.primary.signals;
+      verified = true;
+    } else {
+      const ai = await runNeedsAiReviewPass({
+        workspaceId,
+        jobId,
+        opportunityId,
+        html: htmlForDetect || '<html></html>',
+        url: pausedUrl ?? '',
+        screenshotBase64: shot,
+        stage: stepAction ?? 'gate',
+        workerId,
+        leaseGeneration: leaseGen,
+      });
+      if (ai.kind === 'verified') {
+        gate = ai.gate as
+          | NonNullable<ExecutionGate>
+          | 'cloudflare'
+          | 'unclassified'
+          | 'needs_ai_review';
+        claim = ai.claim;
+        detectorId = ai.gate;
+        detectorSignals = ai.signals;
+        verified = true;
+      } else if (ai.kind === 'unclassified') {
+        gate = 'unclassified';
+        claim = 'Unclassified';
+        unclassified = true;
+        verified = false;
+        detectorId = null;
+      } else {
+        await logTruthViolation({
+          workspaceId,
+          jobId,
+          kind: 'login_gate_without_detector',
+          source: 'pauseForGate',
+          detail: { plannedGate: 'login' },
+        });
+        gate = 'unclassified';
+        claim = 'Unclassified';
+        unclassified = true;
+        verified = false;
+      }
+    }
+  } else if (params.blockedButUnknown || (!truth.primary && gate === 'manual_input')) {
+    const ai = await runNeedsAiReviewPass({
+      workspaceId,
+      jobId,
+      opportunityId,
+      html: htmlForDetect || '<html></html>',
+      url: pausedUrl ?? '',
+      screenshotBase64: shot,
+      stage: stepAction ?? 'gate',
+      workerId,
+      leaseGeneration: leaseGen,
+    });
+    if (ai.kind === 'verified') {
+      gate = ai.gate as
+        | NonNullable<ExecutionGate>
+        | 'cloudflare'
+        | 'unclassified'
+        | 'needs_ai_review';
+      claim = ai.claim;
+      detectorId = ai.gate;
+      detectorSignals = ai.signals;
+      verified = true;
+    } else {
+      gate = 'unclassified';
+      claim = 'Unclassified';
+      unclassified = true;
+      verified = false;
+    }
+  } else if (truth.primary) {
+    gate = truth.primary.detectorId as typeof gate;
+    claim = truth.primary.claim;
+    detectorId = truth.primary.detectorId;
+    detectorSignals = truth.primary.signals;
+    verified = true;
+    reasonLabel = claim;
+    explanation = signals.explanation ?? explanation;
+  } else if (
+    !['category', 'manual_input', 'human_approval'].includes(String(gate)) ||
+    params.blockedButUnknown
+  ) {
+    // Planned intervention without detector hit → Needs AI Review (never guess)
+    const ai = await runNeedsAiReviewPass({
+      workspaceId,
+      jobId,
+      opportunityId,
+      html: htmlForDetect || '<html></html>',
+      url: pausedUrl ?? '',
+      screenshotBase64: shot,
+      stage: stepAction ?? 'gate',
+      workerId,
+      leaseGeneration: leaseGen,
+    });
+    if (ai.kind === 'verified') {
+      gate = ai.gate as
+        | NonNullable<ExecutionGate>
+        | 'cloudflare'
+        | 'unclassified'
+        | 'needs_ai_review';
+      claim = ai.claim;
+      detectorId = ai.gate;
+      detectorSignals = ai.signals;
+      verified = true;
+    } else if (ai.kind === 'unclassified') {
+      gate = 'unclassified';
+      claim = 'Unclassified';
+      unclassified = true;
+      verified = false;
+    } else {
+      gate = 'unclassified';
+      claim = 'Unclassified';
+      unclassified = true;
+      verified = false;
+    }
+  }
+
+  // Needs AI Review maps to CSM Retrying (automated resolution attempt)
+  if (gate === 'needs_ai_review' && opportunityId) {
+    try {
+      const { updateCampaignItem } = await import('../campaigns/campaign-state.service.js');
+      await updateCampaignItem(workspaceId, opportunityId, {
+        currentStatus: 'Retrying',
+        lastError: 'Needs AI Review',
+      });
+    } catch {
+      /* additive best-effort */
+    }
+  }
+
+  const evidenceRec = await captureEvidenceRecord({
+    workspaceId,
+    jobId,
+    opportunityId,
+    claim,
+    detectorId: detectorId != null ? String(detectorId) : null,
+    signals: detectorSignals.map((s) =>
+      typeof s === 'string'
+        ? { id: s, kind: 'dom', detail: s }
+        : { id: s.id, kind: s.kind, detail: s.detail }
+    ),
+    url: pausedUrl,
+    screenshotBase64: shot,
+    domHtml: liveHtml ?? htmlForDetect,
+    stage: stepAction ?? String(gate),
+    workerId,
+    leaseGeneration: leaseGen,
+    verified: verified && !unclassified,
+    unclassified,
+  });
+
+  const ok = await assertEvidenceForClassification({
+    workspaceId,
+    jobId,
+    claim,
+    evidenceId: evidenceRec?.id,
+    source: 'pauseForGate',
+  });
+  if (!ok) {
+    // Truth rule: no evidence → do not write intervention classification
+    return;
+  }
+
+  const gateForStatus =
+    gate === 'cloudflare'
+      ? ('captcha' as ExecutionGate)
+      : gate === 'unclassified' || gate === 'needs_ai_review'
+        ? ('manual_input' as ExecutionGate)
+        : (gate as ExecutionGate);
+  const gateStatus = gateStatusFromBlocker(gateForStatus) ?? 'needs_approval';
+
+  await updateStep(jobId, stepIndex, {
+    status: 'paused',
+    finished_at: new Date().toISOString(),
+  });
+  await updateJob(jobId, {
+    status: gateStatus,
+    pause_reason: gate,
+    current_step_index: stepIndex,
+    evidence_id: evidenceRec!.id,
+    truth_claim: claim,
+    unclassified,
+    needs_ai_review: gate === 'needs_ai_review',
+  });
+
+  if (unclassified && opportunityId) {
+    try {
+      const { updateCampaignItem } = await import('../campaigns/campaign-state.service.js');
+      await updateCampaignItem(workspaceId, opportunityId, {
+        currentStatus: 'Waiting Human',
+        lastError: 'Unclassified — needs diagnosis',
+      });
+    } catch {
+      /* best-effort */
+    }
+  }
+
   const currentStepLabel = workflowStepLabel(stepAction, stepIndex);
   const domEvidence = liveHtml
     ? liveHtml
@@ -238,10 +494,14 @@ async function pauseForGate(params: {
     pageTitle: pageTitle ?? null,
     currentStepLabel,
     pauseExplanation: explanation ?? reasonLabel ?? null,
-    pauseReasonLabel: reasonLabel ?? null,
+    pauseReasonLabel: reasonLabel ?? claim,
     loginFormDetected: gate === 'login',
     domEvidence,
-    pauseEvidence: evidence,
+    pauseEvidence: detectorSignals.map((s) => (typeof s === 'string' ? s : s.id)),
+    evidenceId: evidenceRec!.id,
+    truthClaim: claim,
+    unclassified,
+    verifiedIntervention: verified && !unclassified,
     pauseContext: {
       ...(params.context ?? {}),
       url: pausedUrl,
@@ -249,17 +509,31 @@ async function pauseForGate(params: {
       stepAction,
       currentStepLabel,
       explanation,
-      reason: reasonLabel,
-      evidence,
+      reason: reasonLabel ?? claim,
+      evidence: detectorSignals,
       pageTitle,
+      evidenceId: evidenceRec!.id,
+      claim,
     },
   });
-  await appendLog(workspaceId, jobId, 'warn', `Waiting for User — ${reasonLabel || gate}`, {
+  await appendTimelineEvent({
+    workspaceId,
+    jobId,
+    opportunityId,
+    event: unclassified ? 'Unclassified Gate' : 'Verified Intervention',
+    stage: stepAction,
+    workerId,
+    payload: { claim, gate, evidenceId: evidenceRec!.id },
+  });
+  await appendLog(workspaceId, jobId, 'warn', `Waiting for User — ${reasonLabel || claim || gate}`, {
     nonNegotiable: true,
     displayStatus: 'Waiting for User',
-    note: 'Open the exact paused URL to finish this step. AI auto-resumes — never bypassed.',
+    note: unclassified
+      ? 'Unclassified — needs diagnosis. The system could not determine what is blocking this.'
+      : 'Open the exact paused URL to finish this step. AI auto-resumes — never bypassed.',
     pausedUrl,
     currentStepLabel,
+    evidenceId: evidenceRec!.id,
     ...params.context,
   });
 
@@ -281,12 +555,18 @@ async function pauseForGate(params: {
     .eq('workspace_id', workspaceId)
     .maybeSingle();
 
-  if (isWatchableGate(gate) && policyRow?.auto_resume !== false) {
+  const watchGate = gateForStatus;
+  if (
+    watchGate &&
+    isWatchableGate(watchGate) &&
+    policyRow?.auto_resume !== false &&
+    !unclassified
+  ) {
     await enqueueGateWatch({
       jobId,
       workspaceId,
       sessionId,
-      gate,
+      gate: watchGate,
       intervalMs: Number(policyRow?.watch_interval_ms ?? 2000),
     });
   }
@@ -406,7 +686,9 @@ async function runBeeExecutionJobInner(
     .order('step_index');
 
   try {
-    await updateJob(jobId, { status: 'launching_browser' });
+    // Phase 4.5: stay Idle/Queued until browser is allocated — never claim Starting early
+    const { appendTimelineEvent } = await import('./bee-timeline.service.js');
+    const { beeWorkerId } = await import('./bee-config.js');
     const health = await runtime.health();
     await getSupabaseAdmin()
       .from('browser_sessions')
@@ -444,13 +726,37 @@ async function runBeeExecutionJobInner(
             .maybeSingle();
           if (sess) storageState = await loadStorageStateFromSession(sess);
         }
-        await withStageTimeout('launch', () =>
-          runtime.launch({
-            mode: DEFAULT_FEATURE_FLAGS.bee_headed_debug ? 'headed' : 'headless',
-            storageState: storageState ?? undefined,
-            timeoutMs: 20_000,
-          })
-        );
+        try {
+          await withStageTimeout('launch', () =>
+            runtime.launch({
+              mode: DEFAULT_FEATURE_FLAGS.bee_headed_debug ? 'headed' : 'headless',
+              storageState: storageState ?? undefined,
+              timeoutMs: 20_000,
+            })
+          );
+        } catch (launchErr) {
+          // No Starting state — browser never allocated
+          await appendTimelineEvent({
+            workspaceId,
+            jobId,
+            opportunityId: job.opportunity_id ? String(job.opportunity_id) : null,
+            event: 'Browser Allocation Failed',
+            stage: 'launch',
+            workerId: beeWorkerId(),
+            payload: { error: String(launchErr) },
+          });
+          throw launchErr;
+        }
+        // Truth: Starting only after acquire/launch returned
+        await updateJob(jobId, { status: 'launching_browser' });
+        await appendTimelineEvent({
+          workspaceId,
+          jobId,
+          opportunityId: job.opportunity_id ? String(job.opportunity_id) : null,
+          event: 'Browser Allocated',
+          stage: 'launch',
+          workerId: beeWorkerId(),
+        });
         await appendLog(
           workspaceId,
           jobId,
@@ -460,6 +766,17 @@ async function runBeeExecutionJobInner(
             : 'Launching Browser',
           { sessionReuse: Boolean(storageState), pooled: true }
         );
+      } else {
+        await updateJob(jobId, { status: 'launching_browser' });
+        await appendTimelineEvent({
+          workspaceId,
+          jobId,
+          opportunityId: job.opportunity_id ? String(job.opportunity_id) : null,
+          event: 'Browser Allocated',
+          stage: 'launch',
+          workerId: beeWorkerId(),
+          payload: { reused: true },
+        });
       }
 
       if (sessionId) {
@@ -496,10 +813,15 @@ async function runBeeExecutionJobInner(
         status: 'running',
         started_at: new Date().toISOString(),
       });
-      await updateJob(jobId, {
-        status: statusForAction(action),
-        current_step_index: step.step_index,
-      });
+      // Phase 4.5: do not claim Running for open/navigate until Website Opened is verified
+      if (action !== 'open' && action !== 'navigate') {
+        await updateJob(jobId, {
+          status: statusForAction(action),
+          current_step_index: step.step_index,
+        });
+      } else {
+        await updateJob(jobId, { current_step_index: step.step_index });
+      }
 
       // Gate: pause for user — never bypass; start watcher for auto-resume
       if (blocker && blocker !== null) {
@@ -573,9 +895,39 @@ async function runBeeExecutionJobInner(
           const url = String(detail.url ?? '');
           if (url) {
             await appendLog(workspaceId, jobId, 'info', 'Opening Website', { url });
-            const cap = await withStageTimeout(action === 'open' ? 'open' : 'navigate', () =>
-              runtime.navigate(url, 20_000)
+            const { appendTimelineEvent: appendNavTimeline } = await import(
+              './bee-timeline.service.js'
             );
+            let cap;
+            try {
+              cap = await withStageTimeout(action === 'open' ? 'open' : 'navigate', () =>
+                runtime.navigate(url, 20_000)
+              );
+            } catch (navErr) {
+              // Page never committed → never enter Starting/Running
+              await appendNavTimeline({
+                workspaceId,
+                jobId,
+                opportunityId: job.opportunity_id ? String(job.opportunity_id) : null,
+                event: 'Navigation Failed',
+                stage: action,
+                payload: { url, error: String(navErr) },
+              });
+              throw navErr;
+            }
+            // Truth: Running only after Website Opened is recorded
+            await appendNavTimeline({
+              workspaceId,
+              jobId,
+              opportunityId: job.opportunity_id ? String(job.opportunity_id) : null,
+              event: 'Website Opened',
+              stage: action,
+              payload: { url: cap.url },
+            });
+            await updateJob(jobId, {
+              status: statusForAction(action),
+              current_step_index: step.step_index,
+            });
             await storeScreenshot(
               workspaceId,
               jobId,

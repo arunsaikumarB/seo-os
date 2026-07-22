@@ -88,7 +88,7 @@ export function toPublicExecutionStatus(
   ) {
     return 'Waiting Human';
   }
-  if (s === 'queued' || s === 'retry_scheduled') {
+  if (s === 'queued' || s === 'retry_scheduled' || s === 'preparing') {
     return 'Queued';
   }
   if (s === 'waiting_infrastructure') {
@@ -98,11 +98,12 @@ export function toPublicExecutionStatus(
   if (s === 'cancelled') {
     return d === 'deleted_forever' ? 'Deleted' : 'Skipped';
   }
+  // Phase 4.5: Starting = browser allocated (launch succeeded); Running = Website Opened+
+  if (s === 'launching_browser' || s === 'authenticating') {
+    return 'Starting';
+  }
   if (
     [
-      'preparing',
-      'launching_browser',
-      'authenticating',
       'navigating',
       'analyzing_form',
       'uploading_assets',
@@ -190,9 +191,8 @@ export function computeExecutionCounts(
 
   counts.campaignIsRunning = counts.Running > 0;
 
-  // Progress numerator: sites that have left Ready (actively in flight or done-ish human wait)
-  const progressed =
-    counts.Running + completedLike + counts['Waiting Human'];
+  // Phase 4.5 progress truth: bar advances only on verified-terminal items
+  const progressed = completedLike;
 
   let campaignState: CampaignState = 'Idle';
   if (counts.campaignIsRunning) {

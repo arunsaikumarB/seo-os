@@ -59,6 +59,16 @@ type HealthData = {
     };
     invariants: { stuckWorkersZero: boolean; browsersWithinCeiling: boolean };
   };
+  truthAudit?: {
+    classifications: number;
+    missingEvidence: number;
+    falseInterventions: number;
+    falseInterventionRate: number;
+    unclassified: number;
+    phantomStates: number;
+    rejectedWrites: Array<{ kind: string; source: string; created_at?: string }>;
+    invariants: { missingEvidenceZero: boolean; phantomStatesZero: boolean };
+  };
   items: HealthRow[];
 };
 
@@ -170,6 +180,31 @@ export function CampaignHealthPage() {
             Invariants: stuck=0{' '}
             {data.executionAudit.invariants.stuckWorkersZero ? 'OK' : 'FAIL'} · ceiling{' '}
             {data.executionAudit.invariants.browsersWithinCeiling ? 'OK' : 'FAIL'}
+          </p>
+        </div>
+      ) : null}
+
+      {data?.truthAudit ? (
+        <div className="border p-2 space-y-2">
+          <p className="font-semibold">Truth audit (Phase 4.5)</p>
+          <p>
+            Classifications {data.truthAudit.classifications} · Missing evidence{' '}
+            {data.truthAudit.missingEvidence} (must be 0) · Unclassified{' '}
+            {data.truthAudit.unclassified} · False interventions{' '}
+            {data.truthAudit.falseInterventions} (rate {data.truthAudit.falseInterventionRate}) ·
+            Phantom states {data.truthAudit.phantomStates} (must be 0)
+          </p>
+          <p>
+            Invariants: missingEvidence=0{' '}
+            {data.truthAudit.invariants.missingEvidenceZero ? 'OK' : 'FAIL'} · phantom=0{' '}
+            {data.truthAudit.invariants.phantomStatesZero ? 'OK' : 'FAIL'}
+          </p>
+          <p>
+            Rejected writes (last {data.truthAudit.rejectedWrites.length}):{' '}
+            {data.truthAudit.rejectedWrites
+              .slice(0, 8)
+              .map((v) => `${v.kind}@${v.source}`)
+              .join(' · ') || 'none'}
           </p>
         </div>
       ) : null}

@@ -20,6 +20,13 @@ export type InterventionItem = {
   elapsedMs: number;
   timeWaitingMs?: number;
   autoResumePending?: boolean;
+  evidenceId?: string | null;
+  matchedSignals?: string[];
+  screenshotPath?: string | null;
+  domSnapshotPath?: string | null;
+  stage?: string | null;
+  unclassified?: boolean;
+  verified?: boolean;
 };
 
 export function useInterventions(projectId: string, refetchInterval = 2_000) {

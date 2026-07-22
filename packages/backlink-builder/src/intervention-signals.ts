@@ -1,8 +1,14 @@
 /**
  * Page-gate signals for Human Intervention.
- * Login is reported only when a real login form is detected — never from
- * loose "sign in" copy or a lone password field on a submission form.
+ * Classifications go through the Detector Registry (Phase 4.5) — never infer.
+ * Login is reported only when a real login form is detected AND blocking.
  */
+
+import {
+  DETECTOR_CONFIG,
+  evaluateDetectors,
+  type DetectorId,
+} from './detector-registry.js';
 
 export type DetectedInterventionGate =
   | 'login'
@@ -12,7 +18,11 @@ export type DetectedInterventionGate =
   | 'email_verify'
   | 'phone_verify'
   | 'category'
-  | 'manual_input';
+  | 'manual_input'
+  | 'cloudflare'
+  | 'human_approval'
+  | 'unclassified'
+  | 'needs_ai_review';
 
 export interface InterventionSignals {
   loginForm: boolean;
@@ -30,70 +40,59 @@ export interface InterventionSignals {
   explanation: string | null;
   /** Compact DOM evidence for debugging */
   evidence: string[];
+  /** Phase 4.5: detector verified + blocking */
+  verified?: boolean;
+  claim?: string | null;
+  detectorSignals?: Array<{ id: string; kind: string; detail: string }>;
 }
 
 function hasPasswordInput(html: string): boolean {
-  return /<input[^>]*\btype=["']password["'][^>]*>/i.test(html);
+  return DETECTOR_CONFIG.passwordInput.test(html);
 }
 
 function hasConfirmPassword(html: string): boolean {
   return (
-    /<input[^>]*(name|id|placeholder)=["'][^"']*(confirm|password2|password_confirmation|retype)[^"']*["'][^>]*>/i.test(
-      html
-    ) || (html.match(/<input[^>]*\btype=["']password["'][^>]*>/gi) ?? []).length >= 2
+    DETECTOR_CONFIG.confirmPassword.test(html) ||
+    (html.match(/<input[^>]*\btype=["']password["'][^>]*>/gi) ?? []).length >= 2
   );
 }
 
 function hasUsernameOrEmailField(html: string): boolean {
-  return (
-    /<input[^>]*\btype=["']email["'][^>]*>/i.test(html) ||
-    /<input[^>]*(name|id|autocomplete)=["'][^"']*(user|email|login|username|userid)[^"']*["'][^>]*>/i.test(
-      html
-    )
-  );
+  return DETECTOR_CONFIG.identityField.test(html);
 }
 
 function hasLoginSubmitIntent(html: string): boolean {
   return (
-    /<(?:button|input)[^>]*(?:value|aria-label|title)=["'][^"']*(?:sign[\s-]?in|log[\s-]?in|login)[^"']*["'][^>]*>/i.test(
-      html
-    ) ||
-    /<(?:button|a)[^>]*>[^<]*(?:sign[\s-]?in|log[\s-]?in)[^<]*<\/(?:button|a)>/i.test(html) ||
+    DETECTOR_CONFIG.loginCta.test(html) ||
     /<form[^>]*action=["'][^"']*(?:login|signin|sign-in|auth\/login)[^"']*["'][^>]*>/i.test(html)
   );
 }
 
 function hasSignupIntent(html: string, url = ''): boolean {
   const blob = `${html}\n${url}`.toLowerCase();
-  return (
-    /sign[\s-]?up|register|create (an )?account|join (now|us|free)/i.test(blob) ||
-    /\/(signup|sign-up|register|join|create-account)(\/|$|\?)/i.test(url)
-  );
+  return DETECTOR_CONFIG.signupIntent.test(blob) || DETECTOR_CONFIG.signupUrl.test(url);
 }
 
 function hasLoginHeadingOrUrl(html: string, url = ''): boolean {
-  return (
-    /<(?:h1|h2|h3|legend|title)[^>]*>[^<]*(?:sign[\s-]?in|log[\s-]?in|login)[^<]*</i.test(html) ||
-    /\/(login|signin|sign-in|auth)(\/|$|\?)/i.test(url)
-  );
+  return DETECTOR_CONFIG.loginHeading.test(html) || DETECTOR_CONFIG.loginUrl.test(url);
 }
 
-/** True only when a login form is actually present on the page. */
+/**
+ * True when a login form is present (signal only — blocking is enforced by the registry).
+ * Prefer evaluateDetectors / detectInterventionSignals for classification.
+ */
 export function detectLoginForm(html: string, url = ''): boolean {
   if (!hasPasswordInput(html)) return false;
-  // Registration / create-account forms are not "login"
   if (hasSignupIntent(html, url) && (hasConfirmPassword(html) || !hasLoginSubmitIntent(html))) {
     return false;
   }
   const identity = hasUsernameOrEmailField(html);
   const intent = hasLoginSubmitIntent(html) || hasLoginHeadingOrUrl(html, url);
-  // Require password + (identity field OR clear login intent)
   return identity || intent;
 }
 
 export function detectSignupForm(html: string, url = ''): boolean {
   if (!hasSignupIntent(html, url)) return false;
-  // Prefer signup when register CTA / confirm password present
   if (hasConfirmPassword(html)) return true;
   if (hasPasswordInput(html) && hasUsernameOrEmailField(html) && !hasLoginSubmitIntent(html)) {
     return true;
@@ -114,74 +113,40 @@ export function detectCategoryManualInput(html: string): boolean {
   return needsPick || /<select[^>]*(?:name|id)=["'][^"']*categor[^"']*["'][^>]*\brequired\b/i.test(html);
 }
 
-export function detectInterventionSignals(htmlSnippet?: string, url = ''): InterventionSignals {
+export function detectInterventionSignals(
+  htmlSnippet?: string,
+  url = '',
+  opts?: { postSubmitHtml?: string | null; blockedButUnknown?: boolean }
+): InterventionSignals {
   const html = htmlSnippet ?? '';
-  const htmlLower = html.toLowerCase();
-  const evidence: string[] = [];
-
-  const captcha =
-    /g-recaptcha|h-captcha|hcaptcha|cf-turnstile|data-sitekey|captcha-container|id=["']captcha/i.test(
-      html
-    );
-  if (captcha) evidence.push('captcha_widget');
-
-  const mfa = /mfa|2fa|two[\s-]?factor|authenticator|enter (your )?otp|verification code/i.test(
-    htmlLower
+  const ev = evaluateDetectors(
+    { html, url, postSubmitHtml: opts?.postSubmitHtml, targetingSubmissionForm: true },
+    { blockedButUnknown: opts?.blockedButUnknown }
   );
-  if (mfa) evidence.push('mfa_prompt');
+  const primary = ev.primary;
+  const categoryManual = !primary && detectCategoryManualInput(html);
 
-  const emailVerify = /verify your email|email verification|confirm your email|check your inbox/i.test(
-    htmlLower
-  );
-  if (emailVerify) evidence.push('email_verify_copy');
-
-  const phoneVerify = /verify.*(phone|sms)|sms code|phone verification/i.test(htmlLower);
-  if (phoneVerify) evidence.push('phone_verify_copy');
-
-  const loginForm = detectLoginForm(html, url);
-  if (loginForm) {
-    if (hasPasswordInput(html)) evidence.push('password_input');
-    if (hasUsernameOrEmailField(html)) evidence.push('username_or_email_input');
-    if (hasLoginSubmitIntent(html)) evidence.push('login_submit_cta');
-  }
-
-  const signupForm = !loginForm && detectSignupForm(html, url);
-  if (signupForm) evidence.push('signup_or_register');
-
-  const categoryManual = detectCategoryManualInput(html);
-  if (categoryManual) evidence.push('category_select_manual');
+  const evidence = primary
+    ? primary.signals.map((s) => `${s.id}:${s.detail}`)
+    : categoryManual
+      ? ['category_select_manual']
+      : [];
 
   let primaryGate: DetectedInterventionGate | null = null;
   let reason: string | null = null;
   let explanation: string | null = null;
+  let claim: string | null = null;
 
-  // Priority: hard blockers first, then auth, then form assistance
-  if (captcha) {
-    primaryGate = 'captcha';
-    reason = 'Solve CAPTCHA';
-    explanation = 'A CAPTCHA challenge is blocking submission. Solve it on the live page.';
-  } else if (mfa) {
-    primaryGate = 'mfa';
-    reason = 'Enter Verification Code';
-    explanation = 'Multi-factor authentication is required before automation can continue.';
-  } else if (emailVerify) {
-    primaryGate = 'email_verify';
-    reason = 'Verify Email';
-    explanation = 'Email verification is required before the listing can be submitted.';
-  } else if (phoneVerify) {
-    primaryGate = 'phone_verify';
-    reason = 'Verify Phone';
-    explanation = 'Phone verification is required before automation can continue.';
-  } else if (loginForm) {
-    primaryGate = 'login';
-    reason = 'Login form detected before submission.';
-    explanation =
-      'A login form was detected on this page. Sign in on the exact paused URL so AI can continue.';
-  } else if (signupForm) {
-    primaryGate = 'signup';
-    reason = 'Registration is required before submitting.';
-    explanation =
-      'This site requires creating an account before a listing can be submitted. Complete registration on the paused page.';
+  if (primary) {
+    primaryGate = primary.detectorId as DetectedInterventionGate;
+    claim = primary.claim;
+    reason = primary.claim;
+    explanation = `Verified by detector ${primary.detectorId}: ${primary.signals.map((s) => s.id).join(', ')}`;
+  } else if (ev.needsAiReview) {
+    primaryGate = 'needs_ai_review';
+    claim = 'Needs AI Review';
+    reason = 'Needs AI Review';
+    explanation = 'No detector matched; evidence captured for AI classification pass.';
   } else if (categoryManual) {
     primaryGate = 'category';
     reason = 'Category selection requires manual input.';
@@ -189,19 +154,40 @@ export function detectInterventionSignals(htmlSnippet?: string, url = ''): Inter
       'A required category field could not be filled reliably. Choose the correct category on the paused page.';
   }
 
+  const loginHit = ev.all.find((r) => r.detectorId === 'login');
+  const signupHit = ev.all.find((r) => r.detectorId === 'signup');
+  const captchaHit = ev.all.find((r) => r.detectorId === 'captcha' || r.detectorId === 'cloudflare');
+  const mfaHit = ev.all.find((r) => r.detectorId === 'mfa');
+  const emailHit = ev.all.find((r) => r.detectorId === 'email_verify');
+  const phoneHit = ev.all.find((r) => r.detectorId === 'phone_verify');
+
   return {
-    loginForm,
-    signupForm,
-    captcha,
-    mfa,
-    emailVerify,
-    phoneVerify,
+    loginForm: Boolean(loginHit?.matched),
+    signupForm: Boolean(signupHit?.matched),
+    captcha: Boolean(captchaHit?.matched),
+    mfa: Boolean(mfaHit?.matched),
+    emailVerify: Boolean(emailHit?.matched),
+    phoneVerify: Boolean(phoneHit?.matched),
     categoryManual,
     primaryGate,
     reason,
     explanation,
     evidence,
+    verified: Boolean(primary?.matched && primary.blocking),
+    claim,
+    detectorSignals: primary?.signals ?? [],
   };
+}
+
+/** Re-run a single detector by id (used after AI suggests a claim). */
+export function verifyDetectorClaim(
+  detectorId: DetectorId,
+  html: string,
+  url = '',
+  postSubmitHtml?: string | null
+): boolean {
+  const ev = evaluateDetectors({ html, url, postSubmitHtml });
+  return Boolean(ev.all.find((r) => r.detectorId === detectorId)?.matched);
 }
 
 /** Map a stored pause_reason / gate key to display copy (no false "Login Required"). */

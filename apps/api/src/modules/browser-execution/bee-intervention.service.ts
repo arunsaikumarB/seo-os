@@ -34,6 +34,8 @@ export type InterventionGate =
   | 'category'
   | 'manual_input'
   | 'human_approval'
+  | 'unclassified'
+  | 'needs_ai_review'
   | 'unknown';
 
 const INTERVENTION_STATUSES = [
@@ -127,6 +129,7 @@ export function resolveInterventionGate(job: {
   }
   if (pause === 'phone_verify' || status.includes('phone')) return 'phone_verify';
   if (pause === 'human_approval') return 'human_approval';
+  if (pause === 'unclassified' || pause === 'needs_ai_review') return 'unclassified';
   if (!pause && (status === 'needs_approval' || status === 'ready_for_review')) {
     return 'human_approval';
   }
@@ -248,7 +251,8 @@ const HUMAN_QUEUE_GATES = new Set([
 
 export async function listInterventions(workspaceId: string) {
   const jobs = await listJobs(workspaceId);
-  const items = [];
+  const verified: Array<Record<string, unknown>> = [];
+  const unclassifiedGroup: Array<Record<string, unknown>> = [];
   for (const j of jobs) {
     const status = String(j.status);
     if (!isInterventionStatus(status)) continue;
@@ -261,12 +265,24 @@ export async function listInterventions(workspaceId: string) {
     if (status === 'deleted' || status === 'ignored' || disposition === 'deleted_forever') {
       continue;
     }
+    // Phase 4.5: queue purity — only evidence-backed interventions
+    const evidenceId =
+      jobRec.evidence_id != null
+        ? String(jobRec.evidence_id)
+        : ((jobRec.metrics as { evidenceId?: string } | null)?.evidenceId ?? null);
+    if (!evidenceId) continue;
+
     const gate = resolveInterventionGate(jobRec);
     // Dedicated Human Intervention Queue — only protected human gates
-    if (!HUMAN_QUEUE_GATES.has(gate) && gate !== 'unknown' && gate !== 'category' && gate !== 'manual_input') {
+    if (
+      !HUMAN_QUEUE_GATES.has(gate) &&
+      gate !== 'unknown' &&
+      gate !== 'category' &&
+      gate !== 'manual_input' &&
+      gate !== 'unclassified'
+    ) {
       continue;
     }
-    // Keep category/manual/unknown in the queue too (still need a human)
     const copy = humanInterventionCopy(gate, jobRec);
     const started = j.watch_started_at || j.started_at || j.created_at;
     const elapsedMs = started ? Date.now() - new Date(String(started)).getTime() : 0;
@@ -275,7 +291,16 @@ export async function listInterventions(workspaceId: string) {
     const idx = Number(j.current_step_index ?? 0);
     const stepAction = m.pauseContext?.stepAction || steps[idx]?.action || null;
     const pausedUrl = pausedUrlFromJob(jobRec);
-    items.push({
+    const isUnclassified =
+      jobRec.unclassified === true ||
+      gate === 'unclassified' ||
+      String(jobRec.truth_claim ?? '') === 'Unclassified' ||
+      String(j.pause_reason ?? '') === 'unclassified';
+    const evidenceBlob =
+      (jobRec.evidence as Record<string, unknown> | null) ??
+      (m as { evidence?: Record<string, unknown> }).evidence ??
+      null;
+    const row = {
       jobId: String(j.id),
       website: String(j.site_domain ?? 'Website'),
       pausedUrl,
@@ -285,11 +310,17 @@ export async function listInterventions(workspaceId: string) {
       opportunityId: j.opportunity_id ? String(j.opportunity_id) : null,
       sessionId: j.session_id ? String(j.session_id) : null,
       status,
-      displayStatus: 'Needs You',
-      gate,
-      reason: copy.reason,
-      title: copy.title,
-      instruction: copy.instruction,
+      displayStatus: isUnclassified ? 'Unclassified — needs diagnosis' : 'Needs You',
+      gate: isUnclassified ? 'unclassified' : gate,
+      reason: isUnclassified
+        ? 'Unclassified — needs diagnosis'
+        : (jobRec.truth_claim != null ? String(jobRec.truth_claim) : copy.reason),
+      title: isUnclassified
+        ? 'Unclassified — needs diagnosis'
+        : copy.title,
+      instruction: isUnclassified
+        ? 'The system could not determine what is blocking this. Review the evidence and diagnose.'
+        : copy.instruction,
       explanation: m.pauseExplanation || m.pauseContext?.explanation || copy.instruction,
       cta: copy.cta,
       pauseReason: j.pause_reason ? String(j.pause_reason) : null,
@@ -298,10 +329,38 @@ export async function listInterventions(workspaceId: string) {
       timeWaitingMs: elapsedMs,
       createdAt: String(j.created_at),
       autoResumePending: status === 'ready_to_continue',
-    });
+      evidenceId,
+      matchedSignals: m.pauseEvidence || m.pauseContext?.evidence || [],
+      screenshotPath:
+        evidenceBlob && typeof evidenceBlob.screenshotPath === 'string'
+          ? evidenceBlob.screenshotPath
+          : null,
+      domSnapshotPath:
+        evidenceBlob && typeof evidenceBlob.domSnapshotPath === 'string'
+          ? evidenceBlob.domSnapshotPath
+          : null,
+      stage: stepAction || m.currentStepLabel || null,
+      unclassified: isUnclassified,
+      verified: !isUnclassified,
+    };
+    if (isUnclassified) unclassifiedGroup.push(row);
+    else verified.push(row);
   }
-  items.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-  return { count: items.length, items };
+  verified.sort(
+    (a, b) => new Date(String(a.createdAt)).getTime() - new Date(String(b.createdAt)).getTime()
+  );
+  unclassifiedGroup.sort(
+    (a, b) => new Date(String(a.createdAt)).getTime() - new Date(String(b.createdAt)).getTime()
+  );
+  const items = [...verified, ...unclassifiedGroup];
+  return {
+    count: items.length,
+    verifiedCount: verified.length,
+    unclassifiedCount: unclassifiedGroup.length,
+    items,
+    verified,
+    unclassified: unclassifiedGroup,
+  };
 }
 
 export async function getIntervention(workspaceId: string, jobId: string) {

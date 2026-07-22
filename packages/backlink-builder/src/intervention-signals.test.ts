@@ -20,7 +20,7 @@ describe('intervention signals', () => {
     expect(detectLoginForm(html, 'https://directory6.org/login')).toBe(true);
     const s = detectInterventionSignals(html, 'https://directory6.org/login');
     expect(s.primaryGate).toBe('login');
-    expect(s.reason).toMatch(/Login form detected/i);
+    expect(s.reason).toMatch(/Login Required/i);
   });
 
   it('detects registration instead of login', () => {
@@ -29,7 +29,7 @@ describe('intervention signals', () => {
     expect(detectLoginForm(html, 'https://example.com/register')).toBe(false);
     const s = detectInterventionSignals(html, 'https://example.com/register');
     expect(s.primaryGate).toBe('signup');
-    expect(s.reason).toMatch(/Registration is required/i);
+    expect(s.reason).toMatch(/Registration Required/i);
   });
 
   it('detects category manual input', () => {

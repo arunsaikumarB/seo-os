@@ -44,6 +44,8 @@ export function HumanInterventionQueue({ projectId }: Props) {
   const qc = useQueryClient();
   const interventions = useInterventions(projectId, 2_500);
   const items = interventions.data?.data.items ?? [];
+  const verifiedItems = items.filter((i) => !i.unclassified);
+  const unclassifiedItems = items.filter((i) => i.unclassified);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const invalidate = () => {
@@ -212,6 +214,7 @@ export function HumanInterventionQueue({ projectId }: Props) {
                 </th>
                 <th className="px-3 py-2 font-medium">Website</th>
                 <th className="px-3 py-2 font-medium">Reason</th>
+                <th className="px-3 py-2 font-medium">Signals</th>
                 <th className="px-3 py-2 font-medium">Current URL</th>
                 <th className="px-3 py-2 font-medium">Detected Step</th>
                 <th className="px-3 py-2 font-medium">Time Waiting</th>
@@ -219,7 +222,7 @@ export function HumanInterventionQueue({ projectId }: Props) {
               </tr>
             </thead>
             <tbody>
-              {items.map((item: InterventionItem) => (
+              {verifiedItems.map((item: InterventionItem) => (
                 <tr key={item.jobId} className="border-t">
                   <td className="px-3 py-2">
                     <input
@@ -235,13 +238,66 @@ export function HumanInterventionQueue({ projectId }: Props) {
                       {item.reason}
                     </span>
                   </td>
+                  <td className="px-3 py-2 max-w-[160px]">
+                    <span className="text-[11px] text-muted-foreground break-all line-clamp-2">
+                      {(item.matchedSignals ?? []).slice(0, 4).join(', ') || '—'}
+                    </span>
+                  </td>
                   <td className="px-3 py-2 max-w-[220px]">
                     <span className="text-xs text-muted-foreground break-all line-clamp-2">
                       {item.currentUrl || item.pausedUrl || '—'}
                     </span>
                   </td>
                   <td className="px-3 py-2 text-xs">
-                    {item.detectedStep || item.currentStep || '—'}
+                    {item.detectedStep || item.currentStep || item.stage || '—'}
+                  </td>
+                  <td className="px-3 py-2 tabular-nums text-xs">
+                    {formatWait(item.timeWaitingMs ?? item.elapsedMs)}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <Button
+                      size="sm"
+                      onClick={() => openInterventionWindow(projectId, item.jobId)}
+                    >
+                      Complete
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+              {unclassifiedItems.length > 0 ? (
+                <tr className="border-t bg-muted/30">
+                  <td colSpan={8} className="px-3 py-2 text-xs font-medium text-muted-foreground">
+                    Unclassified — needs diagnosis ({unclassifiedItems.length}) — the system could
+                    not determine what is blocking these
+                  </td>
+                </tr>
+              ) : null}
+              {unclassifiedItems.map((item: InterventionItem) => (
+                <tr key={item.jobId} className="border-t">
+                  <td className="px-3 py-2">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${item.website}`}
+                      checked={selected.has(item.jobId)}
+                      onChange={() => toggle(item.jobId)}
+                    />
+                  </td>
+                  <td className="px-3 py-2 font-medium">{item.website}</td>
+                  <td className="px-3 py-2">
+                    <span className="text-xs text-muted-foreground">{item.reason}</span>
+                  </td>
+                  <td className="px-3 py-2 max-w-[160px]">
+                    <span className="text-[11px] text-muted-foreground break-all line-clamp-2">
+                      {(item.matchedSignals ?? []).slice(0, 4).join(', ') || '—'}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 max-w-[220px]">
+                    <span className="text-xs text-muted-foreground break-all line-clamp-2">
+                      {item.currentUrl || item.pausedUrl || '—'}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-xs">
+                    {item.detectedStep || item.currentStep || item.stage || '—'}
                   </td>
                   <td className="px-3 py-2 tabular-nums text-xs">
                     {formatWait(item.timeWaitingMs ?? item.elapsedMs)}
@@ -261,6 +317,7 @@ export function HumanInterventionQueue({ projectId }: Props) {
         </div>
         <p className="text-[11px] text-muted-foreground">
           Skip = this campaign only. Delete Forever = Global Ignore List for all future projects.
+          Verified interventions only (evidence required).
         </p>
       </CardContent>
     </Card>
