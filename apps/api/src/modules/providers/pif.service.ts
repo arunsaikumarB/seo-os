@@ -452,6 +452,23 @@ async function recordUsage(
   }
 }
 
+/** Phase 5.6 — content generation records LLM/image calls on the same metrics path as Test. */
+export async function recordProviderInvocation(params: {
+  workspaceId: string;
+  providerKey: string;
+  success: boolean;
+  latencyMs: number;
+}) {
+  const orgId = await resolveOrgId(params.workspaceId);
+  await recordUsage(
+    orgId,
+    params.workspaceId,
+    params.providerKey,
+    params.success,
+    params.latencyMs
+  );
+}
+
 export async function listProviderLogs(workspaceId: string) {
   const orgId = await resolveOrgId(workspaceId);
   const { data } = await getSupabaseAdmin()

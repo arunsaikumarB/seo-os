@@ -54,6 +54,17 @@ export async function getProjectById(projectId: string, orgId: string): Promise<
   return mapWorkspace(data);
 }
 
+/** Load workspace/project by id alone (content generation brand injection). */
+export async function getProjectByWorkspaceId(projectId: string): Promise<Project | null> {
+  const { data, error } = await getSupabaseAdmin()
+    .from('workspaces')
+    .select('*')
+    .eq('id', projectId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return mapWorkspace(data);
+}
+
 export async function createProject(
   orgId: string,
   userId: string,

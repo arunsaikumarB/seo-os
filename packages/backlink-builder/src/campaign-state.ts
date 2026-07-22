@@ -833,9 +833,18 @@ export function assertPackageAssetsComplete(item: {
 }): void {
   const missing: string[] = [];
   if (item.packageStatus !== 'generated') missing.push('package');
-  if (item.imageStatus !== 'generated') missing.push('images');
+  // Phase 5.6 — failed/n/a images are honest outcomes (never fabricate pixels)
+  if (
+    item.imageStatus !== 'generated' &&
+    item.imageStatus !== 'failed' &&
+    item.imageStatus !== 'n/a'
+  ) {
+    missing.push('images');
+  }
   if (item.metadataStatus !== 'generated') missing.push('metadata');
-  if (item.videoMetadataStatus !== 'generated') missing.push('video_metadata');
+  if (item.videoMetadataStatus !== 'generated' && item.videoMetadataStatus !== 'n/a') {
+    missing.push('video_metadata');
+  }
   if (item.schemaStatus !== 'generated') missing.push('schema');
   if (missing.length) {
     throw new Error(

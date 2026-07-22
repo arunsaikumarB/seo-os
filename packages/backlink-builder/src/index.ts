@@ -33,6 +33,7 @@ export * from './wordpress-intelligence.js';
 export * from './directory-intelligence.js';
 export * from './contact-form-intelligence.js';
 export * from './generation-handoff.js';
+export * from './placeholder-tripwire.js';
 export * from './execution-failures.js';
 export * from './page-watcher.js';
 export * from './image-intelligence.js';

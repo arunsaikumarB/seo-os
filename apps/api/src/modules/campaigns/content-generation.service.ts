@@ -777,16 +777,21 @@ export async function processContentGenerationJob(job: {
           imageType: 'featured',
           count: 1,
         });
+        await updateCampaignItem(workspaceId, opportunityId, {
+          imageStatus: 'generated',
+          force: true,
+        });
       } catch (err) {
-        logger.debug(
+        logger.warn(
           { err, opportunityId },
-          'Image pixel enqueue skipped — metadata brief still counts'
+          'Image provider unavailable — marking image_status failed (no fabricated assets)'
         );
+        await updateCampaignItem(workspaceId, opportunityId, {
+          imageStatus: 'failed',
+          lastError: 'image provider not available',
+          force: true,
+        });
       }
-      await updateCampaignItem(workspaceId, opportunityId, {
-        imageStatus: 'generated',
-        force: true,
-      });
     }
 
     if (stage === 'all' || stage === 'video_metadata') {
@@ -796,7 +801,7 @@ export async function processContentGenerationJob(job: {
       });
       await createMediaBrief(workspaceId, opportunityId, 'video');
       await updateCampaignItem(workspaceId, opportunityId, {
-        videoMetadataStatus: 'generated',
+        videoMetadataStatus: 'n/a',
         force: true,
       });
     }
@@ -885,9 +890,52 @@ async function finalizeQuality(
     .limit(1)
     .maybeSingle();
 
-  const quality = (packRow?.pack as { quality?: { overall?: number; recommendations?: string[] } })
-    ?.quality;
-  const score = typeof quality?.overall === 'number' ? quality.overall : 0;
+  const quality = (packRow?.pack as {
+    quality?: { overall?: number | null; recommendations?: string[]; placeholderFailed?: boolean };
+  })?.quality;
+
+  // Phase 5.6 — placeholder tripwire already failed the pack insert; if somehow present, Fail
+  if (quality?.placeholderFailed) {
+    await updateCampaignItem(workspaceId, opportunityId, {
+      qualityScore: null,
+      generationStatus: 'Failed',
+      currentStatus: 'Failed',
+      lastError: 'placeholder content detected',
+      force: true,
+    });
+    return;
+  }
+
+  // Interim: null overall → Needs Review (never invent a constant score)
+  if (quality?.overall == null || typeof quality.overall !== 'number') {
+    const { completePackageHandoff } = await import('./generation-handoff.service.js');
+    await completePackageHandoff({
+      workspaceId,
+      opportunityId,
+      qualityScore: null,
+      packageApprovedBy: null,
+      domain: item.domain,
+      forceBlocker: 'needs_review',
+    });
+    await updateCampaignItem(workspaceId, opportunityId, {
+      generationStatus: 'Needs Review',
+      lastError: 'Awaiting quality review — live AI content',
+      force: true,
+    });
+    if (packRow?.id) {
+      await getSupabaseAdmin()
+        .from('content_packs')
+        .update({ status: 'needs_review', updated_at: new Date().toISOString() })
+        .eq('id', packRow.id);
+    }
+    await recordSample(workspaceId, {
+      durationMs: Date.now() - startedAt,
+      images: 1,
+    });
+    return;
+  }
+
+  const score = quality.overall;
   const recommendations = quality?.recommendations ?? [];
   const tier = tierFromQualityScore(score);
   const reason = qualityFailureReason(score, recommendations);

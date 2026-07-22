@@ -16,7 +16,7 @@ import {
   type QueueStage,
 } from '@seo-os/backlink-builder';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
-import { getProjectById } from '../projects/project.service.js';
+import { getProjectById, getProjectByWorkspaceId } from '../projects/project.service.js';
 import { publishPlatformEvent, fireAndForget } from '../platform/event-bus.service.js';
 import { enqueueJob, QUEUES } from '../../jobs/boss.js';
 import { runVerificationCheck } from './automation.service.js';
@@ -29,11 +29,19 @@ import {
 export { analyzeOpportunityForContent };
 
 async function brandFor(workspaceId: string, orgId?: string) {
-  const project = orgId ? await getProjectById(workspaceId, orgId) : null;
+  const project = orgId
+    ? await getProjectById(workspaceId, orgId)
+    : await getProjectByWorkspaceId(workspaceId);
+  if (!project?.name) {
+    throw new Error(
+      `Workspace brand missing for ${workspaceId} — cannot generate content without project name`
+    );
+  }
   return {
-    brandName: project?.name ?? 'Our Brand',
-    projectDomain: project?.domain ?? undefined,
-    industry: project?.industry ?? undefined,
+    brandName: project.name,
+    projectDomain: project.domain ?? undefined,
+    projectUrl: project.url ?? undefined,
+    industry: project.industry ?? undefined,
   };
 }
 
@@ -330,9 +338,13 @@ export async function createContentPack(
   const storageType = plan.storageType || backlinkType || String(opp.opportunity_type);
 
   const brand = await brandFor(workspaceId, orgId);
-  const pack = generateContentPack(
+  const { generateLiveContentPack } = await import(
+    '../campaigns/llm-content-generation.js'
+  );
+  const pack = (await generateLiveContentPack({
+    workspaceId,
     storageType,
-    {
+    opp: {
       title: String(opp.title),
       domain: opp.domain as string | null,
       opportunity_type: storageType,
@@ -340,14 +352,10 @@ export async function createContentPack(
       website_name: opp.website_name as string | null,
     },
     brand,
-    {
-      classificationId: plan.detectedType,
-      classificationLabel: plan.detectedTypeLabel,
-      workflowQueue: null,
-      confidence: plan.confidence,
-      reason: plan.reason,
-    }
-  );
+    classificationId: plan.detectedType,
+    classificationLabel: plan.detectedTypeLabel,
+    reason: plan.reason,
+  })) as ReturnType<typeof generateContentPack> & Record<string, unknown>;
 
   // Align estimates from live intelligence
   pack.estimatedApprovalProbability = intelligence.estimatedApprovalProbability;
@@ -510,7 +518,23 @@ export async function createMediaBrief(
     score: Number(opp.score ?? 0),
     website_name: opp.website_name as string | null,
   };
-  const brief = kind === 'image' ? generateImageBrief(ctx, brand) : generateVideoBrief(ctx, brand);
+  // Phase 5.6 — never invent example.com template briefs; pixel path is IIE / honest n/a
+  const { isGenerationMockEnabled } = await import('@seo-os/backlink-builder');
+  const brief = isGenerationMockEnabled()
+    ? kind === 'image'
+      ? generateImageBrief(ctx, brand)
+      : generateVideoBrief(ctx, brand)
+    : {
+        suggestions: [],
+        generationStatus: kind === 'image' ? 'pending_provider' : 'n/a',
+        metricsSource: 'live',
+        note:
+          kind === 'image'
+            ? 'Image pixels via configured image provider only — no fabricated metadata.'
+            : 'Video render not configured — metadata deferred.',
+        brand: brand.brandName,
+        projectDomain: brand.projectDomain,
+      };
   const { data, error } = await getSupabaseAdmin()
     .from('media_asset_briefs')
     .insert({

@@ -9,6 +9,7 @@ import {
   scoreContentPackQuality,
   type ContentStudioMode,
 } from './intelligent-content.js';
+import { isGenerationMockEnabled } from './placeholder-tripwire.js';
 
 export type ContentPackPayload = GuestPostPack & {
   backlinkType: string;
@@ -68,6 +69,11 @@ export function generateContentPack(
     reason?: string | null;
   } = {}
 ): ContentPackPayload {
+  if (!isGenerationMockEnabled()) {
+    throw new Error(
+      'Silent template generateContentPack is disabled. Set GENERATION_MOCK=true for local mock only, or use LLM generation.'
+    );
+  }
   const plan = buildIntelligentContentPlan({
     classificationId: opts.classificationId,
     classificationLabel: opts.classificationLabel,

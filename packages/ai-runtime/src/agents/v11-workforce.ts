@@ -82,6 +82,16 @@ export function registerV11WorkforceAgents(
   });
 
   register('content_agent', async ({ input }) => {
+    const { isGenerationMockEnabled } = await import('@seo-os/backlink-builder');
+    if (!isGenerationMockEnabled()) {
+      return {
+        agentType: 'content_agent',
+        status: 'error',
+        summary:
+          'Template content_agent disabled — use campaign Generate Content (LLM). Set GENERATION_MOCK=true only for local mock.',
+        metricsSource: 'live',
+      };
+    }
     const opp = oppFromInput(input);
     const pack = generateContentPack(
       asString(input.backlinkType, opp.opportunity_type),
