@@ -49,6 +49,70 @@ const DEFAULT_AVG = {
   samples: 0,
 };
 
+/** Phase 5.7 — consumer liveness (generation queue must self-heal after restart). */
+const CONSUMER_STALE_MS = 45_000;
+const SUPERVISION_INTERVAL_MS = 20_000;
+let lastConsumerHeartbeatAt = 0;
+let supervisionTimer: ReturnType<typeof setInterval> | null = null;
+
+export function touchContentGenHeartbeat(): void {
+  lastConsumerHeartbeatAt = Date.now();
+}
+
+export function getContentGenHeartbeatAgeMs(): number | null {
+  if (!lastConsumerHeartbeatAt) return null;
+  return Date.now() - lastConsumerHeartbeatAt;
+}
+
+export function isContentGenConsumerAlive(maxAgeMs = CONSUMER_STALE_MS): boolean {
+  if (!lastConsumerHeartbeatAt) return false;
+  return Date.now() - lastConsumerHeartbeatAt <= maxAgeMs;
+}
+
+async function countPendingGenerationItems(workspaceId?: string): Promise<number> {
+  let q = getSupabaseAdmin()
+    .from('opportunities')
+    .select('id', { count: 'exact', head: true })
+    .in('generation_status', ['Queued', 'Generating']);
+  if (workspaceId) q = q.eq('workspace_id', workspaceId);
+  const { count } = await q;
+  return count ?? 0;
+}
+
+/**
+ * Supervise the generation consumer: Queued items + stale/missing heartbeat → re-drain.
+ */
+export function startContentGenSupervisionLoop(): void {
+  if (supervisionTimer) return;
+  supervisionTimer = setInterval(() => {
+    void superviseContentGenConsumer().catch((err) =>
+      logger.warn({ err }, 'content-gen supervision tick failed')
+    );
+  }, SUPERVISION_INTERVAL_MS);
+  void superviseContentGenConsumer().catch((err) =>
+    logger.warn({ err }, 'content-gen supervision initial tick failed')
+  );
+  logger.info(
+    { intervalMs: SUPERVISION_INTERVAL_MS, staleMs: CONSUMER_STALE_MS },
+    'Content-generation consumer supervision started'
+  );
+}
+
+async function superviseContentGenConsumer(): Promise<void> {
+  if (isContentGenConsumerAlive()) return;
+  const pending = await countPendingGenerationItems();
+  if (pending <= 0) return;
+  logger.warn(
+    {
+      pending,
+      heartbeatAgeMs: getContentGenHeartbeatAgeMs(),
+    },
+    'content-gen: Queued items with idle consumer — recovering'
+  );
+  const result = await resumeInterruptedContentGeneration();
+  logger.info(result, 'content-gen supervision recovery finished');
+}
+
 function contentGenConcurrency(): number {
   const raw = Number(process.env.CONTENT_GEN_CONCURRENCY);
   if (Number.isFinite(raw) && raw >= 1 && raw <= 16) return Math.floor(raw);
@@ -186,6 +250,8 @@ export async function getContentGenerationBoard(workspaceId: string) {
   };
 
   const orphans = await findOrphanAssets(workspaceId, items);
+  const consumerAlive = isContentGenConsumerAlive();
+  const generationInterrupted = progress.queued + progress.generating > 0 && !consumerAlive;
 
   return {
     progress,
@@ -204,9 +270,9 @@ export async function getContentGenerationBoard(workspaceId: string) {
       concurrency,
     },
     eta:
-      progress.active && etaMs != null
+      progress.active && consumerAlive && etaMs != null
         ? formatDuration(etaMs)
-        : progress.active
+        : progress.active && consumerAlive
           ? 'estimating…'
           : null,
     current: generatingItems,
@@ -214,8 +280,15 @@ export async function getContentGenerationBoard(workspaceId: string) {
     generationAudit,
     orphans,
     metricsSource: 'campaign_state' as const,
+    consumerAlive,
+    consumerHeartbeatAgeMs: getContentGenHeartbeatAgeMs(),
+    generationInterrupted,
     dashboardCard: {
-      title: progress.active ? 'AI is generating content' : 'Content generation',
+      title: generationInterrupted
+        ? 'Generation interrupted — resuming…'
+        : progress.active
+          ? 'AI is generating content'
+          : 'Content generation',
       approved: progress.approved,
       completed: progress.completed,
       generating: progress.generating,
@@ -223,9 +296,9 @@ export async function getContentGenerationBoard(workspaceId: string) {
       failed: progress.failed,
       needsReview: progress.needsReview,
       eta:
-        progress.active && etaMs != null
+        progress.active && consumerAlive && etaMs != null
           ? formatDuration(etaMs)
-          : progress.active
+          : progress.active && consumerAlive
             ? 'estimating…'
             : null,
     },
@@ -345,13 +418,25 @@ export async function enqueueContentGeneration(
     manualRetry?: boolean;
   }> = [];
 
+  const reviveDeadConsumer =
+    !opts.manualRetry && !isContentGenConsumerAlive();
+
   for (const item of targets) {
     if (item.currentStatus === 'Deleted') {
       skipped++;
       skipReasons.push(`${item.websiteUrl ?? item.id}: deleted`);
       continue;
     }
-    if (stage === 'all' && isEnqueueSkip(item.generationStatus) && !opts.manualRetry) {
+    // Escape hatch: Queued/Generating with a dead consumer must revive, not no-op.
+    const stuckQueued =
+      reviveDeadConsumer &&
+      (item.generationStatus === 'Queued' || item.generationStatus === 'Generating');
+    if (
+      stage === 'all' &&
+      isEnqueueSkip(item.generationStatus) &&
+      !opts.manualRetry &&
+      !stuckQueued
+    ) {
       skipped++;
       skipReasons.push(
         `${item.websiteUrl ?? item.id}: already ${item.generationStatus}`
@@ -387,7 +472,8 @@ export async function enqueueContentGeneration(
         patch.currentStatus = 'Approved';
       }
     }
-    if (stage === 'all') {
+    // Revive path: do not wipe partial asset state — only re-attach consumer jobs.
+    if (!stuckQueued && stage === 'all') {
       patch.packageStatus = 'pending';
       patch.imageStatus = 'pending';
       patch.metadataStatus = 'pending';
@@ -395,11 +481,11 @@ export async function enqueueContentGeneration(
       patch.schemaStatus = 'pending';
       patch.qualityScore = null;
       patch.packageApprovedBy = null;
-    } else if (stage === 'images') {
+    } else if (!stuckQueued && stage === 'images') {
       patch.imageStatus = 'pending';
-    } else if (stage === 'metadata') {
+    } else if (!stuckQueued && stage === 'metadata') {
       patch.metadataStatus = 'pending';
-    } else if (stage === 'video_metadata') {
+    } else if (!stuckQueued && stage === 'video_metadata') {
       patch.videoMetadataStatus = 'pending';
     }
 
@@ -729,10 +815,13 @@ export async function processContentGenerationJob(job: {
   const { workspaceId, opportunityId } = job;
   const stage: ContentGenStage = job.stage ?? 'all';
   const started = Date.now();
+  touchContentGenHeartbeat();
+  const heartbeat = setInterval(() => touchContentGenHeartbeat(), 10_000);
 
   const items = await listCampaignItems(workspaceId, { includeDeleted: false });
   const item = items.find((i) => i.id === opportunityId);
   if (!item) {
+    clearInterval(heartbeat);
     logger.warn({ opportunityId }, 'content_generate: item not found');
     return;
   }
@@ -867,6 +956,9 @@ export async function processContentGenerationJob(job: {
       lastError: `stage=${stage} attempt=${attempt}: ${msg}`,
       force: true,
     });
+  } finally {
+    clearInterval(heartbeat);
+    touchContentGenHeartbeat();
   }
 }
 
@@ -1032,25 +1124,40 @@ async function finalizeQuality(
   }
 }
 
-/** Re-queue items stuck in Generating after process restart (does not consume a retry). */
+/**
+ * Boot / supervision reconcile: drain Queued + interrupted Generating items.
+ * Generating → Queued without consuming a retry. Re-attaches consumer jobs.
+ */
 export async function resumeInterruptedContentGeneration(workspaceId?: string) {
   const db = getSupabaseAdmin();
   let q = db
     .from('opportunities')
-    .select('id, workspace_id')
-    .eq('generation_status', 'Generating')
+    .select('id, workspace_id, generation_status')
+    .in('generation_status', ['Queued', 'Generating'])
     .limit(500);
   if (workspaceId) q = q.eq('workspace_id', workspaceId);
   const { data } = await q;
+
   let resumed = 0;
+  let requeuedFromGenerating = 0;
+  let reattachedQueued = 0;
+
   for (const row of data ?? []) {
     const ws = String(row.workspace_id);
     const id = String(row.id);
-    await updateCampaignItem(ws, id, {
-      generationStatus: 'Queued',
-      lastError: 'resumed after interruption',
-      force: true,
-    });
+    const wasGenerating = String(row.generation_status) === 'Generating';
+
+    if (wasGenerating) {
+      await updateCampaignItem(ws, id, {
+        generationStatus: 'Queued',
+        lastError: 'resumed after interruption',
+        force: true,
+      });
+      requeuedFromGenerating++;
+    } else {
+      reattachedQueued++;
+    }
+
     await enqueueJob(
       QUEUES.LOW,
       'content_generate',
@@ -1068,7 +1175,15 @@ export async function resumeInterruptedContentGeneration(workspaceId?: string) {
     );
     resumed++;
   }
-  return { resumed };
+
+  if (resumed > 0) {
+    logger.info(
+      { resumed, requeuedFromGenerating, reattachedQueued, workspaceId: workspaceId ?? 'all' },
+      'content-gen queue reconcile: re-attached consumer jobs'
+    );
+  }
+
+  return { resumed, requeuedFromGenerating, reattachedQueued };
 }
 
 export async function handleContentGenerateJobs(
@@ -1076,6 +1191,7 @@ export async function handleContentGenerateJobs(
 ) {
   for (const job of jobs) {
     if (String(job.data.type ?? '') !== 'content_generate') continue;
+    touchContentGenHeartbeat();
     await processContentGenerationJob({
       workspaceId: String(job.data.workspaceId),
       opportunityId: String(job.data.opportunityId),

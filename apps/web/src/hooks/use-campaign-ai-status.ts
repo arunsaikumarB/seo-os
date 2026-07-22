@@ -49,6 +49,9 @@ export type ContentGenBoard = {
     videoMetadata: { generated: number; missingFailed: number };
     schema: { generated: number; missingFailed: number };
   };
+  consumerAlive?: boolean;
+  consumerHeartbeatAgeMs?: number | null;
+  generationInterrupted?: boolean;
   dashboardCard: {
     title: string;
     approved: number;
@@ -75,12 +78,20 @@ export function useCampaignAiStatus(projectId: string) {
         `/v1/projects/${projectId}/backlink-builder/automation/content-generation`
       ),
     enabled: !!projectId,
-    refetchInterval: (q) => (q.state.data?.data?.progress?.active ? 2_000 : 10_000),
+    refetchInterval: (q) => {
+      const d = q.state.data?.data;
+      if (d?.progress?.active || d?.generationInterrupted) return 2_000;
+      return 10_000;
+    },
   });
 
   const board = boardQ.data?.data;
   const progress = board?.progress;
-  const genActive = Boolean(progress?.active);
+  const generationInterrupted = Boolean(board?.generationInterrupted);
+  const consumerAlive = board?.consumerAlive !== false;
+  // Honest activity: Queued alone is not "Generating" unless consumer heartbeat is live.
+  const genLive = Boolean(progress?.active) && consumerAlive && !generationInterrupted;
+  const genActive = genLive || generationInterrupted;
 
   const campaignState = s?.campaignState ?? 'Idle';
   const beeRunning = Boolean(
@@ -102,7 +113,14 @@ export function useCampaignAiStatus(projectId: string) {
   let percent = 0;
   let eta: string | null = null;
 
-  if (genActive && progress) {
+  if (generationInterrupted && progress) {
+    currentLabel = 'Generation interrupted — resuming…';
+    currentActivity = 'Resuming';
+    completed = progress.completed;
+    remaining = progress.queued + progress.generating;
+    percent = Math.round(progress.percent);
+    eta = null;
+  } else if (genLive && progress) {
     currentLabel = 'Generating Packages';
     currentActivity = 'Generating';
     const cur = board?.current?.[0];
@@ -145,7 +163,7 @@ export function useCampaignAiStatus(projectId: string) {
 
   const generateState: GeneratePageState = (() => {
     if (!progress) return 'empty';
-    if (progress.active) return 'running';
+    if (generationInterrupted || progress.active) return 'running';
     if (progress.completed > 0 || progress.needsReview > 0 || progress.failed > 0) {
       return 'complete';
     }
@@ -158,6 +176,8 @@ export function useCampaignAiStatus(projectId: string) {
     boardLoading: boardQ.isLoading,
     progress,
     genActive,
+    generationInterrupted,
+    consumerAlive: board?.consumerAlive,
     beeRunning,
     aiActive,
     currentLabel,

@@ -22,6 +22,7 @@ import { recoverStuckAnalyzingImports } from '../modules/backlinks/discovery.ser
 import {
   handleContentGenerateJobs,
   resumeInterruptedContentGeneration,
+  startContentGenSupervisionLoop,
 } from '../modules/campaigns/content-generation.service.js';
 import {
   reconcileExecutionAfterRestart,
@@ -242,8 +243,14 @@ export async function startJobInfrastructure(): Promise<void> {
   try {
     const resumed = await resumeInterruptedContentGeneration();
     logger.info(resumed, 'Startup content-generation resume finished');
+    startContentGenSupervisionLoop();
   } catch (err) {
     logger.warn({ err }, 'Startup content-generation resume failed');
+    try {
+      startContentGenSupervisionLoop();
+    } catch (supErr) {
+      logger.warn({ err: supErr }, 'Failed to start content-gen supervision');
+    }
   }
 
   try {
