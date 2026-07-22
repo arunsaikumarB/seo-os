@@ -167,7 +167,12 @@ async function latestJobForOpp(workspaceId: string, opportunityId: string) {
 }
 
 function isVerifiedTerminalSkip(status: string, disposition?: string | null): boolean {
-  return status === 'skipped' || disposition === 'skipped';
+  return (
+    status === 'skipped' ||
+    disposition === 'skipped' ||
+    disposition === 'manual_offline' ||
+    disposition === 'unsupported'
+  );
 }
 
 /** Real completion / cancel — not a start failure that must be retried. */
@@ -413,14 +418,25 @@ async function tryStartOrPark(params: {
 
     // Permanent site blockers → verified skip / failed_to_start
     if (['SITE_UNSUPPORTED', 'SITE_UNPROFILABLE'].includes(code)) {
-      await markJobFailedToStart(params.workspaceId, params.jobId, msg);
+      // Phase 6.3 — Unsupported → Manual Excel (not Failed)
+      try {
+        const { divertToManualOffline } = await import('./bee-intervention-actions.service.js');
+        await divertToManualOffline(params.workspaceId, params.jobId, {
+          gate: 'unsupported',
+          reason: 'Unsupported',
+        });
+      } catch {
+        await markJobFailedToStart(params.workspaceId, params.jobId, msg);
+      }
       await writeOppPipelineMeta(params.workspaceId, params.opportunityId, {
         startApiResponse: msg,
         creationError: msg,
         creationStack: stack,
         verifiedBlocker: msg,
+        submissionLane: 'manual',
+        manualReason: 'Unsupported',
       });
-      return { ok: false, status: 'failed', error: msg };
+      return { ok: false, status: 'skipped', error: msg };
     }
 
     // Infrastructure / readiness — keep queued for Railway worker retry; never silent
@@ -512,6 +528,18 @@ export async function ensureExecutionJobsForReady(params: {
     const domain = String(item.domain ?? 'unknown');
     const website = String(item.website_name || item.domain || item.id);
     try {
+      // Phase 6.3 — Manual lane never enters auto execution
+      const meta = (item.metadata as Record<string, unknown> | null) ?? {};
+      if (meta.submissionLane === 'manual') {
+        summary.skippedTerminal++;
+        await writeOppPipelineMeta(params.workspaceId, item.id, {
+          whyNoJob: 'Manual — user handling offline',
+          verifiedBlocker: String(meta.manualReason ?? 'Manual'),
+          submissionLane: 'manual',
+        });
+        continue;
+      }
+
       const existing = await latestJobForOpp(params.workspaceId, item.id);
       const existingStatus = existing ? String(existing.status) : '';
       const existingDisp = (existing?.disposition as string | null) ?? null;

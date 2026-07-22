@@ -13,7 +13,6 @@ import { NextActionPanel } from '@/components/workflow/next-action-panel';
 import { WorkflowProgressHeader } from '@/components/workflow/workflow-progress-header';
 import { WorkflowCelebration } from '@/components/workflow/workflow-celebration';
 import { CampaignAiStatus } from '@/components/workflow/campaign-ai-status';
-import { InterventionBanner } from '@/components/browser/intervention-banner';
 import { OfflineBanner } from '@/components/beta/offline-banner';
 import { BetaAnnouncementBar } from '@/components/beta/beta-announcement-bar';
 import { useAppStore } from '@/stores/app-store';
@@ -23,7 +22,7 @@ interface AppShellProps {
   projectId: string;
 }
 
-/** One progress header · AI status · one next action · one intervention banner. */
+/** One progress header · AI status · one next action. Manual list is opt-in on Submit. */
 export function AppShell({ projectId }: AppShellProps) {
   const breadcrumbs = useBreadcrumbs(projectId);
   const location = useLocation();
@@ -63,7 +62,6 @@ export function AppShell({ projectId }: AppShellProps) {
         </div>
         <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto p-4 pb-20 md:p-6 md:pb-6">
           <WorkflowProgressHeader projectId={projectId} />
-          <InterventionBanner projectId={projectId} />
           <WorkflowCelebration projectId={projectId} />
           {!onGeneratePage ? <CampaignAiStatus projectId={projectId} /> : null}
           {!isHome ? (

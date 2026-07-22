@@ -157,6 +157,41 @@ async function pauseForGate(params: {
     | 'unclassified'
     | 'needs_ai_review' = params.gate;
 
+  // Phase 6.3 — any detected human gate silently moves to Manual Excel (no-blocker guarantee).
+  // Final publish hold uses updateJob(needs_approval) directly — not this path.
+  try {
+    const { shouldDivertGateToManual, manualReasonFromGate } = await import(
+      '@seo-os/backlink-builder'
+    );
+    if (
+      shouldDivertGateToManual({
+        gate: String(gate),
+        truthClaim:
+          params.context?.truthClaim != null ? String(params.context.truthClaim) : null,
+        isPublishApprovalOnly: false,
+      })
+    ) {
+      const { divertToManualOffline } = await import('./bee-intervention-actions.service.js');
+      await updateStep(jobId, stepIndex, {
+        status: 'paused',
+        finished_at: new Date().toISOString(),
+      });
+      await divertToManualOffline(workspaceId, jobId, {
+        gate: String(gate),
+        truthClaim:
+          params.context?.truthClaim != null ? String(params.context.truthClaim) : null,
+        reason: manualReasonFromGate(
+          String(gate),
+          params.context?.truthClaim != null ? String(params.context.truthClaim) : null
+        ),
+        pausedUrl: params.context?.url != null ? String(params.context.url) : null,
+      });
+      return;
+    }
+  } catch {
+    /* fall through to normal pause if divert fails */
+  }
+
   // Preferences: auto-skip optional human gates so the campaign keeps moving
   try {
     const { getOrCreatePolicy } = await import('./bee.service.js');
@@ -1045,7 +1080,24 @@ async function runBeeExecutionJobInner(
           await storeScreenshot(workspaceId, jobId, step.id, 'preview', cap.screenshotBase64);
           await updateJob(jobId, { status: 'ready_for_review' });
         } else if (action === 'submit') {
-          if (!job.approved_at && job.mode !== 'automatic_eligible') {
+          // Phase 6.3 — zero-click auto-publish when campaign toggle is ON
+          let autoPublish = Boolean(job.approved_at) || job.mode === 'automatic_eligible';
+          if (!autoPublish) {
+            try {
+              const { getOrCreatePolicy } = await import('./bee.service.js');
+              const policy = await getOrCreatePolicy(workspaceId);
+              if (policy.auto_publish_automatable === true) {
+                autoPublish = true;
+                await updateJob(jobId, {
+                  approved_at: new Date().toISOString(),
+                  approved_by: 'auto_publish_automatable',
+                });
+              }
+            } catch {
+              /* keep approval gate */
+            }
+          }
+          if (!autoPublish) {
             await updateJob(jobId, { status: 'needs_approval', pause_reason: 'human_approval' });
             await updateStep(jobId, step.step_index, { status: 'paused' });
             await appendLog(workspaceId, jobId, 'warn', 'Submit blocked — approval required');

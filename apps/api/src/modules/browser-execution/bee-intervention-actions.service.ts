@@ -61,6 +61,98 @@ async function syncOpportunityStatus(
     .eq('workspace_id', workspaceId);
 }
 
+/**
+ * Phase 6.3 — silently move a gated job to Manual (offline Excel).
+ * Never leaves Waiting Human / never prompts Complete Now.
+ * Disposition is manual_offline (not Failed).
+ */
+export async function divertToManualOffline(
+  workspaceId: string,
+  jobId: string,
+  opts: {
+    gate: string;
+    truthClaim?: string | null;
+    reason?: string;
+    pausedUrl?: string | null;
+  }
+) {
+  const { manualReasonFromGate } = await import('@seo-os/backlink-builder');
+  const job = await getJob(workspaceId, jobId);
+  if (!job) throw Object.assign(new Error('Job not found'), { status: 404 });
+
+  const reasonLabel =
+    opts.reason ??
+    manualReasonFromGate(opts.gate, opts.truthClaim ?? null);
+
+  await setJobStatus(workspaceId, jobId, 'skipped', {
+    finished_at: new Date().toISOString(),
+    disposition: 'manual_offline',
+    disposition_at: new Date().toISOString(),
+    pause_reason: opts.gate,
+    error_code: null,
+    error_message: null,
+  });
+  await releaseSession(job as Record<string, unknown>);
+  await cancelQueuedBossJobsForExecution(jobId);
+  await mergeJobMetrics(workspaceId, jobId, {
+    disposition: 'manual_offline',
+    dispositionReason: reasonLabel,
+    submissionLane: 'manual',
+    manualReason: reasonLabel,
+    divertedFromGate: opts.gate,
+    pausedUrl: opts.pausedUrl ?? null,
+    truthClaim: opts.truthClaim ?? null,
+  });
+
+  const opportunityId = job.opportunity_id ? String(job.opportunity_id) : null;
+  if (opportunityId) {
+    try {
+      const { updateCampaignItem } = await import('../campaigns/campaign-state.service.js');
+      const { data: row } = await getSupabaseAdmin()
+        .from('opportunities')
+        .select('metadata')
+        .eq('id', opportunityId)
+        .eq('workspace_id', workspaceId)
+        .maybeSingle();
+      const prev = (row?.metadata as Record<string, unknown> | null) ?? {};
+      await updateCampaignItem(workspaceId, opportunityId, {
+        currentStatus: 'Skipped',
+        submissionStatus: 'Skipped',
+        lastError: `Manual — ${reasonLabel}`,
+        force: true,
+      });
+      await getSupabaseAdmin()
+        .from('opportunities')
+        .update({
+          metadata: {
+            ...prev,
+            submissionLane: 'manual',
+            manualReason: reasonLabel,
+            laneSource: 'truth_engine_divert',
+            laneSticky: true,
+            divertedGate: opts.gate,
+            divertedUrl: opts.pausedUrl ?? null,
+            truthClaim: opts.truthClaim ?? null,
+          },
+          automation_status: 'manual_offline',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', opportunityId)
+        .eq('workspace_id', workspaceId);
+    } catch {
+      await syncOpportunityStatus(workspaceId, opportunityId, 'manual_offline');
+    }
+  }
+
+  await appendLog(workspaceId, jobId, 'info', 'Moved to Manual (offline) — auto queue continues', {
+    gate: opts.gate,
+    reason: reasonLabel,
+  });
+  await recordHistory(workspaceId, jobId, 'skipped');
+  await drainQueue(workspaceId);
+  return getJob(workspaceId, jobId);
+}
+
 /** Skip only this campaign/job — domain stays eligible for future projects. */
 export async function skipInterventionJob(
   workspaceId: string,
@@ -213,15 +305,15 @@ export async function markInterventionUnsupported(
     });
     await removeOpportunityFromProject(workspaceId, job.opportunity_id as string | null);
   } else {
-    await setJobStatus(workspaceId, jobId, 'skipped', {
-      finished_at: new Date().toISOString(),
-      disposition: 'unsupported',
-      disposition_at: new Date().toISOString(),
-      disposition_by: opts?.userId ?? null,
-      error_code: 'UNSUPPORTED_SITE',
-      error_message: 'Marked unsupported',
+    // Phase 6.3 — Unsupported → Manual Excel (not Failed)
+    await divertToManualOffline(workspaceId, jobId, {
+      gate: 'unsupported',
+      reason: 'Unsupported',
     });
-    await syncOpportunityStatus(workspaceId, job.opportunity_id as string | null, 'unsupported');
+    if (opts?.userId) {
+      await mergeJobMetrics(workspaceId, jobId, { dispositionBy: opts.userId });
+    }
+    return getJob(workspaceId, jobId);
   }
   await releaseSession(job as Record<string, unknown>);
   await cancelQueuedBossJobsForExecution(jobId);

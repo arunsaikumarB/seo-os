@@ -54,6 +54,26 @@ reportsRouter.get(
   }
 );
 
+/** Phase 6.3 — Manual submissions download (Excel / CSV / PDF) */
+reportsRouter.get(
+  '/manual-links.xlsx',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const { exportManualLinksWorkbook } = await import('../../modules/reports/reports.service.js');
+      const format =
+        req.query.format === 'csv' || req.query.format === 'pdf' ? req.query.format : 'xlsx';
+      const file = await exportManualLinksWorkbook(param(req.params.projectId), format);
+      res.setHeader('Content-Type', file.contentType);
+      res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+      res.send(file.body);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 reportsRouter.get(
   '/backlink-ops.csv',
   authMiddleware,

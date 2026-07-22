@@ -214,6 +214,7 @@ export async function listCampaignItems(
           ? o.package_approved_by
           : null,
       blockerReason: o.blocker_reason != null ? String(o.blocker_reason) : null,
+      metadata: meta,
       raw: o as Record<string, unknown>,
     });
   }

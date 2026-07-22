@@ -188,6 +188,8 @@ export type CampaignItemInput = {
   packageApprovedBy?: 'auto' | 'user' | null;
   /** Phase 5.5 — why package cannot become Submission Ready (Ready). */
   blockerReason?: string | null;
+  /** Phase 6.3 — auto/manual lane metadata bag */
+  metadata?: Record<string, unknown> | null;
 };
 
 export type CampaignCounts = {

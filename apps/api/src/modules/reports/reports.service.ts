@@ -972,4 +972,96 @@ export async function exportBacklinkOpsWorkbook(
   };
 }
 
+/** Phase 6.3 — Manual submissions Excel (offline hand-submit list). */
+export async function exportManualLinksWorkbook(
+  workspaceId: string,
+  format: 'xlsx' | 'csv' | 'pdf' = 'xlsx'
+) {
+  const { readLaneMeta } = await import('@seo-os/backlink-builder');
+  const { data: opps } = await getSupabaseAdmin()
+    .from('opportunities')
+    .select(
+      'id, title, domain, url, opportunity_type, website_name, campaign_lifecycle, metadata, last_error'
+    )
+    .eq('workspace_id', workspaceId)
+    .neq('campaign_lifecycle', 'Deleted')
+    .limit(2000);
+
+  const header = [
+    'Website',
+    'Reason',
+    'Entry URL',
+    'Detected Platform',
+    'Strategy',
+    'Backlink Type',
+    'Notes',
+    'Anchor / Content Ref',
+  ];
+  const rows: string[][] = [header];
+  for (const o of opps ?? []) {
+    const meta = (o.metadata as Record<string, unknown> | null) ?? {};
+    const lane = readLaneMeta(meta);
+    if (lane.submissionLane !== 'manual') continue;
+    const enrichment = (meta.importEnrichment as Record<string, unknown> | null) ?? {};
+    const classification = (meta.classification as Record<string, unknown> | null) ?? {};
+    const sie = (meta.siteIntelligence as Record<string, unknown> | null) ?? {};
+    rows.push([
+      String(o.website_name ?? o.title ?? o.domain ?? ''),
+      String(lane.manualReason ?? 'Manual'),
+      String(meta.divertedUrl ?? o.url ?? ''),
+      String(sie.platform ?? meta.cms ?? classification.displayName ?? ''),
+      String(sie.strategy ?? meta.workflowQueue ?? ''),
+      String(o.opportunity_type ?? classification.id ?? ''),
+      String(o.last_error ?? enrichment.notes ?? ''),
+      String(enrichment.anchorText ?? enrichment.description ?? enrichment.targetPage ?? ''),
+    ]);
+  }
+
+  if (format === 'csv') {
+    const body = rows.map((r) => r.map(csvEscape).join(',')).join('\n');
+    return {
+      body: Buffer.from(body, 'utf8'),
+      contentType: 'text/csv',
+      filename: 'manual-submissions.csv',
+    };
+  }
+
+  if (format === 'pdf') {
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    let page = doc.addPage();
+    let y = page.getHeight() - 40;
+    page.drawText('Manual Submissions (offline)', { x: 40, y, size: 14, font });
+    y -= 24;
+    for (const r of rows.slice(0, 50)) {
+      if (y < 40) {
+        page = doc.addPage();
+        y = page.getHeight() - 40;
+      }
+      page.drawText(r.join(' | ').slice(0, 110), { x: 40, y, size: 8, font });
+      y -= 12;
+    }
+    const pdfBytes = await doc.save();
+    return {
+      body: Buffer.from(pdfBytes),
+      contentType: 'application/pdf',
+      filename: 'manual-submissions.pdf',
+    };
+  }
+
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'SEO OS';
+  const sheet = workbook.addWorksheet('Manual Submissions');
+  rows.forEach((r, i) => {
+    if (i === 0) sheet.addRow(r).font = { bold: true };
+    else sheet.addRow(r);
+  });
+  const body = Buffer.from(await workbook.xlsx.writeBuffer());
+  return {
+    body,
+    contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    filename: 'manual-submissions.xlsx',
+  };
+}
+
 export { reportToPlainText };

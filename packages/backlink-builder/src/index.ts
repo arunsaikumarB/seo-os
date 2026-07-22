@@ -39,3 +39,4 @@ export * from './page-watcher.js';
 export * from './image-intelligence.js';
 export * from './recommendations.js';
 export * from './submission-lanes.js';
+export * from './manual-lane.js';

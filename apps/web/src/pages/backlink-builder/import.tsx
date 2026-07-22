@@ -16,6 +16,12 @@ type ImportResult = {
   stats: { total: number; valid: number; duplicates: number; invalid: number };
   pipeline?: { queued?: boolean; status?: string; jobId?: string | null } | null;
   message?: string;
+  provisionalLanes?: {
+    automatable: number;
+    manual: number;
+    samples?: Array<{ url: string; lane: string; reason: string | null }>;
+    note?: string;
+  };
 };
 
 type ImportRecord = {
@@ -41,6 +47,12 @@ type ImportRecord = {
         queue: string;
         agent: string;
       }>;
+    };
+    provisionalLanes?: {
+      automatable: number;
+      manual: number;
+      samples?: Array<{ url: string; lane: string; reason: string | null }>;
+      note?: string;
     };
   };
 };
@@ -88,8 +100,11 @@ export function BacklinkImportPage() {
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['backlink-imports', projectId] });
       queryClient.invalidateQueries({ queryKey: ['automation-summary', projectId] });
+      const p = res.data.provisionalLanes;
       toast.success(
-        `Imported ${res.data.stats.valid} websites — AI is reviewing them now`
+        p
+          ? `Imported ${res.data.stats.valid} — provisional Auto ${p.automatable} · Manual ${p.manual}`
+          : `Imported ${res.data.stats.valid} websites — AI is reviewing them now`
       );
     },
     onError: (err) => toast.error(getApiErrorMessage(err, 'Import failed')),
@@ -258,6 +273,51 @@ export function BacklinkImportPage() {
           </Card>
         </div>
       </div>
+
+      {importMutation.data?.data?.provisionalLanes ? (
+        <Card className="border-dashed">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Provisional Auto / Manual</CardTitle>
+            <CardDescription>
+              URL-only guess — crawl may move Auto → Manual if a gate is found. Manual Excel is
+              available on Submit Backlinks.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="text-sm space-y-2">
+            <p>
+              Automatable{' '}
+              <span className="font-semibold tabular-nums">
+                {importMutation.data.data.provisionalLanes.automatable}
+              </span>
+              {' · '}
+              Manual{' '}
+              <span className="font-semibold tabular-nums">
+                {importMutation.data.data.provisionalLanes.manual}
+              </span>
+            </p>
+            <ul className="text-xs text-muted-foreground space-y-1 max-h-32 overflow-y-auto">
+              {(importMutation.data.data.provisionalLanes.samples ?? []).map((s) => (
+                <li key={s.url} className="truncate">
+                  {s.lane === 'manual' ? 'Manual' : 'Auto'} — {s.url}
+                  {s.reason ? ` (${s.reason})` : ''}
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {latest?.metadata?.provisionalLanes && !importMutation.data?.data?.provisionalLanes ? (
+        <Card className="border-dashed">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Latest import — provisional lanes</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm">
+            Automatable {latest.metadata.provisionalLanes.automatable} · Manual{' '}
+            {latest.metadata.provisionalLanes.manual}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {latest?.metadata?.classificationSummary && (
         <Card>

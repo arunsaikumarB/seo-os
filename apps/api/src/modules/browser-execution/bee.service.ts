@@ -103,6 +103,7 @@ export async function updatePolicy(workspaceId: string, patch: Record<string, un
     'auto_skip_login',
     'auto_skip_captcha',
     'never_ask_login',
+    'auto_publish_automatable',
   ];
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
   for (const k of allowed) {

@@ -129,6 +129,61 @@ backlinkBuilderRouter.get(
   }
 );
 
+/** Phase 6.3 — quiet Manual submissions list + counts */
+backlinkBuilderRouter.get(
+  '/manual-submissions',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const { listCampaignItems } = await import(
+        '../../modules/campaigns/campaign-state.service.js'
+      );
+      const { computeAutoManualCounts, readLaneMeta } = await import('@seo-os/backlink-builder');
+      const workspaceId = param(req.params.projectId);
+      const items = await listCampaignItems(workspaceId, { includeDeleted: false });
+      const counts = computeAutoManualCounts(
+        items.map((i) => ({
+          currentStatus: i.currentStatus,
+          metadata: (i as { metadata?: Record<string, unknown> | null }).metadata ?? null,
+        }))
+      );
+      const manualItems = items
+        .filter((i) => {
+          const meta =
+            ((i as { metadata?: Record<string, unknown> | null }).metadata as Record<
+              string,
+              unknown
+            > | null) ?? null;
+          return readLaneMeta(meta).submissionLane === 'manual';
+        })
+        .map((i) => {
+          const meta =
+            ((i as { metadata?: Record<string, unknown> | null }).metadata as Record<
+              string,
+              unknown
+            > | null) ?? {};
+          const lane = readLaneMeta(meta);
+          return {
+            id: i.id,
+            website: i.websiteUrl ?? i.domain ?? i.id,
+            reason: String(lane.manualReason ?? 'Manual'),
+            url: i.websiteUrl ?? null,
+          };
+        });
+      res.json({
+        data: {
+          counts,
+          items: manualItems,
+          metricsSource: 'campaign_state',
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 /** Dev-only Campaign Health audit — all items including Deleted. */
 backlinkBuilderRouter.get(
   '/campaign-health',

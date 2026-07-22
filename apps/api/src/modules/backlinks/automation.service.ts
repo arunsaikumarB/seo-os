@@ -23,6 +23,7 @@ import {
   type QualificationResult,
   type RichImportRow,
   type TrackingStatus,
+  classifyUrlProvisional,
 } from '@seo-os/backlink-builder';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { getProjectById } from '../projects/project.service.js';
@@ -183,6 +184,28 @@ export async function createImport(
   const { rows, stats } = deduplicateAndValidate(urls);
   const importId = randomUUID();
 
+  // Phase 6.3 — provisional Auto/Manual split (instant, URL-only)
+  let provisionalAuto = 0;
+  let provisionalManual = 0;
+  const provisionalSamples: Array<{
+    url: string;
+    lane: string;
+    reason: string | null;
+  }> = [];
+  for (const r of rows) {
+    if (r.status !== 'valid' || !r.normalizedUrl) continue;
+    const p = classifyUrlProvisional(r.normalizedUrl);
+    if (p.lane === 'manual') provisionalManual++;
+    else provisionalAuto++;
+    if (provisionalSamples.length < 12) {
+      provisionalSamples.push({
+        url: r.normalizedUrl,
+        lane: p.lane,
+        reason: p.reason,
+      });
+    }
+  }
+
   const richByUrl = new Map<string, RichImportRow>();
   for (const r of opts.richRows ?? []) {
     const key = r.url.trim().toLowerCase();
@@ -205,6 +228,12 @@ export async function createImport(
       metadata: {
         richColumns: Boolean(opts.richRows?.length),
         richRowCount: opts.richRows?.length ?? 0,
+        provisionalLanes: {
+          automatable: provisionalAuto,
+          manual: provisionalManual,
+          samples: provisionalSamples,
+          note: 'Provisional — crawl may move Auto→Manual if a gate is found',
+        },
         richByUrl: Object.fromEntries(
           [...richByUrl.entries()].map(([k, v]) => [
             k,
@@ -241,7 +270,18 @@ export async function createImport(
       );
   }
 
-  return { importId, stats, rows, richMapped: richByUrl.size };
+  return {
+    importId,
+    stats,
+    rows,
+    richMapped: richByUrl.size,
+    provisionalLanes: {
+      automatable: provisionalAuto,
+      manual: provisionalManual,
+      samples: provisionalSamples,
+      note: 'Provisional — crawl may move Auto→Manual if a gate is found',
+    },
+  };
 }
 
 export async function listImports(workspaceId: string, limit = 20) {
@@ -638,6 +678,18 @@ export async function runAutomationPipeline(
                 websiteSignals: analysis.websiteSignals
                   ? { ...analysis.websiteSignals, rawSnippet: undefined }
                   : null,
+                // Phase 6.3 — provisional Auto/Manual at upload (URL heuristic only)
+                ...(() => {
+                  const provisional = classifyUrlProvisional(url);
+                  return {
+                    provisionalLane: provisional.lane,
+                    submissionLane: provisional.lane,
+                    manualReason: provisional.reason,
+                    laneSource: 'upload_heuristic',
+                    laneSticky: provisional.lane === 'manual',
+                    provisionalSignal: provisional.signal,
+                  };
+                })(),
                 classification: {
                   id: classification.classificationId,
                   displayName: classification.classificationLabel,

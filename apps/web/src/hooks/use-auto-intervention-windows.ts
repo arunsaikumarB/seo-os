@@ -23,7 +23,7 @@ export function useAutoInterventionWindows(projectId: string) {
   // Soft toast once per job — never force popups or interrupt the campaign
   useEffect(() => {
     if (!projectId || isInterveneRoute) return;
-    const items = interventions.data?.data.items ?? [];
+    const items = interventions.data?.data.laneA?.items ?? [];
     const count = items.length;
     if (count === 0) {
       notifiedRef.current.clear();

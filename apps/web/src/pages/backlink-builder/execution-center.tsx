@@ -817,6 +817,10 @@ export function BrowserExecutionCenterPage() {
                     ['auto_skip_login', 'Automatically Skip Login Sites'],
                     ['auto_skip_captcha', 'Automatically Skip CAPTCHA Sites'],
                     ['never_ask_login', 'Never Ask Again for Login Sites'],
+                    [
+                      'auto_publish_automatable',
+                      'Auto-publish automatable links (zero clicks — informed opt-in)',
+                    ],
                   ] as const
                 ).map(([key, label]) => {
                   const checked = Boolean(
