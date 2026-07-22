@@ -76,6 +76,17 @@ type HealthData = {
     byStrategy?: Record<string, number>;
     avgPagesFetched?: number;
     avgElapsedMs?: number;
+    wordpressHealth?: {
+      detected: number;
+      comment: number;
+      guestPost: number;
+      dashboard: number;
+      contactForm: number;
+      email: number;
+      registration: number;
+      unsupported: number;
+      successRate: number | null;
+    };
     profiles?: Array<{
       domain: string;
       status: string;
@@ -266,6 +277,21 @@ export function CampaignHealthPage() {
                   .map(([k, v]) => `${k}=${v}`)
                   .join(' · ') || 'none'}
               </p>
+              {data.siteIntelligenceAudit.wordpressHealth ? (
+                <div className="border border-dashed p-2 space-y-1">
+                  <p className="font-semibold">WordPress Health (Capability 1)</p>
+                  <p>
+                    Detected {data.siteIntelligenceAudit.wordpressHealth.detected} · Comment{' '}
+                    {data.siteIntelligenceAudit.wordpressHealth.comment} · Guest Post{' '}
+                    {data.siteIntelligenceAudit.wordpressHealth.guestPost} · Dashboard{' '}
+                    {data.siteIntelligenceAudit.wordpressHealth.dashboard} · Contact{' '}
+                    {data.siteIntelligenceAudit.wordpressHealth.contactForm} · Email{' '}
+                    {data.siteIntelligenceAudit.wordpressHealth.email} · Unsupported{' '}
+                    {data.siteIntelligenceAudit.wordpressHealth.unsupported} · Success Rate{' '}
+                    {data.siteIntelligenceAudit.wordpressHealth.successRate ?? '—'}
+                  </p>
+                </div>
+              ) : null}
               <table className="w-full border-collapse">
                 <thead>
                   <tr className="border-b">

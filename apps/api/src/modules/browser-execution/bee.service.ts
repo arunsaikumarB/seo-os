@@ -550,6 +550,7 @@ export async function startJob(workspaceId: string, jobId: string, userId?: stri
       ensureSiteIntelligence,
       getSiteProfileByDomain,
       isProfileExecutionReady,
+      isOutreachOnlyProfile,
     } = await import('./site-intelligence.service.js');
     const domain = String(job.site_domain ?? '');
     if (domain && domain !== 'unknown') {
@@ -572,6 +573,41 @@ export async function startJob(workspaceId: string, jobId: string, userId?: stri
           code: 'SITE_UNPROFILABLE',
         });
       }
+
+      // Capability 1 Step 8 — email strategy: never start browser automation
+      if (isOutreachOnlyProfile(profile)) {
+        const email =
+          (profile!.strategy as { payloadHints?: { emailAddress?: string } } | null)
+            ?.payloadHints?.emailAddress ?? null;
+        await getSupabaseAdmin()
+          .from('execution_jobs')
+          .update({
+            status: 'skipped',
+            finished_at: new Date().toISOString(),
+            error_message: 'WordPress email strategy — moved to Outreach Queue',
+            metrics: {
+              ...((job.metrics as Record<string, unknown>) ?? {}),
+              waitingForSiteProfile: false,
+              siteProfileId: profile!.id,
+              siteStrategy: 'Email Outreach',
+              outreachEmail: email,
+              skipBrowserAutomation: true,
+              disposition: 'skipped',
+            },
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', jobId)
+          .eq('workspace_id', workspaceId);
+        await appendLog(
+          workspaceId,
+          jobId,
+          'info',
+          'Email submission detected — moved to Outreach Queue (no browser automation)',
+          { email }
+        );
+        return getJob(workspaceId, jobId);
+      }
+
       if (!isProfileExecutionReady(profile)) {
         const metrics = {
           ...((job.metrics as Record<string, unknown>) ?? {}),
@@ -601,11 +637,18 @@ export async function startJob(workspaceId: string, jobId: string, userId?: stri
       const expected =
         ((profile!.strategy as { expectedInterventions?: string[] } | null)
           ?.expectedInterventions as string[]) ?? [];
+      const payloadHints =
+        (profile!.strategy as { payloadHints?: Record<string, unknown> } | null)?.payloadHints ??
+        {};
       if (entryUrl) {
         await getSupabaseAdmin()
           .from('execution_steps')
           .update({
-            detail: { url: entryUrl, fromSiteIntelligence: true },
+            detail: {
+              url: entryUrl,
+              fromSiteIntelligence: true,
+              wordpressPayloadHints: payloadHints,
+            },
             updated_at: new Date().toISOString(),
           })
           .eq('job_id', jobId)
@@ -620,6 +663,10 @@ export async function startJob(workspaceId: string, jobId: string, userId?: stri
               siteIntelligenceEntryUrl: entryUrl,
               expectedInterventions: expected,
               siteStrategy: (profile!.strategy as { chosen?: string } | null)?.chosen ?? null,
+              wordpressStrategy:
+                (profile!.strategy as { wordpressStrategy?: string } | null)
+                  ?.wordpressStrategy ?? null,
+              wordpressPayloadHints: payloadHints,
             },
             updated_at: new Date().toISOString(),
           })

@@ -12,6 +12,7 @@ import {
   planCrawlFrontier,
   profileExpiresAt,
   recordStrategyOutcome,
+  summarizeWordPressHealth,
   SIE_CRAWL_DEFAULTS,
   type SiteIntelligenceResult,
   type SiteLearning,
@@ -100,14 +101,34 @@ export async function upsertPendingProfile(params: {
   return data as SiteProfileRow;
 }
 
-/** True when execution may start at entry_url. */
+/** True when browser execution may start at entry_url. */
 export function isProfileExecutionReady(profile: SiteProfileRow | null): boolean {
   if (!profile) return false;
   if (profile.profile_status === 'unsupported') return false;
   if (profile.profile_status !== 'complete') return false;
   if (isProfileStale(profile.expires_at)) return false;
-  const entry = (profile.strategy as { entryUrl?: string | null } | null)?.entryUrl;
-  return Boolean(entry);
+  const strategy = profile.strategy as {
+    entryUrl?: string | null;
+    chosen?: string;
+    payloadHints?: { moveToOutreach?: boolean };
+  } | null;
+  // Email WordPress strategy → outreach queue, never browser automation
+  if (strategy?.payloadHints?.moveToOutreach || strategy?.chosen === 'Email Outreach') {
+    return false;
+  }
+  return Boolean(strategy?.entryUrl);
+}
+
+/** Email / outreach-only profiles (Capability 1 Step 8). */
+export function isOutreachOnlyProfile(profile: SiteProfileRow | null): boolean {
+  if (!profile || profile.profile_status !== 'complete') return false;
+  const strategy = profile.strategy as {
+    chosen?: string;
+    payloadHints?: { moveToOutreach?: boolean };
+  } | null;
+  return Boolean(
+    strategy?.payloadHints?.moveToOutreach || strategy?.chosen === 'Email Outreach'
+  );
 }
 
 /**
@@ -228,6 +249,30 @@ export async function saveIntelligenceResult(
     .single();
 
   const row = data as SiteProfileRow;
+
+  // Seed WordPress learning from fingerprint
+  const wp = result.wordpress ?? (result.fingerprint as { wordpress?: unknown }).wordpress;
+  if (wp && learning) {
+    const { recordWordPressLearning } = await import('@seo-os/backlink-builder');
+    const wpLearn = recordWordPressLearning(
+      (learning as SiteLearning).wordpress,
+      {
+        theme: (wp as { theme?: string | null }).theme ?? null,
+        plugins: ((wp as { plugins?: string[] }).plugins ?? []) as string[],
+        submissionMethod:
+          (result.strategy as { wordpressStrategy?: string; chosen?: string }).wordpressStrategy ??
+          result.strategy.chosen,
+      }
+    );
+    await admin()
+      .from('site_profiles')
+      .update({
+        learning: { ...((learning as SiteLearning) ?? emptyLearning()), wordpress: wpLearn },
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', profileId);
+  }
+
   for (const oppId of row.opportunity_ids ?? []) {
     await linkOpportunityToProfile(
       workspaceId,
@@ -235,6 +280,41 @@ export async function saveIntelligenceResult(
       profileId,
       result.profileStatus
     );
+
+    // Capability 1 Step 8 — email strategy → Outreach Queue (additive flags, no CSM rewrite)
+    const hints = (result.strategy as { payloadHints?: {
+      moveToOutreach?: boolean;
+      emailAddress?: string | null;
+      emailSubject?: string | null;
+    } }).payloadHints;
+    if (hints?.moveToOutreach || result.strategy.chosen === 'Email Outreach') {
+      try {
+        const { data: opp } = await admin()
+          .from('opportunities')
+          .select('id, metadata')
+          .eq('id', oppId)
+          .maybeSingle();
+        const meta = (opp?.metadata as Record<string, unknown> | null) ?? {};
+        await admin()
+          .from('opportunities')
+          .update({
+            pipeline_stage: 'outreach',
+            metadata: {
+              ...meta,
+              wordpress_email_strategy: true,
+              outreach_email: hints?.emailAddress ?? result.guidelines?.emailAddress ?? null,
+              outreach_subject: hints?.emailSubject ?? 'Guest post submission',
+              skip_browser_automation: true,
+            },
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', oppId)
+          .eq('workspace_id', workspaceId);
+      } catch {
+        /* optional */
+      }
+    }
+
     if (result.guidelines) {
       // Flag mismatch only when we have a package word-count hint on opportunity metadata
       try {
@@ -328,11 +408,28 @@ export async function getSiteProfileAudit(workspaceId: string) {
       profiles.length > 0 ? Math.round((pagesFetched / profiles.length) * 10) / 10 : 0,
     avgElapsedMs:
       profiles.length > 0 ? Math.round(elapsedMs / Math.max(1, profiles.length)) : 0,
+    wordpressHealth: summarizeWordPressHealth(
+      profiles.map((p) => ({
+        fingerprint: p.fingerprint as {
+          platform?: string;
+          wordpress?: import('@seo-os/backlink-builder').WordPressKnowledge;
+        },
+        strategy: p.strategy as { wordpressStrategy?: string; chosen?: string },
+        learning: p.learning as SiteLearning,
+      }))
+    ),
     profiles: profiles.map((p) => ({
       domain: p.domain,
       status: p.profile_status,
       platform: (p.fingerprint as { platform?: string })?.platform ?? null,
       strategy: (p.strategy as { chosen?: string } | null)?.chosen ?? null,
+      wordpressStrategy:
+        (p.strategy as { wordpressStrategy?: string } | null)?.wordpressStrategy ?? null,
+      workflow:
+        (p.fingerprint as { wordpress?: { workflow?: string } })?.wordpress?.workflow ?? null,
+      theme: (p.fingerprint as { wordpress?: { theme?: string } })?.wordpress?.theme ?? null,
+      plugins:
+        (p.fingerprint as { wordpress?: { plugins?: string[] } })?.wordpress?.plugins ?? [],
       entryUrl: (p.strategy as { entryUrl?: string } | null)?.entryUrl ?? null,
       expectedInterventions:
         (p.strategy as { expectedInterventions?: string[] } | null)?.expectedInterventions ??

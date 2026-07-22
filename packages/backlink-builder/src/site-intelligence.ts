@@ -15,6 +15,12 @@ import {
 import { classifyPageIntent, type ClassifiedPage } from './page-intent-detectors.js';
 import { selectSubmissionStrategy, type StrategyPlan } from './site-strategy.js';
 import { extractGuidelines, type SiteGuidelines } from './site-guidelines.js';
+import {
+  enrichWithWordPressIntelligence,
+  emptyWordPressLearning,
+  type WordPressKnowledge,
+  type WordPressLearning,
+} from './wordpress-intelligence.js';
 
 export type SiteProfileStatus =
   | 'pending'
@@ -37,6 +43,8 @@ export type SiteLearning = {
   platformConfirmed: string | null;
   lastSuccessAt: string | null;
   lastFailureAt: string | null;
+  /** Capability 1 */
+  wordpress?: WordPressLearning;
 };
 
 export type FetchedPage = {
@@ -64,6 +72,8 @@ export type SiteIntelligenceResult = {
     elapsedMs: number;
     truncated: boolean;
   };
+  /** Capability 1 — null when not WordPress */
+  wordpress?: WordPressKnowledge | null;
 };
 
 export function emptyLearning(): SiteLearning {
@@ -74,6 +84,7 @@ export function emptyLearning(): SiteLearning {
     platformConfirmed: null,
     lastSuccessAt: null,
     lastFailureAt: null,
+    wordpress: emptyWordPressLearning(),
   };
 }
 
@@ -211,14 +222,31 @@ export function analyzeFetchedSite(params: {
   const fetched = params.pages.filter((p) => p.status === 'fetched').length;
   const failed = params.pages.filter((p) => p.status === 'failed').length;
 
+  // Capability 1 — enrich when WordPress (additive; does not redesign SIE)
+  const enriched = enrichWithWordPressIntelligence({
+    fingerprint,
+    pageClassifications: classifications,
+    strategy,
+    guidelines,
+    pages: params.pages,
+    homepageUrl: params.homepageUrl,
+  });
+
+  let finalStatus = profileStatus;
+  if (enriched.strategy.chosen === 'Unsupported') finalStatus = 'unsupported';
+  if (enriched.strategy.payloadHints?.moveToOutreach) {
+    // Email strategy is a completed profile that routes to outreach (not browser execute)
+    finalStatus = 'complete';
+  }
+
   return {
     domain,
-    fingerprint,
+    fingerprint: enriched.fingerprint,
     navigationGraph: graph,
-    pageClassifications: classifications,
-    guidelines,
-    strategy,
-    profileStatus,
+    pageClassifications: enriched.pageClassifications,
+    guidelines: enriched.guidelines,
+    strategy: enriched.strategy,
+    profileStatus: finalStatus,
     crawlStats: {
       pagesFetched: fetched,
       pagesFailed: failed,
@@ -227,6 +255,7 @@ export function analyzeFetchedSite(params: {
       elapsedMs: params.elapsedMs ?? 0,
       truncated: Boolean(params.truncated),
     },
+    wordpress: enriched.wordpress,
   };
 }
 

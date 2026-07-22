@@ -5,8 +5,11 @@ import type { ClassifiedPage, PageIntent } from './page-intent-detectors.js';
 
 export const SUBMISSION_STRATEGIES = [
   'Direct Submission Form',
+  'Guest Post',
+  'Comment Posting',
   'Platform Form',
   'Dashboard Submission',
+  'Registration Strategy',
   'Contact Form',
   'Email Outreach',
   'Unsupported',
@@ -26,6 +29,15 @@ export type StrategyPlan = {
     entryUrl: string | null;
     reason: string;
   }>;
+  /** Capability 1 */
+  wordpressStrategy?: string;
+  payloadHints?: {
+    fields?: string[];
+    skip?: string[];
+    emailAddress?: string | null;
+    emailSubject?: string | null;
+    moveToOutreach?: boolean;
+  };
 };
 
 function findIntent(
@@ -120,9 +132,12 @@ export function selectSubmissionStrategy(pages: ClassifiedPage[]): StrategyPlan 
 
   // Preference order
   const order: SubmissionStrategyName[] = [
+    'Guest Post',
     'Direct Submission Form',
     'Platform Form',
+    'Comment Posting',
     'Dashboard Submission',
+    'Registration Strategy',
     'Contact Form',
     'Email Outreach',
   ];

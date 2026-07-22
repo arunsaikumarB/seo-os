@@ -28,6 +28,8 @@ export type SiteFingerprint = {
     submissionUrlPatterns: string[];
     formHints: string[];
   };
+  /** Capability 1 — WordPressKnowledge when SIE enrichment ran */
+  wordpress?: Record<string, unknown>;
 };
 
 type FpInput = {
