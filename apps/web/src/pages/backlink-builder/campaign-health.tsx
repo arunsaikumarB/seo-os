@@ -58,7 +58,20 @@ type HealthData = {
       deleted: number;
       ignored: number;
     };
-    invariants: { stuckWorkersZero: boolean; browsersWithinCeiling: boolean };
+    queueIntegrity?: {
+      distinctItemsWithActiveJobs: number;
+      activeJobs: number;
+      duplicateActiveJobs: number;
+      jobItemRatio: number;
+      maxActivePerItem: number;
+      assertMaxOneActivePerItem: boolean;
+      duplicateViolations?: Array<{ opportunityId: string; jobIds: string[]; count: number }>;
+    };
+    invariants: {
+      stuckWorkersZero: boolean;
+      browsersWithinCeiling: boolean;
+      duplicateActiveJobsZero?: boolean;
+    };
   };
   truthAudit?: {
     classifications: number;
@@ -420,11 +433,33 @@ export function CampaignHealthPage() {
             Retrying {data.executionAudit.queue.retrying} · Deleted{' '}
             {data.executionAudit.queue.deleted} · Ignored {data.executionAudit.queue.ignored}
           </p>
+          {data.executionAudit.queueIntegrity ? (
+            <p>
+              Queue integrity (Phase 6): Items{' '}
+              {data.executionAudit.queueIntegrity.distinctItemsWithActiveJobs} · Active jobs{' '}
+              {data.executionAudit.queueIntegrity.activeJobs} · Duplicate active{' '}
+              {data.executionAudit.queueIntegrity.duplicateActiveJobs} (must be 0) · Ratio{' '}
+              {data.executionAudit.queueIntegrity.jobItemRatio} (target 1.0) · max/item{' '}
+              {data.executionAudit.queueIntegrity.maxActivePerItem}
+            </p>
+          ) : null}
           <p>
             Invariants: stuck=0{' '}
             {data.executionAudit.invariants.stuckWorkersZero ? 'OK' : 'FAIL'} · ceiling{' '}
             {data.executionAudit.invariants.browsersWithinCeiling ? 'OK' : 'FAIL'}
+            {data.executionAudit.invariants.duplicateActiveJobsZero != null
+              ? ` · duplicates=0 ${data.executionAudit.invariants.duplicateActiveJobsZero ? 'OK' : 'FAIL'}`
+              : ''}
           </p>
+          {data.executionAudit.queueIntegrity?.duplicateViolations?.length ? (
+            <p className="text-destructive text-sm">
+              Violations:{' '}
+              {data.executionAudit.queueIntegrity.duplicateViolations
+                .slice(0, 8)
+                .map((v) => `${v.opportunityId.slice(0, 8)}…×${v.count}`)
+                .join(', ')}
+            </p>
+          ) : null}
         </div>
       ) : null}
 

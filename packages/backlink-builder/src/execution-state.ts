@@ -202,12 +202,111 @@ function dispositionOf(job: ExecutionStateJobInput): string | null {
   return m?.disposition != null ? String(m.disposition) : null;
 }
 
+/** Hard-terminal statuses — excluded from the Phase 6 active unique index. */
+export const EXECUTION_HARD_TERMINAL_STATUSES = [
+  'completed',
+  'submitted',
+  'verified',
+  'skipped',
+  'unsupported',
+  'deleted',
+  'ignored',
+  'cancelled',
+  'approved',
+  'rejected',
+] as const;
+
+export function isHardTerminalExecutionStatus(status: string): boolean {
+  return (EXECUTION_HARD_TERMINAL_STATUSES as readonly string[]).includes(String(status));
+}
+
+/**
+ * Active (non-hard-terminal) job — at most one may exist per opportunity.
+ * Includes Queued, Running stages, Waiting Human, Retrying, Failed, Failed to Start.
+ */
+export function isActiveExecutionStatus(status: string): boolean {
+  return !isHardTerminalExecutionStatus(status);
+}
+
+/** Progress rank for choosing which duplicate to keep (higher = prefer). */
+export function executionProgressRank(status: string): number {
+  const s = String(status);
+  if (s === 'verified') return 200;
+  if (s === 'completed' || s === 'submitted') return 190;
+  if (s === 'waiting_verification') return 180;
+  if (s === 'submitting') return 170;
+  if (s === 'validating') return 160;
+  if (s === 'filling_fields') return 150;
+  if (s === 'uploading_assets') return 140;
+  if (s === 'analyzing_form') return 130;
+  if (s === 'navigating') return 120;
+  if (s === 'authenticating' || s === 'launching_browser') return 110;
+  if (s.startsWith('watching_') || s.startsWith('blocked_')) return 100;
+  if (
+    [
+      'needs_approval',
+      'paused',
+      'awaiting_user',
+      'ready_for_review',
+      'ready_to_continue',
+    ].includes(s)
+  ) {
+    return 100;
+  }
+  if (s === 'preparing') return 40;
+  if (s === 'queued' || s === 'retry_scheduled') return 30;
+  if (s === 'waiting_infrastructure') return 20;
+  if (s === 'failed') return 10;
+  return 5;
+}
+
+/**
+ * Phase 6 — one row per Campaign Item (opportunity_id).
+ * Prefers visible furthest-progressed job, then newest. Jobs without opportunity_id pass through.
+ */
+export function dedupeJobsByOpportunity<T extends ExecutionStateJobInput>(jobs: T[]): T[] {
+  const byOpp = new Map<string, T>();
+  const orphans: T[] = [];
+
+  const sorted = [...jobs].sort((a, b) => {
+    const aPub = toPublicExecutionStatus(a.status, {
+      disposition: dispositionOf(a),
+      errorCode: a.error_code ?? null,
+    });
+    const bPub = toPublicExecutionStatus(b.status, {
+      disposition: dispositionOf(b),
+      errorCode: b.error_code ?? null,
+    });
+    const aVisible = aPub === 'Deleted' || aPub === 'Ignored' ? 0 : 1;
+    const bVisible = bPub === 'Deleted' || bPub === 'Ignored' ? 0 : 1;
+    if (bVisible !== aVisible) return bVisible - aVisible;
+    const rank = executionProgressRank(b.status) - executionProgressRank(a.status);
+    if (rank !== 0) return rank;
+    const at = a.created_at ? Date.parse(String(a.created_at)) : 0;
+    const bt = b.created_at ? Date.parse(String(b.created_at)) : 0;
+    return bt - at;
+  });
+
+  for (const j of sorted) {
+    const oid = j.opportunity_id ? String(j.opportunity_id) : '';
+    if (!oid) {
+      orphans.push(j);
+      continue;
+    }
+    if (!byOpp.has(oid)) byOpp.set(oid, j);
+  }
+
+  return [...byOpp.values(), ...orphans];
+}
+
 /** Compute campaign counts — ONLY source of truth for progress math. */
 export function computeExecutionCounts(
   jobs: ExecutionStateJobInput[]
 ): ExecutionStateCounts {
+  // Phase 6: count Campaign Items (one job per opportunity), never raw job rows.
+  const unique = dedupeJobsByOpportunity(jobs);
   const counts = emptyExecutionCounts();
-  for (const job of jobs) {
+  for (const job of unique) {
     const pub = toPublicExecutionStatus(job.status, {
       disposition: dispositionOf(job),
       errorCode: job.error_code ?? null,
@@ -217,7 +316,7 @@ export function computeExecutionCounts(
 
   // Failed to Start / Deleted / Ignored never inflate campaign progress
   counts.totalExecutable =
-    jobs.length - counts.Deleted - counts.Ignored - counts['Failed to Start'];
+    unique.length - counts.Deleted - counts.Ignored - counts['Failed to Start'];
   counts.campaignTotal = counts.totalExecutable;
 
   const completedLike =

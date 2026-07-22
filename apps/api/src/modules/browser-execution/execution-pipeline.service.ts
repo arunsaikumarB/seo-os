@@ -189,21 +189,23 @@ function isRetriableStartFailure(status: string, disposition?: string | null): b
 }
 
 function isInFlightJob(status: string): boolean {
-  return [
-    'preparing',
-    'starting',
-    'running',
-    'waiting_human',
-    'needs_approval',
-    'paused',
-    'navigating',
-    'analyzing_form',
-    'filling_fields',
-    'uploading_assets',
-    'submitting',
-    'waiting_verification',
-    'retry_scheduled',
-  ].includes(status);
+  // Live / Waiting Human — do NOT create another job.
+  // Exclude queued + retriable start failures (handled below).
+  const s = String(status);
+  if (s === 'queued' || s === 'retry_scheduled') return false;
+  if (s === 'failed' || s === 'waiting_infrastructure') return false;
+  return ![
+    'completed',
+    'submitted',
+    'verified',
+    'skipped',
+    'unsupported',
+    'deleted',
+    'ignored',
+    'cancelled',
+    'approved',
+    'rejected',
+  ].includes(s);
 }
 
 function isInfrastructureStartError(msg: string): boolean {

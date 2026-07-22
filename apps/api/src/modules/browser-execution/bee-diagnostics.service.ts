@@ -428,7 +428,23 @@ export async function bulkRetryJobs(
 
 export async function getWorkspaceExecutionReport(workspaceId: string, format: 'json' | 'csv' = 'json') {
   const stats = await getStatistics(workspaceId);
-  const jobs = await listJobs(workspaceId);
+  const jobsRaw = await listJobs(workspaceId);
+  const { dedupeJobsByOpportunity } = await import('@seo-os/backlink-builder');
+  const jobs = dedupeJobsByOpportunity(
+    jobsRaw.map((j) => ({
+      id: String(j.id),
+      status: String(j.status),
+      opportunity_id: j.opportunity_id != null ? String(j.opportunity_id) : null,
+      site_domain: j.site_domain != null ? String(j.site_domain) : null,
+      created_at: j.created_at != null ? String(j.created_at) : null,
+      error_code: j.error_code != null ? String(j.error_code) : null,
+      error_message: j.error_message != null ? String(j.error_message) : null,
+      pause_reason: j.pause_reason != null ? String(j.pause_reason) : null,
+      retry_count: j.retry_count,
+      started_at: j.started_at,
+      finished_at: j.finished_at,
+    }))
+  );
   const failed = jobs.filter((j) => String(j.status) === 'failed');
   const reasonCounts: Record<string, number> = {};
   for (const j of failed) {
@@ -478,13 +494,14 @@ export async function getWorkspaceExecutionReport(workspaceId: string, format: '
     jobs: jobs.map((j) => ({
       id: j.id,
       domain: j.site_domain,
+      opportunityId: j.opportunity_id,
       status: j.status,
       errorCode: j.error_code,
       errorMessage: j.error_message,
       pauseReason: j.pause_reason,
-      retryCount: j.retry_count,
-      startedAt: j.started_at,
-      finishedAt: j.finished_at,
+      retryCount: (j as { retry_count?: unknown }).retry_count,
+      startedAt: (j as { started_at?: unknown }).started_at,
+      finishedAt: (j as { finished_at?: unknown }).finished_at,
     })),
   };
 

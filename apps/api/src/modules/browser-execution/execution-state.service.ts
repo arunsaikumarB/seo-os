@@ -5,6 +5,7 @@
  */
 import {
   computeExecutionCounts,
+  dedupeJobsByOpportunity,
   isHiddenFromProject,
   isVerificationEligible,
   toPublicExecutionStatus,
@@ -60,8 +61,23 @@ function dispositionOf(job: Record<string, unknown>): string | null {
 }
 
 export async function getExecutionState(workspaceId: string): Promise<ExecutionStateSnapshot> {
-  const jobs = await listJobs(workspaceId);
+  const jobsRaw = await listJobs(workspaceId);
   const ignore = await listGlobalIgnore(workspaceId).catch(() => ({ items: [] as unknown[] }));
+  // Phase 6: one job per Campaign Item for all counters and queues.
+  const jobs = dedupeJobsByOpportunity(
+    jobsRaw.map((j) => {
+      const row = j as Record<string, unknown>;
+      return {
+        ...j,
+        id: String(j.id),
+        status: String(j.status),
+        opportunity_id: j.opportunity_id != null ? String(j.opportunity_id) : null,
+        disposition: dispositionOf(row),
+        error_code: j.error_code != null ? String(j.error_code) : null,
+        created_at: j.created_at != null ? String(j.created_at) : null,
+      };
+    })
+  );
 
   const items: ExecutionStateItem[] = jobs.map((j) => {
     const row = j as Record<string, unknown>;
@@ -99,6 +115,7 @@ export async function getExecutionState(workspaceId: string): Promise<ExecutionS
         disposition: dispositionOf(row),
         error_code: j.error_code != null ? String(j.error_code) : null,
         error_message: j.error_message != null ? String(j.error_message) : null,
+        created_at: j.created_at != null ? String(j.created_at) : null,
         metrics: (j.metrics as Record<string, unknown>) ?? null,
       };
     })

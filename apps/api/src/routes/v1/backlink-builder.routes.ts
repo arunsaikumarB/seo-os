@@ -198,7 +198,8 @@ backlinkBuilderRouter.get(
               );
               const ensured = await ensureExecutionJobsForReady({
                 workspaceId,
-                startImmediately: true,
+                // Phase 6: health poll must NOT start browsers — only ensure jobs exist (idempotent).
+                startImmediately: false,
               });
               return ensured.diagnostics;
             } catch (err) {

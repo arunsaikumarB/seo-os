@@ -380,14 +380,29 @@ export async function listInterventions(workspaceId: string) {
   unclassifiedGroup.sort(
     (a, b) => new Date(String(a.createdAt)).getTime() - new Date(String(b.createdAt)).getTime()
   );
-  const items = [...verified, ...unclassifiedGroup];
+
+  // Phase 6 — one Waiting Human card per Campaign Item (opportunity).
+  const dedupeByOpp = (rows: Array<Record<string, unknown>>) => {
+    const seen = new Set<string>();
+    const out: Array<Record<string, unknown>> = [];
+    for (const row of rows) {
+      const oid = row.opportunityId != null ? String(row.opportunityId) : `job:${row.jobId}`;
+      if (seen.has(oid)) continue;
+      seen.add(oid);
+      out.push(row);
+    }
+    return out;
+  };
+  const verifiedDeduped = dedupeByOpp(verified);
+  const unclassifiedDeduped = dedupeByOpp(unclassifiedGroup);
+  const items = [...verifiedDeduped, ...unclassifiedDeduped];
   return {
     count: items.length,
-    verifiedCount: verified.length,
-    unclassifiedCount: unclassifiedGroup.length,
+    verifiedCount: verifiedDeduped.length,
+    unclassifiedCount: unclassifiedDeduped.length,
     items,
-    verified,
-    unclassified: unclassifiedGroup,
+    verified: verifiedDeduped,
+    unclassified: unclassifiedDeduped,
   };
 }
 

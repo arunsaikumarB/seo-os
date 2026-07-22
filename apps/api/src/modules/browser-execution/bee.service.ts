@@ -269,6 +269,51 @@ export async function createExecution(params: {
   };
   const mapping = mapAssetsToFields(assets, form.controls, params.mappingOverrides ?? {});
 
+  // Phase 6 — idempotent enqueue: return existing active job (never insert a duplicate).
+  const { data: activeExisting } = await getSupabaseAdmin()
+    .from('execution_jobs')
+    .select('*')
+    .eq('workspace_id', params.workspaceId)
+    .eq('opportunity_id', params.opportunityId)
+    .is('deleted_at', null)
+    .not(
+      'status',
+      'in',
+      '(completed,submitted,verified,skipped,unsupported,deleted,ignored,cancelled,approved,rejected)'
+    )
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (activeExisting) {
+    const { data: steps } = await getSupabaseAdmin()
+      .from('execution_steps')
+      .select('*')
+      .eq('job_id', activeExisting.id)
+      .order('step_index');
+    await appendLog(
+      params.workspaceId,
+      String(activeExisting.id),
+      'info',
+      'Execution enqueue reused existing active job (Phase 6 idempotent)',
+      { status: activeExisting.status }
+    );
+    return {
+      ...activeExisting,
+      planSteps: (steps ?? []).map((s) => ({
+        stepIndex: s.step_index,
+        action: s.action,
+        detail: s.detail,
+        selectorHint: s.selector_hint,
+        requiresUser: s.requires_user,
+        blocker: s.blocker,
+      })),
+      form,
+      mapping,
+      reused: true,
+    };
+  }
+
   const jobId = randomUUID();
   const { data: job, error } = await getSupabaseAdmin()
     .from('execution_jobs')
@@ -286,7 +331,37 @@ export async function createExecution(params: {
     })
     .select('*')
     .single();
-  if (error) throw error;
+
+  // Race: unique index rejected a concurrent insert — reuse the winner.
+  if (error) {
+    const code = (error as { code?: string }).code;
+    if (code === '23505') {
+      const { data: raced } = await getSupabaseAdmin()
+        .from('execution_jobs')
+        .select('*')
+        .eq('workspace_id', params.workspaceId)
+        .eq('opportunity_id', params.opportunityId)
+        .is('deleted_at', null)
+        .not(
+          'status',
+          'in',
+          '(completed,submitted,verified,skipped,unsupported,deleted,ignored,cancelled,approved,rejected)'
+        )
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (raced) {
+        return {
+          ...raced,
+          planSteps,
+          form,
+          mapping,
+          reused: true,
+        };
+      }
+    }
+    throw error;
+  }
 
   const stepRows = planSteps.map((s: ExecutionPlanStep) => ({
     id: randomUUID(),
@@ -338,7 +413,7 @@ export async function listJobs(workspaceId: string, status?: string) {
     .eq('workspace_id', workspaceId)
     .is('deleted_at', null)
     .order('created_at', { ascending: false })
-    .limit(100);
+    .limit(2000);
   if (status) q = q.eq('status', status);
   const { data } = await q;
   return data ?? [];
@@ -396,7 +471,29 @@ export async function startExecutionsForOpportunities(params: {
       });
       jobId = String(job.id);
       let status = String(job.status);
-      if (params.startImmediately !== false) {
+      const reused = Boolean((job as { reused?: boolean }).reused);
+      const hardTerminal = [
+        'completed',
+        'submitted',
+        'verified',
+        'skipped',
+        'unsupported',
+        'deleted',
+        'ignored',
+        'cancelled',
+        'approved',
+        'rejected',
+      ].includes(status);
+      // Phase 6: never re-start an already-live / Waiting Human job from bulk submit.
+      const alreadyLive =
+        reused &&
+        status !== 'queued' &&
+        status !== 'retry_scheduled' &&
+        status !== 'failed' &&
+        status !== 'waiting_infrastructure' &&
+        !hardTerminal;
+
+      if (params.startImmediately !== false && !alreadyLive) {
         try {
           const started = await startJob(params.workspaceId, jobId, params.userId);
           status = String(started?.status ?? 'preparing');

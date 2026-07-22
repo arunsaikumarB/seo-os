@@ -153,7 +153,9 @@ export async function getExecutionAudit(workspaceId: string) {
   const policyMax = BEE_RELIABILITY.MAX_BROWSER_SESSIONS;
   const { data: jobs } = await getSupabaseAdmin()
     .from('execution_jobs')
-    .select('id, status, lease_holder, lease_expires_at, failure_classification')
+    .select(
+      'id, status, opportunity_id, lease_holder, lease_expires_at, failure_classification, site_domain, created_at'
+    )
     .eq('workspace_id', workspaceId)
     .is('deleted_at', null)
     .limit(5000);
@@ -188,7 +190,48 @@ export async function getExecutionAudit(workspaceId: string) {
   ]);
   const terminalDone = new Set<string>(['completed', 'submitted', 'verified']);
   const terminalFail = new Set<string>(['failed', 'cancelled']);
+  const hardTerminal = new Set<string>([
+    'completed',
+    'submitted',
+    'verified',
+    'skipped',
+    'unsupported',
+    'deleted',
+    'ignored',
+    'cancelled',
+    'approved',
+    'rejected',
+  ]);
   const inFlight = new Set<string>([...IN_FLIGHT_STATUSES]);
+
+  // Phase 6 queue integrity — at most one active job per opportunity
+  const activeByOpp = new Map<string, string[]>();
+  for (const j of jobs ?? []) {
+    const s = String(j.status);
+    const oid = j.opportunity_id != null ? String(j.opportunity_id) : '';
+    if (oid && !hardTerminal.has(s)) {
+      const list = activeByOpp.get(oid) ?? [];
+      list.push(String(j.id));
+      activeByOpp.set(oid, list);
+    }
+  }
+  const duplicateViolations: Array<{
+    opportunityId: string;
+    jobIds: string[];
+    count: number;
+  }> = [];
+  let activeJobs = 0;
+  for (const [opportunityId, jobIds] of activeByOpp) {
+    activeJobs += jobIds.length;
+    if (jobIds.length > 1) {
+      duplicateViolations.push({ opportunityId, jobIds, count: jobIds.length });
+    }
+  }
+  const distinctItemsWithJobs = activeByOpp.size;
+  const jobItemRatio =
+    distinctItemsWithJobs > 0
+      ? Math.round((activeJobs / distinctItemsWithJobs) * 100) / 100
+      : 0;
 
   for (const j of jobs ?? []) {
     const s = String(j.status);
@@ -196,7 +239,7 @@ export async function getExecutionAudit(workspaceId: string) {
     else if (s === 'retry_scheduled') retrying++;
     else if (s === 'deleted') deleted++;
     else if (s === 'ignored' || s === 'skipped' || s === 'unsupported') ignored++;
-    else if (waitingStatuses.has(s)) waitingHuman++;
+    else if (waitingStatuses.has(s) || s.startsWith('watching_')) waitingHuman++;
     else if (terminalDone.has(s)) completed++;
     else if (terminalFail.has(s)) failed++;
     else if (inFlight.has(s) || s === 'waiting_infrastructure') {
@@ -253,11 +296,25 @@ export async function getExecutionAudit(workspaceId: string) {
       ignored,
       total,
     },
+    queueIntegrity: {
+      distinctItemsWithActiveJobs: distinctItemsWithJobs,
+      activeJobs,
+      duplicateActiveJobs: duplicateViolations.length,
+      duplicateViolations: duplicateViolations.slice(0, 40),
+      jobItemRatio,
+      maxActivePerItem: duplicateViolations.length
+        ? Math.max(...duplicateViolations.map((v) => v.count))
+        : activeJobs > 0
+          ? 1
+          : 0,
+      assertMaxOneActivePerItem: duplicateViolations.length === 0,
+    },
     invariants: {
       stuckWorkersZero: stuck === 0,
       browsersWithinCeiling: allocated <= policyMax,
       queueSumsToTotal: true,
       noUnknownStates: true,
+      duplicateActiveJobsZero: duplicateViolations.length === 0,
     },
     failureByClassification: byClassification,
     pool,

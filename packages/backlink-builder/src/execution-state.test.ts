@@ -118,4 +118,23 @@ describe('execution state manager', () => {
     expect(isVerificationEligible('deleted')).toBe(false);
     expect(isVerificationEligible('submitted')).toBe(true);
   });
+
+  it('Phase 6: dedupes multiple jobs per opportunity to one count', () => {
+    const c = computeExecutionCounts([
+      { id: 'a1', status: 'queued', opportunity_id: 'opp-1', created_at: '2026-01-01T00:00:00Z' },
+      {
+        id: 'a2',
+        status: 'watching_login',
+        opportunity_id: 'opp-1',
+        created_at: '2026-01-01T00:01:00Z',
+      },
+      { id: 'a3', status: 'queued', opportunity_id: 'opp-1', created_at: '2026-01-01T00:02:00Z' },
+      { id: 'b1', status: 'navigating', opportunity_id: 'opp-2', created_at: '2026-01-01T00:00:00Z' },
+    ]);
+    expect(c['Waiting Human']).toBe(1);
+    expect(c.Running).toBe(1);
+    expect(c.Queued).toBe(0);
+    expect(c.totalExecutable).toBe(2);
+    expect(c.campaignTotal).toBe(2);
+  });
 });
