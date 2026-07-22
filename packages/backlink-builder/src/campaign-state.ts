@@ -186,6 +186,8 @@ export type CampaignItemInput = {
   qualityScore?: number | null;
   retryCount?: number | null;
   packageApprovedBy?: 'auto' | 'user' | null;
+  /** Phase 5.5 — why package cannot become Submission Ready (Ready). */
+  blockerReason?: string | null;
 };
 
 export type CampaignCounts = {

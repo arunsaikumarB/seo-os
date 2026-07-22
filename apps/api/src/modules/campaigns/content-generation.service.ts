@@ -556,17 +556,10 @@ async function approvePackages(workspaceId: string, itemIds: string[]) {
     }
     try {
       assertPackageAssetsComplete(item);
-      await updateCampaignItem(workspaceId, id, {
-        currentStatus: 'Package Generated',
-        generationStatus: 'Completed',
-        packageApprovedBy: 'user',
-        lastError: null,
-        force: true,
-      });
-      await updateCampaignItem(workspaceId, id, {
-        currentStatus: 'Ready',
-        force: true,
-      });
+      const { resolveHandoffBlockerAfterApprove } = await import(
+        './generation-handoff.service.js'
+      );
+      await resolveHandoffBlockerAfterApprove(workspaceId, id, item.domain);
       const { data: packs } = await getSupabaseAdmin()
         .from('content_packs')
         .select('id')
@@ -905,17 +898,13 @@ async function finalizeQuality(
   });
 
   if (tier === 'Completed') {
-    await updateCampaignItem(workspaceId, opportunityId, {
+    const { completePackageHandoff } = await import('./generation-handoff.service.js');
+    await completePackageHandoff({
+      workspaceId,
+      opportunityId,
       qualityScore: score,
-      generationStatus: 'Completed',
-      currentStatus: 'Package Generated',
       packageApprovedBy: 'auto',
-      lastError: null,
-      force: true,
-    });
-    await updateCampaignItem(workspaceId, opportunityId, {
-      currentStatus: 'Ready',
-      force: true,
+      domain: item.domain,
     });
     if (packRow?.id) {
       await getSupabaseAdmin()
@@ -938,9 +927,16 @@ async function finalizeQuality(
   }
 
   if (tier === 'Needs Review') {
-    await updateCampaignItem(workspaceId, opportunityId, {
+    const { completePackageHandoff } = await import('./generation-handoff.service.js');
+    await completePackageHandoff({
+      workspaceId,
+      opportunityId,
       qualityScore: score,
-      generationStatus: 'Needs Review',
+      packageApprovedBy: null,
+      domain: item.domain,
+      forceBlocker: 'needs_review',
+    });
+    await updateCampaignItem(workspaceId, opportunityId, {
       lastError: reason,
       force: true,
     });
@@ -968,10 +964,15 @@ async function finalizeQuality(
     return;
   }
 
-  await updateCampaignItem(workspaceId, opportunityId, {
+  const { completePackageHandoff } = await import('./generation-handoff.service.js');
+  await completePackageHandoff({
+    workspaceId,
+    opportunityId,
     qualityScore: score,
-    generationStatus: 'Failed',
-    currentStatus: 'Failed',
+    domain: item.domain,
+    forceBlocker: 'quality_failed',
+  });
+  await updateCampaignItem(workspaceId, opportunityId, {
     lastError: reason,
     force: true,
   });

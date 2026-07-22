@@ -41,7 +41,7 @@ export type SelectedOpportunity = {
 export type ApprovedOpportunity = SelectedOpportunity;
 
 const READINESS_LABEL: Record<string, string> = {
-  ready: 'Ready',
+  ready: 'Submission Ready',
   starting: 'Opening Website',
   running: 'Running',
   waiting_human: 'Waiting Human',

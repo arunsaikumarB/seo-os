@@ -143,7 +143,7 @@ export async function getExecutionState(workspaceId: string): Promise<ExecutionS
   };
 }
 
-/** Compatibility shim — statistics consumers read ESM counts. */
+/** Compatibility shim — statistics consumers read ESM counts + CSM Submission Ready. */
 export async function getStatisticsFromExecutionState(workspaceId: string) {
   const state = await getExecutionState(workspaceId);
   const policy = await getOrCreatePolicy(workspaceId);
@@ -153,18 +153,40 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
     c.Submitted + c.Completed + c.Verified + c.Approved;
   const remaining = c.Queued; // not yet started — never includes Running
 
+  // Phase 5.5 — Submission Ready from CSM shared selector (never execution-job Ready)
+  let submissionReady = 0;
+  let handoff: Awaited<
+    ReturnType<typeof import('../campaigns/generation-handoff.service.js').getHandoffAudit>
+  > | null = null;
+  try {
+    const { getCampaignCounts } = await import('../campaigns/campaign-state.service.js');
+    submissionReady = (await getCampaignCounts(workspaceId)).ready;
+    const { getHandoffAudit } = await import('../campaigns/generation-handoff.service.js');
+    handoff = await getHandoffAudit(workspaceId);
+  } catch {
+    /* CSM optional during partial boot */
+  }
+
+  const aiStatusLine =
+    submissionReady > 0 && c.campaignState === 'Idle'
+      ? 'Campaign ready for submission'
+      : c.aiStatusLine;
+
   return {
     state,
     running: c.Running + c.Starting,
     queued: c.Queued,
-    ready: c.Ready,
+    /** CSM Submission Ready count (Phase 5.5) — was wrongly bound to execution job Ready */
+    ready: submissionReady,
+    submissionReady,
+    handoff,
     paused: 0,
     needs_approval: c['Waiting Human'],
     /** Success completions — same as submitted / aiSubmitted (Phase 4.7 consistency) */
     completed,
     failed: c.Failed,
     failedToStart: c['Failed to Start'],
-    blocked: 0,
+    blocked: handoff?.blocked ?? 0,
     cancelled: c.Deleted,
     watching: c['Waiting Human'],
     submitted: completed,
@@ -191,7 +213,7 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
     executionComplete: c.executionComplete,
     campaignState: c.campaignState,
     campaignIsRunning: c.campaignIsRunning,
-    aiStatusLine: c.aiStatusLine,
+    aiStatusLine,
     successRate:
       completed + c.Failed > 0
         ? Math.round((completed / (completed + c.Failed)) * 1000) / 10
@@ -222,7 +244,8 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
       etaSeconds: 0,
       executionComplete: c.executionComplete,
       campaignState: c.campaignState,
-      aiStatusLine: c.aiStatusLine,
+      aiStatusLine,
+      submissionReady,
     },
   };
 }

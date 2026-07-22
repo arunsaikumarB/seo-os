@@ -119,6 +119,22 @@ type HealthData = {
     }>;
     error?: string;
   };
+  handoffAudit?: {
+    generatedPackages?: number;
+    submissionReady?: number;
+    inFlight?: number;
+    completed?: number;
+    blocked?: number;
+    blockers?: Record<string, number>;
+    conservationLeft?: number;
+    conservationRight?: number;
+    ok?: boolean;
+    waitingHuman?: number;
+    executionJobsQueued?: number;
+    executionJobsRunning?: number;
+    violations?: Array<{ id: string; website: string; reason: string }>;
+    error?: string;
+  };
   executionDiagnostics?: {
     readyItems: number;
     executionJobsCreated: number;
@@ -204,7 +220,8 @@ export function CampaignHealthPage() {
         <div className="flex flex-wrap gap-3 border p-2">
           <span>imported={totals.imported}</span>
           <span>approved={totals.approved}</span>
-          <span>ready={totals.ready}</span>
+          <span>submissionReady={totals.ready}</span>
+          <span>packageGenerated={totals.packageGenerated}</span>
           <span>submitted={totals.submitted}</span>
           <span>verified={totals.verified}</span>
           <span>failed={totals.failed}</span>
@@ -252,6 +269,60 @@ export function CampaignHealthPage() {
                   .join(', ')}`
               : ' (must be 0)'}
           </p>
+        </div>
+      ) : null}
+
+      {data?.handoffAudit ? (
+        <div
+          className={`border p-2 space-y-2 ${
+            data.handoffAudit.ok === false
+              ? 'border-red-700 bg-red-950/20'
+              : 'border-emerald-700/40'
+          }`}
+        >
+          <p className="font-semibold">Handoff Audit (Generation → Submission Ready)</p>
+          <p>
+            Generated Packages: {data.handoffAudit.generatedPackages ?? 0}
+          </p>
+          <p>
+            Submission Ready: {data.handoffAudit.submissionReady ?? 0}
+          </p>
+          <p>
+            Execution Jobs: {data.handoffAudit.executionJobsQueued ?? 0} queued ·{' '}
+            {data.handoffAudit.executionJobsRunning ?? 0} running
+          </p>
+          <p>
+            Completed: {data.handoffAudit.completed ?? 0} · Waiting Human:{' '}
+            {data.handoffAudit.waitingHuman ?? 0} · In flight:{' '}
+            {data.handoffAudit.inFlight ?? 0}
+          </p>
+          <p>
+            Blocked: {data.handoffAudit.blocked ?? 0}
+            {data.handoffAudit.blockers
+              ? ` → needs_review ${data.handoffAudit.blockers.needs_review ?? 0} · quality_failed ${data.handoffAudit.blockers.quality_failed ?? 0} · unsupported ${data.handoffAudit.blockers.unsupported ?? 0} · awaiting_profile ${data.handoffAudit.blockers.awaiting_site_profile ?? 0} · outreach ${data.handoffAudit.blockers.outreach_path ?? 0} · other ${data.handoffAudit.blockers.other ?? 0}`
+              : ''}
+          </p>
+          <p className={data.handoffAudit.ok ? 'text-emerald-500' : 'text-red-400 font-semibold'}>
+            CONSERVATION CHECK: {data.handoffAudit.conservationLeft ?? 0} ={' '}
+            {(data.handoffAudit.submissionReady ?? 0) +
+              (data.handoffAudit.inFlight ?? 0) +
+              (data.handoffAudit.completed ?? 0) +
+              (data.handoffAudit.blocked ?? 0)}{' '}
+            {data.handoffAudit.ok ? '✅' : '❌'}
+          </p>
+          {data.handoffAudit.ok === false && Array.isArray(data.handoffAudit.violations) ? (
+            <ul className="text-xs list-disc pl-4">
+              {data.handoffAudit.violations.slice(0, 20).map((v: {
+                id: string;
+                website: string;
+                reason: string;
+              }) => (
+                <li key={v.id + v.reason}>
+                  {v.website} ({v.id}): {v.reason}
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       ) : null}
 

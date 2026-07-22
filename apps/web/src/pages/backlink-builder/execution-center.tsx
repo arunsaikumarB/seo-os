@@ -71,6 +71,18 @@ type BeeStats = {
   watching?: number;
   submitted?: number;
   ready?: number;
+  /** Phase 5.5 — CSM count(status == Ready) */
+  submissionReady?: number;
+  handoff?: {
+    generatedPackages?: number;
+    submissionReady?: number;
+    blocked?: number;
+    blockers?: Record<string, number>;
+    ok?: boolean;
+    emptyState?: { kind: string; message: string } | null;
+    conservationLeft?: number;
+    conservationRight?: number;
+  } | null;
   needsYou?: number;
   skipped?: number;
   aiSubmitted?: number;
@@ -151,7 +163,7 @@ const TABS = [
 ] as const;
 
 const ROW_STATUS_LABEL: Record<string, string> = {
-  Ready: 'Ready',
+  Ready: 'Submission Ready',
   Starting: 'Opening Website',
   Queued: 'Queued',
   Running: 'Running',
@@ -163,7 +175,7 @@ const ROW_STATUS_LABEL: Record<string, string> = {
   'Failed to Start': 'Failed to Start',
   Skipped: 'Skipped',
   Deleted: 'Deleted',
-  ready: 'Ready',
+  ready: 'Submission Ready',
   starting: 'Opening Website',
   running: 'Running',
   waiting_human: 'Waiting Human',
@@ -581,6 +593,22 @@ export function BrowserExecutionCenterPage() {
       (totalJobs > 0 && remainingJobs === 0 && (sum?.running ?? 0) === 0 && (sum?.waitingHuman ?? 0) === 0)
   );
 
+  /** Phase 5.5 — CSM Submission Ready (shared selector via statistics.ready / submissionReady) */
+  const submissionReady = s?.submissionReady ?? s?.ready ?? 0;
+  const handoff = s?.handoff ?? null;
+  const unsupportedBlocked = Number(handoff?.blockers?.unsupported ?? 0);
+  const expectedHumanActions = Math.min(
+    submissionReady,
+    Number(handoff?.blockers?.needs_review ?? 0) >= 0
+      ? Math.max(1, Math.round(submissionReady * 0.15))
+      : 0
+  );
+  const estMinutes =
+    submissionReady > 0
+      ? Math.max(1, Math.ceil((submissionReady * 2) / Math.max(1, maxWorkers || 4)))
+      : 0;
+  const emptyMsg = handoff?.emptyState?.message ?? null;
+
   return (
     <div className="space-y-6">
       <div>
@@ -683,14 +711,92 @@ export function BrowserExecutionCenterPage() {
                 </div>
               </CardContent>
             </Card>
+          ) : !showFailedToStart && !showExecutionSummary && submissionReady > 0 ? (
+            <Card className="rounded-2xl border-border/40">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Campaign Ready</CardTitle>
+                <CardDescription>
+                  {submissionReady} website{submissionReady === 1 ? '' : 's'} · Submission Ready
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <p>
+                    Estimated Time:{' '}
+                    <span className="font-medium tabular-nums">{estMinutes} minutes</span>
+                    <span className="text-muted-foreground text-xs"> (estimate)</span>
+                  </p>
+                  <p>
+                    Expected Human Actions:{' '}
+                    <span className="font-medium tabular-nums">{expectedHumanActions}</span>
+                  </p>
+                  <p>
+                    Supported:{' '}
+                    <span className="font-medium tabular-nums">{submissionReady}</span>
+                  </p>
+                  <p>
+                    Unsupported:{' '}
+                    <span className="font-medium tabular-nums">{unsupportedBlocked}</span>
+                    {unsupportedBlocked > 0 ? (
+                      <span className="text-muted-foreground text-xs">
+                        {' '}
+                        ({unsupportedBlocked} unsupported, excluded)
+                      </span>
+                    ) : null}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  disabled={
+                    !runtimeHealthy ||
+                    selectableOpps.length === 0 ||
+                    startExecutions.isPending
+                  }
+                  onClick={() => {
+                    const ids =
+                      selectedOppIds.size > 0
+                        ? [...selectedOppIds]
+                        : selectableOpps.map((o) => o.id);
+                    if (ids.length) startExecutions.mutate(ids);
+                  }}
+                >
+                  <Play className="h-3 w-3 mr-1" />
+                  Start Submission
+                </Button>
+              </CardContent>
+            </Card>
           ) : !showFailedToStart && !showExecutionSummary ? (
             <Card className="rounded-2xl border-border/40">
               <CardHeader className="pb-2">
-                <CardTitle className="text-base">Ready to submit</CardTitle>
+                <CardTitle className="text-base">Submission Ready</CardTitle>
                 <CardDescription>
-                  Select approved websites below. AI fills forms and uploads assets for you.
+                  {emptyMsg ??
+                    'No packages are Submission Ready yet. Generate content first, or wait for quality review.'}
                 </CardDescription>
               </CardHeader>
+              <CardContent className="flex flex-wrap gap-2">
+                {handoff?.emptyState?.kind === 'no_packages' ||
+                handoff?.emptyState?.kind === 'generation_running' ? (
+                  <Button size="sm" variant="outline" asChild>
+                    <Link to={`/projects/${projectId}/backlink-builder/automation`}>
+                      Continue → Generate
+                    </Link>
+                  </Button>
+                ) : null}
+                {handoff?.emptyState?.kind === 'needs_review' ||
+                handoff?.emptyState?.kind === 'quality_failed' ? (
+                  <Button size="sm" variant="outline" asChild>
+                    <Link to={`/projects/${projectId}/backlink-builder/automation`}>Review →</Link>
+                  </Button>
+                ) : null}
+                {handoff?.emptyState?.kind === 'all_submitted' ? (
+                  <Button size="sm" variant="outline" asChild>
+                    <Link to={`/projects/${projectId}/backlink-builder/track-results`}>
+                      Continue → Results
+                    </Link>
+                  </Button>
+                ) : null}
+              </CardContent>
             </Card>
           ) : null}
 
@@ -760,7 +866,7 @@ export function BrowserExecutionCenterPage() {
               <CardContent className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6 text-sm">
                 {(
                   [
-                    ['Ready', s?.ready ?? s?.queued ?? 0],
+                    ['Submission Ready', s?.submissionReady ?? s?.ready ?? 0],
                     ['Running', s?.running ?? 0],
                     ['Submitted', s?.aiSubmitted ?? s?.submitted ?? completedJobs],
                     ['Needs You', s?.needsYou ?? actionItems.length],

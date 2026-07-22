@@ -192,7 +192,7 @@ export function emptyExecutionCounts(): ExecutionStateCounts {
     executionComplete: false,
     campaignState: 'Idle',
     campaignIsRunning: false,
-    aiStatusLine: 'Ready to submit',
+    aiStatusLine: 'Campaign ready for submission',
   };
 }
 
@@ -309,7 +309,7 @@ export function aiStatusForCampaign(c: ExecutionStateCounts): string {
     case 'Paused':
       return 'Campaign paused';
     default:
-      return 'Ready to submit';
+      return 'Campaign ready for submission';
   }
 }
 

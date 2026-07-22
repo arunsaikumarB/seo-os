@@ -173,6 +173,24 @@ backlinkBuilderRouter.get(
           executionAudit,
           truthAudit,
           siteIntelligenceAudit,
+          handoffAudit: await (async () => {
+            try {
+              const { getHandoffAudit, reconcileGenerationHandoff } = await import(
+                '../../modules/campaigns/generation-handoff.service.js'
+              );
+              await reconcileGenerationHandoff(workspaceId);
+              return await getHandoffAudit(workspaceId);
+            } catch (err) {
+              return {
+                ok: false,
+                error: err instanceof Error ? err.message : String(err),
+                generatedPackages: 0,
+                submissionReady: 0,
+                blocked: 0,
+                violations: [],
+              };
+            }
+          })(),
           executionDiagnostics: await (async () => {
             try {
               const { ensureExecutionJobsForReady } = await import(

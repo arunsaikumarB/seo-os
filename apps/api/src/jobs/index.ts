@@ -247,6 +247,16 @@ export async function startJobInfrastructure(): Promise<void> {
   }
 
   try {
+    const { reconcileGenerationHandoff } = await import(
+      '../modules/campaigns/generation-handoff.service.js'
+    );
+    const handoff = await reconcileGenerationHandoff();
+    logger.info(handoff, 'Startup generation→submission handoff reconcile finished');
+  } catch (err) {
+    logger.warn({ err }, 'Startup generation handoff reconcile failed');
+  }
+
+  try {
     const reconciled = await reconcileExecutionAfterRestart();
     logger.info(reconciled, 'BEE startup reconciliation finished');
     startLeaseSweepLoop();

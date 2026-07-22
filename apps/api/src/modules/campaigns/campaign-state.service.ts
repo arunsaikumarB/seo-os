@@ -61,7 +61,7 @@ export async function listCampaignItems(
   const { data: opps } = await getSupabaseAdmin()
     .from('opportunities')
     .select(
-      'id, campaign_id, url, domain, website_name, title, opportunity_type, status, queue_status, pipeline_stage, automation_status, campaign_lifecycle, campaign_step, package_status, image_status, metadata_status, video_metadata_status, submission_status, verification_status, last_error, metadata, import_id, domain_analysis_id, confidence_score, review_tier, review_decision, approved_by, duplicate_of_id, generation_status, schema_status, quality_score, retry_count, package_approved_by, created_at, updated_at'
+      'id, campaign_id, url, domain, website_name, title, opportunity_type, status, queue_status, pipeline_stage, automation_status, campaign_lifecycle, campaign_step, package_status, image_status, metadata_status, video_metadata_status, submission_status, verification_status, last_error, metadata, import_id, domain_analysis_id, confidence_score, review_tier, review_decision, approved_by, duplicate_of_id, generation_status, schema_status, quality_score, retry_count, package_approved_by, blocker_reason, created_at, updated_at'
     )
     .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: true })
@@ -213,6 +213,7 @@ export async function listCampaignItems(
         o.package_approved_by === 'auto' || o.package_approved_by === 'user'
           ? o.package_approved_by
           : null,
+      blockerReason: o.blocker_reason != null ? String(o.blocker_reason) : null,
       raw: o as Record<string, unknown>,
     });
   }
@@ -248,6 +249,8 @@ export type UpdateCampaignItemPatch = {
   qualityScore?: number | null;
   retryCount?: number | null;
   packageApprovedBy?: 'auto' | 'user' | null;
+  /** Phase 5.5 — handoff blocker (null clears). */
+  blockerReason?: string | null;
   /** Skip transition check (backfill only). */
   force?: boolean;
 };
@@ -337,6 +340,7 @@ export async function updateCampaignItem(
   if (patch.retryCount !== undefined) update.retry_count = patch.retryCount;
   if (patch.packageApprovedBy !== undefined)
     update.package_approved_by = patch.packageApprovedBy;
+  if (patch.blockerReason !== undefined) update.blocker_reason = patch.blockerReason;
   if (patch.classification != null) {
     const meta = (row.metadata as Record<string, unknown>) ?? {};
     const prev =

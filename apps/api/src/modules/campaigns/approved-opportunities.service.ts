@@ -71,11 +71,21 @@ export async function listApprovedOpportunities(workspaceId: string) {
   const { data: opps, error } = await getSupabaseAdmin()
     .from('opportunities')
     .select(
-      'id, title, domain, website_name, url, opportunity_type, backlink_category, score, domain_rating, monthly_traffic, status, queue_status, pipeline_stage, automation_status, metadata, created_at, updated_at'
+      'id, title, domain, website_name, url, opportunity_type, backlink_category, score, domain_rating, monthly_traffic, status, queue_status, pipeline_stage, automation_status, campaign_lifecycle, generation_status, blocker_reason, metadata, created_at, updated_at'
     )
     .eq('workspace_id', workspaceId)
     .or(
-      'queue_status.eq.approved,status.eq.approved,pipeline_stage.eq.campaign_ready,pipeline_stage.eq.outreach'
+      [
+        'campaign_lifecycle.eq.Ready',
+        'campaign_lifecycle.eq.Submitting',
+        'campaign_lifecycle.eq.Waiting Human',
+        'campaign_lifecycle.eq.Retrying',
+        'campaign_lifecycle.eq.Package Generated',
+        'queue_status.eq.approved',
+        'status.eq.approved',
+        'pipeline_stage.eq.campaign_ready',
+        'pipeline_stage.eq.outreach',
+      ].join(',')
     )
     .order('score', { ascending: false })
     .limit(200);
@@ -197,6 +207,11 @@ export async function listApprovedOpportunities(workspaceId: string) {
     }
 
     const campaignEligible =
+      opp.campaign_lifecycle === 'Ready' ||
+      opp.campaign_lifecycle === 'Submitting' ||
+      opp.campaign_lifecycle === 'Waiting Human' ||
+      opp.campaign_lifecycle === 'Retrying' ||
+      opp.campaign_lifecycle === 'Package Generated' ||
       workflow.campaign_eligible === true ||
       workflow.execution_ready === true ||
       opp.pipeline_stage === 'campaign_ready' ||
@@ -211,7 +226,7 @@ export async function listApprovedOpportunities(workspaceId: string) {
     } else if (!hasDomain) {
       readiness = 'needs_domain';
       rowStatus = 'Ready';
-    } else if (campaignEligible) {
+    } else if (opp.campaign_lifecycle === 'Ready' || campaignEligible) {
       readiness = 'ready';
       rowStatus = 'Ready';
     }
