@@ -11,6 +11,7 @@ import {
   findSimilarPackagePairs,
   fitValueToLimit,
   inferFieldRole,
+  recipeVersionsCurrent,
   textSimilarity,
 } from './assisted-manual.js';
 
@@ -226,6 +227,50 @@ describe('Phase 7 Assisted Manual', () => {
       selector: '#notes',
     });
     expect(longNeverUrl.role).not.toBe('url');
+  });
+
+  it('reclassifies when recipe reader/classifier version is stale', () => {
+    const html = `
+<form>
+  <label for="title">Title (Optional) Leave blank to auto-fetch from website</label>
+  <input id="title" name="title" type="text" />
+  <label for="website">Website URL</label>
+  <input id="website" name="website" type="url" />
+</form>`;
+    const stale = {
+      domain: 'viesearch.com',
+      entryUrl: 'https://viesearch.com/submit',
+      formFingerprint: 'fp_stale',
+      fields: [
+        {
+          selector: '#title',
+          role: 'url' as const,
+          confidence: 'high' as const,
+          source: 'dom_label' as const,
+          label: 'Title (Optional) Leave blank to auto-fetch from website',
+          required: false,
+          maxlength: null,
+        },
+      ],
+      dropdownOptions: {},
+      gate: 'none' as const,
+      notes: '',
+      lastVerifiedAt: null,
+      correctionCount: 0,
+      multiStep: false,
+      readerVersion: 1,
+      classifierVersion: 1,
+    };
+    const next = buildSiteRecipe({
+      domain: 'viesearch.com',
+      entryUrl: 'https://viesearch.com/submit',
+      html,
+      existing: stale,
+      forceReclassify: true,
+    });
+    expect(recipeVersionsCurrent(next)).toBe(true);
+    expect(next.fields.find((f) => f.selector === '#title')?.role).toBe('title');
+    expect(next.fields.find((f) => f.selector === '#website')?.role).toBe('url');
   });
 
   it('routes multi-step to Needs a person (AT4)', () => {

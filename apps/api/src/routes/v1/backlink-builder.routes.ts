@@ -273,6 +273,27 @@ backlinkBuilderRouter.patch(
 );
 
 backlinkBuilderRouter.post(
+  '/assisted-manual/:packageId/reread',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const { rereadAssistedPackage } = await import(
+        '../../modules/browser-execution/assisted-manual.service.js'
+      );
+      res.json({
+        data: await rereadAssistedPackage(
+          param(req.params.projectId),
+          param(req.params.packageId)
+        ),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+backlinkBuilderRouter.post(
   '/assisted-manual/:packageId/correct',
   authMiddleware,
   requireRole('member'),

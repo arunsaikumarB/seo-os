@@ -40,6 +40,7 @@ type AssistedPackage = {
   correctionCount: number;
   minutesSpent: number | null;
   failureReason: string | null;
+  classifierOutdated?: boolean;
   package: {
     gateNotes: string;
     honestyNotes: string[];
@@ -162,6 +163,20 @@ export function AssistedManualPage() {
       void qc.invalidateQueries({ queryKey: ['assisted-manual-metrics', projectId] });
     },
     onError: (e) => toast.error(getApiErrorMessage(e, 'Correction failed')),
+  });
+
+  const reread = useMutation({
+    mutationFn: (packageId: string) =>
+      request(`/v1/projects/${projectId}/backlink-builder/assisted-manual/${packageId}/reread`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      }),
+    onSuccess: () => {
+      toast.success('Form re-read — roles refreshed');
+      void qc.invalidateQueries({ queryKey: ['assisted-manual', projectId] });
+      void qc.invalidateQueries({ queryKey: ['assisted-manual-metrics', projectId] });
+    },
+    onError: (e) => toast.error(getApiErrorMessage(e, 'Re-read failed')),
   });
 
   async function downloadExcel() {
@@ -337,12 +352,33 @@ export function AssistedManualPage() {
                         <AlertTriangle className="h-3.5 w-3.5" /> {pkg.failureReason}
                       </p>
                     ) : null}
+                    {pkg.classifierOutdated ? (
+                      <p className="text-xs text-amber-700 flex items-center gap-1 mt-2">
+                        <AlertTriangle className="h-3.5 w-3.5" /> Classifier updated — Re-read form
+                        to refresh field roles
+                      </p>
+                    ) : null}
                     <p className="text-xs text-muted-foreground mt-1">{pkg.package?.gateNotes}</p>
                   </CardHeader>
                   <CardContent className="space-y-3">
                     <div className="flex flex-wrap gap-2">
                       <Button size="sm" variant="secondary" onClick={() => setOpenId(open ? null : pkg.id)}>
                         {open ? 'Hide fields' : 'Open package'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={reread.isPending}
+                        onClick={() => reread.mutate(pkg.id)}
+                        title="Fetch the live form again and re-classify fields (keeps your corrections)"
+                      >
+                        <RefreshCw
+                          className={cn(
+                            'h-3.5 w-3.5 mr-1',
+                            reread.isPending && reread.variables === pkg.id && 'animate-spin'
+                          )}
+                        />
+                        Re-read form (ignore cache)
                       </Button>
                       <Button
                         size="sm"

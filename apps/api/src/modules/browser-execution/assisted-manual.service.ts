@@ -7,6 +7,8 @@ import {
   ASSISTED_MANUAL_PILOT_MAX,
   ASSISTED_PACKAGE_TTL_DAYS,
   ASSISTED_PREPARE_BATCH_MAX,
+  ASSISTED_FORM_READER_VERSION,
+  ASSISTED_FIELD_CLASSIFIER_VERSION,
   applyHumanFieldCorrection,
   buildAssistedPackage,
   buildSiteRecipe,
@@ -15,6 +17,7 @@ import {
   extractFormFieldFacts,
   findSimilarPackagePairs,
   normalizeSiteDomain,
+  recipeVersionsCurrent,
   type AssistedPackagePayload,
   type FieldRole,
   type PackageStatus,
@@ -287,7 +290,7 @@ async function listContentReadyOpportunityIds(workspaceId: string): Promise<stri
 async function prepareOnePackage(
   workspaceId: string,
   opportunityId: string,
-  opts: { entryUrlOverride?: string } = {}
+  opts: { entryUrlOverride?: string; forceReread?: boolean } = {}
 ) {
   const { data: opp } = await admin()
     .from('opportunities')
@@ -311,29 +314,50 @@ async function prepareOnePackage(
     .maybeSingle();
 
   const existingRecipe = asRecipe(profile?.recipe);
+  const versionStale = !recipeVersionsCurrent(existingRecipe);
+  const forceReclassify = Boolean(opts.forceReread) || versionStale;
+
   const html = await fetchHtml(entryUrl);
   const formFound = Boolean(html && extractFormFieldFacts(html).length > 0);
 
-  const recipe = html
-    ? buildSiteRecipe({
-        domain,
-        entryUrl,
-        html,
-        existing: existingRecipe,
-      })
-    : (existingRecipe ??
-      ({
-        domain,
-        entryUrl,
-        formFingerprint: 'fp_missing',
-        fields: [],
-        dropdownOptions: {},
-        gate: 'none',
-        notes: 'No form HTML fetched',
-        lastVerifiedAt: new Date().toISOString(),
-        correctionCount: 0,
-        multiStep: false,
-      } satisfies SiteRecipe));
+  let recipe: SiteRecipe;
+  if (html) {
+    recipe = buildSiteRecipe({
+      domain,
+      entryUrl,
+      html,
+      existing: existingRecipe,
+      forceReclassify,
+    });
+  } else if (existingRecipe && !opts.forceReread) {
+    recipe = recipeVersionsCurrent(existingRecipe)
+      ? existingRecipe
+      : {
+          ...existingRecipe,
+          readerVersion: ASSISTED_FORM_READER_VERSION,
+          classifierVersion: ASSISTED_FIELD_CLASSIFIER_VERSION,
+          notes: [existingRecipe.notes, 'Fetch failed — re-read when online']
+            .filter(Boolean)
+            .join(' · '),
+        };
+  } else {
+    recipe = {
+      domain,
+      entryUrl,
+      formFingerprint: 'fp_missing',
+      fields: [],
+      dropdownOptions: {},
+      gate: 'none',
+      notes: opts.forceReread
+        ? 'Force re-read failed — no form HTML fetched'
+        : 'No form HTML fetched',
+      lastVerifiedAt: new Date().toISOString(),
+      correctionCount: existingRecipe?.correctionCount ?? 0,
+      multiStep: false,
+      readerVersion: ASSISTED_FORM_READER_VERSION,
+      classifierVersion: ASSISTED_FIELD_CLASSIFIER_VERSION,
+    };
+  }
 
   await upsertRecipeOnProfile(workspaceId, domain, recipe);
 
@@ -387,6 +411,19 @@ async function prepareOnePackage(
     .from('opportunities')
     .update({ assisted_package_id: saved.id })
     .eq('id', opportunityId);
+
+  logger.info(
+    {
+      workspaceId,
+      opportunityId,
+      domain,
+      forceReclassify,
+      readerVersion: recipe.readerVersion,
+      classifierVersion: recipe.classifierVersion,
+      bucket: payload.bucket,
+    },
+    'assisted-manual package prepared'
+  );
 
   return saved;
 }
@@ -563,6 +600,9 @@ async function refreshPackageFreshness(row: Record<string, unknown>) {
 
 function formatPackageRow(row: Record<string, unknown>) {
   const payload = (row.payload as AssistedPackagePayload) ?? ({} as AssistedPackagePayload);
+  const classifierOutdated =
+    payload.classifierVersion !== ASSISTED_FIELD_CLASSIFIER_VERSION ||
+    payload.readerVersion !== ASSISTED_FORM_READER_VERSION;
   return {
     id: row.id,
     opportunityId: row.opportunity_id,
@@ -579,6 +619,9 @@ function formatPackageRow(row: Record<string, unknown>) {
     rejectedAtSubmit: row.rejected_at_submit,
     failureReason: row.failure_reason,
     pilotBatchId: row.pilot_batch_id,
+    classifierOutdated,
+    readerVersion: payload.readerVersion ?? null,
+    classifierVersion: payload.classifierVersion ?? null,
     package: payload,
   };
 }
@@ -604,6 +647,26 @@ export async function getAssistedPackage(workspaceId: string, packageId: string)
     };
   }
   return { ...formatPackageRow(refreshed), blocked: false };
+}
+
+/**
+ * Force re-fetch HTML + re-classify (ignore fingerprint / TTL / cached recipe versions).
+ * Human field corrections on the Site Recipe are preserved.
+ */
+export async function rereadAssistedPackage(workspaceId: string, packageId: string) {
+  const { data: row } = await admin()
+    .from('assisted_packages')
+    .select('id, opportunity_id, entry_url')
+    .eq('workspace_id', workspaceId)
+    .eq('id', packageId)
+    .maybeSingle();
+  if (!row) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Package not found');
+
+  const saved = await prepareOnePackage(workspaceId, String(row.opportunity_id), {
+    entryUrlOverride: row.entry_url ? String(row.entry_url) : undefined,
+    forceReread: true,
+  });
+  return formatPackageRow(saved);
 }
 
 export async function updateAssistedPackageStatus(

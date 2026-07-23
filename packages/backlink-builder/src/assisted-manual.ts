@@ -11,6 +11,17 @@ export const ASSISTED_SIMILARITY_THRESHOLD = 0.85;
 /** Safety ceiling per prepare request (not a product pilot cap). */
 export const ASSISTED_PREPARE_BATCH_MAX = 500;
 
+/**
+ * Bump when Form Reader extraction changes (search filters, DOM fact shape, etc.).
+ * Mismatched recipes re-read HTML and rebuild fields on prepare even if fingerprint matches.
+ */
+export const ASSISTED_FORM_READER_VERSION = 2;
+/**
+ * Bump when field-role / confidence rules change.
+ * Mismatched recipes re-classify even when form fingerprint is unchanged.
+ */
+export const ASSISTED_FIELD_CLASSIFIER_VERSION = 3;
+
 export type FieldConfidence = 'high' | 'medium' | 'low';
 export type FieldSource = 'dom_label' | 'llm_inferred' | 'human_corrected' | 'name_guess';
 export type FieldRole =
@@ -83,7 +94,19 @@ export type SiteRecipe = {
   correctionCount: number;
   multiStep: boolean;
   multiStepLabel?: string;
+  /** Form Reader extraction version — bump when DOM parsing changes. */
+  readerVersion?: number;
+  /** Field-role / confidence classifier version — bump when mapping rules change. */
+  classifierVersion?: number;
 };
+
+export function recipeVersionsCurrent(recipe: SiteRecipe | null | undefined): boolean {
+  if (!recipe) return false;
+  return (
+    recipe.readerVersion === ASSISTED_FORM_READER_VERSION &&
+    recipe.classifierVersion === ASSISTED_FIELD_CLASSIFIER_VERSION
+  );
+}
 
 export type PackageFieldValue = {
   selector: string;
@@ -119,6 +142,8 @@ export type AssistedPackagePayload = {
   fields: PackageFieldValue[];
   honestyNotes: string[];
   failureReason: string | null;
+  readerVersion?: number;
+  classifierVersion?: number;
 };
 
 export type AssistedLaneCounts = {
@@ -539,7 +564,7 @@ export function inferFieldRole(facts: FormFieldFacts): {
         source: 'dom_label',
       };
     }
-    if (fromLead && fromLead !== 'url') {
+    if (fromLead) {
       return { role: fromLead, confidence: 'high', source: 'dom_label' };
     }
     return {
@@ -651,41 +676,37 @@ export function buildSiteRecipe(input: {
   entryUrl: string;
   html: string;
   existing?: SiteRecipe | null;
+  /**
+   * When true (classifier upgrade or user force re-read), re-infer every non-human field
+   * even if the form fingerprint matches the stored recipe.
+   */
+  forceReclassify?: boolean;
 }): SiteRecipe {
   const facts = extractFormFieldFacts(input.html);
   const fingerprint = computeFormFingerprint(facts);
   const multiStep = detectMultiStepForm(input.html);
   const gate = detectGateFromHtml(input.html);
 
+  const versionStale = !recipeVersionsCurrent(input.existing);
+  const forceReclassify = Boolean(input.forceReclassify) || versionStale;
+
   const existingBySelector = new Map(
     (input.existing?.fields ?? []).map((f) => [f.selector, f] as const)
   );
-  const fingerprintChanged =
-    Boolean(input.existing?.formFingerprint) &&
-    input.existing!.formFingerprint !== fingerprint;
 
   const fields: RecipeField[] = facts.map((f) => {
     const prev = existingBySelector.get(f.selector);
-    // Human correction never re-guessed (§3 rule 2)
-    if (prev?.source === 'human_corrected' && !fingerprintChanged) {
+    // Human correction never re-guessed (§3 rule 2) — even across classifier upgrades
+    if (prev?.source === 'human_corrected') {
       return {
         ...prev,
         maxlength: f.maxlength ?? prev.maxlength,
         options: f.options.length ? f.options : prev.options,
         required: f.required,
+        label: f.label ?? f.ariaLabel ?? f.placeholder ?? prev.label,
       };
     }
-    // Fingerprint change invalidates non-human fields
-    if (prev?.source === 'human_corrected' && fingerprintChanged) {
-      // Keep human role mapping but refresh limits/options from new DOM
-      return {
-        ...prev,
-        maxlength: f.maxlength ?? prev.maxlength,
-        options: f.options.length ? f.options : prev.options,
-        required: f.required,
-        label: f.label ?? prev.label,
-      };
-    }
+    // Machine guess: always re-infer when forceReclassify / version stale / fingerprint change / no prev
     const inferred = inferFieldRole(f);
     return {
       selector: f.selector,
@@ -706,6 +727,11 @@ export function buildSiteRecipe(input: {
     if (f.options?.length) dropdownOptions[f.selector] = f.options;
   }
 
+  const upgradeNote =
+    forceReclassify && input.existing && versionStale
+      ? `Reclassified (reader v${ASSISTED_FORM_READER_VERSION} / classifier v${ASSISTED_FIELD_CLASSIFIER_VERSION})`
+      : null;
+
   return {
     domain: input.domain,
     entryUrl: input.entryUrl,
@@ -715,13 +741,15 @@ export function buildSiteRecipe(input: {
     gate: multiStep ? 'multi_step' : gate,
     notes: multiStep
       ? 'Multi-step form — step 1 prepared, later steps unknown'
-      : input.existing?.notes ?? '',
+      : [input.existing?.notes, upgradeNote].filter(Boolean).join(' · ') || '',
     lastVerifiedAt: new Date().toISOString(),
     correctionCount: input.existing?.correctionCount ?? 0,
     multiStep,
     multiStepLabel: multiStep
       ? 'Multi-step form — step 1 prepared, later steps unknown'
       : undefined,
+    readerVersion: ASSISTED_FORM_READER_VERSION,
+    classifierVersion: ASSISTED_FIELD_CLASSIFIER_VERSION,
   };
 }
 
@@ -1069,6 +1097,8 @@ export function buildAssistedPackage(input: {
     fields,
     honestyNotes,
     failureReason,
+    readerVersion: input.recipe.readerVersion ?? ASSISTED_FORM_READER_VERSION,
+    classifierVersion: input.recipe.classifierVersion ?? ASSISTED_FIELD_CLASSIFIER_VERSION,
   };
 }
 
