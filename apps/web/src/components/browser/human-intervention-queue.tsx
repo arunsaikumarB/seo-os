@@ -88,12 +88,15 @@ export function HumanInterventionQueue({ projectId, campaignActive }: Props) {
         method: 'PUT',
         body: JSON.stringify({ auto_publish_automatable: on }),
       }),
-    onSuccess: () => {
+    onSuccess: (_data, on) => {
       qc.invalidateQueries({ queryKey: ['bee-policy', projectId] });
+      qc.invalidateQueries({ queryKey: ['execution-summary', projectId] });
+      qc.invalidateQueries({ queryKey: ['bee-statistics', projectId] });
+      qc.invalidateQueries({ queryKey: ['bee-progress', projectId] });
       toast.success(
-        autoPublish
-          ? 'Auto-publish off — ready items wait for batch confirm'
-          : 'Auto-publish on — automatable links submit with zero clicks'
+        on
+          ? 'Auto-publish on — draining automatable queue'
+          : 'Auto-publish off — ready items wait for batch confirm'
       );
     },
     onError: (e: Error) => toast.error(e.message),

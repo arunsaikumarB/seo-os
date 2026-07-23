@@ -50,6 +50,40 @@ describe('execution state manager', () => {
     expect(running.progressPercent).toBe(50);
   });
 
+  it('Phase 6.3.2 — Manual Skipped + Preparing/Queued is not Finished', () => {
+    const c = computeExecutionCounts([
+      { id: '1', status: 'skipped', disposition: 'manual_offline', opportunity_id: 'a' },
+      { id: '2', status: 'skipped', disposition: 'manual_offline', opportunity_id: 'b' },
+      { id: '3', status: 'preparing', opportunity_id: 'c' }, // public: Queued
+      { id: '4', status: 'queued', opportunity_id: 'd' },
+    ]);
+    expect(c.Skipped).toBe(2);
+    expect(c.Queued).toBe(2);
+    expect(c.campaignOpen).toBe(2);
+    expect(c.executionComplete).toBe(false);
+    expect(c.campaignState).not.toBe('Completed');
+  });
+
+  it('Phase 6.3.2 — Preparing alone never marks executionComplete', () => {
+    const c = computeExecutionCounts([
+      { id: '1', status: 'skipped', opportunity_id: 'a' },
+      { id: '2', status: 'launching_browser', opportunity_id: 'b' }, // Starting
+    ]);
+    expect(c.Starting).toBe(1);
+    expect(c.executionComplete).toBe(false);
+  });
+
+  it('Phase 6.3.2 — Finished only when every active item is terminal', () => {
+    const c = computeExecutionCounts([
+      { id: '1', status: 'skipped', opportunity_id: 'a' },
+      { id: '2', status: 'submitted', opportunity_id: 'b' },
+      { id: '3', status: 'failed', opportunity_id: 'c' },
+    ]);
+    expect(c.executionComplete).toBe(true);
+    expect(c.campaignState).toBe('Completed');
+    expect(c.campaignOpen).toBe(0);
+  });
+
   it('waiting_infrastructure never looks like Running progress', () => {
     const c = computeExecutionCounts([
       { id: '1', status: 'waiting_infrastructure' },

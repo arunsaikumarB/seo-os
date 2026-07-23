@@ -321,6 +321,16 @@ export function BrowserExecutionCenterPage() {
 
   const startExecutions = useMutation({
     mutationFn: async (ids: string[]) => {
+      // Phase 6.3.2 — ensure + drain first (idempotent; recovers Queued idle)
+      try {
+        await request(`/v1/projects/${projectId}/browser/executions/ensure-ready`, {
+          method: 'POST',
+          body: JSON.stringify({ startImmediately: true }),
+        });
+      } catch {
+        /* continue with per-id starts */
+      }
+
       const byId = new Map(oppList.map((o) => [o.id, o]));
       setBulkProgress(
         ids.map((id) => ({
@@ -365,6 +375,15 @@ export function BrowserExecutionCenterPage() {
           if (!selectedJobId) setSelectedJobId(res.data.id);
         } catch (err) {
           const message = err instanceof Error ? err.message : 'Failed to start';
+          // Already has an active job — treat as ok (Phase 6 uniqueness)
+          if (/already|active job|duplicate/i.test(message)) {
+            setBulkProgress((prev) =>
+              prev.map((p) =>
+                p.opportunityId === opportunityId ? { ...p, phase: 'started' } : p
+              )
+            );
+            continue;
+          }
           errors.push({ opportunityId, message });
           setBulkProgress((prev) =>
             prev.map((p) =>
@@ -588,9 +607,11 @@ export function BrowserExecutionCenterPage() {
           );
         });
   const showExecutionSummary = Boolean(
-    sum?.executionComplete ||
-      s?.executionComplete ||
-      (totalJobs > 0 && remainingJobs === 0 && (sum?.running ?? 0) === 0 && (sum?.waitingHuman ?? 0) === 0)
+    (sum?.executionComplete || s?.executionComplete) &&
+      (sum?.remaining ?? remainingJobs ?? 0) === 0 &&
+      (sum?.running ?? 0) === 0 &&
+      (sum?.waitingHuman ?? 0) === 0 &&
+      (sum?.queued ?? s?.queued ?? 0) === 0
   );
 
   /** Phase 5.5 — CSM Submission Ready (shared selector via statistics.ready / submissionReady) */

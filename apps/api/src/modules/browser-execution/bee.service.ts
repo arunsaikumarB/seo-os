@@ -13,6 +13,7 @@ import {
 import { DEFAULT_FEATURE_FLAGS } from '@seo-os/shared';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { enqueueJob, QUEUES } from '../../jobs/boss.js';
+import { logger } from '../../lib/logger.js';
 import {
   listApprovedOpportunities,
   type OpportunityReadiness,
@@ -77,7 +78,7 @@ export async function getOrCreatePolicy(workspaceId: string) {
 }
 
 export async function updatePolicy(workspaceId: string, patch: Record<string, unknown>) {
-  await getOrCreatePolicy(workspaceId);
+  const prev = await getOrCreatePolicy(workspaceId);
   const allowed = [
     'submission_policy',
     'trusted_domains',
@@ -116,6 +117,20 @@ export async function updatePolicy(workspaceId: string, patch: Record<string, un
     .select('*')
     .single();
   if (error) throw error;
+
+  // Phase 6.3.2 — Auto-publish ON is self-starting: enqueue + drain (idempotent)
+  const turnedOn =
+    patch.auto_publish_automatable === true && prev.auto_publish_automatable !== true;
+  if (turnedOn || patch.auto_publish_automatable === true) {
+    try {
+      const { kickSubmissionDrain } = await import('./bee-submission-supervision.service.js');
+      const kick = await kickSubmissionDrain(workspaceId, { ensureJobs: true });
+      logger.info({ workspaceId, kick }, 'auto-publish ON — submission drain kicked');
+    } catch (err) {
+      logger.warn({ err, workspaceId }, 'auto-publish drain kick failed');
+    }
+  }
+
   return data;
 }
 

@@ -108,19 +108,45 @@ export async function getExecutionState(workspaceId: string): Promise<ExecutionS
     };
   });
 
-  // Phase 6.1 — summary counts from CSM Campaign Items (shared selector).
-  // Job rows still drive Waiting Human / Failed queues below; tiles never read an empty job table.
+  // Phase 6.1 / 6.3.2 — summary from CSM Campaign Items with LIVE job overlay.
+  // Without overlay, Submitting→Running while jobs sit Queued/Preparing → false Finished / 0 remaining.
   let counts: ExecutionStateCounts;
   let metricsSource: 'campaign_state' | 'live' = 'live';
   try {
     const { listCampaignItems } = await import('../campaigns/campaign-state.service.js');
     const csmItems = await listCampaignItems(workspaceId, { includeDeleted: true });
+    const jobsByOpportunity = new Map<
+      string,
+      {
+        id: string;
+        status: string;
+        site_domain?: string | null;
+        opportunity_id?: string | null;
+        disposition?: string | null;
+        error_code?: string | null;
+        created_at?: string | null;
+      }
+    >();
+    for (const j of jobs) {
+      const oid = j.opportunityId;
+      if (!oid || jobsByOpportunity.has(oid)) continue;
+      jobsByOpportunity.set(oid, {
+        id: j.jobId,
+        status: j.rawStatus,
+        site_domain: j.website,
+        opportunity_id: oid,
+        disposition: j.disposition,
+        error_code: j.errorCode,
+        created_at: j.createdAt,
+      });
+    }
     const synthetic = campaignItemsToExecutionJobs(
       csmItems.map((i) => ({
         id: i.id,
         currentStatus: i.currentStatus,
         domain: i.domain ?? null,
-      }))
+      })),
+      jobsByOpportunity
     );
     counts = computeExecutionCounts(synthetic);
     metricsSource = 'campaign_state';
@@ -233,9 +259,15 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
   const c = state.counts;
   const completed =
     c.Submitted + c.Completed + c.Verified + c.Approved;
-  const remaining = c.Queued; // not yet started — never includes Running
-
-  // Phase 5.5 — Submission Ready from CSM shared selector (never execution-job Ready)
+  const remaining = c.Queued; // not yet started — never includes Running/Starting
+  // Phase 6.3.2 — Finished only when cohort is fully terminal (no Starting/Queued/open)
+  const executionComplete =
+    Boolean(c.executionComplete) &&
+    c.campaignOpen === 0 &&
+    c.Running === 0 &&
+    c.Starting === 0 &&
+    c.Queued === 0 &&
+    c['Waiting Human'] === 0;
   let submissionReady = 0;
   let handoff: Awaited<
     ReturnType<typeof import('../campaigns/generation-handoff.service.js').getHandoffAudit>
@@ -292,10 +324,10 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
     completedJobs: completed,
     remainingJobs: remaining,
     progressPercent: c.progressPercent,
-    executionComplete: c.executionComplete,
-    campaignState: c.campaignState,
+    executionComplete,
+    campaignState: executionComplete ? 'Completed' : c.campaignState,
     campaignIsRunning: c.campaignIsRunning,
-    aiStatusLine,
+    aiStatusLine: executionComplete ? 'Campaign complete' : aiStatusLine,
     successRate:
       completed + c.Failed > 0
         ? Math.round((completed / (completed + c.Failed)) * 1000) / 10
@@ -324,9 +356,9 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
       total: c.totalExecutable,
       progressPercent: c.progressPercent,
       etaSeconds: 0,
-      executionComplete: c.executionComplete,
-      campaignState: c.campaignState,
-      aiStatusLine,
+      executionComplete,
+      campaignState: executionComplete ? 'Completed' : c.campaignState,
+      aiStatusLine: executionComplete ? 'Campaign complete' : aiStatusLine,
       submissionReady,
     },
   };

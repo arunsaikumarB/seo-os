@@ -745,6 +745,20 @@ export async function ensureExecutionJobsForReady(params: {
     }
   }
 
+  // Phase 6.3.2 — after ensure, always kick the submission consumer (never leave Queued idle)
+  try {
+    const { resumeInterruptedSubmissions } = await import(
+      './bee-submission-supervision.service.js'
+    );
+    const drain = await resumeInterruptedSubmissions(params.workspaceId);
+    logger.info(
+      { workspaceId: params.workspaceId, drain, ensureSummary: summary },
+      'execution pipeline ensure + drain finished'
+    );
+  } catch (err) {
+    logger.warn({ err, workspaceId: params.workspaceId }, 'post-ensure submission drain failed');
+  }
+
   const diagnostics = await getExecutionDiagnostics(params.workspaceId);
   diagnostics.ensuredAt = new Date().toISOString();
   diagnostics.ensureSummary = summary;

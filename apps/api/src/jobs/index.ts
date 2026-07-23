@@ -267,8 +267,22 @@ export async function startJobInfrastructure(): Promise<void> {
     const reconciled = await reconcileExecutionAfterRestart();
     logger.info(reconciled, 'BEE startup reconciliation finished');
     startLeaseSweepLoop();
+    const { startSubmissionSupervisionLoop, resumeInterruptedSubmissions } = await import(
+      '../modules/browser-execution/bee-submission-supervision.service.js'
+    );
+    const drained = await resumeInterruptedSubmissions();
+    logger.info(drained, 'Startup submission drain finished');
+    startSubmissionSupervisionLoop();
   } catch (err) {
     logger.warn({ err }, 'BEE startup reconciliation failed');
+    try {
+      const { startSubmissionSupervisionLoop } = await import(
+        '../modules/browser-execution/bee-submission-supervision.service.js'
+      );
+      startSubmissionSupervisionLoop();
+    } catch (supErr) {
+      logger.warn({ err: supErr }, 'Failed to start submission supervision');
+    }
   }
 
   try {

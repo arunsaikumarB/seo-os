@@ -387,7 +387,9 @@ export function computeExecutionCounts(
   counts.executionComplete =
     campaignState === 'Completed' ||
     (counts.totalExecutable > 0 &&
+      counts.campaignOpen === 0 &&
       counts.Running === 0 &&
+      counts.Starting === 0 &&
       counts.Queued === 0 &&
       counts['Waiting Human'] === 0);
 
@@ -400,9 +402,11 @@ export function aiStatusForCampaign(c: ExecutionStateCounts): string {
     case 'Failed To Start':
       return 'Execution failed before submission began.';
     case 'Starting':
-      return 'Opening websites…';
+      return c.Queued > 0
+        ? `Submitting (0 running / ${c.Queued} queued)`
+        : 'Opening websites…';
     case 'Running':
-      return 'Submitting backlinks';
+      return `Submitting (${c.Running + c.Starting} running / ${c.Queued} queued)`;
     case 'Waiting Human':
       return 'Waiting for you';
     case 'Completed':
