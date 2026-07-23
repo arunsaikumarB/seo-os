@@ -19,8 +19,48 @@ import {
   type OpportunityReadiness,
 } from '../campaigns/approved-opportunities.service.js';
 import { getBrandContextForBee } from './bee-assets.js';
+import { BEE_RELIABILITY } from './bee-config.js';
 
 export type ExecutionReadiness = OpportunityReadiness;
+
+/** Cap parallel Chromiums for small containers (policy may still say 4). */
+export function effectiveMaxParallelSessions(policyMax: unknown): number {
+  const n = Number(policyMax ?? BEE_RELIABILITY.MAX_BROWSER_SESSIONS) || 2;
+  return Math.max(1, Math.min(n, BEE_RELIABILITY.MAX_BROWSER_SESSIONS));
+}
+
+/**
+ * Free start slots from live Playwright + in-flight job claims (not phantom DB sessions).
+ * Closes unowned orphan DB rows that previously blocked drain while Idle/Free looked healthy.
+ */
+export async function reconcileFreeBrowserSlots(
+  workspaceId: string,
+  maxParallel: number
+): Promise<{ free: number; live: number; claimed: number; phantomsClosed: number }> {
+  const { closeOrphanDbBrowserSessions } = await import('./browser-runtime-manager.service.js');
+  const { countAllocatedBrowserSlots } = await import('./browser-runtime.service.js');
+  const phantomsClosed = await closeOrphanDbBrowserSessions(
+    'reconcile free slots before drain',
+    workspaceId
+  );
+  const live = countAllocatedBrowserSlots();
+
+  // Jobs that already hold a browser slot (preparing → in-flight → waiting human)
+  const { count: claimed } = await getSupabaseAdmin()
+    .from('execution_jobs')
+    .select('id', { count: 'exact', head: true })
+    .eq('workspace_id', workspaceId)
+    .is('deleted_at', null)
+    .not(
+      'status',
+      'in',
+      '(queued,retry_scheduled,completed,failed,cancelled,skipped,deleted,ignored,submitted,verified,waiting_infrastructure)'
+    );
+
+  const used = Math.max(live, claimed ?? 0);
+  const free = Math.max(0, maxParallel - used);
+  return { free, live, claimed: claimed ?? 0, phantomsClosed };
+}
 
 function beeEnabled(): boolean {
   return DEFAULT_FEATURE_FLAGS.bee_enabled !== false;
@@ -59,7 +99,7 @@ export async function getOrCreatePolicy(workspaceId: string) {
     workspace_id: workspaceId,
     submission_policy: 'always_ask',
     require_approval_before_submit: true,
-    max_parallel_sessions: 4,
+    max_parallel_sessions: 2,
     submission_speed: 'fast',
     daily_goal: 20,
     auto_resume: true,
@@ -908,13 +948,9 @@ export async function startJob(workspaceId: string, jobId: string, userId?: stri
   }
 
   const policy = await getOrCreatePolicy(workspaceId);
-  const { count } = await getSupabaseAdmin()
-    .from('browser_sessions')
-    .select('id', { count: 'exact', head: true })
-    .eq('workspace_id', workspaceId)
-    .eq('status', 'running')
-    .is('deleted_at', null);
-  if ((count ?? 0) >= Number(policy.max_parallel_sessions ?? 4)) {
+  const maxParallel = effectiveMaxParallelSessions(policy.max_parallel_sessions);
+  const { free } = await reconcileFreeBrowserSlots(workspaceId, maxParallel);
+  if (free <= 0) {
     // Never fail with "browser limit reached" — leave/keep queued; scheduler fills slots
     if (String(job.status) !== 'queued') {
       await getSupabaseAdmin()
@@ -924,7 +960,7 @@ export async function startJob(workspaceId: string, jobId: string, userId?: stri
         .eq('workspace_id', workspaceId);
     }
     await appendLog(workspaceId, jobId, 'info', 'Queued — waiting for free browser slot', {
-      maxParallel: policy.max_parallel_sessions,
+      maxParallel,
     });
     return getJob(workspaceId, jobId);
   }
@@ -1186,6 +1222,7 @@ export async function mergeJobMetrics(
 
 /**
  * After one website finishes, start the next queued job (supports 20/50/100/500 queues).
+ * Phase 6.3.5 — slots from live contexts; never no-op when Free>0 and Queued>0.
  */
 export async function continueQueuedJobs(
   workspaceId: string,
@@ -1194,21 +1231,24 @@ export async function continueQueuedJobs(
   const policy = await getOrCreatePolicy(workspaceId);
   if (policy.queue_auto_continue === false) return [];
 
-  const { count: running } = await getSupabaseAdmin()
-    .from('browser_sessions')
-    .select('id', { count: 'exact', head: true })
-    .eq('workspace_id', workspaceId)
-    .eq('status', 'running')
-    .is('deleted_at', null);
-  const maxParallel = Number(policy.max_parallel_sessions ?? 4);
-  const slots = Math.max(0, maxParallel - (running ?? 0));
-  if (slots <= 0) return [];
+  const maxParallel = effectiveMaxParallelSessions(policy.max_parallel_sessions);
+  const { free, live, phantomsClosed } = await reconcileFreeBrowserSlots(
+    workspaceId,
+    maxParallel
+  );
+  if (free <= 0) {
+    logger.info(
+      { workspaceId, maxParallel, live, phantomsClosed },
+      'continueQueuedJobs: no free slots'
+    );
+    return [];
+  }
 
-  const take = Math.min(slots, Math.max(1, opts.limit ?? slots));
+  const take = Math.min(free, Math.max(1, opts.limit ?? free));
   // Priority: retries / recovered first, then FIFO by created_at
   let q = getSupabaseAdmin()
     .from('execution_jobs')
-    .select('id, retry_count, infra_retry_count, created_at')
+    .select('id, retry_count, infra_retry_count, created_at, status')
     .eq('workspace_id', workspaceId)
     .eq('status', 'queued')
     .is('deleted_at', null)
@@ -1220,32 +1260,56 @@ export async function continueQueuedJobs(
   if (opts.afterJobId) q = q.neq('id', opts.afterJobId);
 
   const { data } = await q;
+  if (!data?.length) {
+    logger.info({ workspaceId, free, live }, 'continueQueuedJobs: no queued rows');
+    return [];
+  }
+
   const started: string[] = [];
-  await Promise.all(
-    (data ?? []).map(async (row) => {
-      try {
-        await startJob(workspaceId, String(row.id));
-        started.push(String(row.id));
-      } catch (err) {
-        // Phase 6.3.4 — never leave Queued with no Why/Blocker after a start throw
-        try {
-          const { recordFailure } = await import('./bee-record-failure.service.js');
-          await recordFailure({
-            workspaceId,
-            jobId: String(row.id),
-            err,
-            source: 'continueQueuedJobs',
-            allowRetry: true,
-          });
-        } catch (recErr) {
-          logger.warn(
-            { recErr, jobId: row.id },
-            'continueQueuedJobs: recordFailure failed after startJob throw'
-          );
-        }
+  // Sequential start so slot checks see prior launches (avoid over-subscribe)
+  for (const row of data) {
+    const jobId = String(row.id);
+    try {
+      const before = await getJob(workspaceId, jobId);
+      if (!before || String(before.status) !== 'queued') continue;
+      await startJob(workspaceId, jobId);
+      const after = await getJob(workspaceId, jobId);
+      const st = after ? String(after.status) : '';
+      // Only count as started when we actually left Queued (preparing / in-flight)
+      if (st && st !== 'queued') {
+        started.push(jobId);
+      } else {
+        logger.warn(
+          { workspaceId, jobId, status: st },
+          'continueQueuedJobs: startJob left job Queued (slot/readiness)'
+        );
+        break; // no more capacity or soft-block
       }
-    })
-  );
+    } catch (err) {
+      // Phase 6.3.4 — never leave Queued with no Why/Blocker after a start throw
+      try {
+        const { recordFailure } = await import('./bee-record-failure.service.js');
+        await recordFailure({
+          workspaceId,
+          jobId,
+          err,
+          source: 'continueQueuedJobs',
+          allowRetry: true,
+        });
+      } catch (recErr) {
+        logger.warn(
+          { recErr, jobId },
+          'continueQueuedJobs: recordFailure failed after startJob throw'
+        );
+      }
+    }
+  }
+  if (started.length || phantomsClosed) {
+    logger.info(
+      { workspaceId, started: started.length, free, live, phantomsClosed, take },
+      'continueQueuedJobs drained'
+    );
+  }
   return started;
 }
 
@@ -1502,7 +1566,7 @@ export async function getStatistics(workspaceId: string) {
   const base = await getStatisticsFromExecutionState(workspaceId);
   const jobs = await listJobs(workspaceId);
   const policy = await getOrCreatePolicy(workspaceId);
-  const maxWorkers = Math.max(1, Number(policy.max_parallel_sessions ?? 4));
+  const maxWorkers = effectiveMaxParallelSessions(policy.max_parallel_sessions);
   let poolStats: {
     headlessConnected: boolean;
     headedConnected: boolean;

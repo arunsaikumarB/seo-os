@@ -29,7 +29,7 @@ import {
   persistSessionStorageState,
 } from './bee-session.js';
 import { enqueueGateWatch } from './bee-watchers.js';
-import { classifyNavigationFailure, withStageTimeout } from './bee-timeouts.js';
+import { classifyNavigationFailure, withStageTimeout, BEE_STAGE_TIMEOUTS } from './bee-timeouts.js';
 
 async function updateJob(jobId: string, patch: Record<string, unknown>) {
   await getSupabaseAdmin()
@@ -978,11 +978,15 @@ async function runBeeExecutionJobInner(
               './bee-timeline.service.js'
             );
             let cap;
+            const navTimeoutMs = BEE_STAGE_TIMEOUTS[action === 'open' ? 'open' : 'navigate'];
+            const navStartedAt = Date.now();
             try {
               cap = await withStageTimeout(action === 'open' ? 'open' : 'navigate', () =>
-                runtime.navigate(url, 20_000)
+                runtime.navigate(url, navTimeoutMs)
               );
             } catch (navErr) {
+              const elapsedMs =
+                (navErr as { elapsedMs?: number })?.elapsedMs ?? Date.now() - navStartedAt;
               // Page never committed → never enter Starting/Running
               await appendNavTimeline({
                 workspaceId,
@@ -990,9 +994,21 @@ async function runBeeExecutionJobInner(
                 opportunityId: job.opportunity_id ? String(job.opportunity_id) : null,
                 event: 'Navigation Failed',
                 stage: action,
-                payload: { url, error: String(navErr) },
+                payload: { url, error: String(navErr), elapsedMs },
               });
-              throw navErr;
+              throw Object.assign(
+                navErr instanceof Error
+                  ? navErr
+                  : new Error(String(navErr)),
+                {
+                  failureCode:
+                    (navErr as { failureCode?: string })?.failureCode ?? 'NAVIGATION_TIMEOUT',
+                  code: (navErr as { code?: string })?.code ?? 'NAVIGATION_TIMEOUT',
+                  url:
+                    (navErr as { url?: string })?.url ?? url,
+                  elapsedMs,
+                }
+              );
             }
             // Truth: Running only after Website Opened is recorded
             await appendNavTimeline({

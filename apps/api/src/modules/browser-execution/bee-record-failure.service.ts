@@ -61,6 +61,23 @@ export async function recordFailure(params: {
     /* default */
   }
 
+  // Phase 6.3.5 — navigation timeouts: Retrying max 2, then Failed with url + elapsedMs
+  const errMeta = err as { url?: string; elapsedMs?: number; failureCode?: string };
+  if (
+    failureCode === 'NAVIGATION_TIMEOUT' ||
+    errMeta.failureCode === 'NAVIGATION_TIMEOUT'
+  ) {
+    maxRetries = Math.min(maxRetries, 2);
+  }
+
+  // Enrich last_error with URL + elapsed when present (navigate may already embed them)
+  const navExtra =
+    (errMeta.url != null || errMeta.elapsedMs != null) &&
+    !/url=|elapsedMs=/i.test(fullMessage)
+      ? ` url=${errMeta.url ?? '?'} elapsedMs=${errMeta.elapsedMs ?? '?'}`
+      : '';
+  const enrichedMessage = `${fullMessage}${navExtra}`.slice(0, 800);
+
   const retryable =
     params.allowRetry !== false && isAutoRetryable(failureCode) && attempt <= maxRetries;
 
@@ -68,7 +85,7 @@ export async function recordFailure(params: {
   const isRuntimeMissing =
     failureCode === 'BROWSER_RUNTIME_MISSING' ||
     /Browser Runtime Missing|executable doesn't exist|could not find browser|playwright.*install chromium/i.test(
-      `${fullMessage} ${stack}`
+      `${enrichedMessage} ${stack}`
     );
 
   let outcome: RecordFailureResult['outcome'] = 'failed';
@@ -106,9 +123,11 @@ export async function recordFailure(params: {
       maxRetries,
       outcome,
     },
-    lastError: fullMessage,
+    lastError: enrichedMessage,
     lastErrorStack: stack.slice(0, 8000),
     lastErrorSource: source,
+    ...(errMeta.url != null ? { lastNavUrl: errMeta.url } : {}),
+    ...(errMeta.elapsedMs != null ? { lastNavElapsedMs: errMeta.elapsedMs } : {}),
   };
 
   await getSupabaseAdmin()
@@ -117,7 +136,7 @@ export async function recordFailure(params: {
       status: nextStatus,
       disposition,
       error_code: failureCode,
-      error_message: fullMessage,
+      error_message: enrichedMessage,
       failure_classification: failureCode,
       retry_count: attempt,
       finished_at: outcome === 'retrying' ? null : now,
@@ -145,7 +164,7 @@ export async function recordFailure(params: {
         typeof meta.execution_pipeline === 'object' && meta.execution_pipeline
           ? (meta.execution_pipeline as Record<string, unknown>)
           : {};
-      const why = `[${source}] ${fullMessage}`.slice(0, 1000);
+      const why = `[${source}] ${enrichedMessage}`.slice(0, 1000);
       const oppUpdate: Record<string, unknown> = {
         last_error: why,
         metadata: {
@@ -189,12 +208,14 @@ export async function recordFailure(params: {
 
   try {
     const { appendLog } = await import('./bee.service.js');
-    await appendLog(workspaceId, jobId, 'error', fullMessage, {
+    await appendLog(workspaceId, jobId, 'error', enrichedMessage, {
       failureCode,
       source,
       attempt,
       outcome,
       stack: stack.slice(0, 2000),
+      url: errMeta.url ?? null,
+      elapsedMs: errMeta.elapsedMs ?? null,
     });
   } catch {
     /* best-effort */
@@ -223,7 +244,7 @@ export async function recordFailure(params: {
           updated_at: new Date().toISOString(),
         })
         .eq('id', jobId);
-      return { outcome: 'failed', failureCode, message: fullMessage, attempt };
+      return { outcome: 'failed', failureCode, message: enrichedMessage, attempt };
     }
   }
 
@@ -232,13 +253,13 @@ export async function recordFailure(params: {
       const { parkJobWaitingInfrastructure } = await import(
         './browser-runtime-manager.service.js'
       );
-      await parkJobWaitingInfrastructure(workspaceId, jobId, fullMessage);
+      await parkJobWaitingInfrastructure(workspaceId, jobId, enrichedMessage);
     } catch {
       /* already stamped */
     }
   }
 
-  return { outcome, failureCode, message: fullMessage, attempt };
+  return { outcome, failureCode, message: enrichedMessage, attempt };
 }
 
 /**

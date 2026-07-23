@@ -10,8 +10,8 @@ export const BEE_RELIABILITY = {
   get LEASE_TTL_MS() {
     return this.HEARTBEAT_MS * this.LEASE_GRACE_MULTIPLIER;
   },
-  /** Max concurrent browser sessions / workers (default 4) */
-  MAX_BROWSER_SESSIONS: Number(process.env.BEE_MAX_SESSIONS ?? 4) || 4,
+  /** Max concurrent browser sessions / workers (default 2 — small containers contend at 4) */
+  MAX_BROWSER_SESSIONS: Number(process.env.BEE_MAX_SESSIONS ?? 2) || 2,
   /** Recycle Chromium after N jobs to prevent memory creep */
   BROWSER_RECYCLE_AFTER_JOBS: Number(process.env.BEE_BROWSER_RECYCLE_JOBS ?? 25),
   /** Recycle Chromium after M minutes */
@@ -22,10 +22,10 @@ export const BEE_RELIABILITY = {
   JOB_CEILING_MS: Number(process.env.BEE_JOB_CEILING_MS ?? 5 * 60_000),
   /** Lease sweep interval */
   LEASE_SWEEP_MS: Number(process.env.BEE_LEASE_SWEEP_MS ?? 8_000),
-  /** Stage timeouts (ms) — Phase 4 defaults */
+  /** Stage timeouts (ms) — Phase 6.3.5 navigation uses 90s + domcontentloaded */
   STAGE_TIMEOUTS: {
-    open: Number(process.env.BEE_TIMEOUT_OPEN_MS ?? 30_000),
-    navigate: Number(process.env.BEE_TIMEOUT_OPEN_MS ?? 30_000),
+    open: Number(process.env.BEE_TIMEOUT_OPEN_MS ?? 90_000),
+    navigate: Number(process.env.BEE_TIMEOUT_NAVIGATE_MS ?? process.env.BEE_TIMEOUT_OPEN_MS ?? 90_000),
     launch: Number(process.env.BEE_TIMEOUT_LAUNCH_MS ?? 30_000),
     find_form: Number(process.env.BEE_TIMEOUT_FORM_MS ?? 30_000),
     fill: Number(process.env.BEE_TIMEOUT_FILL_MS ?? 30_000),

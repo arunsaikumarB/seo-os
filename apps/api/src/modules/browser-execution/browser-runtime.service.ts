@@ -223,25 +223,40 @@ export class BrowserExecutionService {
     return this.context.storageState();
   }
 
-  async navigate(url: string, timeoutMs = 20_000): Promise<PageCapture> {
+  async navigate(url: string, timeoutMs = 90_000): Promise<PageCapture> {
     if (!this.page) throw new Error('No page — call launch() first');
+    const startedAt = Date.now();
     try {
+      // Phase 6.3.5 — never networkidle (hangs on analytics/long-poll); settle after DOM ready
       await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+      await this.page.waitForLoadState('load', { timeout: 5_000 }).catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 750));
     } catch (err) {
+      const elapsedMs = Date.now() - startedAt;
       const { classifyNavigationFailure } = await import('./bee-timeouts.js');
       const c = classifyNavigationFailure(err);
-      throw Object.assign(new Error(c.message), {
-        code: c.code,
-        failureCode: c.code,
-        temporary: c.retryable,
-        cause: err,
-      });
+      throw Object.assign(
+        new Error(`${c.message} — url=${url} elapsedMs=${elapsedMs}`),
+        {
+          code: c.code,
+          failureCode: c.code,
+          temporary: c.retryable,
+          url,
+          elapsedMs,
+          cause: err,
+        }
+      );
     }
     return this.capture('navigated');
   }
 
   hasLivePage(): boolean {
     return Boolean(this.page && !this.page.isClosed());
+  }
+
+  /** True once Chromium context/page was acquired (not an empty Map stub). */
+  isAllocated(): boolean {
+    return Boolean(this.browser?.isConnected() || this.hasLivePage());
   }
 
   async capture(_label: string): Promise<PageCapture> {
@@ -667,8 +682,37 @@ export function getBrowserPoolStats(): {
   return {
     headlessConnected: Boolean(browserPool.get('headless')?.isConnected()),
     headedConnected: Boolean(browserPool.get('headed')?.isConnected()),
-    activeSessions: sessionRuntimes.size,
+    activeSessions: countAllocatedBrowserSlots(),
   };
+}
+
+/** Live Playwright contexts (excludes empty getSessionRuntime stubs). */
+export function countAllocatedBrowserSlots(): number {
+  let n = 0;
+  for (const svc of sessionRuntimes.values()) {
+    if (svc.isAllocated()) n++;
+  }
+  return n;
+}
+
+export function listAllocatedSessionIds(): string[] {
+  const ids: string[] = [];
+  for (const [id, svc] of sessionRuntimes) {
+    if (svc.isAllocated()) ids.push(id);
+  }
+  return ids;
+}
+
+/** Drop Map stubs that never launched (would inflate capacity / leak). */
+export function pruneEmptySessionRuntimes(): number {
+  let pruned = 0;
+  for (const [id, svc] of sessionRuntimes) {
+    if (!svc.isAllocated()) {
+      sessionRuntimes.delete(id);
+      pruned++;
+    }
+  }
+  return pruned;
 }
 
 export async function isPlaywrightAvailable(): Promise<boolean> {

@@ -255,7 +255,10 @@ export async function getExecutionState(workspaceId: string): Promise<ExecutionS
 export async function getStatisticsFromExecutionState(workspaceId: string) {
   const state = await getExecutionState(workspaceId);
   const policy = await getOrCreatePolicy(workspaceId);
-  const maxWorkers = Math.max(1, Number(policy.max_parallel_sessions ?? 4));
+  const maxWorkers = Math.max(1, Number(policy.max_parallel_sessions ?? 2));
+  // Cap to container-safe concurrency (Phase 6.3.5)
+  const { BEE_RELIABILITY } = await import('./bee-config.js');
+  const cappedWorkers = Math.min(maxWorkers, BEE_RELIABILITY.MAX_BROWSER_SESSIONS);
   const c = state.counts;
   const completed =
     c.Submitted + c.Completed + c.Verified + c.Approved;
@@ -332,9 +335,9 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
       completed + c.Failed > 0
         ? Math.round((completed / (completed + c.Failed)) * 1000) / 10
         : null,
-    maxParallelSessions: maxWorkers,
-    activeWorkerCount: Math.min(maxWorkers, c.Running + c.Starting),
-    workerUsage: `${Math.min(maxWorkers, c.Running + c.Starting)}/${maxWorkers}`,
+    maxParallelSessions: cappedWorkers,
+    activeWorkerCount: Math.min(cappedWorkers, c.Running + c.Starting),
+    workerUsage: `${Math.min(cappedWorkers, c.Running + c.Starting)}/${cappedWorkers}`,
     etaSeconds: 0,
     estimatedApprovalTime: '7–14 days',
     estimatedVerificationTime: '24 hours',

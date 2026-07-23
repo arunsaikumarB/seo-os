@@ -1,6 +1,7 @@
 /**
  * Phase 6.3.2 — Submission / BEE consumer supervision (mirror Phase 5.7 content-gen).
  * Idle workers + Queued/stale in-flight must self-heal: lease → run → terminal.
+ * Phase 6.3.5 — Queued>0 && Idle>0 && Free>0 for two consecutive ticks is a bug → force drain.
  */
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { logger } from '../../lib/logger.js';
@@ -26,6 +27,9 @@ const IN_FLIGHT_STATUSES = [
 let supervisionTimer: NodeJS.Timeout | null = null;
 let lastDrainAt = 0;
 
+/** workspaceId → consecutive ticks with Queued>0 && Idle>0 && Free>0 */
+const capacityStallStreak = new Map<string, number>();
+
 function admin() {
   return getSupabaseAdmin();
 }
@@ -45,6 +49,65 @@ async function closeSession(sessionId: string | null | undefined) {
 }
 
 /**
+ * Assert: Queued > 0 && Idle > 0 && Free > 0 for two consecutive intervals is a bug.
+ * Self-heal: close orphan sessions, force continueQueuedJobs, enqueue bee_queue.
+ */
+async function assertCapacityDrainOrHeal(workspaceId: string): Promise<{
+  stalled: boolean;
+  healed: boolean;
+  started: number;
+  queued: number;
+  idle: number;
+  free: number;
+}> {
+  const { getExecutionAudit } = await import('./bee-reconcile.service.js');
+  const audit = await getExecutionAudit(workspaceId);
+  const queued = Number(audit.queue?.queued ?? 0);
+  const idle = Number(audit.workers?.idle ?? 0);
+  const free = Number(audit.browsers?.free ?? 0);
+
+  if (queued > 0 && idle > 0 && free > 0) {
+    const streak = (capacityStallStreak.get(workspaceId) ?? 0) + 1;
+    capacityStallStreak.set(workspaceId, streak);
+    if (streak >= 2) {
+      logger.error(
+        { workspaceId, queued, idle, free, streak },
+        'ASSERT BUG: Queued>0 && Idle>0 && Free>0 for 2 intervals — self-healing drain'
+      );
+      const { closeOrphanDbBrowserSessions } = await import(
+        './browser-runtime-manager.service.js'
+      );
+      await closeOrphanDbBrowserSessions(
+        'capacity stall self-heal (Queued+Idle+Free)',
+        workspaceId
+      );
+      const { continueQueuedJobs } = await import('./bee.service.js');
+      const startedIds = await continueQueuedJobs(workspaceId, { limit: Math.max(free, 1) });
+      await enqueueJob(
+        QUEUES.LOW,
+        'bee_queue',
+        { type: 'bee_queue', workspaceId },
+        { singletonKey: `bee-queue-drain-${workspaceId}`, startAfter: 0 }
+      );
+      // Reset streak after heal attempt so we don't spam; re-arm if still stalled next ticks
+      capacityStallStreak.set(workspaceId, 0);
+      return {
+        stalled: true,
+        healed: true,
+        started: startedIds.length,
+        queued,
+        idle,
+        free,
+      };
+    }
+    return { stalled: true, healed: false, started: 0, queued, idle, free };
+  }
+
+  capacityStallStreak.set(workspaceId, 0);
+  return { stalled: false, healed: false, started: 0, queued, idle, free };
+}
+
+/**
  * Requeue stale in-flight jobs (no lease heartbeat / frozen at Opening Website),
  * free ghost sessions, and drain Queued work for every workspace that needs it.
  */
@@ -54,6 +117,7 @@ export async function resumeInterruptedSubmissions(workspaceId?: string): Promis
   queuedFound: number;
   workspacesDrained: number;
   started: number;
+  capacityHeals: number;
 }> {
   const now = Date.now();
   const staleBefore = new Date(now - STALE_IN_FLIGHT_MS).toISOString();
@@ -61,6 +125,7 @@ export async function resumeInterruptedSubmissions(workspaceId?: string): Promis
   let ghostSessionsClosed = 0;
   let queuedFound = 0;
   let started = 0;
+  let capacityHeals = 0;
   const workspaces = new Set<string>();
 
   // 1) Stale in-flight without a live lease (never leased, or lease already cleared)
@@ -151,7 +216,7 @@ export async function resumeInterruptedSubmissions(workspaceId?: string): Promis
     queuedFound++;
   }
 
-  // 4) Drain each workspace (startJob → bee_execute)
+  // 4) Drain each workspace (startJob → bee_execute) using live-capacity slots
   const { continueQueuedJobs } = await import('./bee.service.js');
   for (const ws of workspaces) {
     try {
@@ -163,13 +228,25 @@ export async function resumeInterruptedSubmissions(workspaceId?: string): Promis
         { type: 'bee_queue', workspaceId: ws },
         { singletonKey: `bee-queue-drain-${ws}`, startAfter: 1 }
       );
+
+      // Phase 6.3.5 — capacity stall assert (two consecutive Idle+Free+Queued ticks)
+      const heal = await assertCapacityDrainOrHeal(ws);
+      if (heal.healed) {
+        capacityHeals++;
+        started += heal.started;
+      } else if (heal.stalled && ids.length === 0) {
+        logger.warn(
+          { workspaceId: ws, ...heal },
+          'submission: Queued+Idle+Free observed — arming stall streak'
+        );
+      }
     } catch (err) {
       logger.warn({ err, workspaceId: ws }, 'submission supervision drain failed');
     }
   }
 
   lastDrainAt = Date.now();
-  if (requeuedStale > 0 || ghostSessionsClosed > 0 || started > 0) {
+  if (requeuedStale > 0 || ghostSessionsClosed > 0 || started > 0 || capacityHeals > 0) {
     logger.info(
       {
         requeuedStale,
@@ -177,6 +254,7 @@ export async function resumeInterruptedSubmissions(workspaceId?: string): Promis
         queuedFound,
         workspacesDrained: workspaces.size,
         started,
+        capacityHeals,
         staleMs: STALE_IN_FLIGHT_MS,
       },
       'submission supervision recovery finished'
@@ -189,6 +267,7 @@ export async function resumeInterruptedSubmissions(workspaceId?: string): Promis
     queuedFound,
     workspacesDrained: workspaces.size,
     started,
+    capacityHeals,
   };
 }
 
@@ -248,6 +327,7 @@ export function startSubmissionSupervisionLoop(): void {
       intervalMs: SUPERVISION_INTERVAL_MS,
       staleMs: STALE_IN_FLIGHT_MS,
       leaseSweepMs: BEE_RELIABILITY.LEASE_SWEEP_MS,
+      maxSessions: BEE_RELIABILITY.MAX_BROWSER_SESSIONS,
     },
     'Submission consumer supervision started'
   );
@@ -258,5 +338,6 @@ export function getSubmissionSupervisionMeta() {
     intervalMs: SUPERVISION_INTERVAL_MS,
     staleMs: STALE_IN_FLIGHT_MS,
     lastDrainAt,
+    capacityStallStreak: Object.fromEntries(capacityStallStreak),
   };
 }

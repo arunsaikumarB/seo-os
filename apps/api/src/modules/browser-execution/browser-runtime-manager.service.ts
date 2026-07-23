@@ -454,15 +454,54 @@ export async function ensureBrowserRuntimeReady(): Promise<{
  * Prevents Allocated>0 / Contexts=0 phantom capacity.
  */
 export async function closePhantomBrowserSessions(reason: string): Promise<number> {
-  const { data: sessions } = await getSupabaseAdmin()
+  return closeOrphanDbBrowserSessions(reason);
+}
+
+/**
+ * Phase 6.3.5 — Close running DB sessions with no owning active job and no live context.
+ * Never closes sessions still referenced by preparing / in-flight / waiting-human jobs.
+ */
+export async function closeOrphanDbBrowserSessions(
+  reason: string,
+  workspaceId?: string
+): Promise<number> {
+  const {
+    listAllocatedSessionIds,
+    pruneEmptySessionRuntimes,
+    disposeSessionRuntime,
+  } = await import('./browser-runtime.service.js');
+  pruneEmptySessionRuntimes();
+  const live = new Set(listAllocatedSessionIds());
+
+  let q = getSupabaseAdmin()
     .from('browser_sessions')
-    .select('id')
+    .select('id, workspace_id')
     .eq('status', 'running')
     .is('deleted_at', null)
     .limit(2000);
+  if (workspaceId) q = q.eq('workspace_id', workspaceId);
+  const { data: sessions } = await q;
+
   let closed = 0;
   const now = new Date().toISOString();
   for (const s of sessions ?? []) {
+    const id = String(s.id);
+    if (live.has(id)) continue;
+
+    let ownerQ = getSupabaseAdmin()
+      .from('execution_jobs')
+      .select('id')
+      .eq('session_id', id)
+      .is('deleted_at', null)
+      .not(
+        'status',
+        'in',
+        '(completed,failed,cancelled,skipped,deleted,ignored,submitted,verified,queued,retry_scheduled)'
+      );
+    if (workspaceId) ownerQ = ownerQ.eq('workspace_id', workspaceId);
+    const { data: owner } = await ownerQ.maybeSingle();
+    if (owner) continue; // preparing / running / waiting_human — keep slot
+
     await getSupabaseAdmin()
       .from('browser_sessions')
       .update({
@@ -472,11 +511,12 @@ export async function closePhantomBrowserSessions(reason: string): Promise<numbe
         last_error: reason.slice(0, 500),
         updated_at: now,
       })
-      .eq('id', s.id);
+      .eq('id', id);
+    await disposeSessionRuntime(id).catch(() => undefined);
     closed++;
   }
   if (closed > 0) {
-    logger.warn({ closed, reason }, 'Closed phantom browser_sessions (no live contexts)');
+    logger.warn({ closed, reason, workspaceId }, 'Closed orphan browser_sessions (no live context)');
   }
   return closed;
 }
