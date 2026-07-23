@@ -19,6 +19,7 @@ import {
   evaluateFingerprintStatus,
   extractFormFieldFacts,
   findSimilarPackagePairs,
+  fieldFactSnapshot,
   normalizeSiteDomain,
   recipeVersionsCurrent,
   type AssistedPackagePayload,
@@ -360,6 +361,19 @@ async function prepareOnePackage(
   const html = await fetchHtml(entryUrl);
   const liveFacts = html ? extractFormFieldFacts(html) : [];
   const formFound = liveFacts.length > 0;
+
+  // Log raw facts as received by inferFieldRole (compare to unit-test inputs)
+  if (liveFacts.length || opts.forceReread) {
+    logger.info(
+      {
+        domain,
+        entryUrl,
+        htmlBytes: html?.length ?? 0,
+        facts: liveFacts.map((f) => fieldFactSnapshot(f)),
+      },
+      'assisted-manual field facts before classify'
+    );
+  }
 
   let recipe: SiteRecipe;
   let rereadFailed = false;

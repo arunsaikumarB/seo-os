@@ -10,9 +10,11 @@ import {
   computeFormFingerprint,
   evaluateFingerprintStatus,
   extractFormFieldFacts,
+  fieldFactSnapshot,
   findSimilarPackagePairs,
   fitValueToLimit,
   inferFieldRole,
+  leadingAttrToken,
   recipeVersionsCurrent,
   textSimilarity,
 } from './assisted-manual.js';
@@ -267,6 +269,108 @@ describe('Phase 7 Assisted Manual', () => {
         selector: 'textarea',
       }).role
     ).toBe('long_desc');
+  });
+
+  it('explicit label outranks name/id even when attrs look like url', () => {
+    const titleOverUrlName = inferFieldRole({
+      label: 'Title (Optional) Leave blank to auto-fetch from website',
+      name: 'url',
+      id: 'website_url',
+      placeholder: 'https://example.com',
+      ariaLabel: null,
+      type: 'url',
+      required: false,
+      maxlength: null,
+      options: [],
+      surroundingText: '',
+      accept: null,
+      sizeHint: null,
+      selector: '#website_url',
+    });
+    expect(titleOverUrlName.role).toBe('title');
+    expect(titleOverUrlName.source).toBe('dom_label');
+
+    const descOverUrlName = inferFieldRole({
+      label: 'Description (Optional) Leave blank to auto-fetch from website',
+      name: 'url',
+      id: 'url',
+      placeholder: null,
+      ariaLabel: null,
+      type: 'textarea',
+      required: false,
+      maxlength: 400,
+      options: [],
+      surroundingText: '',
+      accept: null,
+      sizeHint: null,
+      selector: '#url',
+    });
+    expect(descOverUrlName.role).toBe('long_desc');
+  });
+
+  it('attribute names get Optional-stripping / leading-token when no label', () => {
+    expect(leadingAttrToken('listing_title')).toBe('listing');
+    expect(leadingAttrToken('website_url')).toBe('website');
+    expect(
+      inferFieldRole({
+        label: null,
+        name: 'title',
+        id: 'title',
+        placeholder: null,
+        ariaLabel: null,
+        type: 'text',
+        required: false,
+        maxlength: null,
+        options: [],
+        surroundingText: '',
+        accept: null,
+        sizeHint: null,
+        selector: '#title',
+      }).role
+    ).toBe('title');
+    expect(
+      inferFieldRole({
+        label: null,
+        name: 'website_url',
+        id: null,
+        placeholder: null,
+        ariaLabel: null,
+        type: 'text',
+        required: false,
+        maxlength: null,
+        options: [],
+        surroundingText: '',
+        accept: null,
+        sizeHint: null,
+        selector: '[name=website_url]',
+      }).role
+    ).toBe('url');
+  });
+
+  it('fieldFactSnapshot matches unit-test viesearch shape', () => {
+    const snap = fieldFactSnapshot({
+      label: 'Title (Optional) Leave blank to auto-fetch from website',
+      name: 'title',
+      id: 'title',
+      placeholder: 'Custom title for your listing',
+      ariaLabel: null,
+      type: 'text',
+      required: false,
+      maxlength: null,
+      options: [],
+      surroundingText: '',
+      accept: null,
+      sizeHint: null,
+      selector: '#title',
+    });
+    expect(snap).toMatchObject({
+      name: 'title',
+      id: 'title',
+      type: 'text',
+      labelText: 'Title (Optional) Leave blank to auto-fetch from website',
+      leadingFromLabel: 'title',
+      role: 'title',
+    });
   });
 
   it('reclassifies when recipe reader/classifier version is stale', () => {

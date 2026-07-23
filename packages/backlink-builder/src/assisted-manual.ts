@@ -19,9 +19,9 @@ export const ASSISTED_FORM_READER_VERSION = 2;
 /**
  * Bump when field-role / confidence rules change.
  * Mismatched recipes re-classify even when form fingerprint is unchanged.
- * v4: force re-stamp after re-read wiring fix (known-bad / clear-corrections).
+ * v5: explicit <label> outranks name/id; attribute tokens get Optional-stripping.
  */
-export const ASSISTED_FIELD_CLASSIFIER_VERSION = 4;
+export const ASSISTED_FIELD_CLASSIFIER_VERSION = 5;
 
 export type FieldConfidence = 'high' | 'medium' | 'low';
 export type FieldSource =
@@ -247,13 +247,21 @@ function findLabel(html: string, id: string | null, name: string | null): string
     if (m) return m[1].replace(/<[^>]+>/g, '').trim() || null;
   }
   if (name) {
-    const re = new RegExp(
-      `<label[^>]*>[\\s\\S]*?(?:name=["']${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["'])[\\s\\S]*?<\\/label>`,
+    // Prefer a label that wraps an input with this name (not the first label in the doc)
+    const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const wrapRe = new RegExp(
+      `<label[^>]*>([\\s\\S]*?<input\\b[^>]*\\bname=["']${esc}["'][\\s\\S]*?)<\\/label>`,
       'i'
     );
-    if (re.test(html)) {
-      const wrap = /<label[^>]*>([\s\S]*?)<\/label>/i.exec(html);
-      if (wrap) return wrap[1].replace(/<[^>]+>/g, '').trim() || null;
+    const wrap = wrapRe.exec(html);
+    if (wrap) {
+      // Text nodes only — strip the nested input tag content
+      const text = wrap[1]
+        .replace(/<input\b[^>]*>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (text) return text;
     }
   }
   return null;
@@ -417,6 +425,47 @@ export function leadingLabelToken(raw: string | null | undefined): string {
   return word.toLowerCase().replace(/[^a-z0-9_-]/gi, '');
 }
 
+/**
+ * Leading token from name/id attributes — same Optional / helper stripping as labels.
+ * `website_url` / `listing_title` → spaced then leading token.
+ */
+export function leadingAttrToken(raw: string | null | undefined): string {
+  if (!raw) return '';
+  return leadingLabelToken(String(raw).replace(/[_\-]+/g, ' '));
+}
+
+/** Snapshot used in production logs / debugging — matches unit-test inputs. */
+export function fieldFactSnapshot(facts: FormFieldFacts): {
+  name: string | null;
+  id: string | null;
+  type: string;
+  placeholder: string | null;
+  ariaLabel: string | null;
+  labelText: string | null;
+  maxlength: number | null;
+  leadingFromLabel: string;
+  leadingFromAttr: string;
+  role: FieldRole;
+  source: FieldSource;
+  confidence: FieldConfidence;
+} {
+  const inferred = inferFieldRole(facts);
+  return {
+    name: facts.name,
+    id: facts.id,
+    type: facts.type,
+    placeholder: facts.placeholder,
+    ariaLabel: facts.ariaLabel,
+    labelText: facts.label,
+    maxlength: facts.maxlength,
+    leadingFromLabel: leadingLabelToken(facts.label || facts.ariaLabel),
+    leadingFromAttr: leadingAttrToken(facts.name) || leadingAttrToken(facts.id),
+    role: inferred.role,
+    source: inferred.source,
+    confidence: inferred.confidence,
+  };
+}
+
 const LONG_DESC_MAXLENGTH = 160;
 
 function isLongTextControl(facts: FormFieldFacts): boolean {
@@ -523,10 +572,22 @@ export function inferFieldRole(facts: FormFieldFacts): {
     return { role: 'other', confidence: 'low', source: 'name_guess' };
   }
 
-  const hasExplicitLabel = Boolean(facts.label || facts.ariaLabel);
-  const leading = leadingLabelToken(facts.label || facts.ariaLabel);
-  const primary = primaryLabelText(facts.label || facts.ariaLabel);
+  const explicitLabel = (facts.label || facts.ariaLabel || '').trim();
+  const hasExplicitLabel = Boolean(explicitLabel);
+  // Explicit <label>/aria always outranks name/id for the leading token
+  const leadingFromLabel = leadingLabelToken(explicitLabel);
+  const leadingFromAttr =
+    leadingAttrToken(facts.name) || leadingAttrToken(facts.id);
+  const leading = leadingFromLabel || (hasExplicitLabel ? '' : leadingFromAttr);
+  const primary = primaryLabelText(explicitLabel);
   const text = evidenceText(facts);
+  const leadSource: FieldSource = leadingFromLabel
+    ? 'dom_label'
+    : leadingFromAttr
+      ? 'name_guess'
+      : hasExplicitLabel
+        ? 'dom_label'
+        : 'name_guess';
 
   if (facts.type === 'file') {
     return {
@@ -553,7 +614,7 @@ export function inferFieldRole(facts: FormFieldFacts): {
       return {
         role: descriptionRoleFromControl(facts),
         confidence: 'high',
-        source: 'dom_label',
+        source: leadSource,
       };
     }
     if (fromLead === 'short_desc' || fromLead === 'long_desc' || fromLead === 'title') {
@@ -562,17 +623,17 @@ export function inferFieldRole(facts: FormFieldFacts): {
         return {
           role: descriptionRoleFromControl(facts),
           confidence: 'high',
-          source: 'dom_label',
+          source: leadSource,
         };
       }
       return {
         role: fromLead === 'title' ? fromLead : descriptionRoleFromControl(facts),
         confidence: 'high',
-        source: 'dom_label',
+        source: leadSource,
       };
     }
     if (fromLead) {
-      return { role: fromLead, confidence: 'high', source: 'dom_label' };
+      return { role: fromLead, confidence: 'high', source: leadSource };
     }
     return {
       role: descriptionRoleFromControl(facts),
@@ -582,24 +643,24 @@ export function inferFieldRole(facts: FormFieldFacts): {
   }
 
   // Leading token wins (Title…website helper → title, not url)
+  // Explicit label token outranks type=url and name/id
   const fromLead = roleFromLeadingToken(leading, facts);
   if (fromLead) {
-    // Never keep url if control is long text (belt-and-suspenders)
     if (fromLead === 'url' && isLongTextControl(facts)) {
       return {
         role: descriptionRoleFromControl(facts),
         confidence: 'high',
-        source: 'dom_label',
+        source: leadSource,
       };
     }
     return {
       role: fromLead,
-      confidence: 'high',
-      source: 'dom_label',
+      confidence: leadingFromLabel ? 'high' : 'medium',
+      source: leadSource,
     };
   }
 
-  // type=url → url only when leading token is empty/unknown or already url-ish
+  // type=url → url only when no conflicting explicit label token
   if (facts.type === 'url') {
     if (isLongTextControl(facts)) {
       return {
@@ -607,6 +668,15 @@ export function inferFieldRole(facts: FormFieldFacts): {
         confidence: 'medium',
         source: 'dom_label',
       };
+    }
+    // Labeled "Title" / "Description" must never become url just because type=url
+    if (hasExplicitLabel && primary) {
+      for (const hint of ROLE_HINTS) {
+        if (hint.role === 'url') continue;
+        if (hint.patterns.some((p) => p.test(primary))) {
+          return { role: hint.role, confidence: 'high', source: 'dom_label' };
+        }
+      }
     }
     return {
       role: 'url',
@@ -626,12 +696,16 @@ export function inferFieldRole(facts: FormFieldFacts): {
     }
   }
 
-  // Fallback: match ROLE_HINTS against cleaned primary label only (not helper text)
-  const matchHaystack = primary || [facts.placeholder, facts.name, facts.id].filter(Boolean).join(' ');
+  // Fallback: cleaned primary label only when labeled; else placeholder / stripped attrs
+  const matchHaystack = hasExplicitLabel
+    ? primary || ''
+    : primary ||
+      primaryLabelText(facts.placeholder) ||
+      [leadingFromAttr, facts.placeholder].filter(Boolean).join(' ');
   for (const hint of ROLE_HINTS) {
     // url only via leading token or type=url — never from incidental "website" in helpers
     if (hint.role === 'url') continue;
-    if (hint.patterns.some((p) => p.test(matchHaystack))) {
+    if (matchHaystack && hint.patterns.some((p) => p.test(matchHaystack))) {
       if (hasExplicitLabel && primary) {
         return { role: hint.role, confidence: 'medium', source: 'dom_label' };
       }
@@ -642,10 +716,12 @@ export function inferFieldRole(facts: FormFieldFacts): {
     }
   }
 
-  // name/id alone may still indicate url (website_url) when no conflicting lead token
+  // name/id alone may still indicate url — never when an explicit label exists
   if (
+    !hasExplicitLabel &&
     !leading &&
-    (/^(website|url|link|homepage)(_|$)/i.test(facts.name ?? '') ||
+    (roleFromLeadingToken(leadingFromAttr, facts) === 'url' ||
+      /^(website|url|link|homepage)(_|$)/i.test(facts.name ?? '') ||
       /^(website|url|link|homepage)(_|$)/i.test(facts.id ?? ''))
   ) {
     return { role: 'url', confidence: 'low', source: 'name_guess' };
