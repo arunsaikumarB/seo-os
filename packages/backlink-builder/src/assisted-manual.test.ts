@@ -89,6 +89,75 @@ describe('Phase 7 Assisted Manual', () => {
     expect(low.confidence).toBe('low');
   });
 
+  it('filters search/nav inputs out of Form Reader', () => {
+    const html = `
+<form>
+  <label for="site">Website URL</label>
+  <input id="site" name="website" type="url" required />
+  <input type="search" name="q" placeholder="Search this site" />
+  <input name="search" id="nav-search" aria-label="Search" type="text" />
+</form>`;
+    const facts = extractFormFieldFacts(html);
+    expect(facts.some((f) => f.type === 'search' || f.name === 'q' || f.name === 'search')).toBe(
+      false
+    );
+    expect(facts.find((f) => f.id === 'site')).toBeTruthy();
+  });
+
+  it('demotes empty mapped values to low confidence', () => {
+    const recipe = buildSiteRecipe({
+      domain: 'viesearch.com',
+      entryUrl: 'https://viesearch.com/submit',
+      html: `
+<form>
+  <label for="url">Website URL</label>
+  <input id="url" name="website_url" type="url" required />
+  <label for="title">Title</label>
+  <input id="title" name="title" type="text" required />
+</form>`,
+    });
+    const empty = buildAssistedPackage({
+      recipe,
+      content: { url: '', title: '', businessName: '' },
+    });
+    for (const f of empty.fields.filter((x) => x.role === 'url' || x.role === 'title')) {
+      expect(f.confidence).toBe('low');
+      expect(f.value).toBe('');
+    }
+    const filled = buildAssistedPackage({
+      recipe,
+      content: {
+        url: 'https://go.chefgaa.com',
+        title: 'Chef Gaa',
+        businessName: 'Chef Gaa',
+        shortDescription: 'Restaurant',
+      },
+    });
+    const url = filled.fields.find((f) => f.role === 'url');
+    expect(url?.value).toBe('https://go.chefgaa.com');
+    expect(url?.confidence).toBe('high');
+  });
+
+  it('does not classify Search this site as url', () => {
+    const role = inferFieldRole({
+      label: 'Search this site',
+      name: 'q',
+      id: 'search',
+      placeholder: 'Search…',
+      ariaLabel: null,
+      type: 'text',
+      required: false,
+      maxlength: null,
+      options: [],
+      surroundingText: 'nav search',
+      accept: null,
+      sizeHint: null,
+      selector: '#search',
+    });
+    expect(role.role).toBe('other');
+    expect(role.confidence).toBe('low');
+  });
+
   it('routes multi-step to Needs a person (AT4)', () => {
     const recipe = buildSiteRecipe({
       domain: 'wizard.example',

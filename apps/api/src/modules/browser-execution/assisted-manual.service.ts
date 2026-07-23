@@ -23,6 +23,7 @@ import {
 import { AppError } from '@seo-os/shared';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { logger } from '../../lib/logger.js';
+import { getBrandContextForBee } from './bee-assets.js';
 import {
   getManualSubmissionsBoard,
   loadLaneEvidenceForWorkspace,
@@ -96,7 +97,7 @@ async function upsertRecipeOnProfile(
   });
 }
 
-async function loadContentForOpportunity(opportunityId: string) {
+async function loadContentForOpportunity(workspaceId: string, opportunityId: string) {
   const { data: pack } = await admin()
     .from('content_packs')
     .select('pack')
@@ -106,21 +107,21 @@ async function loadContentForOpportunity(opportunityId: string) {
     .maybeSingle();
 
   const p = (pack?.pack as Record<string, unknown> | null) ?? {};
-  const { data: opp } = await admin()
-    .from('opportunities')
-    .select('title, domain, url, website_name, metadata')
-    .eq('id', opportunityId)
-    .maybeSingle();
-
-  const meta = (opp?.metadata as Record<string, unknown> | null) ?? {};
-  const enrichment = (meta.importEnrichment as Record<string, unknown> | null) ?? {};
+  const brand = await getBrandContextForBee(workspaceId);
+  const projectDomain = String(brand.projectDomain ?? '')
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/+$/, '')
+    .trim();
 
   const longDesc = String(
-    p.longDescription ?? p.body ?? p.businessDescription ?? enrichment.description ?? ''
+    p.longDescription ?? p.body ?? p.businessDescription ?? ''
   );
   const shortDesc = String(p.shortDescription ?? p.excerpt ?? longDesc.slice(0, 160));
   const businessName = String(
-    p.businessName ?? opp?.website_name ?? opp?.title ?? opp?.domain ?? ''
+    p.businessName ?? brand.brandName ?? projectDomain ?? ''
+  );
+  const title = String(
+    p.seoTitle ?? p.headline ?? p.businessName ?? brand.brandName ?? ''
   );
   const images = Array.isArray(p.suggestedImages) ? p.suggestedImages : [];
   const imageFileName =
@@ -129,19 +130,61 @@ async function loadContentForOpportunity(opportunityId: string) {
       : `${(businessName || 'listing').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)}-listing.jpg`;
 
   return {
-    title: String(p.seoTitle ?? p.headline ?? opp?.title ?? ''),
+    title,
     shortDescription: shortDesc,
     longDescription: longDesc,
     businessName,
-    url: String(p.website ?? opp?.url ?? ''),
+    url: resolveProjectListingUrl(p, projectDomain),
     email: String(p.email ?? ''),
     phone: String(p.phone ?? ''),
     address: String(p.address ?? ''),
     categoryHints: Array.isArray(p.categorySuggestions)
       ? (p.categorySuggestions as string[])
-      : [businessName, String(p.backlinkType ?? '')],
+      : [businessName, String(p.backlinkType ?? ''), brand.industry ?? ''].filter(Boolean),
     imageFileName,
   };
+}
+
+/** Prefer content-pack / project domain — never the directory submit URL. */
+function resolveProjectListingUrl(
+  pack: Record<string, unknown>,
+  projectDomain: string
+): string {
+  const social = (pack.socialLinks as Record<string, unknown> | null) ?? {};
+  const schema = (pack.schemaJsonLd as Record<string, unknown> | null) ?? {};
+  const firstLink = (arr: unknown): string | null => {
+    if (!Array.isArray(arr) || !arr.length) return null;
+    const row = arr[0];
+    if (typeof row === 'string' && row.trim()) return row.trim();
+    if (row && typeof row === 'object' && 'url' in row) {
+      const u = String((row as { url?: unknown }).url ?? '').trim();
+      return u || null;
+    }
+    return null;
+  };
+
+  const candidates = [
+    pack.website,
+    social.website,
+    social.url,
+    schema.url,
+    firstLink(pack.internalLinks),
+    firstLink(pack.suggestedLinks),
+  ];
+
+  for (const c of candidates) {
+    if (typeof c !== 'string' || !c.trim()) continue;
+    const url = c.trim();
+    // Reject obvious directory submit paths mistaken as brand URL
+    if (/\/submit(?:\/|$|\?)/i.test(url)) continue;
+    if (!/^https?:\/\//i.test(url) && projectDomain && url.includes(projectDomain)) {
+      return `https://${url.replace(/^\/+/, '')}`;
+    }
+    if (/^https?:\/\//i.test(url)) return url;
+  }
+
+  if (projectDomain) return `https://${projectDomain}`;
+  return '';
 }
 
 /** Prepare Assisted Manual packages for every content-ready site (not Manual-only). */
@@ -294,7 +337,7 @@ async function prepareOnePackage(
 
   await upsertRecipeOnProfile(workspaceId, domain, recipe);
 
-  const content = await loadContentForOpportunity(opportunityId);
+  const content = await loadContentForOpportunity(workspaceId, opportunityId);
   const preparedAt = new Date().toISOString();
   const expiresAt = new Date(
     Date.now() + ASSISTED_PACKAGE_TTL_DAYS * 24 * 60 * 60 * 1000
@@ -631,7 +674,7 @@ export async function correctAssistedField(
   await upsertRecipeOnProfile(workspaceId, domain, recipe);
 
   // Re-build package values with corrected recipe (no re-fetch required)
-  const content = await loadContentForOpportunity(String(row.opportunity_id));
+  const content = await loadContentForOpportunity(workspaceId, String(row.opportunity_id));
   const payload = buildAssistedPackage({
     recipe,
     content,

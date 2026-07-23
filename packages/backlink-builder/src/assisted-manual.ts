@@ -239,6 +239,7 @@ export function extractFormFieldFacts(html: string): FormFieldFacts[] {
   const seen = new Set<string>();
 
   const push = (f: FormFieldFacts) => {
+    if (isSearchOrNavField(f)) return;
     const key = f.selector || `${f.name}|${f.id}|${f.type}`;
     if (seen.has(key)) return;
     seen.add(key);
@@ -251,6 +252,7 @@ export function extractFormFieldFacts(html: string): FormFieldFacts[] {
     const attrs = m[1];
     const type = (attr(attrs, 'type') ?? 'text').toLowerCase();
     if (type === 'hidden' || type === 'submit' || type === 'button' || type === 'reset') continue;
+    if (type === 'search') continue;
     const name = attr(attrs, 'name');
     const id = attr(attrs, 'id');
     const label = findLabel(html, id, name);
@@ -367,7 +369,21 @@ export function computeFormFingerprint(fields: FormFieldFacts[]): string {
 const ROLE_HINTS: Array<{ role: FieldRole; patterns: RegExp[] }> = [
   { role: 'email', patterns: [/e-?mail/i, /^email$/i] },
   { role: 'phone', patterns: [/phone|mobile|tel/i] },
-  { role: 'url', patterns: [/url|website|site|homepage|link/i] },
+  // Avoid bare "site" / "link" — those match "Search this site" and nav links
+  {
+    role: 'url',
+    patterns: [
+      /web\s*site/i,
+      /website\s*url/i,
+      /your\s*(?:web\s*)?site/i,
+      /company\s*url/i,
+      /listing\s*url/i,
+      /home\s*page/i,
+      /homepage/i,
+      /^url$/i,
+      /\burl\b/i,
+    ],
+  },
   { role: 'title', patterns: [/title|headline|listing.?name|business.?name|^name$/i] },
   { role: 'business_name', patterns: [/company|business|organization|org.?name/i] },
   { role: 'name', patterns: [/full.?name|your.?name|contact.?name|first.?name|last.?name/i] },
@@ -378,6 +394,34 @@ const ROLE_HINTS: Array<{ role: FieldRole; patterns: RegExp[] }> = [
   { role: 'attachment', patterns: [/logo|image|photo|file|upload|attach/i] },
   { role: 'terms', patterns: [/terms|agree|privacy|consent|accept/i] },
 ];
+
+/** Site search / nav chrome — never treat as directory submission fields. */
+export function isSearchOrNavField(f: FormFieldFacts): boolean {
+  if (f.type === 'search') return true;
+  const name = (f.name ?? '').toLowerCase();
+  const id = (f.id ?? '').toLowerCase();
+  if (/^(q|query|search|searchbox|search_term|searchterm|keywords?|keyword)$/i.test(name)) {
+    return true;
+  }
+  if (/^(q|query|search|searchbox)(-|_|$)/i.test(id) || /^(q|query|search|searchbox)$/i.test(id)) {
+    return true;
+  }
+  const blob = [f.label, f.ariaLabel, f.placeholder, f.name, f.id, f.surroundingText]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  if (/\b(search\s+this\s+site|site\s+search|search\s+…|search\s+\.\.\.)\b/i.test(blob)) {
+    return true;
+  }
+  if (/\bsearch\b/i.test(blob) && !/\b(website|web\s*site|homepage|listing\s*url)\b/i.test(blob)) {
+    return true;
+  }
+  if (/\b(find|query|keywords?)\b/i.test(blob) && !/\b(website|business|company|listing)\b/i.test(blob)) {
+    return true;
+  }
+  if (/role=["']search["']/i.test(f.surroundingText ?? '')) return true;
+  return false;
+}
 
 function evidenceText(f: FormFieldFacts): string {
   return [f.label, f.ariaLabel, f.placeholder, f.name, f.id, f.surroundingText]
@@ -390,6 +434,10 @@ export function inferFieldRole(facts: FormFieldFacts): {
   confidence: FieldConfidence;
   source: FieldSource;
 } {
+  if (isSearchOrNavField(facts)) {
+    return { role: 'other', confidence: 'low', source: 'name_guess' };
+  }
+
   const text = evidenceText(facts);
   const hasExplicitLabel = Boolean(facts.label || facts.ariaLabel);
 
@@ -411,9 +459,16 @@ export function inferFieldRole(facts: FormFieldFacts): {
     };
   }
   if (facts.type === 'url') {
+    // type=url alone is not enough for high — require website-ish evidence
+    const looksLikeWebsite = ROLE_HINTS.find((h) => h.role === 'url')!.patterns.some((p) =>
+      p.test(text)
+    );
+    if (!looksLikeWebsite && !hasExplicitLabel) {
+      return { role: 'url', confidence: 'low', source: 'name_guess' };
+    }
     return {
       role: 'url',
-      confidence: hasExplicitLabel ? 'high' : 'medium',
+      confidence: looksLikeWebsite && hasExplicitLabel ? 'high' : 'medium',
       source: hasExplicitLabel ? 'dom_label' : 'name_guess',
     };
   }
@@ -449,9 +504,25 @@ export function inferFieldRole(facts: FormFieldFacts): {
   }
   return {
     role: 'other',
-    confidence: hasExplicitLabel ? 'medium' : 'low',
+    confidence: 'low',
     source: hasExplicitLabel ? 'dom_label' : 'llm_inferred',
   };
+}
+
+/** Empty / unknown mappings must never stay high. */
+export function confidenceAfterValue(
+  role: FieldRole,
+  source: FieldSource,
+  base: FieldConfidence,
+  value: string
+): FieldConfidence {
+  if (source === 'human_corrected') return base;
+  if (role === 'terms' || role === 'attachment') return base;
+  if (role === 'other') return 'low';
+  if (!String(value ?? '').trim()) return 'low';
+  if (source === 'name_guess' && base === 'high') return 'low';
+  if (source === 'name_guess' && base === 'medium') return 'low';
+  return base;
 }
 
 /** Build or merge a Site Recipe from Form Reader facts. Human corrections win permanently. */
@@ -616,6 +687,7 @@ export type ContentSource = {
 function valueForRole(role: FieldRole, content: ContentSource): string {
   switch (role) {
     case 'title':
+      return content.title || content.businessName || '';
     case 'business_name':
       return content.businessName || content.title || '';
     case 'short_desc':
@@ -649,6 +721,14 @@ export function assignAssistedBucket(input: {
   }
   if (input.recipe.multiStep || input.recipe.gate === 'multi_step') return 'needs_person';
   if (input.fields.some((f) => f.overLimit)) return 'needs_person';
+  const emptyRequired = input.fields.some(
+    (f) =>
+      f.required &&
+      f.role !== 'terms' &&
+      f.role !== 'attachment' &&
+      !String(f.value ?? '').trim()
+  );
+  if (emptyRequired) return 'check_fields';
   const unresolvedDropdown = input.fields.some(
     (f) => f.role === 'category' && f.options && f.options.length > 0 && !f.recommendedOption
   );
@@ -745,7 +825,7 @@ export function buildAssistedPackage(input: {
         charCount: 0,
         maxlength: null,
         required: rf.required,
-        confidence: rf.confidence,
+        confidence: confidenceAfterValue(rf.role, rf.source, rf.confidence, ''),
         source: rf.source,
         overLimit: false,
         humanStep: 'Accept terms yourself — never pre-answered by the app.',
@@ -767,7 +847,7 @@ export function buildAssistedPackage(input: {
         charCount: 0,
         maxlength: null,
         required: rf.required,
-        confidence: rf.confidence,
+        confidence: confidenceAfterValue(rf.role, rf.source, rf.confidence, 'attach'),
         source: rf.source,
         overLimit: false,
         imageFileName: fileName,
@@ -790,7 +870,12 @@ export function buildAssistedPackage(input: {
         charCount: (recommended ?? '').length,
         maxlength: null,
         required: rf.required,
-        confidence: rf.confidence,
+        confidence: confidenceAfterValue(
+          rf.role,
+          rf.source,
+          rf.confidence,
+          recommended ?? ''
+        ),
         source: rf.source,
         options: rf.options,
         recommendedOption: recommended,
@@ -811,7 +896,7 @@ export function buildAssistedPackage(input: {
       charCount: fitted.value.length,
       maxlength: rf.maxlength,
       required: rf.required,
-      confidence: rf.confidence,
+      confidence: confidenceAfterValue(rf.role, rf.source, rf.confidence, fitted.value),
       source: rf.source,
       overLimit: fitted.overLimit,
       truncatedAtSentence: fitted.truncatedAtSentence,
