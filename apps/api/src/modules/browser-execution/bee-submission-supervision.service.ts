@@ -38,18 +38,22 @@ function admin() {
 }
 
 /**
- * Phase 6.3.6 — Crash-loop watchdog.
- * Job whose status+error_message are unchanged for > CRASH_LOOP_TICKS intervals while
- * in-flight → force-fail with frozen error and release the slot (~40s at 20s ticks).
+ * Phase 6.3.6 / hung-stage — Crash-loop + static-progress watchdog.
+ * Unchanged status+error+step+stage for > CRASH_LOOP_TICKS → force-fail.
+ * Also: started_at older than JOB_CEILING_MS → force-fail wall clock (ignores heartbeat).
  */
 async function forceFailCrashLoopedJobs(workspaceId?: string): Promise<{
   forced: number;
   workspaces: string[];
 }> {
   const tickLimit = BEE_RELIABILITY.CRASH_LOOP_TICKS;
+  const wallMs = BEE_RELIABILITY.JOB_CEILING_MS;
+  const now = Date.now();
   let q = admin()
     .from('execution_jobs')
-    .select('id, workspace_id, status, error_message, session_id, retry_count, updated_at')
+    .select(
+      'id, workspace_id, status, error_message, session_id, retry_count, updated_at, started_at, current_step_index, metrics'
+    )
     .in('status', [...IN_FLIGHT_STATUSES])
     .is('deleted_at', null)
     .limit(500);
@@ -59,51 +63,99 @@ async function forceFailCrashLoopedJobs(workspaceId?: string): Promise<{
   let forced = 0;
   const touched = new Set<string>();
   const seen = new Set<string>();
-  for (const row of rows ?? []) {
+
+  async function forceFail(
+    row: {
+      id: unknown;
+      workspace_id: unknown;
+      session_id: unknown;
+      status: unknown;
+      error_message: unknown;
+      current_step_index?: unknown;
+      metrics?: unknown;
+    },
+    reason: string,
+    code: string
+  ) {
     const jobId = String(row.id);
     const ws = String(row.workspace_id);
+    logger.error(
+      { jobId, workspaceId: ws, status: row.status, reason },
+      'HUNG-STAGE / CRASH-LOOP WATCHDOG — force-failing wedged in-flight job'
+    );
+    if (row.session_id) {
+      await closeSession(String(row.session_id));
+      try {
+        const { disposeSessionRuntime } = await import('./browser-runtime.service.js');
+        await disposeSessionRuntime(String(row.session_id)).catch(() => undefined);
+      } catch {
+        /* best-effort */
+      }
+    }
+    const { recordFailure } = await import('./bee-record-failure.service.js');
+    await recordFailure({
+      workspaceId: ws,
+      jobId,
+      err: Object.assign(new Error(reason), {
+        failureCode: code,
+        code,
+        stage: String(
+          (row.metrics as { currentStage?: string } | null)?.currentStage ??
+            row.status ??
+            'unknown'
+        ),
+      }),
+      source: 'crashLoopWatchdog',
+      step: String(
+        (row.metrics as { currentStage?: string } | null)?.currentStage ?? row.status ?? null
+      ),
+      allowRetry: false,
+    });
+    crashLoopWatch.delete(jobId);
+    forced++;
+    touched.add(ws);
+    await enqueueJob(
+      QUEUES.LOW,
+      'bee_queue',
+      { type: 'bee_queue', workspaceId: ws },
+      { singletonKey: `bee-queue-drain-${ws}`, startAfter: 0 }
+    );
+  }
+
+  for (const row of rows ?? []) {
+    const jobId = String(row.id);
     seen.add(jobId);
-    const fp = `${row.status}|${row.error_message ?? ''}`;
+    const metrics = (row.metrics as Record<string, unknown> | null) ?? {};
+    const stage = String(metrics.currentStage ?? '');
+    const progress = String(metrics.stageProgress ?? row.current_step_index ?? '');
+    const stageStarted = String(metrics.stageStartedAt ?? '');
+
+    // Assert: no job may be Running longer than the wall clock, ever
+    const startedMs = row.started_at ? new Date(String(row.started_at)).getTime() : 0;
+    if (startedMs > 0 && now - startedMs > wallMs) {
+      const stageLabel = stage || String(row.status);
+      await forceFail(
+        row,
+        `job exceeded wall clock at stage ${stageLabel} (${Math.round(wallMs / 1000)}s)`,
+        'QUEUE_TIMEOUT'
+      );
+      continue;
+    }
+
+    // Fingerprint: status + error + step + stage + stage-start — heartbeat must not reset this
+    const fp = `${row.status}|${row.error_message ?? ''}|${progress}|${stage}|${stageStarted}`;
     const prev = crashLoopWatch.get(jobId);
     if (prev && prev.fp === fp) {
       const ticks = prev.ticks + 1;
       crashLoopWatch.set(jobId, { fp, ticks });
       if (ticks >= tickLimit) {
-        logger.error(
-          { jobId, workspaceId: ws, status: row.status, ticks, error: row.error_message },
-          'CRASH-LOOP WATCHDOG — force-failing wedged in-flight job'
-        );
-        if (row.session_id) {
-          await closeSession(String(row.session_id));
-          try {
-            const { disposeSessionRuntime } = await import('./browser-runtime.service.js');
-            await disposeSessionRuntime(String(row.session_id)).catch(() => undefined);
-          } catch {
-            /* best-effort */
-          }
-        }
         const frozen =
           String(row.error_message || '').trim() ||
-          `Wedged in ${row.status} — crash-loop watchdog`;
-        const { recordFailure } = await import('./bee-record-failure.service.js');
-        await recordFailure({
-          workspaceId: ws,
-          jobId,
-          err: Object.assign(new Error(frozen), {
-            failureCode: /crash|oom/i.test(frozen) ? 'BROWSER_CLOSED' : 'INTERNAL_ERROR',
-            code: /crash|oom/i.test(frozen) ? 'BROWSER_CLOSED' : 'INTERNAL_ERROR',
-          }),
-          source: 'crashLoopWatchdog',
-          allowRetry: false,
-        });
-        crashLoopWatch.delete(jobId);
-        forced++;
-        touched.add(ws);
-        await enqueueJob(
-          QUEUES.LOW,
-          'bee_queue',
-          { type: 'bee_queue', workspaceId: ws },
-          { singletonKey: `bee-queue-drain-${ws}`, startAfter: 0 }
+          `Wedged in ${row.status}${stage ? ` / ${stage}` : ''} (static progress) — hung-stage watchdog`;
+        await forceFail(
+          row,
+          frozen,
+          /crash|oom/i.test(frozen) ? 'BROWSER_CLOSED' : 'QUEUE_TIMEOUT'
         );
       }
     } else {

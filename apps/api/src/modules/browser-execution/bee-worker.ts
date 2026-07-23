@@ -683,34 +683,61 @@ export async function runBeeExecutionJob(data: {
   }
   const heartbeat = startLeaseHeartbeat(workspaceId, lease);
   const jobStartedAt = Date.now();
-  let ceilingTimer: NodeJS.Timeout | null = setTimeout(() => {
-    logger.warn({ jobId }, 'Whole-job ceiling exceeded — forcing cleanup');
-  }, BEE_RELIABILITY.JOB_CEILING_MS);
-  ceilingTimer.unref?.();
+  /** Mutable stage label for wall-clock failure message */
+  const stageRef = {
+    current: 'starting' as string,
+    deadline: Date.now() + BEE_RELIABILITY.JOB_CEILING_MS,
+  };
+  let wallTimer: NodeJS.Timeout | null = null;
+
+  const wallClockPromise = new Promise<never>((_, reject) => {
+    wallTimer = setTimeout(() => {
+      reject(
+        Object.assign(
+          new Error(
+            `job exceeded wall clock at stage ${stageRef.current} (${Math.round(BEE_RELIABILITY.JOB_CEILING_MS / 1000)}s)`
+          ),
+          {
+            code: 'QUEUE_TIMEOUT',
+            failureCode: 'QUEUE_TIMEOUT',
+            stage: stageRef.current,
+            temporary: true,
+          }
+        )
+      );
+    }, BEE_RELIABILITY.JOB_CEILING_MS);
+    wallTimer.unref?.();
+  });
 
   try {
-    await runBeeExecutionJobInner(data, lease);
+    await Promise.race([runBeeExecutionJobInner(data, lease, stageRef), wallClockPromise]);
   } catch (err) {
-    // Phase 6.3.4 — never swallow; never silent-requeue
+    // Kill browser so a raced inner loop cannot keep holding the slot
+    const sid = data.sessionId;
+    if (sid) {
+      await disposeSessionRuntime(sid).catch(() => undefined);
+    }
     const { recordFailure } = await import('./bee-record-failure.service.js');
     await recordFailure({
       workspaceId,
       jobId,
       err,
       source: 'runBeeExecutionJob',
+      step: stageRef.current,
       allowRetry: true,
     });
   } finally {
     clearInterval(heartbeat);
-    if (ceilingTimer) clearTimeout(ceilingTimer);
+    if (wallTimer) clearTimeout(wallTimer);
     await releaseJobLease(workspaceId, jobId, lease).catch(() => undefined);
     if (Date.now() - jobStartedAt > BEE_RELIABILITY.JOB_CEILING_MS) {
       await appendTimelineEvent({
         workspaceId,
         jobId,
         event: 'Job Ceiling Exceeded',
-        stage: 'recovery',
+        stage: stageRef.current || 'recovery',
         workerId,
+        payload: { stage: stageRef.current, ceilingMs: BEE_RELIABILITY.JOB_CEILING_MS },
       });
     }
     try {
@@ -730,7 +757,8 @@ async function runBeeExecutionJobInner(
     action?: string;
     restoreStorage?: boolean;
   },
-  _lease: { jobId: string; workerId: string; generation: number; expiresAt: string }
+  _lease: { jobId: string; workerId: string; generation: number; expiresAt: string },
+  stageRef: { current: string; deadline?: number } = { current: 'starting' }
 ): Promise<void> {
   const { jobId, workspaceId } = data;
 
@@ -764,7 +792,11 @@ async function runBeeExecutionJobInner(
   try {
     // Phase 4.5: stay Idle/Queued until browser is allocated — never claim Starting early
     const { appendTimelineEvent } = await import('./bee-timeline.service.js');
-    const { beeWorkerId } = await import('./bee-config.js');
+    const { beeWorkerId, BEE_RELIABILITY } = await import('./bee-config.js');
+    stageRef.current = 'launch';
+    if (stageRef.deadline == null) {
+      stageRef.deadline = Date.now() + BEE_RELIABILITY.JOB_CEILING_MS;
+    }
     const health = await runtime.health();
     await getSupabaseAdmin()
       .from('browser_sessions')
@@ -885,6 +917,20 @@ async function runBeeExecutionJobInner(
 
       const action = String(step.action);
       const blocker = (step.blocker as ExecutionGate) ?? null;
+      stageRef.current = action;
+      // Assert: never Running past wall clock (even if Promise.race is late)
+      if (stageRef.deadline != null && Date.now() > stageRef.deadline) {
+        throw Object.assign(
+          new Error(`job exceeded wall clock at stage ${action}`),
+          { code: 'QUEUE_TIMEOUT', failureCode: 'QUEUE_TIMEOUT', stage: action, temporary: true }
+        );
+      }
+      // Stamp progress so hung-stage watchdog sees static stage even while heartbeat updates lease
+      await mergeJobMetrics(workspaceId, jobId, {
+        currentStage: action,
+        stageProgress: Number(step.step_index),
+        stageStartedAt: new Date().toISOString(),
+      });
       await updateStep(jobId, step.step_index, {
         status: 'running',
         started_at: new Date().toISOString(),
@@ -913,7 +959,7 @@ async function runBeeExecutionJobInner(
         let pauseCtx: Record<string, unknown> = { stepAction: action };
         if (health.playwrightAvailable) {
           try {
-            const cap = await runtime.capture(`gate_${blocker}`);
+            const cap = await withStageTimeout('detect', () => runtime.capture(`gate_${blocker}`));
             shot = cap.screenshotBase64;
             htmlSnippet = cap.htmlSnippet;
             pauseCtx = {
@@ -1079,7 +1125,9 @@ async function runBeeExecutionJobInner(
             }
           }
         } else if (action === 'screenshot') {
-          const cap = await runtime.capture(String(detail.label ?? 'shot'));
+          const cap = await withStageTimeout('detect', () =>
+            runtime.capture(String(detail.label ?? 'shot'))
+          );
           await storeScreenshot(
             workspaceId,
             jobId,
@@ -1091,7 +1139,9 @@ async function runBeeExecutionJobInner(
           await appendLog(workspaceId, jobId, 'info', 'Finding Form', {});
           const cap = await withStageTimeout('find_form', () => runtime.capture('analyze'));
           if (cap.htmlSnippet) {
-            const form = detectFormIntelligence(cap.htmlSnippet);
+            const form = await withStageTimeout('detect', async () =>
+              detectFormIntelligence(cap.htmlSnippet!)
+            );
             await appendLog(workspaceId, jobId, 'info', 'Detecting Fields', {
               controls: form.controls.length,
               required: form.requiredFields,
@@ -1111,12 +1161,16 @@ async function runBeeExecutionJobInner(
           action === 'upload_images' ||
           action === 'upload_videos'
         ) {
-          await appendLog(workspaceId, jobId, 'info', 'Uploading Assets', {
-            action,
-            note: 'File paths resolved from asset library when available',
+          await withStageTimeout('upload', async () => {
+            await appendLog(workspaceId, jobId, 'info', 'Uploading Assets', {
+              action,
+              note: 'File paths resolved from asset library when available',
+            });
+            // Soft upload step — still budgeted so a hung I/O path cannot pin the worker
+            await new Promise((r) => setTimeout(r, 0));
           });
         } else if (action === 'preview') {
-          const cap = await runtime.capture('preview');
+          const cap = await withStageTimeout('detect', () => runtime.capture('preview'));
           await storeScreenshot(workspaceId, jobId, step.id, 'preview', cap.screenshotBase64);
           await updateJob(jobId, { status: 'ready_for_review' });
         } else if (action === 'submit') {
@@ -1168,7 +1222,9 @@ async function runBeeExecutionJobInner(
           }
 
           // After gate clearance: revalidate then submit
-          const validation = await runtime.revalidateBeforeSubmit(plan.mapping ?? {});
+          const validation = await withStageTimeout('submit', () =>
+            runtime.revalidateBeforeSubmit(plan.mapping ?? {})
+          );
           await appendLog(workspaceId, jobId, 'info', 'Pre-submit revalidation', validation);
           if (!validation.ok) {
             await updateJob(jobId, {
@@ -1266,15 +1322,17 @@ async function runBeeExecutionJobInner(
               .eq('id', job.opportunity_id);
           }
         } else if (action === 'verify') {
-          await appendLog(workspaceId, jobId, 'info', 'Verification Scheduled', {});
-          await updateJob(jobId, { status: 'waiting_verification' });
-          await enqueueJob(QUEUES.CRAWL, 'backlink_verify', {
-            type: 'backlink_reverify_hint',
-            workspaceId,
-            opportunityId: job.opportunity_id,
-            executionJobId: jobId,
+          await withStageTimeout('verify', async () => {
+            await appendLog(workspaceId, jobId, 'info', 'Verification Scheduled', {});
+            await updateJob(jobId, { status: 'waiting_verification' });
+            await enqueueJob(QUEUES.CRAWL, 'backlink_verify', {
+              type: 'backlink_reverify_hint',
+              workspaceId,
+              opportunityId: job.opportunity_id,
+              executionJobId: jobId,
+            });
+            await updateJob(jobId, { status: 'verified' });
           });
-          await updateJob(jobId, { status: 'verified' });
         } else if (action === 'login') {
           let gate: NonNullable<ExecutionGate> = 'login';
           let ctx: Record<string, unknown> = {
@@ -1284,7 +1342,7 @@ async function runBeeExecutionJobInner(
           let shot: string | undefined;
           let htmlSnippet: string | undefined;
           try {
-            const cap = await runtime.capture('login_step');
+            const cap = await withStageTimeout('detect', () => runtime.capture('login_step'));
             shot = cap.screenshotBase64;
             htmlSnippet = cap.htmlSnippet;
             ctx = {

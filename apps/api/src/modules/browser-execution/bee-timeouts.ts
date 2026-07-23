@@ -1,4 +1,4 @@
-/** Per-stage timeouts for BEE (milliseconds). Phase 4 defaults — never stall the queue. */
+/** Per-stage timeouts for BEE (milliseconds). Hung-stage escape — never stall forever. */
 
 import { BEE_RELIABILITY } from './bee-config.js';
 
@@ -6,6 +6,7 @@ export const BEE_STAGE_TIMEOUTS = {
   launch: BEE_RELIABILITY.STAGE_TIMEOUTS.launch,
   open: BEE_RELIABILITY.STAGE_TIMEOUTS.open,
   navigate: BEE_RELIABILITY.STAGE_TIMEOUTS.navigate,
+  detect: BEE_RELIABILITY.STAGE_TIMEOUTS.detect,
   find_form: BEE_RELIABILITY.STAGE_TIMEOUTS.find_form,
   fill: BEE_RELIABILITY.STAGE_TIMEOUTS.fill,
   upload: BEE_RELIABILITY.STAGE_TIMEOUTS.upload,
@@ -15,13 +16,17 @@ export const BEE_STAGE_TIMEOUTS = {
 
 export type BeeStageName = keyof typeof BEE_STAGE_TIMEOUTS;
 
+/**
+ * Race a stage against its budget. Default: no intra-stage retries —
+ * a timeout throws once and consumes a job attempt via recordFailure.
+ */
 export async function withStageTimeout<T>(
   stage: BeeStageName,
   fn: () => Promise<T>,
   opts?: { retries?: number }
 ): Promise<T> {
-  const ms = BEE_STAGE_TIMEOUTS[stage] ?? BEE_RELIABILITY.STAGE_TIMEOUTS.open;
-  const retries = opts?.retries ?? 1;
+  const ms = BEE_STAGE_TIMEOUTS[stage] ?? BEE_RELIABILITY.STAGE_TIMEOUTS.find_form;
+  const retries = opts?.retries ?? 0;
   let lastErr: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -31,8 +36,8 @@ export async function withStageTimeout<T>(
           const t = setTimeout(() => {
             reject(
               Object.assign(new Error(`Stage timeout after ${ms}ms: ${stage}`), {
-                code: 'NAVIGATION_TIMEOUT',
-                failureCode: 'NAVIGATION_TIMEOUT',
+                code: 'QUEUE_TIMEOUT',
+                failureCode: 'QUEUE_TIMEOUT',
                 temporary: true,
                 stage,
                 attempt,
@@ -86,6 +91,8 @@ export function classifyNavigationFailure(err: unknown): {
     return { code: 'HTTP_5XX', retryable: true, message: 'Server error' };
   if (/robots?\.txt|access denied|forbidden|403/i.test(lower))
     return { code: 'HTTP_403_FORBIDDEN', retryable: false, message: 'Robot / access blocked' };
+  if (/stage timeout|queue.?timeout|wall clock/i.test(lower))
+    return { code: 'QUEUE_TIMEOUT', retryable: true, message: msg.slice(0, 200) };
   if (/timeout|timed out|navigation.?timeout|net::err_timed_out/.test(lower))
     return { code: 'NAVIGATION_TIMEOUT', retryable: true, message: 'Navigation timed out' };
   if (/page crashed|target crashed|renderer.?crash|sigbus|oom|out of memory/i.test(lower))
