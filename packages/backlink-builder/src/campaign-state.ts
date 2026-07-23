@@ -364,6 +364,26 @@ export function campaignItemsToExecutionJobs(
     const job = jobsByOpportunity?.get(item.id);
     if (job) {
       let status = String(job.status);
+      // Assisted Manual Done / CSM terminal success always outranks a stale failed job.
+      // Abandoned browser attempts must not paint Ready / Waiting Human sites as Failed.
+      const csmSuccess = (['Submitted', 'Verified', 'Completed'] as const).includes(
+        item.currentStatus as 'Submitted' | 'Verified' | 'Completed'
+      );
+      const csmAssistedOpen = (['Package Generated', 'Ready', 'Waiting Human'] as const).includes(
+        item.currentStatus as 'Package Generated' | 'Ready' | 'Waiting Human'
+      );
+      if (csmSuccess || (csmAssistedOpen && status === 'failed')) {
+        out.push({
+          id: String(job.id),
+          status: lifecycleToExecutionJobStatus(item.currentStatus),
+          site_domain: job.site_domain ?? item.domain ?? null,
+          opportunity_id: item.id,
+          disposition: csmSuccess ? null : job.disposition ?? null,
+          error_code: csmSuccess ? null : job.error_code ?? null,
+          created_at: job.created_at ?? null,
+        });
+        continue;
+      }
       // Phase 6.3.6 — Submitting CSM + unknown job status must still count as in-flight
       const knownInFlight = [
         'queued',

@@ -665,6 +665,11 @@ async function enforceSimilarity(workspaceId: string) {
 }
 
 export async function listAssistedPackages(workspaceId: string) {
+  // Heal legacy Done packages that never wrote CSM Submitted / export rows
+  await healAssistedDoneSubmissions(workspaceId).catch((err) =>
+    logger.warn({ err, workspaceId }, 'assisted heal Done→Submitted failed')
+  );
+
   const { data: rows } = await admin()
     .from('assisted_packages')
     .select('*')
@@ -825,6 +830,9 @@ function formatPackageRow(row: Record<string, unknown>) {
     correctionCount: row.correction_count,
     minutesSpent: row.minutes_spent,
     rejectedAtSubmit: row.rejected_at_submit,
+    submittedAt: row.submitted_at ?? null,
+    verifiedAt: row.verified_at ?? null,
+    userVerified: Boolean(row.user_verified),
     failureReason: row.failure_reason,
     pilotBatchId: row.pilot_batch_id,
     classifierOutdated,
@@ -889,12 +897,35 @@ export async function updateAssistedPackageStatus(
     status?: PackageStatus;
     minutesSpent?: number;
     rejectedAtSubmit?: boolean;
+    /** Optional Verified tick (email confirmation / listing live). */
+    userVerified?: boolean;
   }
 ) {
+  const { data: existing } = await admin()
+    .from('assisted_packages')
+    .select('*')
+    .eq('workspace_id', workspaceId)
+    .eq('id', packageId)
+    .maybeSingle();
+  if (!existing) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Package not found');
+
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (body.status) patch.status = body.status;
   if (body.minutesSpent != null) patch.minutes_spent = body.minutesSpent;
   if (body.rejectedAtSubmit != null) patch.rejected_at_submit = body.rejectedAtSubmit;
+
+  if (body.userVerified === true) {
+    patch.user_verified = true;
+    patch.verified_at = existing.verified_at ?? new Date().toISOString();
+  } else if (body.userVerified === false) {
+    patch.user_verified = false;
+    patch.verified_at = null;
+  }
+
+  // Done is authoritative submission — stamp submitted_at on first Done
+  if (body.status === 'done' && !existing.submitted_at) {
+    patch.submitted_at = new Date().toISOString();
+  }
 
   const { data, error } = await admin()
     .from('assisted_packages')
@@ -904,7 +935,325 @@ export async function updateAssistedPackageStatus(
     .select('*')
     .single();
   if (error) throw new AppError(500, 'INTERNAL_ERROR', error.message);
+
+  if (body.status === 'done') {
+    await recordAssistedManualSubmission(workspaceId, data, {
+      minutesSpent:
+        body.minutesSpent != null ? body.minutesSpent : Number(data.minutes_spent ?? 0) || null,
+    });
+  }
+
+  if (body.userVerified === true) {
+    await recordAssistedManualVerified(workspaceId, data);
+  } else if (body.userVerified === false) {
+    await clearAssistedManualVerified(workspaceId, data);
+  }
+
   return formatPackageRow(data);
+}
+
+/**
+ * Authoritative Assisted Manual Done → CSM Submitted + submission row.
+ * The app cannot observe the third-party site; the user's click is the record.
+ */
+async function healAssistedDoneSubmissions(workspaceId: string) {
+  const { data: done } = await admin()
+    .from('assisted_packages')
+    .select('*')
+    .eq('workspace_id', workspaceId)
+    .eq('status', 'done')
+    .limit(50);
+  if (!done?.length) return;
+
+  for (const pkg of done) {
+    const opportunityId = String(pkg.opportunity_id);
+    const { data: opp } = await admin()
+      .from('opportunities')
+      .select('campaign_lifecycle')
+      .eq('id', opportunityId)
+      .maybeSingle();
+    const life = String(opp?.campaign_lifecycle ?? '');
+    if (life === 'Submitted' || life === 'Verified' || life === 'Completed') {
+      // Still ensure submitted_at is stamped
+      if (!pkg.submitted_at) {
+        await admin()
+          .from('assisted_packages')
+          .update({
+            submitted_at: pkg.updated_at ?? new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', pkg.id);
+      }
+      continue;
+    }
+    const stamped = {
+      ...pkg,
+      submitted_at: pkg.submitted_at ?? pkg.updated_at ?? new Date().toISOString(),
+    };
+    if (!pkg.submitted_at) {
+      await admin()
+        .from('assisted_packages')
+        .update({ submitted_at: stamped.submitted_at, updated_at: new Date().toISOString() })
+        .eq('id', pkg.id);
+    }
+    await recordAssistedManualSubmission(workspaceId, stamped, {
+      minutesSpent: pkg.minutes_spent != null ? Number(pkg.minutes_spent) : null,
+    });
+  }
+}
+
+/**
+ * Authoritative Assisted Manual Done → CSM Submitted + submission row.
+ * The app cannot observe the third-party site; the user's click is the record.
+ */
+async function recordAssistedManualSubmission(
+  workspaceId: string,
+  pkg: Record<string, unknown>,
+  opts: { minutesSpent?: number | null } = {}
+) {
+  const opportunityId = String(pkg.opportunity_id);
+  const entryUrl = String(pkg.entry_url ?? '');
+  const domain = String(pkg.domain ?? '');
+  const submittedAt = String(pkg.submitted_at ?? new Date().toISOString());
+  const minutes =
+    opts.minutesSpent != null && Number.isFinite(Number(opts.minutesSpent))
+      ? Number(opts.minutesSpent)
+      : pkg.minutes_spent != null
+        ? Number(pkg.minutes_spent)
+        : null;
+  const payload = (pkg.payload as AssistedPackagePayload) ?? ({} as AssistedPackagePayload);
+  const contentSnapshot = (payload.fields ?? []).map((f) => ({
+    label: f.label,
+    role: f.role,
+    value: f.value,
+    selector: f.selector,
+  }));
+
+  // 1) CSM → Submitted (same terminal state as auto lane)
+  try {
+    const { updateCampaignItem } = await import('../campaigns/campaign-state.service.js');
+    await updateCampaignItem(workspaceId, opportunityId, {
+      currentStatus: 'Submitted',
+      submissionStatus: 'Completed',
+      force: true,
+      lastError: null,
+    });
+  } catch (err) {
+    logger.error({ err, opportunityId }, 'assisted Done: CSM Submitted write failed');
+  }
+
+  // 2) Opportunity metadata + automation_status
+  try {
+    const { data: opp } = await admin()
+      .from('opportunities')
+      .select('id, metadata')
+      .eq('id', opportunityId)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle();
+    const meta = (opp?.metadata as Record<string, unknown>) ?? {};
+    await admin()
+      .from('opportunities')
+      .update({
+        automation_status: 'submitted',
+        metadata: {
+          ...meta,
+          submission: {
+            ...(typeof meta.submission === 'object' && meta.submission
+              ? (meta.submission as Record<string, unknown>)
+              : {}),
+            method: 'assisted_manual',
+            submitted_at: submittedAt,
+            entry_url: entryUrl,
+            minutes_spent: minutes,
+            package_id: pkg.id,
+            content: contentSnapshot,
+          },
+        },
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', opportunityId)
+      .eq('workspace_id', workspaceId);
+  } catch (err) {
+    logger.warn({ err, opportunityId }, 'assisted Done: opportunity metadata write failed');
+  }
+
+  // 3) backlink_submissions row (reports / Track Results exports)
+  try {
+    const { data: existingSub } = await admin()
+      .from('backlink_submissions')
+      .select('id, metadata')
+      .eq('workspace_id', workspaceId)
+      .eq('opportunity_id', opportunityId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const subMeta = {
+      method: 'assisted_manual',
+      entry_url: entryUrl,
+      domain,
+      minutes_spent: minutes,
+      package_id: pkg.id,
+      content: contentSnapshot,
+      user_verified: Boolean(pkg.user_verified),
+      verified_at: pkg.verified_at ?? null,
+    };
+
+    if (existingSub?.id) {
+      const prev = (existingSub.metadata as Record<string, unknown>) ?? {};
+      await admin()
+        .from('backlink_submissions')
+        .update({
+          status: 'submitted',
+          tracking_status: 'submitted',
+          queue_stage: 'submitted',
+          submitted_at: submittedAt,
+          notes: minutes != null ? `Assisted Manual · ${minutes} min` : 'Assisted Manual',
+          metadata: { ...prev, ...subMeta },
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existingSub.id);
+    } else {
+      const { randomUUID } = await import('node:crypto');
+      await admin().from('backlink_submissions').insert({
+        id: randomUUID(),
+        workspace_id: workspaceId,
+        opportunity_id: opportunityId,
+        submission_type: 'assisted_manual',
+        assisted_mode: 'manual',
+        status: 'submitted',
+        tracking_status: 'submitted',
+        queue_stage: 'submitted',
+        submitted_at: submittedAt,
+        notes: minutes != null ? `Assisted Manual · ${minutes} min` : 'Assisted Manual',
+        metadata: subMeta,
+      });
+    }
+  } catch (err) {
+    logger.warn({ err, opportunityId }, 'assisted Done: backlink_submissions write failed');
+  }
+
+  // 4) Promote any failed/stale BEE jobs so overlay cannot resurrect Failed
+  try {
+    const { data: jobs } = await admin()
+      .from('execution_jobs')
+      .select('id, status')
+      .eq('workspace_id', workspaceId)
+      .eq('opportunity_id', opportunityId);
+
+    const terminal = new Set(['submitted', 'completed', 'verified', 'deleted', 'ignored']);
+    for (const job of jobs ?? []) {
+      if (terminal.has(String(job.status))) continue;
+      const { setJobStatus } = await import('./bee.service.js');
+      await setJobStatus(workspaceId, String(job.id), 'submitted', {
+        finished_at: submittedAt,
+        disposition: 'assisted_manual',
+        truth_claim: 'assisted_manual_done',
+      });
+    }
+  } catch (err) {
+    logger.warn({ err, opportunityId }, 'assisted Done: job promote failed');
+  }
+
+  logger.info(
+    { workspaceId, opportunityId, domain, entryUrl, minutes, packageId: pkg.id },
+    'assisted-manual Done → CSM Submitted'
+  );
+}
+
+async function recordAssistedManualVerified(
+  workspaceId: string,
+  pkg: Record<string, unknown>
+) {
+  const opportunityId = String(pkg.opportunity_id);
+  const verifiedAt = String(pkg.verified_at ?? new Date().toISOString());
+
+  try {
+    const { updateCampaignItem } = await import('../campaigns/campaign-state.service.js');
+    await updateCampaignItem(workspaceId, opportunityId, {
+      currentStatus: 'Verified',
+      verificationStatus: 'verified',
+      force: true,
+    });
+  } catch (err) {
+    logger.warn({ err, opportunityId }, 'assisted Verified: CSM write failed');
+  }
+
+  try {
+    const { data: opp } = await admin()
+      .from('opportunities')
+      .select('metadata')
+      .eq('id', opportunityId)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle();
+    const meta = (opp?.metadata as Record<string, unknown>) ?? {};
+    const prevSub =
+      typeof meta.submission === 'object' && meta.submission
+        ? (meta.submission as Record<string, unknown>)
+        : {};
+    await admin()
+      .from('opportunities')
+      .update({
+        automation_status: 'verified',
+        verification_status: 'verified',
+        metadata: {
+          ...meta,
+          submission: { ...prevSub, user_verified: true, verified_at: verifiedAt },
+        },
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', opportunityId);
+  } catch {
+    /* best-effort */
+  }
+
+  try {
+    await admin()
+      .from('backlink_submissions')
+      .update({
+        status: 'accepted',
+        tracking_status: 'verified',
+        queue_stage: 'verified',
+        verified_at: verifiedAt,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('workspace_id', workspaceId)
+      .eq('opportunity_id', opportunityId);
+  } catch {
+    /* best-effort */
+  }
+}
+
+async function clearAssistedManualVerified(
+  workspaceId: string,
+  pkg: Record<string, unknown>
+) {
+  const opportunityId = String(pkg.opportunity_id);
+  // Drop back to Submitted (still submitted; just unverified)
+  try {
+    const { updateCampaignItem } = await import('../campaigns/campaign-state.service.js');
+    await updateCampaignItem(workspaceId, opportunityId, {
+      currentStatus: 'Submitted',
+      verificationStatus: 'pending',
+      force: true,
+    });
+  } catch {
+    /* best-effort */
+  }
+  try {
+    await admin()
+      .from('backlink_submissions')
+      .update({
+        status: 'submitted',
+        tracking_status: 'submitted',
+        verified_at: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('workspace_id', workspaceId)
+      .eq('opportunity_id', opportunityId);
+  } catch {
+    /* best-effort */
+  }
 }
 
 export async function correctAssistedField(
@@ -1063,6 +1412,10 @@ export async function exportAssistedPackagesWorkbook(workspaceId: string) {
     'Bucket',
     'Status',
     'Entry URL',
+    'Submitted At',
+    'Verified',
+    'Verified At',
+    'Minutes',
     'Gate',
     'Gate Notes',
     'Fingerprint',
@@ -1102,6 +1455,10 @@ export async function exportAssistedPackagesWorkbook(workspaceId: string) {
         pkg.bucket,
         pkg.status,
         pkg.entryUrl,
+        pkg.submittedAt ?? '',
+        pkg.userVerified ? 'yes' : 'no',
+        pkg.verifiedAt ?? '',
+        pkg.minutesSpent ?? '',
         pkg.gate,
         pkg.package?.gateNotes ?? '',
         pkg.fingerprintStatus,

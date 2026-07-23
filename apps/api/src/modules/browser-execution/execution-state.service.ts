@@ -286,7 +286,19 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
 
   // Auto-publish OFF: Ready CSM items must not look like a browser submit queue.
   // Live job rows still drive Waiting Human / Running if the user opted in earlier.
+  // Remaining / Complete must still reflect Assisted Manual open packages (CSM Ready).
+  let assistedOpen = 0;
   if (policy.auto_publish_automatable !== true) {
+    assistedOpen = Math.max(0, submissionReady);
+    // Also count CSM open cohort (Ready / Waiting Human / Package Generated) via campaignOpen
+    // when Ready count is stale — prefer the larger of submissionReady and campaignOpen-without-live.
+    const csmOpenForAssisted = Math.max(
+      0,
+      c.campaignOpen - (c.Running + c.Starting + c.Queued)
+    );
+    // When auto is off, CSM Queued synthetic = Ready items — those are assisted open
+    assistedOpen = Math.max(assistedOpen, c.Queued, csmOpenForAssisted, c['Waiting Human']);
+
     const liveFromJobs = state.items.filter((i) => {
       const s = i.rawStatus;
       return (
@@ -327,10 +339,13 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
       campaignState = 'Running';
       campaignIsRunning = true;
       aiStatusLine = `Submitting (${liveRunning} running / ${liveQueued} queued)`;
-    } else if (liveWaiting > 0) {
+    } else if (liveWaiting > 0 || assistedOpen > 0) {
       campaignState = 'Waiting Human';
       campaignIsRunning = false;
-      aiStatusLine = 'Waiting for you';
+      aiStatusLine =
+        assistedOpen > 0
+          ? `Assisted Manual — ${assistedOpen} site${assistedOpen === 1 ? '' : 's'} remaining`
+          : 'Waiting for you';
     } else if (liveQueued > 0) {
       campaignState = 'Starting';
       campaignIsRunning = false;
@@ -346,15 +361,28 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
   }
 
   // Phase 6.3.6 — Remaining includes in-flight so Submitting cohort never looks like all-zeros
-  const remaining = queued + inFlight;
+  // Assisted path: remaining = open packages still needing Done (not just live browser queue)
+  const remaining =
+    policy.auto_publish_automatable !== true
+      ? Math.max(queued + inFlight, assistedOpen, c.campaignOpen)
+      : queued + inFlight;
   const liveWaitingHuman =
     policy.auto_publish_automatable !== true
-      ? state.items.filter((i) => i.status === 'Waiting Human').length
+      ? Math.max(
+          state.items.filter((i) => i.status === 'Waiting Human').length,
+          assistedOpen > 0 ? assistedOpen : c['Waiting Human']
+        )
       : c['Waiting Human'];
-  // Phase 6.3.2 — Finished only when cohort is fully terminal (no Starting/Queued/open)
+  // Finished only when the CSM cohort is fully terminal — never while Assisted packages remain
+  const submittedCount = c.Submitted + c.Completed;
+  const verifiedCount = c.Verified + c.Approved;
   const executionComplete =
     policy.auto_publish_automatable !== true
-      ? inFlight === 0 && queued === 0 && liveWaitingHuman === 0
+      ? inFlight === 0 &&
+        remaining === 0 &&
+        assistedOpen === 0 &&
+        c.campaignOpen === 0 &&
+        submissionReady === 0
       : Boolean(c.executionComplete) &&
         c.campaignOpen === 0 &&
         c.Running === 0 &&
@@ -372,18 +400,19 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
     handoff,
     paused: 0,
     needs_approval: liveWaitingHuman,
-    /** Success completions — same as submitted / aiSubmitted (Phase 4.7 consistency) */
+    /** Success completions — Submitted + Verified + Approved (Phase 4.7 consistency) */
     completed,
+    /** Explicit Submitted tile (includes assisted-manual Done; excludes Verified-only bump) */
+    submitted: submittedCount,
+    verified: verifiedCount,
     failed: c.Failed,
     failedToStart: c['Failed to Start'],
     blocked: handoff?.blocked ?? 0,
     cancelled: c.Deleted,
     watching: liveWaitingHuman,
-    submitted: completed,
     skipped: c.Skipped,
     deleted: c.Deleted,
     ignored: c.Ignored,
-    verified: c.Verified,
     approved: c.Approved,
     rejected: c.Rejected,
     needsYou: liveWaitingHuman,
@@ -415,7 +444,12 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
     estimatedApprovalTime: '7–14 days',
     estimatedVerificationTime: '24 hours',
     needsYourAction: liveWaitingHuman,
-    trackResults: state.trackResults,
+    trackResults: {
+      ...state.trackResults,
+      Submitted: submittedCount,
+      Verified: verifiedCount,
+      Completed: completed,
+    },
     failedQueue: state.failedQueue,
     failedToStartQueue: state.failedToStart,
     metricsSource: state.metricsSource,
@@ -424,6 +458,8 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
       queued,
       running: inFlight,
       completed,
+      submitted: submittedCount,
+      verified: verifiedCount,
       waitingHuman: liveWaitingHuman,
       skipped: c.Skipped,
       failed: c.Failed,

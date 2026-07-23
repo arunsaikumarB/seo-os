@@ -254,6 +254,7 @@ backlinkBuilderRouter.patch(
           status: z.enum(['not_started', 'in_progress', 'done', 'failed']).optional(),
           minutesSpent: z.number().min(0).max(240).optional(),
           rejectedAtSubmit: z.boolean().optional(),
+          userVerified: z.boolean().optional(),
         })
         .parse(req.body ?? {});
       const { updateAssistedPackageStatus } = await import(

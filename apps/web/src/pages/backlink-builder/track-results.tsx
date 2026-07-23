@@ -42,6 +42,8 @@ export function TrackResultsPage() {
   const ac = assisted.data?.data.counts;
 
   const metrics = [
+    { label: 'Submitted', value: s?.submitted ?? 0 },
+    { label: 'Verified', value: s?.verified ?? 0 },
     { label: 'Completed', value: s?.completed ?? 0 },
     { label: 'Running', value: s?.running ?? 0 },
     { label: 'Waiting Human', value: s?.waitingHuman ?? 0 },

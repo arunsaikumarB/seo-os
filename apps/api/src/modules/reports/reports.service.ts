@@ -856,72 +856,129 @@ export async function exportBacklinkOpsWorkbook(
   const { data: submissions } = await getSupabaseAdmin()
     .from('backlink_submissions')
     .select(
-      'status, tracking_status, queue_stage, submitted_at, verified_at, estimated_review_hours, estimated_approval_hours, notes, opportunities:opportunity_id(title, domain, opportunity_type, priority, automation_status, queue_status, website_name, metadata)'
+      'id, opportunity_id, status, tracking_status, queue_stage, submitted_at, verified_at, estimated_review_hours, estimated_approval_hours, notes, metadata, opportunities:opportunity_id(id, title, domain, opportunity_type, priority, automation_status, queue_status, website_name, url, metadata, campaign_lifecycle)'
     )
     .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false })
     .limit(500);
 
+  // Assisted Manual Done packages (authoritative when submission row missing)
+  const { data: assistedDone } = await getSupabaseAdmin()
+    .from('assisted_packages')
+    .select(
+      'id, domain, entry_url, submitted_at, verified_at, user_verified, minutes_spent, payload, status, opportunity_id'
+    )
+    .eq('workspace_id', workspaceId)
+    .eq('status', 'done')
+    .limit(500);
+
   const header = [
-    'Website',
     'Domain',
-    'Detected Type',
-    'Confidence',
-    'Reason',
-    'Status',
-    'Workflow Queue',
-    'Assigned Agent',
-    'Ready',
-    'Submitted',
+    'Entry URL',
+    'Submitted At',
+    'Method',
     'Verified',
-    'Approval Status',
-    'Priority',
-    'Est. Review Time (hrs)',
-    'Est. Approval Time (hrs)',
+    'Verified At',
+    'Minutes',
+    'Content Used',
+    'Website',
+    'Detected Type',
+    'Status',
     'Notes',
   ];
 
   const rows: string[][] = [header];
+  const seenOpp = new Set<string>();
+
   for (const row of submissions ?? []) {
     const opp = row.opportunities as {
       title?: string;
       domain?: string;
       website_name?: string;
       opportunity_type?: string;
-      priority?: string;
-      automation_status?: string;
-      queue_status?: string;
+      url?: string;
       metadata?: {
-        classification?: {
-          id?: string;
-          displayName?: string;
-          confidence?: number;
-          reason?: string;
-          workflowQueue?: string;
-          assignedAgent?: string;
+        classification?: { displayName?: string; id?: string };
+        submission?: {
+          method?: string;
+          entry_url?: string;
+          content?: Array<{ label?: string; role?: string; value?: string }>;
+          minutes_spent?: number;
         };
-        workflowQueue?: string;
-        assignedAgent?: string;
       } | null;
     } | null;
-    const c = opp?.metadata?.classification;
+    const meta = (row.metadata as Record<string, unknown>) ?? {};
+    const oppSub = opp?.metadata?.submission;
+    const method =
+      String(meta.method ?? oppSub?.method ?? '') === 'assisted_manual'
+        ? 'assisted'
+        : String(meta.method ?? '') === 'auto' || String(meta.generated_by ?? '') === 'automation_pipeline'
+          ? 'auto'
+          : row.submitted_at
+            ? 'auto'
+            : '';
+    if (!row.submitted_at && method !== 'assisted') continue;
+
+    const entryUrl = String(
+      meta.entry_url ?? oppSub?.entry_url ?? opp?.url ?? ''
+    );
+    const contentArr =
+      (meta.content as Array<{ label?: string; role?: string; value?: string }> | undefined) ??
+      oppSub?.content ??
+      [];
+    const contentUsed = contentArr
+      .map((f) => `${f.label || f.role || ''}: ${String(f.value ?? '').slice(0, 120)}`)
+      .filter(Boolean)
+      .join(' · ');
+    const oppId = String(row.opportunity_id ?? (opp as { id?: string } | null)?.id ?? '');
+    if (oppId) seenOpp.add(oppId);
+
     rows.push([
+      opp?.domain ?? String(meta.domain ?? ''),
+      entryUrl,
+      row.submitted_at ? String(row.submitted_at) : '',
+      method || 'auto',
+      row.verified_at || meta.user_verified === true ? 'yes' : 'no',
+      row.verified_at ? String(row.verified_at) : '',
+      meta.minutes_spent != null
+        ? String(meta.minutes_spent)
+        : oppSub?.minutes_spent != null
+          ? String(oppSub.minutes_spent)
+          : '',
+      contentUsed,
       opp?.website_name ?? opp?.title ?? '',
-      opp?.domain ?? '',
-      c?.displayName ?? c?.id ?? opp?.opportunity_type ?? '',
-      c?.confidence != null ? String(c.confidence) : '',
-      c?.reason ?? '',
+      opp?.metadata?.classification?.displayName ??
+        opp?.metadata?.classification?.id ??
+        opp?.opportunity_type ??
+        '',
       row.queue_stage ?? row.tracking_status ?? row.status ?? '',
-      c?.workflowQueue ?? opp?.metadata?.workflowQueue ?? '',
-      c?.assignedAgent ?? opp?.metadata?.assignedAgent ?? '',
-      opp?.queue_status === 'approved' || row.status === 'ready' ? 'yes' : 'no',
-      row.submitted_at ? 'yes' : 'no',
-      row.verified_at ? 'yes' : 'no',
-      opp?.queue_status ?? row.tracking_status ?? '',
-      opp?.priority ?? '',
-      String(row.estimated_review_hours ?? ''),
-      String(row.estimated_approval_hours ?? ''),
       row.notes ?? '',
+    ]);
+  }
+
+  for (const pkg of assistedDone ?? []) {
+    const oppId = String(pkg.opportunity_id ?? '');
+    if (oppId && seenOpp.has(oppId)) continue;
+    const payload = (pkg.payload as {
+      fields?: Array<{ label?: string; role?: string; value?: string }>;
+    }) ?? {};
+    const contentUsed = (payload.fields ?? [])
+      .map((f) => `${f.label || f.role || ''}: ${String(f.value ?? '').slice(0, 120)}`)
+      .filter(Boolean)
+      .join(' · ');
+    rows.push([
+      String(pkg.domain ?? ''),
+      String(pkg.entry_url ?? ''),
+      pkg.submitted_at ? String(pkg.submitted_at) : '',
+      'assisted',
+      pkg.user_verified || pkg.verified_at ? 'yes' : 'no',
+      pkg.verified_at ? String(pkg.verified_at) : '',
+      pkg.minutes_spent != null ? String(pkg.minutes_spent) : '',
+      contentUsed,
+      String(pkg.domain ?? ''),
+      '',
+      'submitted',
+      'Assisted Manual',
     ]);
   }
 
@@ -939,7 +996,7 @@ export async function exportBacklinkOpsWorkbook(
     const font = await doc.embedFont(StandardFonts.Helvetica);
     let page = doc.addPage();
     let y = page.getHeight() - 40;
-    page.drawText('Backlink Operations Report', { x: 40, y, size: 14, font });
+    page.drawText('Submitted Sites Report', { x: 40, y, size: 14, font });
     y -= 24;
     for (const r of rows.slice(0, 40)) {
       if (y < 40) {
@@ -959,7 +1016,7 @@ export async function exportBacklinkOpsWorkbook(
 
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'SEO OS Backlink Builder';
-  const sheet = workbook.addWorksheet('Backlink Ops');
+  const sheet = workbook.addWorksheet('Submitted Sites');
   rows.forEach((r, i) => {
     if (i === 0) sheet.addRow(r).font = { bold: true };
     else sheet.addRow(r);

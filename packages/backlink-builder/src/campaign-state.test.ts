@@ -181,4 +181,38 @@ describe('campaign state manager', () => {
     expect(exec.Queued).toBe(7);
     expect(exec.progressPercent).toBe(53.3);
   });
+
+  it('Assisted Manual Done — CSM Submitted outranks failed BEE job overlay', () => {
+    const items = [
+      { id: 'a', currentStatus: 'Submitted' as const, domain: 'viesearch.com' },
+      { id: 'b', currentStatus: 'Ready' as const, domain: 'ready.example' },
+    ];
+    const jobsByOpp = new Map([
+      [
+        'a',
+        {
+          id: 'job-a',
+          status: 'failed',
+          opportunity_id: 'a',
+          site_domain: 'viesearch.com',
+          error_code: 'SUBMIT_FAILED',
+        },
+      ],
+      [
+        'b',
+        {
+          id: 'job-b',
+          status: 'failed',
+          opportunity_id: 'b',
+          site_domain: 'ready.example',
+          error_code: 'SUBMIT_FAILED',
+        },
+      ],
+    ]);
+    const jobs = campaignItemsToExecutionJobs(items, jobsByOpp);
+    const exec = computeExecutionCounts(jobs);
+    expect(exec.Submitted).toBe(1);
+    expect(exec.Queued).toBe(1);
+    expect(exec.Failed).toBe(0);
+  });
 });

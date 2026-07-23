@@ -40,6 +40,9 @@ type AssistedPackage = {
   correctionCount: number;
   minutesSpent: number | null;
   failureReason: string | null;
+  submittedAt?: string | null;
+  verifiedAt?: string | null;
+  userVerified?: boolean;
   classifierOutdated?: boolean;
   readerVersion?: number | null;
   classifierVersion?: number | null;
@@ -130,6 +133,7 @@ export function AssistedManualPage() {
       status?: string;
       minutesSpent?: number;
       rejectedAtSubmit?: boolean;
+      userVerified?: boolean;
     }) =>
       request(`/v1/projects/${projectId}/backlink-builder/assisted-manual/${body.packageId}`, {
         method: 'PATCH',
@@ -137,12 +141,20 @@ export function AssistedManualPage() {
           status: body.status,
           minutesSpent: body.minutesSpent,
           rejectedAtSubmit: body.rejectedAtSubmit,
+          userVerified: body.userVerified,
         }),
       }),
-    onSuccess: () => {
-      toast.success('Updated');
+    onSuccess: (_data, vars) => {
+      toast.success(
+        vars.status === 'done'
+          ? 'Marked Submitted'
+          : vars.userVerified
+            ? 'Marked Verified'
+            : 'Updated'
+      );
       void qc.invalidateQueries({ queryKey: ['assisted-manual', projectId] });
       void qc.invalidateQueries({ queryKey: ['assisted-manual-metrics', projectId] });
+      void qc.invalidateQueries({ queryKey: ['execution-summary', projectId] });
     },
     onError: (e) => toast.error(getApiErrorMessage(e, 'Update failed')),
   });
@@ -454,6 +466,22 @@ export function AssistedManualPage() {
                       >
                         <Check className="h-3.5 w-3.5 mr-1" /> Done
                       </Button>
+                      {pkg.status === 'done' || pkg.submittedAt ? (
+                        <Button
+                          size="sm"
+                          variant={pkg.userVerified ? 'secondary' : 'outline'}
+                          disabled={patchStatus.isPending}
+                          onClick={() =>
+                            patchStatus.mutate({
+                              packageId: pkg.id,
+                              userVerified: !pkg.userVerified,
+                            })
+                          }
+                          title="Tick after email confirmation / listing goes live"
+                        >
+                          {pkg.userVerified ? 'Verified ✓' : 'Mark Verified'}
+                        </Button>
+                      ) : null}
                       <Button
                         size="sm"
                         variant="ghost"

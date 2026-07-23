@@ -9,6 +9,9 @@ export type ExecutionSummary = {
   queued: number;
   running: number;
   completed: number;
+  /** Submitted (auto + assisted Done) — separate from Verified */
+  submitted: number;
+  verified: number;
   waitingHuman: number;
   skipped: number;
   failed: number;
@@ -28,11 +31,15 @@ export type ExecutionSummary = {
 };
 
 type StatsPayload = {
-  executionSummary?: Partial<ExecutionSummary>;
+  executionSummary?: Partial<ExecutionSummary> & {
+    submitted?: number;
+    verified?: number;
+  };
   queued?: number;
   running?: number;
   completed?: number;
   submitted?: number;
+  verified?: number;
   completedJobs?: number;
   waitingHuman?: number;
   needsYou?: number;
@@ -58,6 +65,8 @@ function normalize(d: StatsPayload): ExecutionSummary {
   const completed = Number(
     es.completed ?? d.completed ?? d.submitted ?? d.completedJobs ?? 0
   );
+  const submitted = Number(es.submitted ?? d.submitted ?? completed);
+  const verified = Number(es.verified ?? d.verified ?? 0);
   const waitingHuman = Number(
     es.waitingHuman ?? d.waitingHuman ?? d.needsYou ?? d.needsYourAction ?? 0
   );
@@ -68,6 +77,8 @@ function normalize(d: StatsPayload): ExecutionSummary {
     queued: Number(es.queued ?? d.queued ?? 0),
     running,
     completed,
+    submitted,
+    verified,
     waitingHuman,
     skipped: Number(es.skipped ?? d.skipped ?? 0),
     failed: Number(es.failed ?? d.failed ?? 0),
