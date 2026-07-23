@@ -44,15 +44,42 @@ export const useAppStore = create<AppState>()(
       workflowProgress: {},
       helpDrawerOpen: false,
       aiCoachOpen: false,
-      setCurrentOrgId: (id) => set({ currentOrgId: id }),
-      setCurrentProjectId: (id) => set({ currentProjectId: id }),
-      setDemoMode: (demoMode) => set({ demoMode }),
-      setTourCompleted: (tourCompleted) => set({ tourCompleted }),
-      setShowTour: (showTour) => set({ showTour }),
-      setLearningMode: (learningMode) => set({ learningMode }),
-      setExpertMode: (expertMode) => set({ expertMode }),
-      setHelpDrawerOpen: (helpDrawerOpen) => set({ helpDrawerOpen }),
-      setAiCoachOpen: (aiCoachOpen) => set({ aiCoachOpen }),
+      setCurrentOrgId: (id) => {
+        if (get().currentOrgId === id) return;
+        set({ currentOrgId: id });
+      },
+      setCurrentProjectId: (id) => {
+        if (get().currentProjectId === id) return;
+        set({ currentProjectId: id });
+      },
+      setDemoMode: (demoMode) => {
+        if (get().demoMode === demoMode) return;
+        set({ demoMode });
+      },
+      setTourCompleted: (tourCompleted) => {
+        if (get().tourCompleted === tourCompleted) return;
+        set({ tourCompleted });
+      },
+      setShowTour: (showTour) => {
+        if (get().showTour === showTour) return;
+        set({ showTour });
+      },
+      setLearningMode: (learningMode) => {
+        if (get().learningMode === learningMode) return;
+        set({ learningMode });
+      },
+      setExpertMode: (expertMode) => {
+        if (get().expertMode === expertMode) return;
+        set({ expertMode });
+      },
+      setHelpDrawerOpen: (helpDrawerOpen) => {
+        if (get().helpDrawerOpen === helpDrawerOpen) return;
+        set({ helpDrawerOpen });
+      },
+      setAiCoachOpen: (aiCoachOpen) => {
+        if (get().aiCoachOpen === aiCoachOpen) return;
+        set({ aiCoachOpen });
+      },
       markStepComplete: (projectId, stepId) => {
         const prev = get().workflowProgress[projectId] ?? [];
         if (prev.includes(stepId)) return;

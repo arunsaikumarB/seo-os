@@ -6,7 +6,10 @@ import { useAppStore } from '@/stores/app-store';
 /** Sets default org from /me when user authenticates */
 export function OrgBootstrap({ children }: { children: React.ReactNode }) {
   const { fetchMe } = useApi();
-  const { currentOrgId, setCurrentOrgId, setCurrentProjectId, demoMode } = useAppStore();
+  const currentOrgId = useAppStore((s) => s.currentOrgId);
+  const setCurrentOrgId = useAppStore((s) => s.setCurrentOrgId);
+  const setCurrentProjectId = useAppStore((s) => s.setCurrentProjectId);
+  const demoMode = useAppStore((s) => s.demoMode);
 
   const { data } = useQuery({
     queryKey: ['me'],
@@ -16,8 +19,10 @@ export function OrgBootstrap({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (demoMode) return;
+    // Wait for /me — empty array while loading must not wipe org/project
+    if (!data) return;
 
-    const memberships = data?.data.organizations ?? [];
+    const memberships = data.data.organizations ?? [];
     if (!memberships.length) {
       if (currentOrgId) setCurrentOrgId(null);
       setCurrentProjectId(null);

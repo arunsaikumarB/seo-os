@@ -11,7 +11,7 @@ import { useAppStore } from '@/stores/app-store';
 import { toast } from 'sonner';
 import { PageTransition } from '@/components/demo/page-transition';
 import { AiActivityCard } from '@/components/workflow/ai-activity-card';
-import { isSuccessfulImportRecord } from '@/hooks/use-workflow';
+import { isSuccessfulImportRecord } from '@/lib/import-success';
 import { Upload, FileSpreadsheet, FileText, Link2, Sheet, Download } from 'lucide-react';
 
 type ImportResult = {

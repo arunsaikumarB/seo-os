@@ -11,13 +11,17 @@ interface NextActionStripProps {
 export function NextActionStrip({ projectId }: NextActionStripProps) {
   const location = useLocation();
   const learningMode = useAppStore((s) => s.learningMode);
-  const { nextStep, allComplete, continueHref, continueEnabled, hasSuccessfulImport } =
+  const { nextStep, allComplete, continueHref, continueEnabled, hasSuccessfulImport, importsLoaded } =
     useWorkflow(projectId);
 
   const onHome = location.pathname.endsWith('/home');
   if (!learningMode || onHome || allComplete) return null;
   // Import page owns the primary CTA when no import exists yet
-  if (!hasSuccessfulImport && location.pathname.includes('/backlink-builder/import')) {
+  if (
+    importsLoaded &&
+    !hasSuccessfulImport &&
+    location.pathname.includes('/backlink-builder/import')
+  ) {
     return null;
   }
 

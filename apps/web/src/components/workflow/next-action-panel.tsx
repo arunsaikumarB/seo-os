@@ -25,12 +25,14 @@ export function NextActionPanel({ projectId, className }: NextActionPanelProps) 
     continueLabel,
     continueEnabled,
     hasSuccessfulImport,
+    importsLoaded,
     allComplete,
     jobsOpen,
     needsHumanAction,
     activeStep,
   } = useWorkflow(projectId);
   const { generateState, exceptionCount, progress, genActive } = useCampaignAiStatus(projectId);
+  const importGateActive = importsLoaded && !hasSuccessfulImport;
 
   const onGeneratePage = location.pathname.includes('/content/library');
   if (onGeneratePage) return null;
@@ -49,7 +51,7 @@ export function NextActionPanel({ projectId, className }: NextActionPanelProps) 
   }
 
   // Still on Import with no data — page owns the Import CTA; hide global Continue to AI Review
-  if (!hasSuccessfulImport && activeStep?.id === 'import-websites') {
+  if (importGateActive && activeStep?.id === 'import-websites') {
     return null;
   }
 
@@ -146,7 +148,7 @@ export function NextActionPanel({ projectId, className }: NextActionPanelProps) 
               <ArrowRight className="ml-2 h-4 w-4" />
             </Link>
           </Button>
-          {!hasSuccessfulImport ? (
+          {importGateActive ? (
             <p className="text-xs text-muted-foreground">
               Import at least one website before continuing to AI Review.
             </p>

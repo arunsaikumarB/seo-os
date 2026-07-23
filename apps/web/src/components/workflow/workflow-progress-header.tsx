@@ -12,8 +12,15 @@ type Props = {
 
 /** Workflow steps only — no counts, chips, or sub-statuses (Phase 3.6). */
 export function WorkflowProgressHeader({ projectId, className }: Props) {
-  const { steps, currentStep, getStepHref, isStepComplete, hasSuccessfulImport } =
-    useWorkflow(projectId);
+  const {
+    steps,
+    currentStep,
+    getStepHref,
+    isStepComplete,
+    hasSuccessfulImport,
+    importsLoaded,
+  } = useWorkflow(projectId);
+  const lockLaterSteps = importsLoaded && !hasSuccessfulImport;
 
   return (
     <motion.div
@@ -26,7 +33,7 @@ export function WorkflowProgressHeader({ projectId, className }: Props) {
           const done = isStepComplete(step.id);
           const current = step.id === currentStep.id && !done;
           const locked =
-            !hasSuccessfulImport &&
+            lockLaterSteps &&
             step.id !== 'create-project' &&
             step.id !== 'import-websites';
           const label =
