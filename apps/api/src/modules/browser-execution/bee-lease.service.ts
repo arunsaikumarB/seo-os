@@ -220,6 +220,18 @@ export async function sweepExpiredLeases(): Promise<{ recovered: number }> {
       })
       .eq('id', jobId);
 
+    try {
+      const { stampRequeueTrace } = await import('./bee-record-failure.service.js');
+      await stampRequeueTrace({
+        workspaceId,
+        jobId,
+        reason: `worker lost — lease expired (prior status ${row.status})`,
+        source: 'sweepExpiredLeases',
+      });
+    } catch {
+      /* best-effort */
+    }
+
     await appendTimelineEvent({
       workspaceId,
       jobId,

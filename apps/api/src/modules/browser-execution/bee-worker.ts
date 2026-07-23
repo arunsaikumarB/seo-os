@@ -653,8 +653,19 @@ export async function runBeeExecutionJob(data: {
 
   // Delayed smart-retry — startAfter elapsed, now start a fresh session
   if (data.action === 'retry_start') {
-    const { startJob } = await import('./bee.service.js');
-    await startJob(workspaceId, jobId);
+    try {
+      const { startJob } = await import('./bee.service.js');
+      await startJob(workspaceId, jobId);
+    } catch (err) {
+      const { recordFailure } = await import('./bee-record-failure.service.js');
+      await recordFailure({
+        workspaceId,
+        jobId,
+        err,
+        source: 'retry_start',
+        allowRetry: true,
+      });
+    }
     return;
   }
 
@@ -682,6 +693,16 @@ export async function runBeeExecutionJob(data: {
 
   try {
     await runBeeExecutionJobInner(data, lease);
+  } catch (err) {
+    // Phase 6.3.4 — never swallow; never silent-requeue
+    const { recordFailure } = await import('./bee-record-failure.service.js');
+    await recordFailure({
+      workspaceId,
+      jobId,
+      err,
+      source: 'runBeeExecutionJob',
+      allowRetry: true,
+    });
   } finally {
     clearInterval(heartbeat);
     if (ceilingTimer) clearTimeout(ceilingTimer);
@@ -694,6 +715,12 @@ export async function runBeeExecutionJob(data: {
         stage: 'recovery',
         workerId,
       });
+    }
+    try {
+      const { assertLeftRunningSafely } = await import('./bee-record-failure.service.js');
+      await assertLeftRunningSafely(workspaceId, jobId);
+    } catch (assertErr) {
+      logger.warn({ assertErr, jobId }, 'assertLeftRunningSafely failed');
     }
   }
 }
@@ -1525,6 +1552,21 @@ async function runBeeExecutionJobInner(
       error_message: failLabel,
       finished_at: new Date().toISOString(),
     });
+    // Phase 6.3.4 — Campaign Health Why/Blocker must not stay empty
+    try {
+      const { stampRequeueTrace } = await import('./bee-record-failure.service.js');
+      await stampRequeueTrace({
+        workspaceId,
+        jobId,
+        reason: `${failLabel}\n${err instanceof Error ? (err.stack ?? err.message) : String(err)}`.slice(
+          0,
+          2000
+        ),
+        source: 'runBeeExecutionJobInner',
+      });
+    } catch {
+      /* best-effort */
+    }
     await appendLog(workspaceId, jobId, 'error', failLabel, {
       failureCode,
       failureMessage: nav.message || classified.failureMessage,

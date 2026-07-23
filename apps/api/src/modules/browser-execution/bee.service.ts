@@ -1226,8 +1226,23 @@ export async function continueQueuedJobs(
       try {
         await startJob(workspaceId, String(row.id));
         started.push(String(row.id));
-      } catch {
-        /* slot race / 429 — leave queued for next scheduler tick */
+      } catch (err) {
+        // Phase 6.3.4 — never leave Queued with no Why/Blocker after a start throw
+        try {
+          const { recordFailure } = await import('./bee-record-failure.service.js');
+          await recordFailure({
+            workspaceId,
+            jobId: String(row.id),
+            err,
+            source: 'continueQueuedJobs',
+            allowRetry: true,
+          });
+        } catch (recErr) {
+          logger.warn(
+            { recErr, jobId: row.id },
+            'continueQueuedJobs: recordFailure failed after startJob throw'
+          );
+        }
       }
     })
   );

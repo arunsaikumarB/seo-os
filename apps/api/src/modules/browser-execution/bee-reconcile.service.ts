@@ -91,6 +91,18 @@ export async function reconcileExecutionAfterRestart(): Promise<{
       })
       .eq('id', jobId);
 
+    try {
+      const { stampRequeueTrace } = await import('./bee-record-failure.service.js');
+      await stampRequeueTrace({
+        workspaceId,
+        jobId,
+        reason: `recovered after restart (prior ${row.status})`,
+        source: 'reconcileExecutionAfterRestart',
+      });
+    } catch {
+      /* best-effort */
+    }
+
     await appendTimelineEvent({
       workspaceId,
       jobId,

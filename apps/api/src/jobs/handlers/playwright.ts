@@ -13,16 +13,33 @@ export async function handlePlaywrightJobs(
     const type = String(job.data.type ?? '');
 
     if (type === 'bee_execute') {
+      const jobId = String(job.data.jobId ?? '');
+      const workspaceId = String(job.data.workspaceId ?? '');
       try {
         await runBeeExecutionJob({
-          jobId: String(job.data.jobId ?? ''),
-          workspaceId: String(job.data.workspaceId ?? ''),
+          jobId,
+          workspaceId,
           sessionId: job.data.sessionId ? String(job.data.sessionId) : undefined,
           action: job.data.action ? String(job.data.action) : 'run',
         });
       } catch (err) {
         logger.error({ jobId: job.id, err }, 'BEE playwright job failed');
-        throw err;
+        // Phase 6.3.4 — record Failure/Retrying; do not leave Queued with no trace
+        try {
+          const { recordFailure } = await import(
+            '../../modules/browser-execution/bee-record-failure.service.js'
+          );
+          await recordFailure({
+            workspaceId,
+            jobId,
+            err,
+            source: 'handlePlaywrightJobs',
+            allowRetry: true,
+          });
+        } catch (recErr) {
+          logger.error({ recErr, jobId }, 'recordFailure after playwright throw failed');
+        }
+        // Do not rethrow — status is now Failed/Retrying; pg-boss retry would silent-requeue
       }
       continue;
     }

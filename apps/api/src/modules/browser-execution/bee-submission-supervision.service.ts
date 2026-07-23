@@ -98,6 +98,17 @@ export async function resumeInterruptedSubmissions(workspaceId?: string): Promis
         updated_at: new Date().toISOString(),
       })
       .eq('id', jobId);
+    try {
+      const { stampRequeueTrace } = await import('./bee-record-failure.service.js');
+      await stampRequeueTrace({
+        workspaceId: ws,
+        jobId,
+        reason: `recovered — stale in-flight (prior ${row.status})`,
+        source: 'resumeInterruptedSubmissions',
+      });
+    } catch {
+      /* best-effort */
+    }
     workspaces.add(ws);
     requeuedStale++;
   }

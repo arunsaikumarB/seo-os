@@ -772,7 +772,9 @@ export async function getExecutionDiagnostics(
   const targets = await listPipelineTargetItems(workspaceId);
   const { data: allJobs } = await admin()
     .from('execution_jobs')
-    .select('id, opportunity_id, status, disposition, metrics, error_message, site_domain')
+    .select(
+      'id, opportunity_id, status, disposition, metrics, error_message, error_code, failure_classification, site_domain'
+    )
     .eq('workspace_id', workspaceId)
     .is('deleted_at', null);
 
@@ -781,6 +783,35 @@ export async function getExecutionDiagnostics(
   for (const j of jobs) {
     const oid = String(j.opportunity_id);
     if (!byOpp.has(oid)) byOpp.set(oid, j);
+  }
+
+  // Phase 6.3.4 — also include Submitting / active-job opportunities (not only Ready)
+  const activeJobOppIds = [...byOpp.keys()].filter((id) => {
+    const j = byOpp.get(id)!;
+    const st = String(j.status);
+    return ![
+      'completed',
+      'submitted',
+      'verified',
+      'skipped',
+      'deleted',
+      'ignored',
+      'cancelled',
+    ].includes(st);
+  });
+  const extraIds = activeJobOppIds.filter(
+    (id) => !targets.some((t) => t.id === id) && !ready.some((r) => r.id === id)
+  );
+  let extras: ReadyOpp[] = [];
+  if (extraIds.length) {
+    const { data } = await admin()
+      .from('opportunities')
+      .select(
+        'id, domain, url, website_name, campaign_lifecycle, pipeline_stage, generation_status, package_approved_by, automation_status, metadata, last_error'
+      )
+      .eq('workspace_id', workspaceId)
+      .in('id', extraIds);
+    extras = (data ?? []) as ReadyOpp[];
   }
 
   const countStatus = (pred: (s: string, d: string | null) => boolean) =>
@@ -803,10 +834,15 @@ export async function getExecutionDiagnostics(
   const items: PipelineItemDiag[] = [];
   let missing = 0;
 
-  // Diagnostics rows: Ready items + recovery targets (failed_to_start)
-  const diagOpps = targets.length >= ready.length ? targets : ready;
+  const diagOpps = [
+    ...(targets.length >= ready.length ? targets : ready),
+    ...extras,
+  ];
+  const seen = new Set<string>();
 
   for (const item of diagOpps) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
     const job = byOpp.get(item.id);
     const meta = (item.metadata as Record<string, unknown> | null) ?? {};
     const pipe =
@@ -814,15 +850,38 @@ export async function getExecutionDiagnostics(
         ? (meta.execution_pipeline as Record<string, unknown>)
         : {};
     const metrics = (job?.metrics as Record<string, unknown> | null) ?? {};
+    const failure = (metrics.failure as Record<string, unknown> | null) ?? null;
     const exists = Boolean(job);
     const st = job ? String(job.status) : '';
     const disp = (job?.disposition as string | null) ?? null;
     const isReadyRow = ready.some((r) => r.id === item.id);
     if (isReadyRow && !exists) missing++;
     if (isReadyRow && exists && isRetriableStartFailure(st, disp)) {
-      // Ready (or restored) with retriable fail still counts as pipeline gap
       missing++;
     }
+
+    // Phase 6.3.4 — Why/Blocker from job error, metrics, opportunity last_error, pipeline
+    const jobErr =
+      (job?.error_message != null ? String(job.error_message) : null) ||
+      (failure?.failureMessage != null ? String(failure.failureMessage) : null) ||
+      (failure?.label != null ? String(failure.label) : null) ||
+      (metrics.lastError != null ? String(metrics.lastError) : null) ||
+      (job?.failure_classification != null ? String(job.failure_classification) : null);
+    const oppLastError =
+      (item as { last_error?: string | null }).last_error != null
+        ? String((item as { last_error?: string | null }).last_error)
+        : null;
+    const why =
+      (pipe.whyNoJob as string) ||
+      (pipe.verifiedBlocker as string) ||
+      (pipe.creationError as string) ||
+      jobErr ||
+      oppLastError ||
+      (!exists
+        ? 'Ready item has no execution_jobs row — ensure never ran or create failed'
+        : st === 'queued' || st === 'preparing'
+          ? 'Queued — awaiting worker (no failure recorded yet)'
+          : null);
 
     items.push({
       campaignItemId: item.id,
@@ -833,13 +892,7 @@ export async function getExecutionDiagnostics(
       executionJobExists: exists,
       executionJobId: job ? String(job.id) : null,
       executionJobStatus: job ? String(job.status) : null,
-      whyNoJob: exists
-        ? isRetriableStartFailure(st, disp)
-          ? String(job!.error_message ?? 'failed_to_start — retry required')
-          : null
-        : (pipe.whyNoJob as string) ||
-          (pipe.creationError as string) ||
-          'Ready item has no execution_jobs row — ensure never ran or create failed',
+      whyNoJob: why,
       queueAccepted: exists
         ? [
             'queued',
@@ -850,6 +903,8 @@ export async function getExecutionDiagnostics(
             'completed',
             'skipped',
             'failed',
+            'retry_scheduled',
+            'waiting_infrastructure',
           ].includes(String(job!.status))
         : ((pipe.queueAccepted as boolean | null) ?? false),
       workerAssigned: Boolean(
@@ -870,8 +925,15 @@ export async function getExecutionDiagnostics(
       queuePosition: null,
       verifiedBlocker:
         (pipe.verifiedBlocker as string) ||
-        (job?.status === 'skipped' ? String(job.error_message ?? 'skipped') : null),
-      creationError: (pipe.creationError as string) || null,
+        jobErr ||
+        oppLastError ||
+        (job?.status === 'skipped' ? String(job.error_message ?? 'skipped') : null) ||
+        why,
+      creationError:
+        (pipe.creationError as string) ||
+        (failure?.stack != null ? String(failure.stack).slice(0, 500) : null) ||
+        (metrics.lastErrorStack != null ? String(metrics.lastErrorStack).slice(0, 500) : null) ||
+        jobErr,
       creationStack: (pipe.creationStack as string) || null,
     });
   }
