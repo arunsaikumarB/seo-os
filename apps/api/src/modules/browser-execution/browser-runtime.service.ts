@@ -112,6 +112,8 @@ async function acquirePooledBrowser(mode: BrowserMode, timeoutMs: number): Promi
       headless: mode === 'headless',
       timeout: timeoutMs,
       executablePath,
+      // Required in many container images (Railway / Playwright Docker)
+      args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
     });
     browserPool.set(mode, browser);
     browserJobCounts.set(mode, 1);

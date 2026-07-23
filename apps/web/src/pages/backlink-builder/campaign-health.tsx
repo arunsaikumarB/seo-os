@@ -49,7 +49,18 @@ type HealthData = {
   generationProgress?: Record<string, number | boolean>;
   executionAudit?: {
     workers: { healthy: number; idle: number; running: number; stuck: number };
-    browsers: { allocated: number; free: number; contexts: number; max: number };
+    browsers: {
+      allocated: number;
+      free: number;
+      contexts: number;
+      max: number;
+      dbSessionRunning?: number;
+      allocatedEqualsContexts?: boolean;
+      runtimeHealthy?: boolean;
+      runtimeError?: string | null;
+      browsersPath?: string | null;
+      withinCeiling?: boolean;
+    };
     queue: {
       queued: number;
       running: number;
@@ -72,6 +83,8 @@ type HealthData = {
     invariants: {
       stuckWorkersZero: boolean;
       browsersWithinCeiling: boolean;
+      allocatedEqualsContexts?: boolean;
+      runtimeHealthy?: boolean;
       duplicateActiveJobsZero?: boolean;
     };
   };
@@ -459,8 +472,21 @@ export function CampaignHealthPage() {
           <p>
             Browsers: Allocated {data.executionAudit.browsers.allocated} · Free{' '}
             {data.executionAudit.browsers.free} · Contexts {data.executionAudit.browsers.contexts}{' '}
-            (Allocated + Free ≤ {data.executionAudit.browsers.max})
+            (Allocated == Contexts{' '}
+            {data.executionAudit.browsers.allocatedEqualsContexts !== false ? 'OK' : 'FAIL'} · max{' '}
+            {data.executionAudit.browsers.max})
           </p>
+          {data.executionAudit.browsers.runtimeHealthy === false ? (
+            <p className="text-destructive text-sm">
+              Browser runtime unhealthy
+              {data.executionAudit.browsers.browsersPath
+                ? ` · PLAYWRIGHT_BROWSERS_PATH=${data.executionAudit.browsers.browsersPath}`
+                : ''}
+              {data.executionAudit.browsers.runtimeError
+                ? ` — ${data.executionAudit.browsers.runtimeError}`
+                : ' — Chromium not launchable (not a stuck queue)'}
+            </p>
+          ) : null}
           <p>
             Queue: Queued {data.executionAudit.queue.queued} · Running{' '}
             {data.executionAudit.queue.running} · Waiting Human{' '}
@@ -483,6 +509,12 @@ export function CampaignHealthPage() {
             Invariants: stuck=0{' '}
             {data.executionAudit.invariants.stuckWorkersZero ? 'OK' : 'FAIL'} · ceiling{' '}
             {data.executionAudit.invariants.browsersWithinCeiling ? 'OK' : 'FAIL'}
+            {data.executionAudit.invariants.allocatedEqualsContexts != null
+              ? ` · Allocated==Contexts ${data.executionAudit.invariants.allocatedEqualsContexts ? 'OK' : 'FAIL'}`
+              : ''}
+            {data.executionAudit.invariants.runtimeHealthy != null
+              ? ` · runtime ${data.executionAudit.invariants.runtimeHealthy ? 'OK' : 'FAIL'}`
+              : ''}
             {data.executionAudit.invariants.duplicateActiveJobsZero != null
               ? ` · duplicates=0 ${data.executionAudit.invariants.duplicateActiveJobsZero ? 'OK' : 'FAIL'}`
               : ''}

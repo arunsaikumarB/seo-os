@@ -259,8 +259,37 @@ export async function getExecutionAudit(workspaceId: string) {
     .is('deleted_at', null);
 
   const pool = getBrowserPoolStats();
-  const allocated = sessionsRunning ?? 0;
-  const free = Math.max(0, policyMax - allocated);
+  const contexts = pool.activeSessions;
+
+  // Phase 6.3.3 — Allocated must equal live Playwright contexts (never phantom DB sessions).
+  let runtimeHealthy = true;
+  let runtimeError: string | null = null;
+  let browsersPath: string | null = null;
+  try {
+    const { getBrowserRuntimeStatus } = await import('./browser-runtime-manager.service.js');
+    const runtime = await getBrowserRuntimeStatus();
+    runtimeHealthy = runtime.health === 'healthy' && runtime.launch_ok === true;
+    runtimeError = runtime.last_error;
+    browsersPath =
+      (runtime.meta as { browsersPath?: string } | null)?.browsersPath ??
+      process.env.PLAYWRIGHT_BROWSERS_PATH ??
+      null;
+    if (!runtimeHealthy && (sessionsRunning ?? 0) > 0) {
+      const { closePhantomBrowserSessions } = await import(
+        './browser-runtime-manager.service.js'
+      );
+      await closePhantomBrowserSessions(
+        runtimeError || 'Browser runtime unhealthy — releasing phantom slots'
+      );
+    }
+  } catch {
+    runtimeHealthy = false;
+  }
+
+  const allocated = runtimeHealthy ? contexts : 0;
+  const free = runtimeHealthy ? Math.max(0, policyMax - allocated) : 0;
+  const dbSessionRunning = sessionsRunning ?? 0;
+  const allocatedEqualsContexts = allocated === contexts;
   const total =
     queued + running + waitingHuman + completed + failed + retrying + deleted + ignored;
 
@@ -274,7 +303,7 @@ export async function getExecutionAudit(workspaceId: string) {
 
   return {
     workers: {
-      healthy: Math.max(0, policyMax - stuck),
+      healthy: runtimeHealthy ? Math.max(0, policyMax - stuck) : 0,
       idle: free,
       running: leased,
       stuck, // must be 0
@@ -282,8 +311,13 @@ export async function getExecutionAudit(workspaceId: string) {
     browsers: {
       allocated,
       free,
-      contexts: pool.activeSessions,
+      contexts,
       max: policyMax,
+      dbSessionRunning,
+      allocatedEqualsContexts,
+      runtimeHealthy,
+      runtimeError,
+      browsersPath,
       withinCeiling: allocated + free <= policyMax && allocated <= policyMax,
     },
     queue: {
@@ -313,6 +347,8 @@ export async function getExecutionAudit(workspaceId: string) {
     invariants: {
       stuckWorkersZero: stuck === 0,
       browsersWithinCeiling: allocated <= policyMax,
+      allocatedEqualsContexts,
+      runtimeHealthy,
       queueSumsToTotal: true,
       noUnknownStates: true,
       duplicateActiveJobsZero: duplicateViolations.length === 0,

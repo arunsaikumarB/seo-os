@@ -44,6 +44,15 @@ export type StartupHealthCheck = {
 
 let installInFlight: Promise<boolean> | null = null;
 let lastStatus: BrowserRuntimeStatusRow | null = null;
+/** True only after this process completed a verifyBrowserRuntime() call. */
+let processLocalVerified = false;
+
+function browsersPathEnv(): string {
+  return (
+    process.env.PLAYWRIGHT_BROWSERS_PATH ||
+    path.join(process.env.LOCALAPPDATA || process.env.HOME || '', 'ms-playwright')
+  );
+}
 
 function playwrightVersion(): string | null {
   try {
@@ -129,14 +138,22 @@ async function persistStatus(patch: Partial<BrowserRuntimeStatusRow> & Record<st
   return lastStatus;
 }
 
-export async function getBrowserRuntimeStatus(): Promise<BrowserRuntimeStatusRow> {
-  if (lastStatus?.last_verification_at) return lastStatus;
+export async function getBrowserRuntimeStatus(opts?: {
+  force?: boolean;
+}): Promise<BrowserRuntimeStatusRow> {
+  // Never trust cross-deploy DB "healthy" until this process has probed launch.
+  if (!opts?.force && processLocalVerified && lastStatus?.last_verification_at) {
+    return lastStatus;
+  }
+  if (!opts?.force && !processLocalVerified) {
+    return verifyBrowserRuntime({ autoInstall: false, probeLaunch: true });
+  }
   const { data } = await getSupabaseAdmin()
     .from('browser_runtime_status')
     .select('*')
     .eq('id', STATUS_ID)
     .maybeSingle();
-  if (data) {
+  if (data && processLocalVerified) {
     lastStatus = {
       ...(data as BrowserRuntimeStatusRow),
       installed_browsers: Array.isArray(data.installed_browsers)
@@ -147,7 +164,7 @@ export async function getBrowserRuntimeStatus(): Promise<BrowserRuntimeStatusRow
     };
     return lastStatus;
   }
-  return verifyBrowserRuntime({ autoInstall: false });
+  return verifyBrowserRuntime({ autoInstall: false, probeLaunch: true });
 }
 
 /** Deep verification: package, executable path, launch probe. */
@@ -158,6 +175,7 @@ export async function verifyBrowserRuntime(
   const probeLaunch = opts.probeLaunch !== false;
   const pwVersion = playwrightVersion();
   const packageOk = await isPlaywrightAvailable().catch(() => false);
+  const browsersPath = browsersPathEnv();
 
   let executablePath: string | null = null;
   let browserVersion: string | null = null;
@@ -165,6 +183,7 @@ export async function verifyBrowserRuntime(
   let executableExists = false;
   let launchOk = false;
   let lastError: string | null = null;
+  let rawError: string | null = null;
   const installed: string[] = [];
   let cacheSize: number | null = null;
 
@@ -180,14 +199,12 @@ export async function verifyBrowserRuntime(
     } catch {
       chromiumExists = false;
       executableExists = false;
-      lastError = 'Browser Runtime Missing — Chromium executable not found';
+      rawError = `Chromium executable not found at ${chromePath} (PLAYWRIGHT_BROWSERS_PATH=${browsersPath})`;
+      lastError = friendlyRuntimeError(rawError);
     }
 
-    const cacheRoot =
-      process.env.PLAYWRIGHT_BROWSERS_PATH ||
-      path.join(process.env.LOCALAPPDATA || process.env.HOME || '', 'ms-playwright');
-    if (cacheRoot) {
-      cacheSize = await dirSizeBytes(cacheRoot).catch(() => null);
+    if (browsersPath) {
+      cacheSize = await dirSizeBytes(browsersPath).catch(() => null);
     }
 
     if (executableExists && probeLaunch) {
@@ -197,22 +214,32 @@ export async function verifyBrowserRuntime(
           headless: true,
           timeout: 45_000,
           executablePath: chromePath,
+          args: ['--no-sandbox', '--disable-dev-shm-usage'],
         });
         browserVersion = browser.version();
         await browser.close();
         launchOk = true;
         lastError = null;
+        rawError = null;
       } catch (err) {
         launchOk = false;
+        rawError = err instanceof Error ? err.message : String(err);
         lastError = friendlyRuntimeError(err);
-        logger.warn({ err: lastError }, 'Browser launch probe failed');
+        logger.warn({ err: rawError, browsersPath, chromePath }, 'Browser launch probe failed');
       }
-    } else if (executableExists) {
-      launchOk = true;
+    } else if (executableExists && !probeLaunch) {
+      // File exists is NOT enough — without a probe, stay degraded until launch proven
+      launchOk = false;
+      rawError = rawError ?? 'Launch probe skipped — runtime not confirmed';
+      lastError = friendlyRuntimeError(rawError);
     }
   } catch (err) {
+    rawError = err instanceof Error ? err.message : String(err);
     lastError = friendlyRuntimeError(err);
-    if (!packageOk) lastError = 'Browser Runtime Missing — Playwright package not available';
+    if (!packageOk) {
+      lastError = 'Browser Runtime Missing — Playwright package not available';
+      rawError = rawError || lastError;
+    }
   }
 
   let health: string = 'missing';
@@ -232,13 +259,23 @@ export async function verifyBrowserRuntime(
     installed_browsers: installed,
     install_status: health === 'healthy' ? 'installed' : 'unknown',
     health,
-    last_error: lastError,
+    last_error: lastError
+      ? rawError && !lastError.includes(rawError.slice(0, 80))
+        ? `${lastError} — ${rawError.slice(0, 280)}`
+        : lastError
+      : null,
     last_verification_at: new Date().toISOString(),
-    meta: { verifiedBy: 'verifyBrowserRuntime' },
+    meta: {
+      verifiedBy: 'verifyBrowserRuntime',
+      browsersPath,
+      rawError,
+      processPid: process.pid,
+    },
   });
+  processLocalVerified = true;
 
   if (health !== 'healthy' && autoInstall) {
-    logger.warn({ lastError }, 'Browser runtime unhealthy — attempting auto-install of Chromium');
+    logger.warn({ lastError, rawError }, 'Browser runtime unhealthy — attempting auto-install of Chromium');
     const ok = await installChromium((progress) => {
       void persistStatus({
         install_status: 'installing',
@@ -257,10 +294,18 @@ export async function verifyBrowserRuntime(
       status = await persistStatus({
         install_status: 'failed',
         health: 'missing',
-        last_error: 'Automatic Chromium install failed — administrator action required',
+        last_error:
+          'Automatic Chromium install failed — administrator action required. Check PLAYWRIGHT_BROWSERS_PATH and container image.',
         last_verification_at: new Date().toISOString(),
+        meta: { browsersPath, rawError },
       });
     }
+  }
+
+  if (status.health !== 'healthy' || !status.launch_ok) {
+    await closePhantomBrowserSessions(
+      status.last_error || 'Browser runtime unhealthy — closing phantom sessions'
+    ).catch((err) => logger.warn({ err }, 'closePhantomBrowserSessions failed'));
   }
 
   return status;
@@ -383,11 +428,13 @@ export async function ensureBrowserRuntimeReady(): Promise<{
   status: BrowserRuntimeStatusRow;
   message?: string;
 }> {
-  let status = await getBrowserRuntimeStatus();
+  let status = processLocalVerified
+    ? await getBrowserRuntimeStatus()
+    : await verifyBrowserRuntime({ autoInstall: true, probeLaunch: true });
   const stale =
     !status.last_verification_at ||
     Date.now() - new Date(status.last_verification_at).getTime() > 5 * 60_000;
-  if (stale || status.health !== 'healthy') {
+  if (stale || status.health !== 'healthy' || !status.launch_ok) {
     status = await verifyBrowserRuntime({ autoInstall: true, probeLaunch: true });
   }
   if (status.health === 'healthy' && status.launch_ok) {
@@ -400,6 +447,38 @@ export async function ensureBrowserRuntimeReady(): Promise<{
       status.last_error ||
       'Browser Runtime Missing — Install Required. Start is disabled until Chromium is healthy.',
   };
+}
+
+/**
+ * Close DB browser_sessions marked running when there is no live Playwright context.
+ * Prevents Allocated>0 / Contexts=0 phantom capacity.
+ */
+export async function closePhantomBrowserSessions(reason: string): Promise<number> {
+  const { data: sessions } = await getSupabaseAdmin()
+    .from('browser_sessions')
+    .select('id')
+    .eq('status', 'running')
+    .is('deleted_at', null)
+    .limit(2000);
+  let closed = 0;
+  const now = new Date().toISOString();
+  for (const s of sessions ?? []) {
+    await getSupabaseAdmin()
+      .from('browser_sessions')
+      .update({
+        status: 'closed',
+        closed_at: now,
+        health_status: 'expired',
+        last_error: reason.slice(0, 500),
+        updated_at: now,
+      })
+      .eq('id', s.id);
+    closed++;
+  }
+  if (closed > 0) {
+    logger.warn({ closed, reason }, 'Closed phantom browser_sessions (no live contexts)');
+  }
+  return closed;
 }
 
 export async function runBrowserDiagnostics(): Promise<{

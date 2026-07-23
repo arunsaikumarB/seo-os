@@ -43,9 +43,12 @@ export async function getBeeWorkerHealth(workspaceId: string): Promise<{
   const indicators: HealthIndicator[] = [];
 
   let runtime = await getBrowserRuntimeStatus().catch(() => null);
-  if (!runtime?.last_verification_at) {
-    runtime = await verifyBrowserRuntime({ autoInstall: false, probeLaunch: false }).catch(
-      () => null
+  const stale =
+    !runtime?.last_verification_at ||
+    Date.now() - new Date(String(runtime.last_verification_at)).getTime() > 60_000;
+  if (!runtime || stale || runtime.health !== 'healthy' || !runtime.launch_ok) {
+    runtime = await verifyBrowserRuntime({ autoInstall: false, probeLaunch: true }).catch(
+      () => runtime
     );
   }
   const runtimeHealthy = runtime?.health === 'healthy' && runtime.launch_ok;

@@ -1047,7 +1047,8 @@ export function BrowserExecutionCenterPage() {
                 <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                   <p className="font-medium">Browser setup needed</p>
                   <p className="mt-0.5">
-                    Ask an admin to finish browser setup, then try again.{' '}
+                    Chromium is not launchable on the API worker — this is a missing browser
+                    runtime, not a stuck submission queue.{' '}
                     <button
                       type="button"
                       className="underline font-medium"
@@ -1056,6 +1057,11 @@ export function BrowserExecutionCenterPage() {
                       Technical details
                     </button>
                   </p>
+                  {runtime.data?.data.last_error ? (
+                    <p className="mt-1 font-mono text-[11px] break-all text-amber-950/80">
+                      {runtime.data.data.last_error}
+                    </p>
+                  ) : null}
                 </div>
               ) : null}
             </CardHeader>

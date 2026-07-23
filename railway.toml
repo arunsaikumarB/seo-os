@@ -8,7 +8,9 @@ PLAYWRIGHT_BROWSERS_PATH = "/ms-playwright"
 PLAYWRIGHT_CHROMIUM_USE_HEADLESS_SHELL = "0"
 
 [deploy]
-startCommand = "sh -c 'node apps/api/scripts/ensure-playwright-browsers.mjs && node apps/api/dist/index.js'"
+# Dockerfile CMD already runs ensure-playwright-browsers then the API.
+# Keep env explicit so runtime resolution matches the Playwright image.
+startCommand = "sh -c 'export PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_BROWSERS_PATH:-/ms-playwright}; export PLAYWRIGHT_CHROMIUM_USE_HEADLESS_SHELL=0; node apps/api/scripts/ensure-playwright-browsers.mjs && node apps/api/dist/index.js'"
 healthcheckPath = "/health"
-healthcheckTimeout = 120
+healthcheckTimeout = 180
 restartPolicyType = "ON_FAILURE"
