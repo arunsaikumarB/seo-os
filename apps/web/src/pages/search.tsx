@@ -114,7 +114,7 @@ export function SearchPage() {
       type: 'Opportunity',
       title: o.title,
       subtitle: `Score ${o.score}`,
-      href: 'campaigns/queue',
+      href: 'backlink-builder/classification',
     })),
   ];
 

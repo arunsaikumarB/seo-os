@@ -1,10 +1,8 @@
 import {
   LayoutDashboard,
   Settings,
-  Link2,
   Upload,
   Sparkles,
-  ListChecks,
   Target,
   FileText,
   Handshake,
@@ -19,6 +17,7 @@ import {
   GraduationCap,
   FolderPlus,
   ClipboardList,
+  Bot,
 } from 'lucide-react';
 import type { NavItem } from './navigation';
 
@@ -35,12 +34,12 @@ export interface WorkflowNavSection {
 
 export interface WorkflowNavItem extends NavItem {
   absolute?: boolean;
-  /** Shown as ①…⑧ in primary pipeline */
+  /** Shown as ①…⑦ in primary pipeline */
   stepNumber?: number;
   dividerBefore?: boolean;
 }
 
-/** Guided IA — primary pipeline + collapsible Advanced (nothing deleted) */
+/** Guided IA — 7-step primary pipeline + Advanced (browser auto-submit lives here) */
 export const workflowNavSections: WorkflowNavSection[] = [
   {
     id: 'primary',
@@ -74,39 +73,32 @@ export const workflowNavSections: WorkflowNavSection[] = [
         stepNumber: 3,
       },
       {
-        label: 'Approve Opportunities',
-        href: 'campaigns/queue',
-        icon: ListChecks,
-        featureFlag: 'backlink_builder',
-        stepNumber: 4,
-      },
-      {
         label: 'Generate Content',
         href: 'content/library',
         icon: FileText,
         featureFlag: 'v11_content_studio_v2',
-        stepNumber: 5,
+        stepNumber: 4,
       },
       {
         label: 'Submit Backlinks',
-        href: 'backlink-builder/execution',
-        icon: Link2,
-        featureFlag: 'bee_enabled',
-        stepNumber: 6,
+        href: 'backlink-builder/assisted-manual',
+        icon: ClipboardList,
+        featureFlag: 'backlink_builder',
+        stepNumber: 5,
       },
       {
         label: 'Track Results',
         href: 'backlink-builder/track-results',
         icon: CheckCircle2,
         featureFlag: 'backlink_builder',
-        stepNumber: 7,
+        stepNumber: 6,
       },
       {
-        label: 'Reports & Analytics',
+        label: 'Reports',
         href: 'reports/library',
         icon: FileBarChart,
         featureFlag: 'reports',
-        stepNumber: 8,
+        stepNumber: 7,
       },
     ],
   },
@@ -115,6 +107,12 @@ export const workflowNavSections: WorkflowNavSection[] = [
     label: 'Advanced Tools',
     advanced: true,
     items: [
+      {
+        label: 'Browser Auto-Submit',
+        href: 'backlink-builder/execution',
+        icon: Bot,
+        featureFlag: 'bee_enabled',
+      },
       { label: 'Campaigns', href: 'campaigns', icon: Target, featureFlag: 'backlink_builder' },
       { label: 'Relationship Hub', href: 'relationships', icon: Handshake },
       {
@@ -128,12 +126,6 @@ export const workflowNavSections: WorkflowNavSection[] = [
         href: 'backlink-builder/video-studio',
         icon: Video,
         featureFlag: 'v11_media_studios',
-      },
-      {
-        label: 'Assisted Manual',
-        href: 'backlink-builder/assisted-manual',
-        icon: ClipboardList,
-        featureFlag: 'backlink_builder',
       },
       {
         label: 'Intervention Window',

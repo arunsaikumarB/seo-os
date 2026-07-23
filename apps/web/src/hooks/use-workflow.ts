@@ -225,7 +225,7 @@ export function useWorkflow(projectId: string) {
   const continueHref = importGateActive
     ? `/projects/${projectId}/backlink-builder/import`
     : jobsOpen
-      ? `/projects/${projectId}/backlink-builder/execution`
+      ? `/projects/${projectId}/backlink-builder/assisted-manual`
       : allComplete
         ? `/projects/${projectId}/reports/library`
         : getStepHref(nextUnlockedStep, projectId);
@@ -233,7 +233,7 @@ export function useWorkflow(projectId: string) {
   const continueLabel = importGateActive
     ? 'Import websites'
     : jobsOpen
-      ? 'View progress'
+      ? 'Open Assisted Manual'
       : allComplete
         ? 'Open Reports'
         : 'Continue';

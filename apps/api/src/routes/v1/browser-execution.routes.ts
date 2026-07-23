@@ -183,6 +183,7 @@ browserExecutionRouter.post(
         workspaceId: param(req.params.projectId),
         userId,
         startImmediately: body.startImmediately,
+        force: true, // explicit Advanced → Browser Auto-Submit opt-in
       });
       res.status(200).json({ data });
     } catch (err) {

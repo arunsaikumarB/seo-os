@@ -15,7 +15,6 @@ import {
   Upload,
   Search,
   Sparkles,
-  ListChecks,
   Target,
   FileText,
   ClipboardList,
@@ -88,12 +87,6 @@ export const projectNav: NavItem[] = [
     featureFlag: 'backlink_builder',
   },
   {
-    label: 'Approve Opportunities',
-    href: 'campaigns/queue',
-    icon: ListChecks,
-    featureFlag: 'backlink_builder',
-  },
-  {
     label: 'Campaigns',
     href: 'campaigns',
     icon: Target,
@@ -128,6 +121,10 @@ export const mobileNavItems = (projectId: string): NavItem[] => [
   { label: 'Home', href: `/projects/${projectId}/home`, icon: LayoutDashboard },
   { label: 'Import', href: `/projects/${projectId}/backlink-builder/import`, icon: Link2 },
   { label: 'Projects', href: '/projects', icon: Building2 },
-  { label: 'Approve', href: `/projects/${projectId}/campaigns/queue`, icon: ListChecks },
+  {
+    label: 'Submit',
+    href: `/projects/${projectId}/backlink-builder/assisted-manual`,
+    icon: ClipboardList,
+  },
   { label: 'Settings', href: `/projects/${projectId}/settings/general`, icon: Settings },
 ];

@@ -13,8 +13,8 @@ export interface WorkflowStep {
 }
 
 /**
- * Guided backlink pipeline — primary UX path (8 steps).
- * Internal systems stay in Advanced; users only see outcomes.
+ * Guided backlink pipeline — 7 steps (Approve removed; Submit = Assisted Manual).
+ * Browser auto-submit lives under Advanced Tools.
  */
 export const WORKFLOW_STEPS: WorkflowStep[] = [
   {
@@ -44,26 +44,16 @@ export const WORKFLOW_STEPS: WorkflowStep[] = [
     number: 3,
     emoji: '③',
     title: 'AI Review',
-    purpose: 'AI groups opportunities by type — directories, guest posts, forums, and more.',
+    purpose: 'AI groups opportunities by type — approve or reject here. No separate Approve step.',
     aiTip: 'You do not pick the type. AI detects the right workflow.',
     route: 'backlink-builder/classification',
     estimatedMinutes: 5,
     difficulty: 'Easy',
   },
   {
-    id: 'approve-opportunities',
+    id: 'generate-content',
     number: 4,
     emoji: '④',
-    title: 'Approve Opportunities',
-    purpose: 'Approve or reject websites. AI already scored fit and difficulty.',
-    route: 'campaigns/queue',
-    estimatedMinutes: 10,
-    difficulty: 'Easy',
-  },
-  {
-    id: 'generate-content',
-    number: 5,
-    emoji: '⑤',
     title: 'Generate Content',
     purpose: 'AI creates articles, listings, forum replies, images, and video metadata.',
     aiTip: 'No manual format picking — AI builds the right package for each site.',
@@ -73,18 +63,20 @@ export const WORKFLOW_STEPS: WorkflowStep[] = [
   },
   {
     id: 'submit-backlinks',
-    number: 6,
-    emoji: '⑥',
+    number: 5,
+    emoji: '⑤',
     title: 'Submit Backlinks',
-    purpose: 'AI opens sites, fills forms, uploads assets, and submits. You only help on login or CAPTCHA.',
-    route: 'backlink-builder/execution',
+    purpose:
+      'Open each prepared package, paste fields, clear login/CAPTCHA yourself, and submit on the site.',
+    aiTip: 'Assisted Manual — the app never auto-submits unless you opt in under Advanced.',
+    route: 'backlink-builder/assisted-manual',
     estimatedMinutes: 15,
     difficulty: 'Easy',
   },
   {
     id: 'track-results',
-    number: 7,
-    emoji: '⑦',
+    number: 6,
+    emoji: '⑥',
     title: 'Track Results',
     purpose: 'See submitted, pending, approved, verified, and estimated impact.',
     route: 'backlink-builder/track-results',
@@ -93,8 +85,8 @@ export const WORKFLOW_STEPS: WorkflowStep[] = [
   },
   {
     id: 'reports-analytics',
-    number: 8,
-    emoji: '⑧',
+    number: 7,
+    emoji: '⑦',
     title: 'Reports & Analytics',
     purpose: 'Download executive, campaign, and period reports as Excel, CSV, or PDF.',
     route: 'reports/library',
@@ -107,10 +99,9 @@ export const TOTAL_WORKFLOW_STEPS = WORKFLOW_STEPS.length;
 
 /** Older step ids still stored in local progress */
 export const WORKFLOW_STEP_ALIASES: Record<string, string[]> = {
-  'ai-review': ['ai-discovery'],
-  'approve-opportunities': ['opportunity-review'],
+  'ai-review': ['ai-discovery', 'approve-opportunities', 'opportunity-review'],
   'generate-content': ['content-studio'],
-  'submit-backlinks': ['browser-execution'],
+  'submit-backlinks': ['browser-execution', 'assisted-manual'],
   'track-results': ['verification'],
   'reports-analytics': ['reports'],
 };
@@ -120,7 +111,6 @@ export const WORKFLOW_PIPELINE_LABELS: Array<{ id: string; label: string }> = [
   { id: 'create-project', label: 'Create' },
   { id: 'import-websites', label: 'Import' },
   { id: 'ai-review', label: 'AI Review' },
-  { id: 'approve-opportunities', label: 'Approve' },
   { id: 'generate-content', label: 'Generate' },
   { id: 'submit-backlinks', label: 'Submit' },
   { id: 'track-results', label: 'Results' },

@@ -397,7 +397,7 @@ export function BacklinkImportPage() {
             }
             next={
               hasSuccessfulImport
-                ? 'AI Review → Approve'
+                ? 'Continue to AI Review'
                 : 'Paste URLs and click Import & continue'
             }
             items={checklistItems}

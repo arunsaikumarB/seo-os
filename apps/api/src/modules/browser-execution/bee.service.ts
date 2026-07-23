@@ -162,6 +162,8 @@ export async function updatePolicy(workspaceId: string, patch: Record<string, un
   // Phase 6.3.2 — Auto-publish ON is self-starting: enqueue + drain (idempotent)
   const turnedOn =
     patch.auto_publish_automatable === true && prev.auto_publish_automatable !== true;
+  const turnedOff =
+    patch.auto_publish_automatable === false && prev.auto_publish_automatable !== false;
   if (turnedOn || patch.auto_publish_automatable === true) {
     try {
       const { kickSubmissionDrain } = await import('./bee-submission-supervision.service.js');
@@ -169,6 +171,15 @@ export async function updatePolicy(workspaceId: string, patch: Record<string, un
       logger.info({ workspaceId, kick }, 'auto-publish ON — submission drain kicked');
     } catch (err) {
       logger.warn({ err, workspaceId }, 'auto-publish drain kick failed');
+    }
+  } else if (turnedOff || patch.auto_publish_automatable === false) {
+    try {
+      const { kickSubmissionDrain } = await import('./bee-submission-supervision.service.js');
+      // force=false → cancel queued + skip drain
+      await kickSubmissionDrain(workspaceId, { ensureJobs: false });
+      logger.info({ workspaceId }, 'auto-publish OFF — queued browser jobs cancelled');
+    } catch (err) {
+      logger.warn({ err, workspaceId }, 'auto-publish OFF cancel failed');
     }
   }
 
@@ -1230,6 +1241,13 @@ export async function continueQueuedJobs(
   opts: { afterJobId?: string; batchId?: string; limit?: number } = {}
 ): Promise<string[]> {
   const policy = await getOrCreatePolicy(workspaceId);
+  if (policy.auto_publish_automatable !== true) {
+    logger.info(
+      { workspaceId },
+      'continueQueuedJobs skipped — auto_publish_automatable is OFF'
+    );
+    return [];
+  }
   if (policy.queue_auto_continue === false) return [];
 
   const maxParallel = effectiveMaxParallelSessions(policy.max_parallel_sessions);

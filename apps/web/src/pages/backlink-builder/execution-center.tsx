@@ -1070,7 +1070,7 @@ export function BrowserExecutionCenterPage() {
                 <AiLoadingState message="AI is loading approved websites…" />
               ) : oppList.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  No approved websites yet. Approve items in Approve Opportunities first.
+                  No approved websites yet. Approve items in AI Review first.
                 </p>
               ) : (
                 <>

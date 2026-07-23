@@ -113,13 +113,13 @@ export function ProjectHomePage() {
   const nextLine = actionItems[0]
     ? `${actionItems[0].reason} on ${actionItems[0].website}.`
     : jobsOpen
-      ? 'AI is submitting backlinks for you.'
+      ? 'Open Assisted Manual to finish submissions.'
       : showComplete
         ? 'Your campaign workflow is complete.'
         : classified > 0 && currentStep.id === 'ai-review'
-          ? `Approve ${classified} opportunities.`
+          ? `Review ${classified} opportunities in AI Review.`
           : approved > 0 && currentStep.number <= 4
-            ? 'Approve remaining opportunities, then generate content.'
+            ? 'Finish AI Review, then generate content.'
             : aiStatusLine;
 
   return (

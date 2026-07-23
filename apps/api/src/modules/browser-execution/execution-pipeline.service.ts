@@ -505,10 +505,40 @@ export async function ensureExecutionJobsForReady(params: {
   workspaceId: string;
   userId?: string;
   startImmediately?: boolean;
+  /** Bypass auto-publish gate (explicit user Start from Browser Auto-Submit). */
+  force?: boolean;
 }): Promise<{
   diagnostics: ExecutionDiagnostics;
   ensureSummary: NonNullable<ExecutionDiagnostics['ensureSummary']>;
+  skippedAutoPublishOff?: boolean;
 }> {
+  if (!params.force) {
+    const { getOrCreatePolicy } = await import('./bee.service.js');
+    const policy = await getOrCreatePolicy(params.workspaceId);
+    if (policy.auto_publish_automatable !== true) {
+      logger.info(
+        { workspaceId: params.workspaceId },
+        'ensureExecutionJobsForReady skipped — auto_publish_automatable is OFF'
+      );
+      const diagnostics = await getExecutionDiagnostics(params.workspaceId);
+      return {
+        diagnostics: {
+          ...diagnostics,
+          pipelineBroken: false,
+          rootCause: null,
+        },
+        ensureSummary: {
+          created: 0,
+          started: 0,
+          skippedTerminal: 0,
+          failed: 0,
+          alreadyHadJob: 0,
+        },
+        skippedAutoPublishOff: true,
+      };
+    }
+  }
+
   const startImmediately = params.startImmediately !== false;
   const targets = await listPipelineTargetItems(params.workspaceId);
   const summary = {

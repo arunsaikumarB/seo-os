@@ -32,7 +32,7 @@ export function CurrentOpportunityBanner({
         </Badge>
         <Badge className="text-[10px]">{opportunity.readiness}</Badge>
         <Button size="sm" variant="ghost" asChild>
-          <Link to={`/projects/${projectId}/campaigns/queue`}>Queue</Link>
+          <Link to={`/projects/${projectId}/backlink-builder/classification`}>AI Review</Link>
         </Button>
         {allowClear && (
           <Button

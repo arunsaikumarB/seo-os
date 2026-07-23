@@ -502,16 +502,16 @@ export function ContentLibraryPage() {
         </Card>
       ) : null}
 
-      {/* Empty approved — still show next-action style Continue toward Approve */}
+      {/* Empty approved — continue to AI Review */}
       {generateState === 'empty' && !boardLoading ? (
         <Card className="rounded-2xl border-border/40 shadow-sm">
           <CardContent className="pt-5 space-y-3">
             <p className="font-medium text-sm">Current: Generate Content</p>
             <p className="text-sm text-muted-foreground">
-              Approve websites first, then AI can generate packages.
+              Approve websites in AI Review first, then AI can generate packages.
             </p>
             <Button asChild>
-              <Link to={`/projects/${projectId}/campaigns/queue`}>Continue →</Link>
+              <Link to={`/projects/${projectId}/backlink-builder/classification`}>Continue →</Link>
             </Button>
           </CardContent>
         </Card>

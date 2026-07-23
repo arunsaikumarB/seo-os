@@ -405,6 +405,14 @@ backlinkBuilderRouter.get(
                 // Phase 6: health poll must NOT start browsers — only ensure jobs exist (idempotent).
                 startImmediately: false,
               });
+              if (ensured.skippedAutoPublishOff) {
+                return {
+                  ...ensured.diagnostics,
+                  pipelineBroken: false,
+                  rootCause: null,
+                  autoPublishOff: true,
+                };
+              }
               return ensured.diagnostics;
             } catch (err) {
               try {

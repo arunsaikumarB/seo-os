@@ -294,6 +294,35 @@ export async function resumeInterruptedSubmissions(workspaceId?: string): Promis
     const ws = String(row.workspace_id);
     const jobId = String(row.id);
     await closeSession(row.session_id != null ? String(row.session_id) : null);
+
+    // When auto-publish is OFF, do not re-queue into the browser lane — skip instead.
+    try {
+      const { getOrCreatePolicy } = await import('./bee.service.js');
+      const policy = await getOrCreatePolicy(ws);
+      if (policy.auto_publish_automatable !== true) {
+        const nowIso = new Date().toISOString();
+        await admin()
+          .from('execution_jobs')
+          .update({
+            status: 'skipped',
+            disposition: 'skipped',
+            session_id: null,
+            lease_holder: null,
+            lease_expires_at: null,
+            error_code: 'AUTO_PUBLISH_OFF',
+            error_message:
+              'Browser auto-submit is off — use Assisted Manual. Opt in under Advanced → Browser Auto-Submit.',
+            finished_at: nowIso,
+            updated_at: nowIso,
+          })
+          .eq('id', jobId);
+        workspaces.add(ws);
+        continue;
+      }
+    } catch {
+      /* fall through to requeue */
+    }
+
     await admin()
       .from('execution_jobs')
       .update({
@@ -360,9 +389,15 @@ export async function resumeInterruptedSubmissions(workspaceId?: string): Promis
   }
 
   // 4) Drain each workspace (startJob → bee_execute) using live-capacity slots
-  const { continueQueuedJobs } = await import('./bee.service.js');
+  //    Skip when auto-publish is OFF — cancel stray queued instead of starting.
+  const { continueQueuedJobs, getOrCreatePolicy } = await import('./bee.service.js');
   for (const ws of workspaces) {
     try {
+      const policy = await getOrCreatePolicy(ws);
+      if (policy.auto_publish_automatable !== true) {
+        await cancelQueuedJobsWhenAutoPublishOff(ws);
+        continue;
+      }
       const ids = await continueQueuedJobs(ws);
       started += ids.length;
       await enqueueJob(
@@ -424,15 +459,27 @@ export async function resumeInterruptedSubmissions(workspaceId?: string): Promis
 
 /**
  * Idempotent kick: ensure Ready automatable items have jobs, then drain the queue.
- * Safe to call on auto-publish ON / Start Submission / supervision tick.
+ * Only when auto_publish_automatable is ON — otherwise Assisted Manual is the path.
  */
 export async function kickSubmissionDrain(
   workspaceId: string,
-  opts?: { userId?: string; ensureJobs?: boolean }
+  opts?: { userId?: string; ensureJobs?: boolean; force?: boolean }
 ): Promise<{
   ensured: boolean;
-  drain: Awaited<ReturnType<typeof resumeInterruptedSubmissions>>;
+  drain: Awaited<ReturnType<typeof resumeInterruptedSubmissions>> | null;
+  skippedAutoPublishOff?: boolean;
 }> {
+  const { getOrCreatePolicy } = await import('./bee.service.js');
+  const policy = await getOrCreatePolicy(workspaceId);
+  if (!opts?.force && policy.auto_publish_automatable !== true) {
+    await cancelQueuedJobsWhenAutoPublishOff(workspaceId);
+    logger.info(
+      { workspaceId },
+      'kickSubmissionDrain skipped — auto_publish_automatable is OFF (Assisted Manual path)'
+    );
+    return { ensured: false, drain: null, skippedAutoPublishOff: true };
+  }
+
   let ensured = false;
   if (opts?.ensureJobs !== false) {
     try {
@@ -441,6 +488,7 @@ export async function kickSubmissionDrain(
         workspaceId,
         userId: opts?.userId,
         startImmediately: true,
+        force: opts?.force === true,
       });
       ensured = true;
     } catch (err) {
@@ -451,8 +499,58 @@ export async function kickSubmissionDrain(
   return { ensured, drain };
 }
 
+/** Drop Queued / retry_scheduled jobs so the UI does not imply browser submit is running. */
+async function cancelQueuedJobsWhenAutoPublishOff(workspaceId: string): Promise<number> {
+  const { data: rows } = await admin()
+    .from('execution_jobs')
+    .select('id')
+    .eq('workspace_id', workspaceId)
+    .in('status', ['queued', 'retry_scheduled', 'waiting_infrastructure'])
+    .is('deleted_at', null)
+    .limit(500);
+  if (!rows?.length) return 0;
+  const now = new Date().toISOString();
+  const { error } = await admin()
+    .from('execution_jobs')
+    .update({
+      status: 'skipped',
+      disposition: 'skipped',
+      error_code: 'AUTO_PUBLISH_OFF',
+      error_message:
+        'Browser auto-submit is off — use Assisted Manual. Opt in under Advanced → Browser Auto-Submit.',
+      finished_at: now,
+      updated_at: now,
+    })
+    .eq('workspace_id', workspaceId)
+    .in('status', ['queued', 'retry_scheduled', 'waiting_infrastructure'])
+    .is('deleted_at', null);
+  if (error) {
+    logger.warn({ err: error, workspaceId }, 'cancelQueuedJobsWhenAutoPublishOff failed');
+    return 0;
+  }
+  logger.info(
+    { workspaceId, cancelled: rows.length },
+    'cancelled queued execution jobs — auto_publish off'
+  );
+  return rows.length;
+}
+
 async function superviseSubmissionConsumer(): Promise<void> {
-  // Always scan — unlike content-gen, BEE can stall with "alive" workers and ghost slots
+  // Cancel stray queued jobs on workspaces with auto-publish OFF, then scan only when ON
+  try {
+    const { data: policies } = await admin()
+      .from('execution_policies')
+      .select('workspace_id, auto_publish_automatable')
+      .is('deleted_at', null)
+      .limit(500);
+    for (const p of policies ?? []) {
+      if (p.auto_publish_automatable === true) continue;
+      await cancelQueuedJobsWhenAutoPublishOff(String(p.workspace_id));
+    }
+  } catch (err) {
+    logger.warn({ err }, 'auto-publish-off queue cancel sweep failed');
+  }
+
   const result = await resumeInterruptedSubmissions();
   if (result.queuedFound > 0 && result.started === 0 && result.workspacesDrained > 0) {
     logger.warn(
