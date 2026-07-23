@@ -11,10 +11,15 @@ interface NextActionStripProps {
 export function NextActionStrip({ projectId }: NextActionStripProps) {
   const location = useLocation();
   const learningMode = useAppStore((s) => s.learningMode);
-  const { nextStep, allComplete, getStepHref } = useWorkflow(projectId);
+  const { nextStep, allComplete, continueHref, continueEnabled, hasSuccessfulImport } =
+    useWorkflow(projectId);
 
   const onHome = location.pathname.endsWith('/home');
   if (!learningMode || onHome || allComplete) return null;
+  // Import page owns the primary CTA when no import exists yet
+  if (!hasSuccessfulImport && location.pathname.includes('/backlink-builder/import')) {
+    return null;
+  }
 
   return (
     <div className="mb-4 flex flex-col gap-2 rounded-lg border bg-muted/30 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -24,8 +29,15 @@ export function NextActionStrip({ projectId }: NextActionStripProps) {
           {nextStep.emoji} {nextStep.title}
         </span>
       </div>
-      <Button asChild size="sm" variant="secondary" className="shrink-0">
-        <Link to={getStepHref(nextStep)}>
+      <Button asChild size="sm" variant="secondary" className="shrink-0" disabled={!continueEnabled}>
+        <Link
+          to={continueHref}
+          onClick={(e) => {
+            if (!continueEnabled) e.preventDefault();
+          }}
+          aria-disabled={!continueEnabled}
+          className={!continueEnabled ? 'pointer-events-none opacity-50' : undefined}
+        >
           Continue
           <ArrowRight className="ml-1 h-3.5 w-3.5" />
         </Link>

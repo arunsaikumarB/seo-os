@@ -11,6 +11,7 @@ import { useAppStore } from '@/stores/app-store';
 import { toast } from 'sonner';
 import { PageTransition } from '@/components/demo/page-transition';
 import { AiActivityCard } from '@/components/workflow/ai-activity-card';
+import { isSuccessfulImportRecord } from '@/hooks/use-workflow';
 import { Upload, FileSpreadsheet, FileText, Link2, Sheet, Download } from 'lucide-react';
 
 type ImportResult = {
@@ -74,6 +75,7 @@ export function BacklinkImportPage() {
   const { request } = useApi();
   const { getAccessToken } = useAuth();
   const orgId = useAppStore((s) => s.currentOrgId);
+  const markStepComplete = useAppStore((s) => s.markStepComplete);
   const queryClient = useQueryClient();
   const [sourceType, setSourceType] = useState<string>('url_list');
   const [content, setContent] = useState('');
@@ -128,6 +130,9 @@ export function BacklinkImportPage() {
       queryClient.invalidateQueries({ queryKey: ['backlink-imports', projectId] });
       queryClient.invalidateQueries({ queryKey: ['automation-summary', projectId] });
       queryClient.invalidateQueries({ queryKey: ['manual-submissions', projectId] });
+      if (res.data.stats.valid > 0) {
+        markStepComplete(projectId, 'import-websites');
+      }
       const p = res.data.provisionalLanes;
       toast.success(
         p
@@ -193,9 +198,53 @@ export function BacklinkImportPage() {
   };
 
   const latest = history.data?.data?.[0];
+  const importRows = history.data?.data ?? [];
+  const hasSuccessfulImport = importRows.some((r) => isSuccessfulImportRecord(r));
   const pipelineBusy =
     importMutation.isPending ||
     (latest != null && ACTIVE_STATUSES.has(String(latest.status)));
+
+  const checklistItems = (() => {
+    if (!hasSuccessfulImport && !pipelineBusy) {
+      return [
+        { label: 'Validate URLs', state: 'queued' as const },
+        { label: 'Study websites', state: 'queued' as const },
+        { label: 'Group by type', state: 'queued' as const },
+        { label: 'Ready to approve', state: 'queued' as const },
+      ];
+    }
+    if (pipelineBusy && !hasSuccessfulImport) {
+      return [
+        { label: 'Validate URLs', state: 'active' as const },
+        { label: 'Study websites', state: 'queued' as const },
+        { label: 'Group by type', state: 'queued' as const },
+        { label: 'Ready to approve', state: 'queued' as const },
+      ];
+    }
+    if (pipelineBusy) {
+      return [
+        { label: 'Validate URLs', state: 'done' as const },
+        { label: 'Study websites', state: 'active' as const },
+        { label: 'Group by type', state: 'queued' as const },
+        { label: 'Ready to approve', state: 'queued' as const },
+      ];
+    }
+    const classified = latest?.metadata?.classificationSummary;
+    const classifiedDone =
+      classified != null && Number(classified.classified ?? classified.imported ?? 0) > 0;
+    return [
+      { label: 'Validate URLs', state: 'done' as const },
+      { label: 'Study websites', state: 'done' as const },
+      {
+        label: 'Group by type',
+        state: classifiedDone ? ('done' as const) : ('queued' as const),
+      },
+      {
+        label: 'Ready to approve',
+        state: classifiedDone ? ('done' as const) : ('queued' as const),
+      },
+    ];
+  })();
 
   const provisionalFromImport =
     importMutation.data?.data?.provisionalLanes ??
@@ -323,14 +372,19 @@ export function BacklinkImportPage() {
           <AiActivityCard
             title="After you import"
             percent={null}
-            current="Validate & deduplicate"
-            next="AI Review → Approve"
-            items={[
-              { label: 'Validate URLs', state: 'done' },
-              { label: 'Study websites', state: 'queued' },
-              { label: 'Group by type', state: 'queued' },
-              { label: 'Ready to approve', state: 'queued' },
-            ]}
+            current={
+              !hasSuccessfulImport && !pipelineBusy
+                ? 'Waiting for your first import'
+                : pipelineBusy
+                  ? 'Validate & deduplicate'
+                  : 'Import complete'
+            }
+            next={
+              hasSuccessfulImport
+                ? 'AI Review → Approve'
+                : 'Paste URLs and click Import & continue'
+            }
+            items={checklistItems}
           />
           <Card>
             <CardHeader className="pb-2">

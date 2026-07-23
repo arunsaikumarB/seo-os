@@ -23,6 +23,8 @@ export function NextActionPanel({ projectId, className }: NextActionPanelProps) 
     nextUnlockedStep,
     continueHref,
     continueLabel,
+    continueEnabled,
+    hasSuccessfulImport,
     allComplete,
     jobsOpen,
     needsHumanAction,
@@ -43,6 +45,11 @@ export function NextActionPanel({ projectId, className }: NextActionPanelProps) 
 
   // User is on the step that needs work — that page owns the one primary CTA
   if (activeStep && activeStep.id === nextUnlockedStep.id) {
+    return null;
+  }
+
+  // Still on Import with no data — page owns the Import CTA; hide global Continue to AI Review
+  if (!hasSuccessfulImport && activeStep?.id === 'import-websites') {
     return null;
   }
 
@@ -126,12 +133,24 @@ export function NextActionPanel({ projectId, className }: NextActionPanelProps) 
           <div>
             <p className="text-xs text-muted-foreground">Next: {nextUnlockedStep.title}</p>
           </div>
-          <Button asChild size="sm">
-            <Link to={continueHref}>
+          <Button asChild size="sm" disabled={!continueEnabled}>
+            <Link
+              to={continueHref}
+              onClick={(e) => {
+                if (!continueEnabled) e.preventDefault();
+              }}
+              aria-disabled={!continueEnabled}
+              className={!continueEnabled ? 'pointer-events-none opacity-50' : undefined}
+            >
               Continue
               <ArrowRight className="ml-2 h-4 w-4" />
             </Link>
           </Button>
+          {!hasSuccessfulImport ? (
+            <p className="text-xs text-muted-foreground">
+              Import at least one website before continuing to AI Review.
+            </p>
+          ) : null}
         </CardContent>
       </Card>
     </motion.div>

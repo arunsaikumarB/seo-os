@@ -12,7 +12,8 @@ type Props = {
 
 /** Workflow steps only — no counts, chips, or sub-statuses (Phase 3.6). */
 export function WorkflowProgressHeader({ projectId, className }: Props) {
-  const { steps, currentStep, getStepHref, isStepComplete } = useWorkflow(projectId);
+  const { steps, currentStep, getStepHref, isStepComplete, hasSuccessfulImport } =
+    useWorkflow(projectId);
 
   return (
     <motion.div
@@ -24,17 +25,30 @@ export function WorkflowProgressHeader({ projectId, className }: Props) {
         {steps.map((step) => {
           const done = isStepComplete(step.id);
           const current = step.id === currentStep.id && !done;
+          const locked =
+            !hasSuccessfulImport &&
+            step.id !== 'create-project' &&
+            step.id !== 'import-websites';
           const label =
             WORKFLOW_PIPELINE_LABELS.find((l) => l.id === step.id)?.label ?? step.title;
+          const href = locked
+            ? `/projects/${projectId}/backlink-builder/import`
+            : getStepHref(step);
           return (
             <li key={step.id}>
               <Link
-                to={getStepHref(step)}
+                to={href}
+                title={
+                  locked
+                    ? 'Import websites before continuing to this step'
+                    : undefined
+                }
                 className={cn(
                   'inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-medium transition-colors',
                   done && 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300',
                   current && 'bg-primary/10 text-primary ring-1 ring-primary/30',
-                  !done && !current && 'bg-muted/50 text-muted-foreground'
+                  !done && !current && 'bg-muted/50 text-muted-foreground',
+                  locked && 'opacity-60'
                 )}
               >
                 <span

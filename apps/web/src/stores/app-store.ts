@@ -25,6 +25,7 @@ interface AppState {
   setHelpDrawerOpen: (v: boolean) => void;
   setAiCoachOpen: (v: boolean) => void;
   markStepComplete: (projectId: string, stepId: string) => void;
+  unmarkStepComplete: (projectId: string, stepId: string) => void;
   markGlobalStepComplete: (stepId: string) => void;
 }
 
@@ -59,6 +60,16 @@ export const useAppStore = create<AppState>()(
           workflowProgress: {
             ...get().workflowProgress,
             [projectId]: [...prev, stepId],
+          },
+        });
+      },
+      unmarkStepComplete: (projectId, stepId) => {
+        const prev = get().workflowProgress[projectId] ?? [];
+        if (!prev.includes(stepId)) return;
+        set({
+          workflowProgress: {
+            ...get().workflowProgress,
+            [projectId]: prev.filter((id) => id !== stepId),
           },
         });
       },
