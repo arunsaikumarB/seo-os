@@ -190,15 +190,15 @@ backlinkBuilderRouter.post(
     try {
       const body = z
         .object({
-          opportunityIds: z.array(z.string().uuid()).max(10).optional(),
+          opportunityIds: z.array(z.string().uuid()).max(500).optional(),
           entryUrlOverrides: z.record(z.string().url()).optional(),
         })
         .parse(req.body ?? {});
-      const { prepareAssistedPilot } = await import(
+      const { prepareAssistedPackages } = await import(
         '../../modules/browser-execution/assisted-manual.service.js'
       );
       res.json({
-        data: await prepareAssistedPilot(param(req.params.projectId), body),
+        data: await prepareAssistedPackages(param(req.params.projectId), body),
       });
     } catch (err) {
       next(err);

@@ -1,12 +1,15 @@
 /**
- * Phase 7 — Assisted Manual (pilot ≤10 sites).
+ * Phase 7 — Assisted Manual packages (human submits; app never auto-publishes).
  * Pure logic: Form Reader, Site Recipes, packages, buckets, staleness, similarity.
  * Does NOT submit, solve gates, or change Auto/Manual routing (6.3.x).
  */
 
+/** Soft guide for metrics dashboards — preparation is not capped. */
 export const ASSISTED_MANUAL_PILOT_MAX = 10;
 export const ASSISTED_PACKAGE_TTL_DAYS = 7;
 export const ASSISTED_SIMILARITY_THRESHOLD = 0.85;
+/** Safety ceiling per prepare request (not a product pilot cap). */
+export const ASSISTED_PREPARE_BATCH_MAX = 500;
 
 export type FieldConfidence = 'high' | 'medium' | 'low';
 export type FieldSource = 'dom_label' | 'llm_inferred' | 'human_corrected' | 'name_guess';
@@ -121,14 +124,54 @@ export type AssistedPackagePayload = {
 export type AssistedLaneCounts = {
   automatable: number;
   assisted: number;
+  /** Manual-lane sites without an Assisted package (offline Excel path). */
   manual: number;
+  /** Full Manual-lane count (routing). */
+  manualTotal: number;
   active: number;
   ready: number;
   checkFields: number;
   needsPerson: number;
   assistedOk: boolean;
+  /** Phase 6.3 lane conservation: automatable + manualTotal === active */
   conservationOk: boolean;
 };
+
+export function computeAssistedLaneCounts(input: {
+  automatable: number;
+  manualTotal: number;
+  assistedPackages: Array<{ bucket: AssistedBucket }>;
+  /** How many Manual-lane opportunities already have an Assisted package */
+  manualWithPackage?: number;
+}): AssistedLaneCounts {
+  const assisted = input.assistedPackages.length;
+  const manualWithPkg = Math.min(
+    input.manualWithPackage ?? 0,
+    input.manualTotal,
+    assisted
+  );
+  const manual = Math.max(0, input.manualTotal - manualWithPkg);
+  const active = input.automatable + input.manualTotal;
+  const ready = input.assistedPackages.filter((p) => p.bucket === 'ready').length;
+  const checkFields = input.assistedPackages.filter((p) => p.bucket === 'check_fields').length;
+  const needsPerson = input.assistedPackages.filter((p) => p.bucket === 'needs_person').length;
+  return {
+    automatable: input.automatable,
+    assisted,
+    manual,
+    manualTotal: input.manualTotal,
+    active,
+    ready,
+    checkFields,
+    needsPerson,
+    assistedOk: ready + checkFields + needsPerson === assisted,
+    conservationOk: input.automatable + input.manualTotal === active,
+  };
+}
+
+export function canAddToPilot(currentPilotCount: number, max = ASSISTED_MANUAL_PILOT_MAX): boolean {
+  return currentPilotCount < max;
+}
 
 // ─── Form Reader ─────────────────────────────────────────────────────────────
 
@@ -844,32 +887,4 @@ export function verifyMappingAgainstDom(
     }
   }
   return { ok: mismatches.length === 0, mismatches };
-}
-
-export function computeAssistedLaneCounts(input: {
-  automatable: number;
-  manualTotal: number;
-  assistedPackages: Array<{ bucket: AssistedBucket }>;
-}): AssistedLaneCounts {
-  const assisted = input.assistedPackages.length;
-  const manual = Math.max(0, input.manualTotal - assisted);
-  const active = input.automatable + input.manualTotal;
-  const ready = input.assistedPackages.filter((p) => p.bucket === 'ready').length;
-  const checkFields = input.assistedPackages.filter((p) => p.bucket === 'check_fields').length;
-  const needsPerson = input.assistedPackages.filter((p) => p.bucket === 'needs_person').length;
-  return {
-    automatable: input.automatable,
-    assisted,
-    manual,
-    active,
-    ready,
-    checkFields,
-    needsPerson,
-    assistedOk: ready + checkFields + needsPerson === assisted,
-    conservationOk: input.automatable + manual + assisted === active,
-  };
-}
-
-export function canAddToPilot(currentPilotCount: number, max = ASSISTED_MANUAL_PILOT_MAX): boolean {
-  return currentPilotCount < max;
 }

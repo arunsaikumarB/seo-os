@@ -166,7 +166,7 @@ describe('Phase 7 Assisted Manual', () => {
     expect(rebuilt.fields[0]!.role).toBe('long_desc');
   });
 
-  it('conservation: automatable + assisted + manual === active (AT10)', () => {
+  it('conservation: automatable + manualTotal === active; packages bucket-sum OK', () => {
     const counts = computeAssistedLaneCounts({
       automatable: 4,
       manualTotal: 6,
@@ -174,13 +174,17 @@ describe('Phase 7 Assisted Manual', () => {
         { bucket: 'ready' },
         { bucket: 'ready' },
         { bucket: 'check_fields' },
+        { bucket: 'ready' },
+        { bucket: 'ready' },
       ],
+      manualWithPackage: 2,
     });
-    expect(counts.assisted).toBe(3);
-    expect(counts.manual).toBe(3);
+    expect(counts.assisted).toBe(5);
+    expect(counts.manual).toBe(4); // 6 manual - 2 with packages
+    expect(counts.manualTotal).toBe(6);
     expect(counts.conservationOk).toBe(true);
     expect(counts.assistedOk).toBe(true);
-    expect(counts.ready).toBe(2);
+    expect(counts.ready).toBe(4);
   });
 
   it('TTL marks stale regardless of fingerprint', () => {

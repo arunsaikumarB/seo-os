@@ -109,7 +109,7 @@ export function AssistedManualPage() {
         body: JSON.stringify({}),
       }),
     onSuccess: () => {
-      toast.success('Pilot packages prepared (max 10)');
+      toast.success('Packages prepared for content-ready sites');
       void qc.invalidateQueries({ queryKey: ['assisted-manual', projectId] });
       void qc.invalidateQueries({ queryKey: ['manual-submissions', projectId] });
       void qc.invalidateQueries({ queryKey: ['assisted-manual-metrics', projectId] });
@@ -202,18 +202,14 @@ export function AssistedManualPage() {
             <ClipboardList className="h-6 w-6" /> Assisted Manual
           </h1>
           <p className="text-muted-foreground mt-1 max-w-2xl">
-            Prepared submission packages for sites that need a human. The app prepares; you paste,
-            clear the gate, and submit. Pilot: {d?.pilot.used ?? 0}/{d?.pilot.max ?? 10} sites.
+            Every site with generated content gets a prepared package. Open each link, paste the
+            fields, clear login/CAPTCHA yourself, and submit. Auto-publish stays off.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            onClick={() => prepare.mutate()}
-            disabled={prepare.isPending || d?.pilot.canAdd === false}
-          >
+          <Button size="sm" onClick={() => prepare.mutate()} disabled={prepare.isPending}>
             <RefreshCw className={cn('h-3.5 w-3.5 mr-1', prepare.isPending && 'animate-spin')} />
-            Prepare pilot (≤10)
+            Prepare all content-ready sites
           </Button>
           <Button size="sm" variant="outline" onClick={() => void downloadExcel()}>
             <Download className="h-3.5 w-3.5 mr-1" /> Excel

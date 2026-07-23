@@ -114,6 +114,19 @@ export async function completePackageHandoff(params: {
       { opportunityId: params.opportunityId, blocker },
       'handoff blocked — blocker_reason stored'
     );
+
+    // Still prepare Assisted package when content exists (human submits offline)
+    if (blocker !== 'quality_failed' && blocker !== 'terminal_state') {
+      void import('../browser-execution/assisted-manual.service.js')
+        .then((m) => m.prepareAssistedForOpportunity(params.workspaceId, params.opportunityId))
+        .catch((err) =>
+          logger.warn(
+            { err, opportunityId: params.opportunityId },
+            'assisted package prepare after blocked handoff failed'
+          )
+        );
+    }
+
     return { status: 'blocked', blockerReason: blocker };
   }
 
@@ -129,6 +142,17 @@ export async function completePackageHandoff(params: {
   });
 
   logger.info({ opportunityId: params.opportunityId }, 'handoff → Submission Ready (Ready)');
+
+  // Phase 7 — prepare Assisted Manual package for every content-ready site (never auto-submits)
+  void import('../browser-execution/assisted-manual.service.js')
+    .then((m) => m.prepareAssistedForOpportunity(params.workspaceId, params.opportunityId))
+    .catch((err) =>
+      logger.warn(
+        { err, opportunityId: params.opportunityId },
+        'assisted package prepare after handoff failed'
+      )
+    );
+
   return { status: 'Ready', blockerReason: null };
 }
 

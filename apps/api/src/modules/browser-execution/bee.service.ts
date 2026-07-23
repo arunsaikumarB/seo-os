@@ -107,6 +107,7 @@ export async function getOrCreatePolicy(workspaceId: string) {
     max_watch_ms: 1_800_000,
     session_reuse: true,
     queue_auto_continue: true,
+    auto_publish_automatable: false,
   };
   const { data, error } = await getSupabaseAdmin()
     .from('execution_policies')

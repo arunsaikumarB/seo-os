@@ -840,7 +840,7 @@ export function BrowserExecutionCenterPage() {
                     ['never_ask_login', 'Never Ask Again for Login Sites'],
                     [
                       'auto_publish_automatable',
-                      'Auto-publish automatable links (zero clicks — informed opt-in)',
+                      'Auto-publish automatable links (off by default — prefer Assisted Manual)',
                     ],
                   ] as const
                 ).map(([key, label]) => {

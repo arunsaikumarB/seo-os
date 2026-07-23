@@ -6,10 +6,10 @@
 import {
   ASSISTED_MANUAL_PILOT_MAX,
   ASSISTED_PACKAGE_TTL_DAYS,
+  ASSISTED_PREPARE_BATCH_MAX,
   applyHumanFieldCorrection,
   buildAssistedPackage,
   buildSiteRecipe,
-  canAddToPilot,
   computeAssistedLaneCounts,
   evaluateFingerprintStatus,
   extractFormFieldFacts,
@@ -33,7 +33,7 @@ function admin() {
   return getSupabaseAdmin();
 }
 
-const PILOT_BATCH = 'phase7-pilot-10';
+const PILOT_BATCH = 'assisted-content-ready';
 
 async function fetchHtml(url: string): Promise<string | null> {
   try {
@@ -144,51 +144,24 @@ async function loadContentForOpportunity(opportunityId: string) {
   };
 }
 
-async function countPilotPackages(workspaceId: string): Promise<number> {
-  const { count } = await admin()
-    .from('assisted_packages')
-    .select('id', { count: 'exact', head: true })
-    .eq('workspace_id', workspaceId)
-    .eq('pilot_batch_id', PILOT_BATCH);
-  return count ?? 0;
-}
-
-/** Prepare packages for up to 10 Manual-lane sites (pilot). */
-export async function prepareAssistedPilot(
+/** Prepare Assisted Manual packages for every content-ready site (not Manual-only). */
+export async function prepareAssistedPackages(
   workspaceId: string,
   opts: { opportunityIds?: string[]; entryUrlOverrides?: Record<string, string> } = {}
 ) {
-  const board = await getManualSubmissionsBoard(workspaceId);
-  const manualIds = new Set(
-    (board.items ?? [])
-      .filter((i): i is NonNullable<typeof i> => i != null)
-      .map((i) => i.id)
-  );
+  const contentReadyIds = await listContentReadyOpportunityIds(workspaceId);
+  const readySet = new Set(contentReadyIds);
 
   let targetIds = opts.opportunityIds?.length
-    ? opts.opportunityIds.filter((id) => manualIds.has(id))
-    : [...manualIds];
+    ? opts.opportunityIds.filter((id) => readySet.has(id) || contentReadyIds.length === 0)
+    : contentReadyIds;
 
-  const existingCount = await countPilotPackages(workspaceId);
-  const slots = Math.max(0, ASSISTED_MANUAL_PILOT_MAX - existingCount);
-  if (slots <= 0) {
-    throw new AppError(
-      400,
-      'VALIDATION_ERROR',
-      `Phase 7 pilot is capped at ${ASSISTED_MANUAL_PILOT_MAX} sites. Collect metrics before scaling.`
-    );
+  // If explicit IDs requested but not yet in content-ready set, still allow (re-prepare)
+  if (opts.opportunityIds?.length) {
+    targetIds = [...new Set(opts.opportunityIds)];
   }
 
-  // Prefer already-prepared refresh, then new
-  const { data: existingPkgs } = await admin()
-    .from('assisted_packages')
-    .select('opportunity_id')
-    .eq('workspace_id', workspaceId);
-  const already = new Set((existingPkgs ?? []).map((r) => String(r.opportunity_id)));
-
-  const refreshIds = targetIds.filter((id) => already.has(id));
-  const newIds = targetIds.filter((id) => !already.has(id)).slice(0, slots);
-  targetIds = [...new Set([...refreshIds, ...newIds])].slice(0, ASSISTED_MANUAL_PILOT_MAX);
+  targetIds = targetIds.slice(0, ASSISTED_PREPARE_BATCH_MAX);
 
   const prepared: unknown[] = [];
   const errors: Array<{ opportunityId: string; error: string }> = [];
@@ -207,16 +180,65 @@ export async function prepareAssistedPilot(
     }
   }
 
-  // Similarity check across pilot packages — regenerate description flag on losers
   await enforceSimilarity(workspaceId);
 
   return {
     prepared: prepared.length,
     errors,
-    pilotCap: ASSISTED_MANUAL_PILOT_MAX,
-    pilotUsed: await countPilotPackages(workspaceId),
+    totalCandidates: contentReadyIds.length,
     packages: await listAssistedPackages(workspaceId),
   };
+}
+
+/** @deprecated Use prepareAssistedPackages — alias kept for older callers */
+export const prepareAssistedPilot = prepareAssistedPackages;
+
+/** Single-site prepare after content generation handoff (fire-and-forget safe). */
+export async function prepareAssistedForOpportunity(
+  workspaceId: string,
+  opportunityId: string
+) {
+  const saved = await prepareOnePackage(workspaceId, opportunityId);
+  await enforceSimilarity(workspaceId).catch((err) =>
+    logger.warn({ err, workspaceId }, 'assisted similarity check failed')
+  );
+  return saved;
+}
+
+async function listContentReadyOpportunityIds(workspaceId: string): Promise<string[]> {
+  const ids = new Set<string>();
+
+  const { data: packs } = await admin()
+    .from('content_packs')
+    .select('opportunity_id')
+    .eq('workspace_id', workspaceId)
+    .limit(ASSISTED_PREPARE_BATCH_MAX);
+  for (const p of packs ?? []) {
+    if (p.opportunity_id) ids.add(String(p.opportunity_id));
+  }
+
+  const { data: opps } = await admin()
+    .from('opportunities')
+    .select('id, campaign_lifecycle, generation_status')
+    .eq('workspace_id', workspaceId)
+    .neq('campaign_lifecycle', 'Deleted')
+    .not('automation_status', 'in', '("deleted","ignored")')
+    .limit(ASSISTED_PREPARE_BATCH_MAX);
+
+  for (const o of opps ?? []) {
+    const life = String(o.campaign_lifecycle ?? '');
+    const gen = String(o.generation_status ?? '');
+    if (
+      life === 'Package Generated' ||
+      life === 'Ready' ||
+      gen === 'Completed' ||
+      gen === 'Needs Review'
+    ) {
+      ids.add(String(o.id));
+    }
+  }
+
+  return [...ids].slice(0, ASSISTED_PREPARE_BATCH_MAX);
 }
 
 async function prepareOnePackage(
@@ -401,27 +423,34 @@ export async function listAssistedPackages(workspaceId: string) {
   }
 
   const board = await getManualSubmissionsBoard(workspaceId);
+  const packageOppIds = new Set(packages.map((p) => String(p.opportunityId)));
+  const manualWithPackage = (board.items ?? []).filter(
+    (i): i is NonNullable<typeof i> => i != null && packageOppIds.has(i.id)
+  ).length;
+
   const assistedCounts = computeAssistedLaneCounts({
     automatable: board.counts.automatable,
     manualTotal: board.counts.manual,
     assistedPackages: packages.map((p) => ({
       bucket: p.bucket as 'ready' | 'check_fields' | 'needs_person',
     })),
+    manualWithPackage,
   });
 
   return {
     honesty: [
       'Does not submit anything automatically.',
-      'Does not solve CAPTCHA / OTP / login.',
+      'Does not solve CAPTCHA / OTP / login — you clear those on the site.',
       'Does not guarantee the listing goes live.',
       'Does not fully prepare multi-step forms.',
       'Does not attach images for you.',
     ],
     pilot: {
       max: ASSISTED_MANUAL_PILOT_MAX,
-      used: packages.filter((p) => p.pilotBatchId === PILOT_BATCH).length,
+      used: packages.length,
       batchId: PILOT_BATCH,
-      canAdd: canAddToPilot(packages.filter((p) => p.pilotBatchId === PILOT_BATCH).length),
+      canAdd: true,
+      note: 'Every content-ready site gets a package after generation. Auto-publish stays off.',
     },
     counts: assistedCounts,
     laneConservation: board.conservation,
@@ -756,22 +785,30 @@ export async function exportAssistedPackagesWorkbook(workspaceId: string) {
   };
 }
 
-/** Merge Assisted counts into Manual board response (Phase 1 invariant surfaces). */
+/** Lane + package summary for Import / Submit / Track / Health. */
 export async function getAssistedLaneSummary(workspaceId: string) {
   const evidence = await loadLaneEvidenceForWorkspace(workspaceId);
   let automatable = 0;
   let manualTotal = 0;
+  const manualIds = new Set<string>();
   for (const row of evidence) {
     const resolved = resolveItemLane(row);
     if (!resolved.inActiveCohort) continue;
     if (resolved.lane === 'auto') automatable++;
-    else manualTotal++;
+    else {
+      manualTotal++;
+      manualIds.add(row.id);
+    }
   }
 
   const { data: pkgs } = await admin()
     .from('assisted_packages')
-    .select('bucket')
+    .select('bucket, opportunity_id')
     .eq('workspace_id', workspaceId);
+
+  const manualWithPackage = (pkgs ?? []).filter((p) =>
+    manualIds.has(String(p.opportunity_id))
+  ).length;
 
   return computeAssistedLaneCounts({
     automatable,
@@ -779,5 +816,6 @@ export async function getAssistedLaneSummary(workspaceId: string) {
     assistedPackages: (pkgs ?? []).map((p) => ({
       bucket: p.bucket as 'ready' | 'check_fields' | 'needs_person',
     })),
+    manualWithPackage,
   });
 }
