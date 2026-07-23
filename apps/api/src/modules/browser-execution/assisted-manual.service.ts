@@ -236,12 +236,40 @@ export async function prepareAssistedPackages(
 
   await enforceSimilarity(workspaceId);
 
-  return {
+  const board = await listAssistedPackages(workspaceId);
+  const result = {
     prepared: prepared.length,
     errors,
     totalCandidates: contentReadyIds.length,
-    packages: await listAssistedPackages(workspaceId),
+    packages: board,
   };
+
+  if (prepared.length > 0 || errors.length > 0) {
+    try {
+      const c = board.counts;
+      const { notifyStageCompleteAsync } = await import('../platform/stage-notify.service.js');
+      notifyStageCompleteAsync({
+        workspaceId,
+        kind: 'assisted_manual_prep',
+        stageName: 'Assisted Manual',
+        summary:
+          errors.length > 0
+            ? `Prepared ${prepared.length} packages · ${errors.length} failed`
+            : `Prepared ${prepared.length} packages · ${c.ready} Ready · ${c.checkFields} check fields · ${c.needsPerson} need a person`,
+        outcome: errors.length > 0 ? (prepared.length > 0 ? 'partial' : 'failure') : 'success',
+        href: `/projects/${workspaceId}/backlink-builder/assisted-manual`,
+        payload: {
+          fingerprint: `assisted-prep:${prepared.length}:${errors.length}:${c.ready}`,
+          prepared: prepared.length,
+          failed: errors.length,
+        },
+      });
+    } catch {
+      /* notify optional */
+    }
+  }
+
+  return result;
 }
 
 /** @deprecated Use prepareAssistedPackages — alias kept for older callers */

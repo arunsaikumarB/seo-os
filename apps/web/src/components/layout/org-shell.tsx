@@ -6,8 +6,11 @@ import { Topbar } from './topbar';
 import { CommandPalette } from './command-palette';
 import { cn } from '@/lib/utils';
 import { NavLink } from 'react-router-dom';
+import { useStageNotificationDelivery } from '@/hooks/use-stage-notifications';
 
 export function OrgShell() {
+  useStageNotificationDelivery();
+
   return (
     <div className="flex min-h-screen flex-col">
       <Topbar showProjectSwitcher={false} />

@@ -390,7 +390,7 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
         c.Queued === 0 &&
         c['Waiting Human'] === 0;
 
-  return {
+  const result = {
     state,
     running: inFlight,
     queued,
@@ -432,7 +432,7 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
     executionComplete,
     campaignState: executionComplete ? 'Completed' : campaignState,
     campaignIsRunning,
-    aiStatusLine: executionComplete ? 'Campaign complete' : aiStatusLine,
+    aiStatusLine: executionComplete ? 'Campaign finished' : aiStatusLine,
     successRate:
       completed + c.Failed > 0
         ? Math.round((completed / (completed + c.Failed)) * 1000) / 10
@@ -470,10 +470,64 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
       etaSeconds: 0,
       executionComplete,
       campaignState: executionComplete ? 'Completed' : campaignState,
-      aiStatusLine: executionComplete ? 'Campaign complete' : aiStatusLine,
+      aiStatusLine: executionComplete ? 'Campaign finished' : aiStatusLine,
       submissionReady,
     },
   };
+
+  // Edge-trigger: only when honesty-complete (no un-actioned packages)
+  if (executionComplete && c.totalExecutable > 0) {
+    void maybeNotifyCampaignFinished(workspaceId, {
+      submitted: submittedCount,
+      verified: verifiedCount,
+      failed: c.Failed,
+      skipped: c.Skipped,
+      manualWaiting: 0,
+    }).catch(() => undefined);
+  }
+
+  return result;
+}
+
+async function maybeNotifyCampaignFinished(
+  workspaceId: string,
+  counts: {
+    submitted: number;
+    verified: number;
+    failed: number;
+    skipped: number;
+    manualWaiting: number;
+  }
+) {
+  // Count assisted packages still open — never claim finished while Done is pending
+  try {
+    const { data: openPkgs } = await getSupabaseAdmin()
+      .from('assisted_packages')
+      .select('id, status')
+      .eq('workspace_id', workspaceId)
+      .in('status', ['not_started', 'in_progress']);
+    if ((openPkgs ?? []).length > 0) return;
+  } catch {
+    /* best-effort */
+  }
+
+  const { notifyStageCompleteAsync } = await import('../platform/stage-notify.service.js');
+  const manualDone = counts.submitted; // assisted Done lands in Submitted
+  notifyStageCompleteAsync({
+    workspaceId,
+    kind: 'campaign_finished',
+    stageName: 'Campaign finished',
+    summary: `Submitted ${counts.submitted} · Verified ${counts.verified} · Failed ${counts.failed} · Skipped ${counts.skipped}`,
+    outcome: counts.failed > 0 ? 'partial' : 'success',
+    href: `/projects/${workspaceId}/backlink-builder/track-results`,
+    longRunning: true,
+    dedupeMs: 3_600_000,
+    payload: {
+      fingerprint: `campaign:${counts.submitted}:${counts.verified}:${counts.failed}:${counts.skipped}`,
+      ...counts,
+      manual: manualDone,
+    },
+  });
 }
 
 /** Soft-remove opportunity from current project after Delete Forever. */

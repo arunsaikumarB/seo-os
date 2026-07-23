@@ -159,6 +159,33 @@ notificationsRouter.post('/read-all', authMiddleware, async (req, res, next) => 
   }
 });
 
+notificationsRouter.get('/prefs', authMiddleware, async (req, res, next) => {
+  try {
+    const { userId } = (req as AuthenticatedRequest).auth;
+    const { getNotificationPrefs } = await import('../../modules/platform/stage-notify.service.js');
+    res.json({ data: await getNotificationPrefs(userId) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+notificationsRouter.patch('/prefs', authMiddleware, async (req, res, next) => {
+  try {
+    const { userId } = (req as AuthenticatedRequest).auth;
+    const body = z
+      .object({
+        inApp: z.boolean().optional(),
+        desktop: z.boolean().optional(),
+        emailLongRunning: z.boolean().optional(),
+      })
+      .parse(req.body ?? {});
+    const { updateNotificationPrefs } = await import('../../modules/platform/stage-notify.service.js');
+    res.json({ data: await updateNotificationPrefs(userId, body) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export const auditRouter = Router();
 
 auditRouter.get('/:orgId/audit', authMiddleware, requireRole('admin'), async (req, res, next) => {

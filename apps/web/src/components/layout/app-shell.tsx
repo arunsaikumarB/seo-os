@@ -17,6 +17,7 @@ import { OfflineBanner } from '@/components/beta/offline-banner';
 import { BetaAnnouncementBar } from '@/components/beta/beta-announcement-bar';
 import { useAppStore } from '@/stores/app-store';
 import { useAutoInterventionWindows } from '@/hooks/use-auto-intervention-windows';
+import { useStageNotificationDelivery } from '@/hooks/use-stage-notifications';
 
 interface AppShellProps {
   projectId: string;
@@ -33,6 +34,7 @@ export function AppShell({ projectId }: AppShellProps) {
   const onGeneratePage = location.pathname.includes('/content/library');
 
   useAutoInterventionWindows(projectId);
+  useStageNotificationDelivery();
 
   useEffect(() => {
     setCurrentProjectId(projectId);

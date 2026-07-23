@@ -434,6 +434,22 @@ export async function generateReportRun(runId: string, workspaceId: string) {
       })
       .eq('id', report.id);
 
+    try {
+      const { notifyStageCompleteAsync } = await import('../platform/stage-notify.service.js');
+      notifyStageCompleteAsync({
+        workspaceId,
+        kind: 'report_generation',
+        stageName: 'Report generation',
+        summary: `Report ready — ${String(report.title ?? report.report_type ?? 'Report')}`,
+        outcome: 'success',
+        href: `/projects/${workspaceId}/reports/library`,
+        longRunning: true,
+        payload: { fingerprint: `report-ready:${runId}`, runId },
+      });
+    } catch {
+      /* optional */
+    }
+
     return { run: updated, document: doc };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Report generation failed';
@@ -446,6 +462,21 @@ export async function generateReportRun(runId: string, workspaceId: string) {
       .from('reports')
       .update({ status: 'failed' })
       .eq('id', report.id);
+    try {
+      const { notifyStageCompleteAsync } = await import('../platform/stage-notify.service.js');
+      notifyStageCompleteAsync({
+        workspaceId,
+        kind: 'report_generation',
+        stageName: 'Report generation',
+        summary: `Failed — ${message}`.slice(0, 240),
+        outcome: 'failure',
+        href: `/projects/${workspaceId}/reports/library`,
+        longRunning: true,
+        payload: { fingerprint: `report-fail:${runId}` },
+      });
+    } catch {
+      /* optional */
+    }
     throw err;
   }
 }

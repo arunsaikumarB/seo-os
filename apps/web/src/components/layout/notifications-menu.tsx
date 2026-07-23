@@ -40,6 +40,7 @@ export function NotificationsMenu() {
     ? DEMO_NOTIFICATIONS.map((n) => ({
         id: n.id,
         title: n.title,
+        body: null as string | null,
         href: null as string | null,
         read_at: n.unread ? null : new Date().toISOString(),
         time: n.time,
@@ -47,6 +48,7 @@ export function NotificationsMenu() {
     : liveItems.map((n) => ({
         id: n.id,
         title: n.title,
+        body: n.body ?? null,
         href: n.href ?? null,
         read_at: n.read_at,
         time: formatRelative(n.created_at),
@@ -123,6 +125,9 @@ export function NotificationsMenu() {
                       {n.title}
                     </span>
                   </div>
+                  {n.body ? (
+                    <p className="text-[11px] text-muted-foreground ml-3.5 line-clamp-2">{n.body}</p>
+                  ) : null}
                   <span className="text-[10px] text-muted-foreground ml-3.5">{n.time}</span>
                 </motion.div>
               </DropdownMenuItem>

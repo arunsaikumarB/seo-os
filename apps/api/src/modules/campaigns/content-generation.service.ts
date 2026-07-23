@@ -1045,6 +1045,7 @@ export async function processContentGenerationJob(job: {
       lastError: `stage=${stage} attempt=${attempt}: ${msg}`,
       force: true,
     });
+    await maybeNotifyContentGenerationBatch(workspaceId);
   } finally {
     clearInterval(heartbeat);
     touchContentGenHeartbeat();
@@ -1152,6 +1153,7 @@ async function finalizeQuality(
     } catch (err) {
       logger.error({ err, opportunityId }, 'ensureExecutionJobsForReady after quality Completed');
     }
+    await maybeNotifyContentGenerationBatch(workspaceId);
     return;
   }
 
@@ -1273,6 +1275,36 @@ export async function resumeInterruptedContentGeneration(workspaceId?: string) {
   }
 
   return { resumed, requeuedFromGenerating, reattachedQueued };
+}
+
+/** When the generation queue drains, notify once with outcome counts. */
+async function maybeNotifyContentGenerationBatch(workspaceId: string) {
+  try {
+    const board = await getContentGenerationBoard(workspaceId);
+    const p = board.progress;
+    if (p.queued + p.generating > 0) return;
+    const done = p.completed + p.failed + p.needsReview;
+    if (done <= 0) return;
+
+    const { notifyStageCompleteAsync } = await import('../platform/stage-notify.service.js');
+    notifyStageCompleteAsync({
+      workspaceId,
+      kind: 'content_generation',
+      stageName: 'Content Generation',
+      summary: `Generated ${p.completed}/${done} packages · ${p.failed} failed · ${p.needsReview} need review`,
+      outcome: p.failed > 0 || p.needsReview > 0 ? 'partial' : 'success',
+      href: `/projects/${workspaceId}/backlink-builder/assisted-manual`,
+      longRunning: true,
+      payload: {
+        fingerprint: `content-gen:${p.completed}:${p.failed}:${p.needsReview}`,
+        completed: p.completed,
+        failed: p.failed,
+        needsReview: p.needsReview,
+      },
+    });
+  } catch (err) {
+    logger.warn({ err, workspaceId }, 'content-gen stage notify failed');
+  }
 }
 
 export async function handleContentGenerateJobs(

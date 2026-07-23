@@ -1188,6 +1188,29 @@ export async function runAutomationPipeline(
       },
     });
 
+    try {
+      const { notifyStageCompleteAsync } = await import('../platform/stage-notify.service.js');
+      notifyStageCompleteAsync({
+        workspaceId,
+        orgId,
+        actorUserId: userId,
+        kind: 'import_analysis',
+        stageName: 'Import & analysis',
+        summary: partial
+          ? `Imported ${opportunitiesCreated} sites · ${stageErrors.length} failed · partial`
+          : `Imported ${opportunitiesCreated} sites · ${analysesCreated} analyzed · 0 failed`,
+        outcome: partial ? 'partial' : 'success',
+        href: `/projects/${workspaceId}/backlink-builder/classification`,
+        payload: {
+          fingerprint: `import:${importId}:${finalStatus}`,
+          opportunitiesCreated,
+          analysesCreated,
+        },
+      });
+    } catch {
+      /* notify optional */
+    }
+
     // Non-blocking enrichment only (memory/knowledge/browser) — core data already persisted
     fireAndForget(
       triggerBackgroundEnginesAfterImport({
@@ -1237,6 +1260,22 @@ export async function runAutomationPipeline(
       entityType: 'backlink_import',
       entityId: importId,
     });
+    try {
+      const { notifyStageCompleteAsync } = await import('../platform/stage-notify.service.js');
+      notifyStageCompleteAsync({
+        workspaceId,
+        orgId,
+        actorUserId: userId,
+        kind: 'import_analysis',
+        stageName: 'Import & analysis',
+        summary: `Failed — ${message}`.slice(0, 240),
+        outcome: 'failure',
+        href: `/projects/${workspaceId}/backlink-builder/import`,
+        payload: { fingerprint: `import-fail:${importId}` },
+      });
+    } catch {
+      /* notify optional */
+    }
     throw err;
   }
 }

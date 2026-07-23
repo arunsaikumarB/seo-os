@@ -45,6 +45,14 @@ export const PLATFORM_EVENT_TYPES = [
   'report_updated',
   'automation_pipeline_completed',
   'automation_pipeline_failed',
+  // Stage completion notifications (pipeline milestones)
+  'stage_import_completed',
+  'stage_ai_review_completed',
+  'stage_content_generation_completed',
+  'stage_assisted_manual_prepared',
+  'stage_auto_submit_batch_completed',
+  'stage_report_ready',
+  'stage_campaign_finished',
 ] as const;
 
 export type PlatformEventType = (typeof PLATFORM_EVENT_TYPES)[number];

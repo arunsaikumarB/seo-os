@@ -1320,6 +1320,8 @@ export async function continueQueuedJobs(
   const { data } = await q;
   if (!data?.length) {
     logger.info({ workspaceId, free, live }, 'continueQueuedJobs: no queued rows');
+    // Batch drained — notify when nothing left in-flight either
+    void maybeNotifyAutoSubmitBatch(workspaceId).catch(() => undefined);
     return [];
   }
 
@@ -1807,3 +1809,37 @@ export async function getStatistics(workspaceId: string) {
 }
 
 export { gateStatusFromBlocker, appendLog };
+
+/** When the auto-submit queue has nothing left queued/running, notify once. */
+async function maybeNotifyAutoSubmitBatch(workspaceId: string) {
+  try {
+    const { getStatisticsFromExecutionState } = await import('./execution-state.service.js');
+    const stats = await getStatisticsFromExecutionState(workspaceId);
+    const running = Number(stats.running ?? 0);
+    const queued = Number(stats.queued ?? 0);
+    if (running > 0 || queued > 0) return;
+
+    const submitted = Number(stats.submitted ?? stats.completed ?? 0);
+    const failed = Number(stats.failed ?? 0);
+    const waiting = Number(stats.waitingHuman ?? 0);
+    if (submitted + failed + waiting <= 0) return;
+
+    const { notifyStageCompleteAsync } = await import('../platform/stage-notify.service.js');
+    notifyStageCompleteAsync({
+      workspaceId,
+      kind: 'auto_submit_batch',
+      stageName: 'Auto-submission',
+      summary: `Batch finished · Submitted ${submitted} · Failed ${failed} · Waiting human ${waiting}`,
+      outcome: failed > 0 ? 'partial' : 'success',
+      href: `/projects/${workspaceId}/backlink-builder/track-results`,
+      payload: {
+        fingerprint: `auto-batch:${submitted}:${failed}:${waiting}`,
+        submitted,
+        failed,
+        waiting,
+      },
+    });
+  } catch (err) {
+    logger.warn({ err, workspaceId }, 'auto-submit batch notify failed');
+  }
+}

@@ -225,13 +225,43 @@ export async function bulkAiReviewAction(
     }
   }
 
+  const summary = (await getAiReviewBoard(workspaceId)).summary;
+
+  if (succeeded > 0 || errors.length > 0) {
+    try {
+      const { notifyStageCompleteAsync } = await import('../platform/stage-notify.service.js');
+      const pending = Number((summary as { pending?: number })?.pending ?? 0);
+      const approved = Number((summary as { approved?: number })?.approved ?? succeeded);
+      notifyStageCompleteAsync({
+        workspaceId,
+        kind: 'ai_review',
+        stageName: 'AI Review',
+        summary:
+          errors.length > 0
+            ? `${action}: ${succeeded} succeeded · ${errors.length} failed · ${skipped} skipped`
+            : `${action}: ${succeeded} sites · ${pending} still pending · ${approved} approved`,
+        outcome: errors.length > 0 ? 'partial' : 'success',
+        href: `/projects/${workspaceId}/content/library`,
+        payload: {
+          fingerprint: `ai-review:${action}:${succeeded}:${pending}:${errors.length}`,
+          action,
+          succeeded,
+          skipped,
+          failed: errors.length,
+        },
+      });
+    } catch {
+      /* notify optional */
+    }
+  }
+
   return {
     action,
     succeeded,
     skipped,
     skipReasons: skipReasons.slice(0, 20),
     errors: errors.slice(0, 20),
-    summary: (await getAiReviewBoard(workspaceId)).summary,
+    summary,
   };
 }
 
