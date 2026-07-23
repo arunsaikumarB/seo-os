@@ -216,10 +216,31 @@ export function CampaignHealthPage() {
     refetchInterval: 5_000,
   });
 
+  const assisted = useQuery({
+    queryKey: ['assisted-manual', projectId],
+    queryFn: () =>
+      request<{
+        data: {
+          counts: {
+            automatable: number;
+            assisted: number;
+            manual: number;
+            ready: number;
+            checkFields: number;
+            needsPerson: number;
+            conservationOk: boolean;
+          };
+        };
+      }>(`/v1/projects/${projectId}/backlink-builder/assisted-manual`),
+    enabled: !!projectId,
+    staleTime: 15_000,
+  });
+
   const data = health.data?.data;
   const totals = data?.totals;
   const audit = data?.generationAudit;
   const orphans = data?.orphans;
+  const ac = assisted.data?.data.counts;
 
   // Phase 6.1 — Track Results ≡ Campaign Health Execution Summary ≡ CSM waiting / cohort
   useEffect(() => {
@@ -272,6 +293,19 @@ export function CampaignHealthPage() {
           <span>failed={sum.failed}</span>
           <span>skipped={sum.skipped}</span>
           <span>state={sum.campaignState}</span>
+        </div>
+      ) : null}
+
+      {ac ? (
+        <div className="flex flex-wrap gap-3 border border-sky-700/40 p-2">
+          <span className="font-semibold">Assisted Manual (Phase 7)</span>
+          <span>automatable={ac.automatable}</span>
+          <span>assisted={ac.assisted}</span>
+          <span>ready={ac.ready}</span>
+          <span>checkFields={ac.checkFields}</span>
+          <span>needsPerson={ac.needsPerson}</span>
+          <span>manualOffline={ac.manual}</span>
+          <span>conservation={ac.conservationOk ? 'ok' : 'FAIL'}</span>
         </div>
       ) : null}
 

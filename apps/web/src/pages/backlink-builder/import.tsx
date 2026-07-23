@@ -105,8 +105,20 @@ export function BacklinkImportPage() {
             manual: number;
             active: number;
             confidence: 'provisional' | 'confirmed' | 'mixed';
+            assisted?: number;
+            assistedReady?: number;
+            assistedCheckFields?: number;
+            assistedNeedsPerson?: number;
+            manualOffline?: number;
           };
           items: Array<{ id: string; website: string; reason: string; url: string | null }>;
+          assisted?: {
+            assisted: number;
+            ready: number;
+            checkFields: number;
+            needsPerson: number;
+            conservationOk: boolean;
+          } | null;
         };
       }>(`/v1/projects/${projectId}/backlink-builder/manual-submissions`),
     enabled: !!projectId,
@@ -264,9 +276,13 @@ export function BacklinkImportPage() {
   const displayAuto = showConfirmedSplit
     ? confirmedCounts.automatable
     : (provisionalFromImport?.automatable ?? 0);
-  const displayManual = showConfirmedSplit
+  const displayManualTotal = showConfirmedSplit
     ? confirmedCounts.manual
     : (provisionalFromImport?.manual ?? 0);
+  const assistedCount = confirmedCounts?.assisted ?? 0;
+  const displayManualOffline =
+    confirmedCounts?.manualOffline ?? Math.max(0, displayManualTotal - assistedCount);
+  const displayManual = displayManualTotal;
   const showAutomationSplit =
     provisionalFromImport != null || showConfirmedSplit;
 
@@ -442,6 +458,28 @@ export function BacklinkImportPage() {
                     — need you (CAPTCHA / Login / Cloudflare / Unsupported)
                   </span>
                 </p>
+                {showConfirmedSplit && assistedCount > 0 ? (
+                  <p>
+                    📋 Assisted Manual:{' '}
+                    <span className="font-semibold tabular-nums">{assistedCount}</span>
+                    <span className="text-muted-foreground">
+                      {' '}
+                      — Ready {confirmedCounts?.assistedReady ?? 0} · Check{' '}
+                      {confirmedCounts?.assistedCheckFields ?? 0} · Needs person{' '}
+                      {confirmedCounts?.assistedNeedsPerson ?? 0}
+                      {displayManualOffline > 0
+                        ? ` · Offline Excel ${displayManualOffline}`
+                        : ''}
+                    </span>
+                    {' · '}
+                    <Link
+                      className="underline-offset-2 hover:underline"
+                      to={`/projects/${projectId}/backlink-builder/assisted-manual`}
+                    >
+                      Open worklist
+                    </Link>
+                  </p>
+                ) : null}
               </div>
               {displayManual > 0 && (
                 <Button size="sm" variant="outline" onClick={() => void downloadManualExcel()}>

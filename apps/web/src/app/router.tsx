@@ -112,6 +112,11 @@ const BacklinkPendingPage = lazy(() =>
 const TrackResultsPage = lazy(() =>
   import('@/pages/backlink-builder/track-results').then((m) => ({ default: m.TrackResultsPage }))
 );
+const AssistedManualPage = lazy(() =>
+  import('@/pages/backlink-builder/assisted-manual').then((m) => ({
+    default: m.AssistedManualPage,
+  }))
+);
 const BacklinkAuditPage = lazy(() =>
   import('@/pages/backlink-builder/audit').then((m) => ({ default: m.BacklinkAuditPage }))
 );
@@ -421,6 +426,10 @@ export function AppRouter() {
                     <Route
                       path="backlink-builder/track-results"
                       element={lazyEl(TrackResultsPage)}
+                    />
+                    <Route
+                      path="backlink-builder/assisted-manual"
+                      element={lazyEl(AssistedManualPage)}
                     />
                     <Route
                       path="backlink-builder/verification"

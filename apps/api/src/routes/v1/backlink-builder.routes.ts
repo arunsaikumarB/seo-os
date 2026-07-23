@@ -139,9 +139,185 @@ backlinkBuilderRouter.get(
       const { getManualSubmissionsBoard } = await import(
         '../../modules/browser-execution/manual-lane-backfill.service.js'
       );
+      const { getAssistedLaneSummary } = await import(
+        '../../modules/browser-execution/assisted-manual.service.js'
+      );
       const workspaceId = param(req.params.projectId);
       const board = await getManualSubmissionsBoard(workspaceId);
-      res.json({ data: board });
+      const assisted = await getAssistedLaneSummary(workspaceId).catch(() => null);
+      res.json({
+        data: {
+          ...board,
+          assisted,
+          counts: {
+            ...board.counts,
+            assisted: assisted?.assisted ?? 0,
+            assistedReady: assisted?.ready ?? 0,
+            assistedCheckFields: assisted?.checkFields ?? 0,
+            assistedNeedsPerson: assisted?.needsPerson ?? 0,
+            manualOffline: assisted?.manual ?? board.counts.manual,
+          },
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/** Phase 7 — Assisted Manual worklist (pilot ≤10) */
+backlinkBuilderRouter.get(
+  '/assisted-manual',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const { listAssistedPackages } = await import(
+        '../../modules/browser-execution/assisted-manual.service.js'
+      );
+      res.json({ data: await listAssistedPackages(param(req.params.projectId)) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+backlinkBuilderRouter.post(
+  '/assisted-manual/prepare',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const body = z
+        .object({
+          opportunityIds: z.array(z.string().uuid()).max(10).optional(),
+          entryUrlOverrides: z.record(z.string().url()).optional(),
+        })
+        .parse(req.body ?? {});
+      const { prepareAssistedPilot } = await import(
+        '../../modules/browser-execution/assisted-manual.service.js'
+      );
+      res.json({
+        data: await prepareAssistedPilot(param(req.params.projectId), body),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+backlinkBuilderRouter.get(
+  '/assisted-manual/metrics',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const { getAssistedPilotMetrics } = await import(
+        '../../modules/browser-execution/assisted-manual.service.js'
+      );
+      res.json({ data: await getAssistedPilotMetrics(param(req.params.projectId)) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+backlinkBuilderRouter.get(
+  '/assisted-manual/:packageId',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const { getAssistedPackage } = await import(
+        '../../modules/browser-execution/assisted-manual.service.js'
+      );
+      res.json({
+        data: await getAssistedPackage(
+          param(req.params.projectId),
+          param(req.params.packageId)
+        ),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+backlinkBuilderRouter.patch(
+  '/assisted-manual/:packageId',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const body = z
+        .object({
+          status: z.enum(['not_started', 'in_progress', 'done', 'failed']).optional(),
+          minutesSpent: z.number().min(0).max(240).optional(),
+          rejectedAtSubmit: z.boolean().optional(),
+        })
+        .parse(req.body ?? {});
+      const { updateAssistedPackageStatus } = await import(
+        '../../modules/browser-execution/assisted-manual.service.js'
+      );
+      res.json({
+        data: await updateAssistedPackageStatus(
+          param(req.params.projectId),
+          param(req.params.packageId),
+          body
+        ),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+backlinkBuilderRouter.post(
+  '/assisted-manual/:packageId/correct',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const body = z
+        .object({
+          selector: z.string().min(1).optional(),
+          role: z
+            .enum([
+              'title',
+              'short_desc',
+              'long_desc',
+              'url',
+              'email',
+              'phone',
+              'name',
+              'business_name',
+              'category',
+              'address',
+              'attachment',
+              'terms',
+              'other',
+            ])
+            .optional(),
+          markPackageGood: z.boolean().optional(),
+        })
+        .refine((b) => b.markPackageGood || b.selector, {
+          message: 'selector required unless markPackageGood',
+        })
+        .parse(req.body ?? {});
+      const { correctAssistedField } = await import(
+        '../../modules/browser-execution/assisted-manual.service.js'
+      );
+      res.json({
+        data: await correctAssistedField(
+          param(req.params.projectId),
+          param(req.params.packageId),
+          {
+            selector: body.selector ?? '',
+            role: body.role,
+            markPackageGood: body.markPackageGood,
+          }
+        ),
+      });
     } catch (err) {
       next(err);
     }

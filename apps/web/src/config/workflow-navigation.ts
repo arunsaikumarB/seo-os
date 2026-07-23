@@ -18,6 +18,7 @@ import {
   Plug,
   GraduationCap,
   FolderPlus,
+  ClipboardList,
 } from 'lucide-react';
 import type { NavItem } from './navigation';
 
@@ -127,6 +128,12 @@ export const workflowNavSections: WorkflowNavSection[] = [
         href: 'backlink-builder/video-studio',
         icon: Video,
         featureFlag: 'v11_media_studios',
+      },
+      {
+        label: 'Assisted Manual',
+        href: 'backlink-builder/assisted-manual',
+        icon: ClipboardList,
+        featureFlag: 'backlink_builder',
       },
       {
         label: 'Intervention Window',

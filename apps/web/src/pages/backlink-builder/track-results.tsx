@@ -1,21 +1,45 @@
 import { Link, useParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { Download, FileBarChart, CheckCircle2 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { PageTransition } from '@/components/demo/page-transition';
 import { AiLoadingState } from '@/components/workflow/ai-activity-card';
 import { useExecutionSummary } from '@/hooks/use-execution-summary';
+import { useApi } from '@/hooks/use-api';
 
 /**
  * Step 7 — Track Results.
  * Phase 6.1 — tiles from shared Execution Summary (CSM Campaign Items via /browser/statistics).
- * Same numbers as Campaign Health Execution Summary, Reports, and Submit Backlinks.
+ * Phase 7 — Assisted Manual bucket counts share the same lane selectors as Import / Submit.
  */
 export function TrackResultsPage() {
   const { projectId = '' } = useParams();
+  const { request } = useApi();
   const state = useExecutionSummary(projectId, 2_000);
   const s = state.data;
   const showTiles = Boolean(s) && !state.isLoading && !state.isPlaceholderData;
+
+  const assisted = useQuery({
+    queryKey: ['assisted-manual', projectId],
+    queryFn: () =>
+      request<{
+        data: {
+          counts: {
+            automatable: number;
+            assisted: number;
+            manual: number;
+            ready: number;
+            checkFields: number;
+            needsPerson: number;
+            conservationOk: boolean;
+          };
+        };
+      }>(`/v1/projects/${projectId}/backlink-builder/assisted-manual`),
+    enabled: !!projectId,
+    staleTime: 15_000,
+  });
+  const ac = assisted.data?.data.counts;
 
   const metrics = [
     { label: 'Completed', value: s?.completed ?? 0 },
@@ -39,6 +63,26 @@ export function TrackResultsPage() {
           Health, Reports, and Submit Backlinks.
         </p>
       </div>
+
+      {ac ? (
+        <Card className="border-border/40 shadow-sm rounded-2xl">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Lane mix (Import · Submit · Assisted)</CardTitle>
+            <CardDescription>
+              Automatable {ac.automatable} · Assisted {ac.assisted} (Ready {ac.ready} · Check{' '}
+              {ac.checkFields} · Needs person {ac.needsPerson}) · Manual offline {ac.manual}
+              {ac.conservationOk ? ' · conservation OK' : ' · conservation check'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button size="sm" variant="outline" asChild>
+              <Link to={`/projects/${projectId}/backlink-builder/assisted-manual`}>
+                Open Assisted Manual
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {showTiles ? (
         <p className="text-sm text-muted-foreground">

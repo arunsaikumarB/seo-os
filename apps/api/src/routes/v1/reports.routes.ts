@@ -74,6 +74,26 @@ reportsRouter.get(
   }
 );
 
+/** Phase 7 — Assisted Manual package workbook (standalone; never submits) */
+reportsRouter.get(
+  '/assisted-manual.xlsx',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const { exportAssistedPackagesWorkbook } = await import(
+        '../../modules/browser-execution/assisted-manual.service.js'
+      );
+      const file = await exportAssistedPackagesWorkbook(param(req.params.projectId));
+      res.setHeader('Content-Type', file.contentType);
+      res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+      res.send(file.body);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 reportsRouter.get(
   '/backlink-ops.csv',
   authMiddleware,

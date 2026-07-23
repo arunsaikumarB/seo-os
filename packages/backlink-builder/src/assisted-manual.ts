@@ -1,0 +1,875 @@
+/**
+ * Phase 7 — Assisted Manual (pilot ≤10 sites).
+ * Pure logic: Form Reader, Site Recipes, packages, buckets, staleness, similarity.
+ * Does NOT submit, solve gates, or change Auto/Manual routing (6.3.x).
+ */
+
+export const ASSISTED_MANUAL_PILOT_MAX = 10;
+export const ASSISTED_PACKAGE_TTL_DAYS = 7;
+export const ASSISTED_SIMILARITY_THRESHOLD = 0.85;
+
+export type FieldConfidence = 'high' | 'medium' | 'low';
+export type FieldSource = 'dom_label' | 'llm_inferred' | 'human_corrected' | 'name_guess';
+export type FieldRole =
+  | 'title'
+  | 'short_desc'
+  | 'long_desc'
+  | 'url'
+  | 'email'
+  | 'phone'
+  | 'name'
+  | 'business_name'
+  | 'category'
+  | 'address'
+  | 'attachment'
+  | 'terms'
+  | 'other';
+
+export type AssistedGate =
+  | 'none'
+  | 'captcha'
+  | 'otp_email'
+  | 'otp_phone'
+  | 'login'
+  | 'manual_review'
+  | 'multi_step';
+
+export type AssistedBucket = 'ready' | 'check_fields' | 'needs_person';
+export type PackageStatus = 'not_started' | 'in_progress' | 'done' | 'failed';
+export type FingerprintStatus = 'fresh' | 'stale' | 'changed';
+
+/** DOM facts extracted during crawl — evidence first, LLM only to disambiguate. */
+export type FormFieldFacts = {
+  label: string | null;
+  name: string | null;
+  id: string | null;
+  placeholder: string | null;
+  ariaLabel: string | null;
+  type: string;
+  required: boolean;
+  maxlength: number | null;
+  options: string[];
+  surroundingText: string | null;
+  accept: string | null;
+  sizeHint: string | null;
+  selector: string;
+};
+
+export type RecipeField = {
+  selector: string;
+  role: FieldRole;
+  maxlength: number | null;
+  required: boolean;
+  confidence: FieldConfidence;
+  source: FieldSource;
+  label: string | null;
+  options?: string[];
+  accept?: string | null;
+  sizeHint?: string | null;
+};
+
+export type SiteRecipe = {
+  domain: string;
+  entryUrl: string;
+  formFingerprint: string;
+  fields: RecipeField[];
+  dropdownOptions: Record<string, string[]>;
+  gate: AssistedGate;
+  notes: string;
+  lastVerifiedAt: string | null;
+  correctionCount: number;
+  multiStep: boolean;
+  multiStepLabel?: string;
+};
+
+export type PackageFieldValue = {
+  selector: string;
+  role: FieldRole;
+  label: string;
+  value: string;
+  charCount: number;
+  maxlength: number | null;
+  required?: boolean;
+  confidence: FieldConfidence;
+  source: FieldSource;
+  options?: string[];
+  recommendedOption?: string | null;
+  overLimit: boolean;
+  truncatedAtSentence?: boolean;
+  humanStep?: string | null;
+  imageFileName?: string | null;
+  imageConstraints?: string | null;
+};
+
+export type AssistedPackagePayload = {
+  entryUrl: string;
+  domain: string;
+  formFingerprint: string;
+  preparedAt: string;
+  fingerprintStatus: FingerprintStatus;
+  bucket: AssistedBucket;
+  status: PackageStatus;
+  gate: AssistedGate;
+  gateNotes: string;
+  multiStep: boolean;
+  multiStepLabel: string | null;
+  fields: PackageFieldValue[];
+  honestyNotes: string[];
+  failureReason: string | null;
+};
+
+export type AssistedLaneCounts = {
+  automatable: number;
+  assisted: number;
+  manual: number;
+  active: number;
+  ready: number;
+  checkFields: number;
+  needsPerson: number;
+  assistedOk: boolean;
+  conservationOk: boolean;
+};
+
+// ─── Form Reader ─────────────────────────────────────────────────────────────
+
+function attr(tag: string, name: string): string | null {
+  const m = new RegExp(`${name}=["']([^"']*)["']`, 'i').exec(tag);
+  return m?.[1] ?? null;
+}
+
+function hasRequired(tag: string): boolean {
+  return /\brequired\b/i.test(tag) || /aria-required=["']true["']/i.test(tag);
+}
+
+function parseMaxlength(tag: string, surrounding: string): number | null {
+  const fromAttr = Number(attr(tag, 'maxlength') ?? 0) || 0;
+  if (fromAttr > 0) return fromAttr;
+  const hint = /max(?:imum)?\s*[:\s]*(\d+)\s*char/i.exec(surrounding);
+  if (hint) return Number(hint[1]);
+  return null;
+}
+
+function optionsFromSelect(block: string): string[] {
+  const opts: string[] = [];
+  const re = /<option[^>]*>([\s\S]*?)<\/option>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(block)) !== null) {
+    const text = m[1].replace(/<[^>]+>/g, '').trim();
+    const val = attr(m[0], 'value');
+    const label = text || val || '';
+    if (label && !/^select\b/i.test(label)) opts.push(label);
+  }
+  return opts;
+}
+
+function findLabel(html: string, id: string | null, name: string | null): string | null {
+  if (id) {
+    const re = new RegExp(
+      `<label[^>]*for=["']${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["'][^>]*>([\\s\\S]*?)<\\/label>`,
+      'i'
+    );
+    const m = re.exec(html);
+    if (m) return m[1].replace(/<[^>]+>/g, '').trim() || null;
+  }
+  if (name) {
+    const re = new RegExp(
+      `<label[^>]*>[\\s\\S]*?(?:name=["']${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["'])[\\s\\S]*?<\\/label>`,
+      'i'
+    );
+    if (re.test(html)) {
+      const wrap = /<label[^>]*>([\s\S]*?)<\/label>/i.exec(html);
+      if (wrap) return wrap[1].replace(/<[^>]+>/g, '').trim() || null;
+    }
+  }
+  return null;
+}
+
+function surroundingSnippet(html: string, index: number, len = 120): string {
+  const start = Math.max(0, index - 40);
+  const end = Math.min(html.length, index + len);
+  return html.slice(start, end).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** Extract every form field as DOM facts (Phase 7 §2.1–2.3). */
+export function extractFormFieldFacts(html: string): FormFieldFacts[] {
+  const fields: FormFieldFacts[] = [];
+  const seen = new Set<string>();
+
+  const push = (f: FormFieldFacts) => {
+    const key = f.selector || `${f.name}|${f.id}|${f.type}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    fields.push(f);
+  };
+
+  const inputRe = /<input\b([^>]*)>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = inputRe.exec(html)) !== null) {
+    const attrs = m[1];
+    const type = (attr(attrs, 'type') ?? 'text').toLowerCase();
+    if (type === 'hidden' || type === 'submit' || type === 'button' || type === 'reset') continue;
+    const name = attr(attrs, 'name');
+    const id = attr(attrs, 'id');
+    const label = findLabel(html, id, name);
+    const surrounding = surroundingSnippet(html, m.index);
+    const selector = id ? `#${id}` : name ? `[name="${name}"]` : `input[type="${type}"]`;
+    push({
+      label,
+      name,
+      id,
+      placeholder: attr(attrs, 'placeholder'),
+      ariaLabel: attr(attrs, 'aria-label'),
+      type,
+      required: hasRequired(attrs),
+      maxlength: parseMaxlength(attrs, surrounding),
+      options: [],
+      surroundingText: surrounding,
+      accept: attr(attrs, 'accept'),
+      sizeHint: /(?:max|upto|up to)\s*(\d+\s*(?:kb|mb|mb\.))/i.exec(surrounding)?.[1] ?? null,
+      selector,
+    });
+  }
+
+  const taRe = /<textarea\b([^>]*)>([\s\S]*?)<\/textarea>/gi;
+  while ((m = taRe.exec(html)) !== null) {
+    const attrs = m[1];
+    const name = attr(attrs, 'name');
+    const id = attr(attrs, 'id');
+    const label = findLabel(html, id, name);
+    const surrounding = surroundingSnippet(html, m.index);
+    const selector = id ? `#${id}` : name ? `[name="${name}"]` : 'textarea';
+    push({
+      label,
+      name,
+      id,
+      placeholder: attr(attrs, 'placeholder'),
+      ariaLabel: attr(attrs, 'aria-label'),
+      type: 'textarea',
+      required: hasRequired(attrs),
+      maxlength: parseMaxlength(attrs, surrounding),
+      options: [],
+      surroundingText: surrounding,
+      accept: null,
+      sizeHint: null,
+      selector,
+    });
+  }
+
+  const selRe = /<select\b([^>]*)>([\s\S]*?)<\/select>/gi;
+  while ((m = selRe.exec(html)) !== null) {
+    const attrs = m[1];
+    const block = m[0];
+    const name = attr(attrs, 'name');
+    const id = attr(attrs, 'id');
+    const label = findLabel(html, id, name);
+    const surrounding = surroundingSnippet(html, m.index);
+    const selector = id ? `#${id}` : name ? `[name="${name}"]` : 'select';
+    push({
+      label,
+      name,
+      id,
+      placeholder: null,
+      ariaLabel: attr(attrs, 'aria-label'),
+      type: 'select',
+      required: hasRequired(attrs),
+      maxlength: null,
+      options: optionsFromSelect(block),
+      surroundingText: surrounding,
+      accept: null,
+      sizeHint: null,
+      selector,
+    });
+  }
+
+  return fields;
+}
+
+export function detectMultiStepForm(html: string): boolean {
+  const h = html.toLowerCase();
+  if (/\bstep\s*[1-9]\s*(of|\/)\s*[2-9]/i.test(h)) return true;
+  if (/<(button|a|input)[^>]*>\s*(next|continue|proceed)\s*</i.test(html)) return true;
+  if (/wizard|multi-?step| steppers? /i.test(h)) return true;
+  if (/data-step=["'][2-9]/i.test(h)) return true;
+  return false;
+}
+
+export function detectGateFromHtml(html: string): AssistedGate {
+  const h = html.toLowerCase();
+  if (detectMultiStepForm(html)) return 'multi_step';
+  if (/recaptcha|hcaptcha|g-recaptcha|cf-turnstile|captcha/i.test(h)) return 'captcha';
+  if (/one[- ]?time|otp|verification code|enter the code/i.test(h) && /email/i.test(h)) {
+    return 'otp_email';
+  }
+  if (/sms|phone.*(code|verify)|text.*(code|verify)/i.test(h)) return 'otp_phone';
+  if (/type=["']password["']/i.test(h) && /login|sign\s*in|log\s*in/i.test(h)) return 'login';
+  if (/pending review|manual approval|we will review/i.test(h)) return 'manual_review';
+  return 'none';
+}
+
+/** Ordered hash of name/id/type set — staleness fingerprint (§2.5). */
+export function computeFormFingerprint(fields: FormFieldFacts[]): string {
+  const parts = fields
+    .map((f) => `${f.name ?? ''}|${f.id ?? ''}|${f.type}|${f.required ? '1' : '0'}`)
+    .sort();
+  const raw = parts.join(';;');
+  let hash = 0;
+  for (let i = 0; i < raw.length; i++) {
+    hash = (hash * 31 + raw.charCodeAt(i)) >>> 0;
+  }
+  return `fp_${hash.toString(16)}_${parts.length}`;
+}
+
+// ─── Role mapping + confidence ───────────────────────────────────────────────
+
+const ROLE_HINTS: Array<{ role: FieldRole; patterns: RegExp[] }> = [
+  { role: 'email', patterns: [/e-?mail/i, /^email$/i] },
+  { role: 'phone', patterns: [/phone|mobile|tel/i] },
+  { role: 'url', patterns: [/url|website|site|homepage|link/i] },
+  { role: 'title', patterns: [/title|headline|listing.?name|business.?name|^name$/i] },
+  { role: 'business_name', patterns: [/company|business|organization|org.?name/i] },
+  { role: 'name', patterns: [/full.?name|your.?name|contact.?name|first.?name|last.?name/i] },
+  { role: 'short_desc', patterns: [/short.?desc|tagline|summary|blurb|excerpt/i] },
+  { role: 'long_desc', patterns: [/desc|about|message|body|content|details|bio/i] },
+  { role: 'category', patterns: [/categor|industry|type|topic|niche/i] },
+  { role: 'address', patterns: [/address|street|city|zip|postal/i] },
+  { role: 'attachment', patterns: [/logo|image|photo|file|upload|attach/i] },
+  { role: 'terms', patterns: [/terms|agree|privacy|consent|accept/i] },
+];
+
+function evidenceText(f: FormFieldFacts): string {
+  return [f.label, f.ariaLabel, f.placeholder, f.name, f.id, f.surroundingText]
+    .filter(Boolean)
+    .join(' ');
+}
+
+export function inferFieldRole(facts: FormFieldFacts): {
+  role: FieldRole;
+  confidence: FieldConfidence;
+  source: FieldSource;
+} {
+  const text = evidenceText(facts);
+  const hasExplicitLabel = Boolean(facts.label || facts.ariaLabel);
+
+  if (facts.type === 'file') {
+    return {
+      role: 'attachment',
+      confidence: hasExplicitLabel ? 'high' : 'medium',
+      source: hasExplicitLabel ? 'dom_label' : 'name_guess',
+    };
+  }
+  if (facts.type === 'checkbox' && /terms|agree|privacy/i.test(text)) {
+    return { role: 'terms', confidence: 'high', source: 'dom_label' };
+  }
+  if (facts.type === 'email') {
+    return {
+      role: 'email',
+      confidence: hasExplicitLabel ? 'high' : 'medium',
+      source: hasExplicitLabel ? 'dom_label' : 'name_guess',
+    };
+  }
+  if (facts.type === 'url') {
+    return {
+      role: 'url',
+      confidence: hasExplicitLabel ? 'high' : 'medium',
+      source: hasExplicitLabel ? 'dom_label' : 'name_guess',
+    };
+  }
+  if (facts.type === 'select' || facts.options.length > 0) {
+    const cat = ROLE_HINTS.find((h) => h.role === 'category');
+    if (cat && cat.patterns.some((p) => p.test(text))) {
+      return {
+        role: 'category',
+        confidence: hasExplicitLabel ? 'high' : 'medium',
+        source: hasExplicitLabel ? 'dom_label' : 'llm_inferred',
+      };
+    }
+  }
+
+  for (const hint of ROLE_HINTS) {
+    if (hint.patterns.some((p) => p.test(text))) {
+      if (hasExplicitLabel && (facts.label || facts.ariaLabel)) {
+        return { role: hint.role, confidence: 'high', source: 'dom_label' };
+      }
+      if (facts.placeholder && hint.patterns.some((p) => p.test(facts.placeholder!))) {
+        return { role: hint.role, confidence: 'medium', source: 'dom_label' };
+      }
+      // name="desc2" style — low confidence
+      if (facts.name && /^[a-z]+\d+$/i.test(facts.name)) {
+        return { role: hint.role, confidence: 'low', source: 'name_guess' };
+      }
+      return { role: hint.role, confidence: 'low', source: 'name_guess' };
+    }
+  }
+
+  if (facts.name && /^[a-z]+\d+$/i.test(facts.name)) {
+    return { role: 'other', confidence: 'low', source: 'name_guess' };
+  }
+  return {
+    role: 'other',
+    confidence: hasExplicitLabel ? 'medium' : 'low',
+    source: hasExplicitLabel ? 'dom_label' : 'llm_inferred',
+  };
+}
+
+/** Build or merge a Site Recipe from Form Reader facts. Human corrections win permanently. */
+export function buildSiteRecipe(input: {
+  domain: string;
+  entryUrl: string;
+  html: string;
+  existing?: SiteRecipe | null;
+}): SiteRecipe {
+  const facts = extractFormFieldFacts(input.html);
+  const fingerprint = computeFormFingerprint(facts);
+  const multiStep = detectMultiStepForm(input.html);
+  const gate = detectGateFromHtml(input.html);
+
+  const existingBySelector = new Map(
+    (input.existing?.fields ?? []).map((f) => [f.selector, f] as const)
+  );
+  const fingerprintChanged =
+    Boolean(input.existing?.formFingerprint) &&
+    input.existing!.formFingerprint !== fingerprint;
+
+  const fields: RecipeField[] = facts.map((f) => {
+    const prev = existingBySelector.get(f.selector);
+    // Human correction never re-guessed (§3 rule 2)
+    if (prev?.source === 'human_corrected' && !fingerprintChanged) {
+      return {
+        ...prev,
+        maxlength: f.maxlength ?? prev.maxlength,
+        options: f.options.length ? f.options : prev.options,
+        required: f.required,
+      };
+    }
+    // Fingerprint change invalidates non-human fields
+    if (prev?.source === 'human_corrected' && fingerprintChanged) {
+      // Keep human role mapping but refresh limits/options from new DOM
+      return {
+        ...prev,
+        maxlength: f.maxlength ?? prev.maxlength,
+        options: f.options.length ? f.options : prev.options,
+        required: f.required,
+        label: f.label ?? prev.label,
+      };
+    }
+    const inferred = inferFieldRole(f);
+    return {
+      selector: f.selector,
+      role: inferred.role,
+      maxlength: f.maxlength,
+      required: f.required,
+      confidence: inferred.confidence,
+      source: inferred.source,
+      label: f.label ?? f.ariaLabel ?? f.placeholder ?? f.name,
+      options: f.options.length ? f.options : undefined,
+      accept: f.accept,
+      sizeHint: f.sizeHint,
+    };
+  });
+
+  const dropdownOptions: Record<string, string[]> = {};
+  for (const f of fields) {
+    if (f.options?.length) dropdownOptions[f.selector] = f.options;
+  }
+
+  return {
+    domain: input.domain,
+    entryUrl: input.entryUrl,
+    formFingerprint: fingerprint,
+    fields,
+    dropdownOptions,
+    gate: multiStep ? 'multi_step' : gate,
+    notes: multiStep
+      ? 'Multi-step form — step 1 prepared, later steps unknown'
+      : input.existing?.notes ?? '',
+    lastVerifiedAt: new Date().toISOString(),
+    correctionCount: input.existing?.correctionCount ?? 0,
+    multiStep,
+    multiStepLabel: multiStep
+      ? 'Multi-step form — step 1 prepared, later steps unknown'
+      : undefined,
+  };
+}
+
+export function applyHumanFieldCorrection(
+  recipe: SiteRecipe,
+  correction: { selector: string; role?: FieldRole; notes?: string }
+): SiteRecipe {
+  const fields = recipe.fields.map((f) => {
+    if (f.selector !== correction.selector) return f;
+    return {
+      ...f,
+      role: correction.role ?? f.role,
+      source: 'human_corrected' as const,
+      confidence: 'high' as const,
+    };
+  });
+  return {
+    ...recipe,
+    fields,
+    correctionCount: recipe.correctionCount + 1,
+    notes: correction.notes
+      ? [recipe.notes, correction.notes].filter(Boolean).join(' · ')
+      : recipe.notes,
+    lastVerifiedAt: new Date().toISOString(),
+  };
+}
+
+// ─── Limit-aware content + package build ─────────────────────────────────────
+
+/** Fit value to maxlength — sentence-boundary truncate with flag; never ship over-limit. */
+export function fitValueToLimit(
+  value: string,
+  maxlength: number | null
+): { value: string; overLimit: boolean; truncatedAtSentence: boolean } {
+  if (maxlength == null || maxlength <= 0) {
+    return { value, overLimit: false, truncatedAtSentence: false };
+  }
+  if (value.length <= maxlength) {
+    return { value, overLimit: false, truncatedAtSentence: false };
+  }
+  const slice = value.slice(0, maxlength);
+  const lastSentence = Math.max(slice.lastIndexOf('. '), slice.lastIndexOf('! '), slice.lastIndexOf('? '));
+  if (lastSentence > maxlength * 0.5) {
+    return {
+      value: slice.slice(0, lastSentence + 1).trim(),
+      overLimit: false,
+      truncatedAtSentence: true,
+    };
+  }
+  return {
+    value: slice.trim(),
+    overLimit: true,
+    truncatedAtSentence: true,
+  };
+}
+
+export function recommendDropdownOption(
+  options: string[],
+  preferredHints: string[]
+): string | null {
+  if (!options.length) return null;
+  const lowerHints = preferredHints.map((h) => h.toLowerCase());
+  for (const opt of options) {
+    const o = opt.toLowerCase();
+    if (lowerHints.some((h) => o.includes(h) || h.includes(o))) return opt;
+  }
+  return options[0] ?? null;
+}
+
+export type ContentSource = {
+  title?: string | null;
+  shortDescription?: string | null;
+  longDescription?: string | null;
+  businessName?: string | null;
+  url?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  categoryHints?: string[];
+  imageFileName?: string | null;
+};
+
+function valueForRole(role: FieldRole, content: ContentSource): string {
+  switch (role) {
+    case 'title':
+    case 'business_name':
+      return content.businessName || content.title || '';
+    case 'short_desc':
+      return content.shortDescription || content.longDescription?.slice(0, 160) || '';
+    case 'long_desc':
+      return content.longDescription || content.shortDescription || '';
+    case 'url':
+      return content.url || '';
+    case 'email':
+      return content.email || '';
+    case 'phone':
+      return content.phone || '';
+    case 'address':
+      return content.address || '';
+    case 'name':
+      return content.businessName || content.title || '';
+    default:
+      return '';
+  }
+}
+
+export function assignAssistedBucket(input: {
+  recipe: SiteRecipe;
+  fields: PackageFieldValue[];
+  fingerprintStatus: FingerprintStatus;
+  formFound: boolean;
+}): AssistedBucket {
+  if (!input.formFound) return 'needs_person';
+  if (input.fingerprintStatus === 'changed' || input.fingerprintStatus === 'stale') {
+    return 'needs_person';
+  }
+  if (input.recipe.multiStep || input.recipe.gate === 'multi_step') return 'needs_person';
+  if (input.fields.some((f) => f.overLimit)) return 'needs_person';
+  const unresolvedDropdown = input.fields.some(
+    (f) => f.role === 'category' && f.options && f.options.length > 0 && !f.recommendedOption
+  );
+  if (unresolvedDropdown) return 'check_fields';
+  const lowOrMed = input.fields.filter(
+    (f) => f.required && (f.confidence === 'low' || f.confidence === 'medium')
+  );
+  if (lowOrMed.length > 0) return 'check_fields';
+  const requiredHigh = input.fields.filter((f) => f.required);
+  if (requiredHigh.some((f) => f.confidence !== 'high' && f.role !== 'terms')) {
+    return 'check_fields';
+  }
+  return 'ready';
+}
+
+export function evaluateFingerprintStatus(input: {
+  preparedAt: string;
+  storedFingerprint: string;
+  liveFingerprint: string | null;
+  ttlDays?: number;
+  now?: Date;
+}): FingerprintStatus {
+  const now = input.now ?? new Date();
+  const prepared = new Date(input.preparedAt).getTime();
+  const ttlMs = (input.ttlDays ?? ASSISTED_PACKAGE_TTL_DAYS) * 24 * 60 * 60 * 1000;
+  if (Number.isFinite(prepared) && now.getTime() - prepared > ttlMs) return 'stale';
+  if (input.liveFingerprint && input.liveFingerprint !== input.storedFingerprint) {
+    return 'changed';
+  }
+  return 'fresh';
+}
+
+/** Token Jaccard similarity for cross-package uniqueness (§2.7). */
+export function textSimilarity(a: string, b: string): number {
+  const tok = (s: string) =>
+    new Set(
+      s
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter((t) => t.length > 2)
+    );
+  const A = tok(a);
+  const B = tok(b);
+  if (!A.size || !B.size) return 0;
+  let inter = 0;
+  for (const t of A) if (B.has(t)) inter++;
+  const union = A.size + B.size - inter;
+  return union === 0 ? 0 : inter / union;
+}
+
+export function findSimilarPackagePairs(
+  packages: Array<{ id: string; text: string }>,
+  threshold = ASSISTED_SIMILARITY_THRESHOLD
+): Array<{ a: string; b: string; score: number }> {
+  const hits: Array<{ a: string; b: string; score: number }> = [];
+  for (let i = 0; i < packages.length; i++) {
+    for (let j = i + 1; j < packages.length; j++) {
+      const score = textSimilarity(packages[i].text, packages[j].text);
+      if (score >= threshold) {
+        hits.push({ a: packages[i].id, b: packages[j].id, score });
+      }
+    }
+  }
+  return hits;
+}
+
+export function buildAssistedPackage(input: {
+  recipe: SiteRecipe;
+  content: ContentSource;
+  preparedAt?: string;
+  fingerprintStatus?: FingerprintStatus;
+  formFound?: boolean;
+  status?: PackageStatus;
+}): AssistedPackagePayload {
+  const preparedAt = input.preparedAt ?? new Date().toISOString();
+  const fingerprintStatus = input.fingerprintStatus ?? 'fresh';
+  const formFound = input.formFound !== false;
+  const honestyNotes: string[] = [
+    'Does not submit anything automatically.',
+    'Does not solve CAPTCHA / OTP / login.',
+    'Does not guarantee the listing goes live (directories moderate independently).',
+    'Does not fully prepare multi-step forms.',
+    'Does not attach images for you.',
+  ];
+
+  const fields: PackageFieldValue[] = input.recipe.fields.map((rf) => {
+    if (rf.role === 'terms') {
+      return {
+        selector: rf.selector,
+        role: rf.role,
+        label: rf.label ?? 'Terms',
+        value: '',
+        charCount: 0,
+        maxlength: null,
+        required: rf.required,
+        confidence: rf.confidence,
+        source: rf.source,
+        overLimit: false,
+        humanStep: 'Accept terms yourself — never pre-answered by the app.',
+      };
+    }
+    if (rf.role === 'attachment') {
+      const fileName = input.content.imageFileName ?? 'listing-image.jpg';
+      const constraints = [
+        rf.accept ? `accept ${rf.accept}` : null,
+        rf.sizeHint ? `max ${rf.sizeHint}` : null,
+      ]
+        .filter(Boolean)
+        .join(', ');
+      return {
+        selector: rf.selector,
+        role: rf.role,
+        label: rf.label ?? 'Upload',
+        value: '',
+        charCount: 0,
+        maxlength: null,
+        required: rf.required,
+        confidence: rf.confidence,
+        source: rf.source,
+        overLimit: false,
+        imageFileName: fileName,
+        imageConstraints: constraints || null,
+        humanStep: `Attach \`${fileName}\` to the ${rf.label ?? 'upload'} field${
+          constraints ? ` (${constraints})` : ''
+        }.`,
+      };
+    }
+    if (rf.role === 'category' && rf.options?.length) {
+      const recommended = recommendDropdownOption(
+        rf.options,
+        input.content.categoryHints ?? [input.content.businessName ?? '', 'Food', 'Business']
+      );
+      return {
+        selector: rf.selector,
+        role: rf.role,
+        label: rf.label ?? 'Category',
+        value: recommended ?? '',
+        charCount: (recommended ?? '').length,
+        maxlength: null,
+        required: rf.required,
+        confidence: rf.confidence,
+        source: rf.source,
+        options: rf.options,
+        recommendedOption: recommended,
+        overLimit: false,
+        humanStep: recommended
+          ? `Category: [${recommended}] ← recommended · ${rf.options.length - 1} other options available`
+          : 'Pick a category from the real list.',
+      };
+    }
+
+    const raw = valueForRole(rf.role, input.content);
+    const fitted = fitValueToLimit(raw, rf.maxlength);
+    return {
+      selector: rf.selector,
+      role: rf.role,
+      label: rf.label ?? rf.role,
+      value: fitted.value,
+      charCount: fitted.value.length,
+      maxlength: rf.maxlength,
+      required: rf.required,
+      confidence: rf.confidence,
+      source: rf.source,
+      overLimit: fitted.overLimit,
+      truncatedAtSentence: fitted.truncatedAtSentence,
+    };
+  });
+
+  const bucket = assignAssistedBucket({
+    recipe: input.recipe,
+    fields,
+    fingerprintStatus,
+    formFound,
+  });
+
+  let failureReason: string | null = null;
+  if (fingerprintStatus === 'changed') {
+    failureReason = 'Form changed — re-prepare';
+  } else if (fingerprintStatus === 'stale') {
+    failureReason = 'Package expired — re-prepare';
+  } else if (input.recipe.multiStep) {
+    failureReason = input.recipe.multiStepLabel ?? 'Multi-step form';
+  } else if (!formFound) {
+    failureReason = 'No form found';
+  }
+
+  const gateNotes =
+    input.recipe.gate === 'otp_email'
+      ? 'Email code will be sent to the address you enter — check inbox before submitting.'
+      : input.recipe.gate === 'otp_phone'
+        ? 'SMS code will be sent to the phone you enter — keep your phone ready.'
+        : input.recipe.gate === 'captcha'
+          ? 'CAPTCHA present — clear it yourself; the app will not solve it.'
+          : input.recipe.gate === 'login'
+            ? 'Login required — sign in yourself; the app will not bypass auth.'
+            : input.recipe.gate === 'multi_step'
+              ? honestyNotes[3]
+              : 'No special gate detected beyond normal form submit.';
+
+  return {
+    entryUrl: input.recipe.entryUrl,
+    domain: input.recipe.domain,
+    formFingerprint: input.recipe.formFingerprint,
+    preparedAt,
+    fingerprintStatus,
+    bucket,
+    status: input.status ?? 'not_started',
+    gate: input.recipe.gate,
+    gateNotes,
+    multiStep: input.recipe.multiStep,
+    multiStepLabel: input.recipe.multiStepLabel ?? null,
+    fields,
+    honestyNotes,
+    failureReason,
+  };
+}
+
+/** Static self-check: prepared mapping still matches live DOM facts (§2.1). */
+export function verifyMappingAgainstDom(
+  recipe: SiteRecipe,
+  liveHtml: string
+): { ok: boolean; mismatches: string[] } {
+  const live = extractFormFieldFacts(liveHtml);
+  const bySelector = new Map(live.map((f) => [f.selector, f]));
+  const mismatches: string[] = [];
+  for (const rf of recipe.fields) {
+    const fact = bySelector.get(rf.selector);
+    if (!fact) {
+      mismatches.push(rf.selector);
+      continue;
+    }
+    const inferred = inferFieldRole(fact);
+    if (rf.source !== 'human_corrected' && inferred.role !== rf.role && rf.required) {
+      mismatches.push(rf.selector);
+    }
+  }
+  return { ok: mismatches.length === 0, mismatches };
+}
+
+export function computeAssistedLaneCounts(input: {
+  automatable: number;
+  manualTotal: number;
+  assistedPackages: Array<{ bucket: AssistedBucket }>;
+}): AssistedLaneCounts {
+  const assisted = input.assistedPackages.length;
+  const manual = Math.max(0, input.manualTotal - assisted);
+  const active = input.automatable + input.manualTotal;
+  const ready = input.assistedPackages.filter((p) => p.bucket === 'ready').length;
+  const checkFields = input.assistedPackages.filter((p) => p.bucket === 'check_fields').length;
+  const needsPerson = input.assistedPackages.filter((p) => p.bucket === 'needs_person').length;
+  return {
+    automatable: input.automatable,
+    assisted,
+    manual,
+    active,
+    ready,
+    checkFields,
+    needsPerson,
+    assistedOk: ready + checkFields + needsPerson === assisted,
+    conservationOk: input.automatable + manual + assisted === active,
+  };
+}
+
+export function canAddToPilot(currentPilotCount: number, max = ASSISTED_MANUAL_PILOT_MAX): boolean {
+  return currentPilotCount < max;
+}
