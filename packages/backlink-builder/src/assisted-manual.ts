@@ -366,30 +366,83 @@ export function computeFormFingerprint(fields: FormFieldFacts[]): string {
 
 // ─── Role mapping + confidence ───────────────────────────────────────────────
 
+/** Drop trailing helper copy so "Title (Optional) Leave blank…" → "Title". */
+export function primaryLabelText(raw: string | null | undefined): string {
+  if (!raw) return '';
+  let s = String(raw).replace(/\s+/g, ' ').trim();
+  s = s.replace(/\s*\(\s*optional\s*\).*$/i, '');
+  s = s.replace(/\s*leave\s+blank\b.*$/i, '');
+  s = s.replace(/\s*(?:auto[- ]?fetch|will\s+be\s+(?:filled|fetched)|hint|note|example)\b.*$/i, '');
+  s = s.replace(/\s*[:–—]\s*$/g, '').trim();
+  return s;
+}
+
+/** First significant word of the cleaned label (highest weight for role). */
+export function leadingLabelToken(raw: string | null | undefined): string {
+  const primary = primaryLabelText(raw);
+  if (!primary) return '';
+  const word = primary.split(/[\s:–—|/\\]+/).find((w) => /[a-z]/i.test(w)) ?? '';
+  return word.toLowerCase().replace(/[^a-z0-9_-]/gi, '');
+}
+
+const LONG_DESC_MAXLENGTH = 160;
+
+function isLongTextControl(facts: FormFieldFacts): boolean {
+  if (facts.type === 'textarea') return true;
+  if (facts.maxlength != null && facts.maxlength > LONG_DESC_MAXLENGTH) return true;
+  return false;
+}
+
+function descriptionRoleFromControl(facts: FormFieldFacts): 'short_desc' | 'long_desc' {
+  if (facts.type === 'textarea') return 'long_desc';
+  if (facts.maxlength != null && facts.maxlength <= LONG_DESC_MAXLENGTH) return 'short_desc';
+  if (facts.maxlength != null && facts.maxlength > LONG_DESC_MAXLENGTH) return 'long_desc';
+  return 'long_desc';
+}
+
+/** Leading-token → role. URL only for URL/Website/Link (or type=url handled separately). */
+function roleFromLeadingToken(
+  token: string,
+  facts: FormFieldFacts
+): FieldRole | null {
+  if (!token) return null;
+  if (/^(title|headline|name)$/i.test(token)) return 'title';
+  if (/^(description|about|summary|tagline|blurb|excerpt|details|bio|content|message)$/i.test(token)) {
+    return descriptionRoleFromControl(facts);
+  }
+  if (/^(url|website|link|homepage)$/i.test(token)) return 'url';
+  if (/^(email|e-?mail)$/i.test(token)) return 'email';
+  if (/^(phone|mobile|tel)$/i.test(token)) return 'phone';
+  if (/^(company|business|organization|org)$/i.test(token)) return 'business_name';
+  if (/^(category|industry|type|topic|niche)$/i.test(token)) return 'category';
+  if (/^(address|street|city|zip|postal)$/i.test(token)) return 'address';
+  if (/^(logo|image|photo|file|upload|attach)$/i.test(token)) return 'attachment';
+  if (/^(terms|agree|privacy|consent)$/i.test(token)) return 'terms';
+  return null;
+}
+
 const ROLE_HINTS: Array<{ role: FieldRole; patterns: RegExp[] }> = [
   { role: 'email', patterns: [/e-?mail/i, /^email$/i] },
   { role: 'phone', patterns: [/phone|mobile|tel/i] },
-  // Avoid bare "site" / "link" — those match "Search this site" and nav links
   {
     role: 'url',
     patterns: [
-      /web\s*site/i,
-      /website\s*url/i,
-      /your\s*(?:web\s*)?site/i,
-      /company\s*url/i,
-      /listing\s*url/i,
-      /home\s*page/i,
-      /homepage/i,
+      /^web\s*site$/i,
+      /^website(\s*url)?$/i,
       /^url$/i,
-      /\burl\b/i,
+      /^link$/i,
+      /^homepage$/i,
+      /^home\s*page$/i,
+      /^listing\s*url$/i,
+      /^company\s*url$/i,
     ],
   },
-  { role: 'title', patterns: [/title|headline|listing.?name|business.?name|^name$/i] },
+  { role: 'title', patterns: [/^title$/i, /^headline$/i, /^listing.?name$/i, /^business.?name$/i, /^name$/i] },
   { role: 'business_name', patterns: [/company|business|organization|org.?name/i] },
   { role: 'name', patterns: [/full.?name|your.?name|contact.?name|first.?name|last.?name/i] },
-  { role: 'short_desc', patterns: [/short.?desc|tagline|summary|blurb|excerpt/i] },
-  { role: 'long_desc', patterns: [/desc|about|message|body|content|details|bio/i] },
-  { role: 'category', patterns: [/categor|industry|type|topic|niche/i] },
+  { role: 'short_desc', patterns: [/^short.?desc/i, /^tagline$/i, /^summary$/i, /^blurb$/i, /^excerpt$/i] },
+  { role: 'long_desc', patterns: [/^desc/i, /^about$/i, /^message$/i, /^body$/i, /^content$/i, /^details$/i, /^bio$/i] },
+  { role: 'category', patterns: [/categor|industry|^type$|topic|niche/i] },
   { role: 'address', patterns: [/address|street|city|zip|postal/i] },
   { role: 'attachment', patterns: [/logo|image|photo|file|upload|attach/i] },
   { role: 'terms', patterns: [/terms|agree|privacy|consent|accept/i] },
@@ -424,9 +477,9 @@ export function isSearchOrNavField(f: FormFieldFacts): boolean {
 }
 
 function evidenceText(f: FormFieldFacts): string {
-  return [f.label, f.ariaLabel, f.placeholder, f.name, f.id, f.surroundingText]
-    .filter(Boolean)
-    .join(' ');
+  // Prefer cleaned primary label — never let "Leave blank… website" dominate
+  const primary = primaryLabelText(f.label || f.ariaLabel);
+  return [primary, f.placeholder, f.name, f.id].filter(Boolean).join(' ');
 }
 
 export function inferFieldRole(facts: FormFieldFacts): {
@@ -438,8 +491,10 @@ export function inferFieldRole(facts: FormFieldFacts): {
     return { role: 'other', confidence: 'low', source: 'name_guess' };
   }
 
-  const text = evidenceText(facts);
   const hasExplicitLabel = Boolean(facts.label || facts.ariaLabel);
+  const leading = leadingLabelToken(facts.label || facts.ariaLabel);
+  const primary = primaryLabelText(facts.label || facts.ariaLabel);
+  const text = evidenceText(facts);
 
   if (facts.type === 'file') {
     return {
@@ -458,23 +513,79 @@ export function inferFieldRole(facts: FormFieldFacts): {
       source: hasExplicitLabel ? 'dom_label' : 'name_guess',
     };
   }
-  if (facts.type === 'url') {
-    // type=url alone is not enough for high — require website-ish evidence
-    const looksLikeWebsite = ROLE_HINTS.find((h) => h.role === 'url')!.patterns.some((p) =>
-      p.test(text)
-    );
-    if (!looksLikeWebsite && !hasExplicitLabel) {
-      return { role: 'url', confidence: 'low', source: 'name_guess' };
+
+  // Textarea / long maxlength → description family, never url
+  if (isLongTextControl(facts)) {
+    const fromLead = roleFromLeadingToken(leading, facts);
+    if (fromLead === 'url') {
+      return {
+        role: descriptionRoleFromControl(facts),
+        confidence: 'high',
+        source: 'dom_label',
+      };
+    }
+    if (fromLead === 'short_desc' || fromLead === 'long_desc' || fromLead === 'title') {
+      // Title on a textarea is unusual — still prefer description when long control
+      if (fromLead === 'title' && facts.type === 'textarea') {
+        return {
+          role: descriptionRoleFromControl(facts),
+          confidence: 'high',
+          source: 'dom_label',
+        };
+      }
+      return {
+        role: fromLead === 'title' ? fromLead : descriptionRoleFromControl(facts),
+        confidence: 'high',
+        source: 'dom_label',
+      };
+    }
+    if (fromLead && fromLead !== 'url') {
+      return { role: fromLead, confidence: 'high', source: 'dom_label' };
     }
     return {
-      role: 'url',
-      confidence: looksLikeWebsite && hasExplicitLabel ? 'high' : 'medium',
+      role: descriptionRoleFromControl(facts),
+      confidence: hasExplicitLabel ? 'medium' : 'low',
       source: hasExplicitLabel ? 'dom_label' : 'name_guess',
     };
   }
+
+  // Leading token wins (Title…website helper → title, not url)
+  const fromLead = roleFromLeadingToken(leading, facts);
+  if (fromLead) {
+    // Never keep url if control is long text (belt-and-suspenders)
+    if (fromLead === 'url' && isLongTextControl(facts)) {
+      return {
+        role: descriptionRoleFromControl(facts),
+        confidence: 'high',
+        source: 'dom_label',
+      };
+    }
+    return {
+      role: fromLead,
+      confidence: 'high',
+      source: 'dom_label',
+    };
+  }
+
+  // type=url → url only when leading token is empty/unknown or already url-ish
+  if (facts.type === 'url') {
+    if (isLongTextControl(facts)) {
+      return {
+        role: descriptionRoleFromControl(facts),
+        confidence: 'medium',
+        source: 'dom_label',
+      };
+    }
+    return {
+      role: 'url',
+      confidence: hasExplicitLabel ? 'high' : 'medium',
+      source: hasExplicitLabel ? 'dom_label' : 'name_guess',
+    };
+  }
+
   if (facts.type === 'select' || facts.options.length > 0) {
     const cat = ROLE_HINTS.find((h) => h.role === 'category');
-    if (cat && cat.patterns.some((p) => p.test(text))) {
+    if (cat && cat.patterns.some((p) => p.test(primary || text))) {
       return {
         role: 'category',
         confidence: hasExplicitLabel ? 'high' : 'medium',
@@ -483,20 +594,29 @@ export function inferFieldRole(facts: FormFieldFacts): {
     }
   }
 
+  // Fallback: match ROLE_HINTS against cleaned primary label only (not helper text)
+  const matchHaystack = primary || [facts.placeholder, facts.name, facts.id].filter(Boolean).join(' ');
   for (const hint of ROLE_HINTS) {
-    if (hint.patterns.some((p) => p.test(text))) {
-      if (hasExplicitLabel && (facts.label || facts.ariaLabel)) {
-        return { role: hint.role, confidence: 'high', source: 'dom_label' };
+    // url only via leading token or type=url — never from incidental "website" in helpers
+    if (hint.role === 'url') continue;
+    if (hint.patterns.some((p) => p.test(matchHaystack))) {
+      if (hasExplicitLabel && primary) {
+        return { role: hint.role, confidence: 'medium', source: 'dom_label' };
       }
       if (facts.placeholder && hint.patterns.some((p) => p.test(facts.placeholder!))) {
         return { role: hint.role, confidence: 'medium', source: 'dom_label' };
       }
-      // name="desc2" style — low confidence
-      if (facts.name && /^[a-z]+\d+$/i.test(facts.name)) {
-        return { role: hint.role, confidence: 'low', source: 'name_guess' };
-      }
       return { role: hint.role, confidence: 'low', source: 'name_guess' };
     }
+  }
+
+  // name/id alone may still indicate url (website_url) when no conflicting lead token
+  if (
+    !leading &&
+    (/^(website|url|link|homepage)(_|$)/i.test(facts.name ?? '') ||
+      /^(website|url|link|homepage)(_|$)/i.test(facts.id ?? ''))
+  ) {
+    return { role: 'url', confidence: 'low', source: 'name_guess' };
   }
 
   if (facts.name && /^[a-z]+\d+$/i.test(facts.name)) {

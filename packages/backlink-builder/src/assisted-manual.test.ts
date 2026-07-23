@@ -158,6 +158,76 @@ describe('Phase 7 Assisted Manual', () => {
     expect(role.confidence).toBe('low');
   });
 
+  it('weights leading label token over helper text mentioning website', () => {
+    const title = inferFieldRole({
+      label: 'Title (Optional) Leave blank to auto-fetch from website',
+      name: 'title',
+      id: 'title',
+      placeholder: null,
+      ariaLabel: null,
+      type: 'text',
+      required: false,
+      maxlength: 80,
+      options: [],
+      surroundingText: '',
+      accept: null,
+      sizeHint: null,
+      selector: '#title',
+    });
+    expect(title.role).toBe('title');
+
+    const desc = inferFieldRole({
+      label: 'Description (Optional) Leave blank to auto-fetch from website',
+      name: 'description',
+      id: 'description',
+      placeholder: null,
+      ariaLabel: null,
+      type: 'textarea',
+      required: false,
+      maxlength: 500,
+      options: [],
+      surroundingText: '',
+      accept: null,
+      sizeHint: null,
+      selector: '#description',
+    });
+    expect(desc.role).toBe('long_desc');
+
+    const website = inferFieldRole({
+      label: 'Website URL',
+      name: 'website',
+      id: 'website',
+      placeholder: null,
+      ariaLabel: null,
+      type: 'url',
+      required: true,
+      maxlength: null,
+      options: [],
+      surroundingText: '',
+      accept: null,
+      sizeHint: null,
+      selector: '#website',
+    });
+    expect(website.role).toBe('url');
+
+    const longNeverUrl = inferFieldRole({
+      label: 'Website notes',
+      name: 'notes',
+      id: 'notes',
+      placeholder: null,
+      ariaLabel: null,
+      type: 'textarea',
+      required: false,
+      maxlength: 400,
+      options: [],
+      surroundingText: '',
+      accept: null,
+      sizeHint: null,
+      selector: '#notes',
+    });
+    expect(longNeverUrl.role).not.toBe('url');
+  });
+
   it('routes multi-step to Needs a person (AT4)', () => {
     const recipe = buildSiteRecipe({
       domain: 'wizard.example',
