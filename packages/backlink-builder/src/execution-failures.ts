@@ -160,7 +160,8 @@ const FIXES: Record<ExecutionFailureCode, string> = {
     'Browser failed to launch. Install Chromium (`npx playwright install chromium`) or use Repair Browser on the Browser Runtime page.',
   BROWSER_RUNTIME_MISSING:
     'Browser Runtime Missing — Administrator Action Required. Suggested Fix: Install Chromium. Jobs wait for infrastructure and resume automatically.',
-  BROWSER_CLOSED: 'Browser crashed unexpectedly. Infrastructure auto-retry with a fresh session.',
+  BROWSER_CLOSED:
+    'Browser/page crashed (often OOM). Auto-retry up to 2 times, then Failed. Reduce concurrency.',
   WORKER_OFFLINE: 'Execution worker lost (lease expired). Job requeued — infrastructure retry, no site retry consumed.',
   QUEUE_TIMEOUT: 'Job waited too long in queue. Check worker capacity and retry.',
   INTERNAL_ERROR: 'Unexpected internal error. Auto-retry; if it persists, inspect worker logs.',
@@ -239,6 +240,8 @@ export function classifyExecutionError(
     code = 'WEBSITE_UNREACHABLE';
   else if (/econnreset|connection reset|socket hang up/.test(blob)) code = 'CONNECTION_RESET';
   else if (/network|net::err|fetch failed/.test(blob)) code = 'NETWORK_FAILURE';
+  else if (/page crashed|target crashed|renderer.?crash|sigbus|out of memory|\boom\b/.test(blob))
+    code = 'BROWSER_CLOSED';
   else if (/browser.?closed|target closed|session closed|context.?closed/.test(blob))
     code = 'BROWSER_CLOSED';
   else if (

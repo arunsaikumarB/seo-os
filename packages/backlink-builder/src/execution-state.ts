@@ -100,8 +100,9 @@ export function toPublicExecutionStatus(
     return d === 'deleted_forever' ? 'Deleted' : 'Skipped';
   }
   // Phase 4.5: Starting = browser allocated (launch succeeded); Running = Website Opened+
-  if (s === 'launching_browser' || s === 'authenticating') {
-    return 'Starting';
+  // Phase 6.3.6 — raw `running` must never fall through to Ready (tiles went to zero)
+  if (s === 'running' || s === 'launching_browser' || s === 'authenticating') {
+    return s === 'running' ? 'Running' : 'Starting';
   }
   if (
     [

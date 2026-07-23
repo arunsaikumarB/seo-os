@@ -262,7 +262,9 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
   const c = state.counts;
   const completed =
     c.Submitted + c.Completed + c.Verified + c.Approved;
-  const remaining = c.Queued; // not yet started — never includes Running/Starting
+  const inFlight = c.Running + c.Starting;
+  // Phase 6.3.6 — Remaining includes in-flight so Submitting cohort never looks like all-zeros
+  const remaining = c.Queued + inFlight;
   // Phase 6.3.2 — Finished only when cohort is fully terminal (no Starting/Queued/open)
   const executionComplete =
     Boolean(c.executionComplete) &&
@@ -291,7 +293,7 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
 
   return {
     state,
-    running: c.Running + c.Starting,
+    running: inFlight,
     queued: c.Queued,
     /** CSM Submission Ready count (Phase 5.5) — was wrongly bound to execution job Ready */
     ready: submissionReady,
@@ -336,8 +338,8 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
         ? Math.round((completed / (completed + c.Failed)) * 1000) / 10
         : null,
     maxParallelSessions: cappedWorkers,
-    activeWorkerCount: Math.min(cappedWorkers, c.Running + c.Starting),
-    workerUsage: `${Math.min(cappedWorkers, c.Running + c.Starting)}/${cappedWorkers}`,
+    activeWorkerCount: Math.min(cappedWorkers, inFlight),
+    workerUsage: `${Math.min(cappedWorkers, inFlight)}/${cappedWorkers}`,
     etaSeconds: 0,
     estimatedApprovalTime: '7–14 days',
     estimatedVerificationTime: '24 hours',
@@ -349,7 +351,7 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
     /** Phase 4.7 — one summary object for all surfaces */
     executionSummary: {
       queued: c.Queued,
-      running: c.Running + c.Starting,
+      running: inFlight,
       completed,
       waitingHuman: c['Waiting Human'],
       skipped: c.Skipped,

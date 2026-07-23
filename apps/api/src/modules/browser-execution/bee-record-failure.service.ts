@@ -52,23 +52,24 @@ export async function recordFailure(params: {
   const attempt = Number(job?.retry_count ?? 0) + 1;
   const prevMetrics = (job?.metrics as Record<string, unknown> | null) ?? {};
 
-  let maxRetries = 2;
+  // Phase 6.3.6 — unified attempt budget for ALL failure classes (nav, crash, launch, …)
+  // Max 2 retries → attempt 1..2 retry, attempt 3+ must Failed. Assert attempts ≤ 3.
+  const UNIFIED_MAX_RETRIES = 2;
+  let maxRetries = UNIFIED_MAX_RETRIES;
   try {
     const { getOrCreatePolicy } = await import('./bee.service.js');
     const policy = await getOrCreatePolicy(workspaceId);
-    maxRetries = Number(policy.retry_count ?? 2);
+    maxRetries = Math.min(UNIFIED_MAX_RETRIES, Number(policy.retry_count ?? UNIFIED_MAX_RETRIES));
   } catch {
-    /* default */
+    maxRetries = UNIFIED_MAX_RETRIES;
   }
 
-  // Phase 6.3.5 — navigation timeouts: Retrying max 2, then Failed with url + elapsedMs
   const errMeta = err as { url?: string; elapsedMs?: number; failureCode?: string };
-  if (
-    failureCode === 'NAVIGATION_TIMEOUT' ||
-    errMeta.failureCode === 'NAVIGATION_TIMEOUT'
-  ) {
-    maxRetries = Math.min(maxRetries, 2);
-  }
+  const crashHint =
+    failureCode === 'BROWSER_CLOSED' ||
+    /page crashed|target crashed|renderer.?crash|oom|out of memory/i.test(`${message} ${stack}`)
+      ? ' — page crashed — likely OOM'
+      : '';
 
   // Enrich last_error with URL + elapsed when present (navigate may already embed them)
   const navExtra =
@@ -76,10 +77,18 @@ export async function recordFailure(params: {
     !/url=|elapsedMs=/i.test(fullMessage)
       ? ` url=${errMeta.url ?? '?'} elapsedMs=${errMeta.elapsedMs ?? '?'}`
       : '';
-  const enrichedMessage = `${fullMessage}${navExtra}`.slice(0, 800);
+  let enrichedMessage = `${fullMessage}${crashHint}${navExtra}`.slice(0, 800);
+  if (crashHint && /page crashed — likely OOM/i.test(fullMessage)) {
+    enrichedMessage = `${fullMessage}${navExtra}`.slice(0, 800);
+  }
 
+  // Hard assert: never retry indefinitely
+  const forceFailOverBudget = attempt > 3 || attempt > maxRetries;
   const retryable =
-    params.allowRetry !== false && isAutoRetryable(failureCode) && attempt <= maxRetries;
+    params.allowRetry !== false &&
+    !forceFailOverBudget &&
+    isAutoRetryable(failureCode) &&
+    attempt <= maxRetries;
 
   // Browser missing → waiting_infrastructure (still a logged, non-silent state)
   const isRuntimeMissing =

@@ -86,8 +86,14 @@ export function classifyNavigationFailure(err: unknown): {
     return { code: 'HTTP_5XX', retryable: true, message: 'Server error' };
   if (/robots?\.txt|access denied|forbidden|403/i.test(lower))
     return { code: 'HTTP_403_FORBIDDEN', retryable: false, message: 'Robot / access blocked' };
-  if (/timeout|timed out/i.test(lower))
+  if (/timeout|timed out|navigation.?timeout|net::err_timed_out/.test(lower))
     return { code: 'NAVIGATION_TIMEOUT', retryable: true, message: 'Navigation timed out' };
+  if (/page crashed|target crashed|renderer.?crash|sigbus|oom|out of memory/i.test(lower))
+    return {
+      code: 'BROWSER_CLOSED',
+      retryable: true,
+      message: 'page crashed — likely OOM',
+    };
   if (/net::err_/i.test(lower))
     return { code: 'NETWORK_FAILURE', retryable: true, message: 'Network error' };
   return { code: 'NAVIGATION_TIMEOUT', retryable: true, message: msg.slice(0, 200) };

@@ -10,18 +10,20 @@ export const BEE_RELIABILITY = {
   get LEASE_TTL_MS() {
     return this.HEARTBEAT_MS * this.LEASE_GRACE_MULTIPLIER;
   },
-  /** Max concurrent browser sessions / workers (default 2 — small containers contend at 4) */
-  MAX_BROWSER_SESSIONS: Number(process.env.BEE_MAX_SESSIONS ?? 2) || 2,
+  /** Max concurrent browser sessions / workers (default 1 — small Railway OOMs at 2) */
+  MAX_BROWSER_SESSIONS: Number(process.env.BEE_MAX_SESSIONS ?? 1) || 1,
   /** Recycle Chromium after N jobs to prevent memory creep */
   BROWSER_RECYCLE_AFTER_JOBS: Number(process.env.BEE_BROWSER_RECYCLE_JOBS ?? 25),
   /** Recycle Chromium after M minutes */
   BROWSER_RECYCLE_AFTER_MS: Number(process.env.BEE_BROWSER_RECYCLE_MS ?? 30 * 60_000),
-  /** Site retries (default 3) — distinct from infra_retry_count */
-  SITE_RETRY_LIMIT: Number(process.env.BEE_SITE_RETRY_LIMIT ?? 3),
+  /** Site retries (default 2) — never unbounded */
+  SITE_RETRY_LIMIT: Number(process.env.BEE_SITE_RETRY_LIMIT ?? 2),
   /** Whole-job ceiling (ms) — last-resort stuck-job guarantee */
   JOB_CEILING_MS: Number(process.env.BEE_JOB_CEILING_MS ?? 5 * 60_000),
   /** Lease sweep interval */
   LEASE_SWEEP_MS: Number(process.env.BEE_LEASE_SWEEP_MS ?? 8_000),
+  /** Crash-loop watchdog: unchanged status+error across this many supervision ticks → force-fail */
+  CRASH_LOOP_TICKS: Number(process.env.BEE_CRASH_LOOP_TICKS ?? 2) || 2,
   /** Stage timeouts (ms) — Phase 6.3.5 navigation uses 90s + domcontentloaded */
   STAGE_TIMEOUTS: {
     open: Number(process.env.BEE_TIMEOUT_OPEN_MS ?? 90_000),

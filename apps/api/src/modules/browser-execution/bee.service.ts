@@ -99,7 +99,7 @@ export async function getOrCreatePolicy(workspaceId: string) {
     workspace_id: workspaceId,
     submission_policy: 'always_ask',
     require_approval_before_submit: true,
-    max_parallel_sessions: 2,
+    max_parallel_sessions: 1,
     submission_speed: 'fast',
     daily_goal: 20,
     auto_resume: true,
@@ -1346,20 +1346,79 @@ export async function getExecutionReport(workspaceId: string, jobId: string) {
 }
 
 export async function cancelJob(workspaceId: string, jobId: string, reason?: string) {
-  await setJobStatus(workspaceId, jobId, 'cancelled', {
-    finished_at: new Date().toISOString(),
-  });
   const job = await getJob(workspaceId, jobId);
-  if (job?.session_id) {
+  if (!job) throw Object.assign(new Error('Job not found'), { status: 404 });
+
+  const reasonCode = reason ?? 'cancelled_by_user';
+  const isUserSkip = reasonCode === 'skipped_by_user' || reasonCode === 'cancelled_by_user';
+
+  // Phase 6.3.6 — Cancel must kill live browser, clear lease, terminal Skipped, free slot
+  const sessionId = job.session_id ? String(job.session_id) : null;
+  if (sessionId) {
+    try {
+      const { disposeSessionRuntime } = await import('./browser-runtime.service.js');
+      await disposeSessionRuntime(sessionId).catch(() => undefined);
+    } catch {
+      /* best-effort */
+    }
     await getSupabaseAdmin()
       .from('browser_sessions')
-      .update({ status: 'closed', closed_at: new Date().toISOString() })
-      .eq('id', job.session_id);
+      .update({
+        status: 'closed',
+        closed_at: new Date().toISOString(),
+        health_status: 'expired',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', sessionId);
   }
-  await appendLog(workspaceId, jobId, 'warn', reason === 'skipped_by_user' ? 'Website skipped by user' : 'Execution cancelled', {
-    reason: reason ?? null,
+
+  try {
+    const { cancelQueuedBossJobsForExecution } = await import('./execution-state.service.js');
+    await cancelQueuedBossJobsForExecution(jobId);
+  } catch {
+    /* best-effort */
+  }
+
+  await setJobStatus(workspaceId, jobId, 'skipped', {
+    finished_at: new Date().toISOString(),
+    disposition: isUserSkip ? 'cancelled_by_user' : reasonCode,
+    disposition_at: new Date().toISOString(),
+    session_id: null,
+    lease_holder: null,
+    lease_expires_at: null,
+    error_message: isUserSkip
+      ? 'Skipped (cancelled by user)'
+      : `Skipped (${reasonCode})`,
   });
-  await recordHistory(workspaceId, jobId, 'cancelled');
+
+  await mergeJobMetrics(workspaceId, jobId, {
+    disposition: isUserSkip ? 'cancelled_by_user' : reasonCode,
+    cancelledAt: new Date().toISOString(),
+    cancelReason: reasonCode,
+  });
+
+  await appendLog(
+    workspaceId,
+    jobId,
+    'warn',
+    isUserSkip ? 'Skipped (cancelled by user)' : 'Execution cancelled',
+    { reason: reasonCode }
+  );
+  await recordHistory(workspaceId, jobId, 'skipped');
+
+  // Free the worker for the next Queued job within this tick
+  await enqueueJob(
+    QUEUES.LOW,
+    'bee_queue',
+    { type: 'bee_queue', workspaceId },
+    { singletonKey: `bee-queue-drain-${workspaceId}`, startAfter: 0 }
+  );
+  try {
+    await continueQueuedJobs(workspaceId, { afterJobId: jobId, limit: 1 });
+  } catch {
+    /* drain best-effort */
+  }
+
   return getJob(workspaceId, jobId);
 }
 
@@ -1401,7 +1460,7 @@ export async function retryJob(
 
   const nextAttempt = Number(job.retry_count ?? 0) + 1;
   const policy = await getOrCreatePolicy(workspaceId);
-  const maxRetries = Number(policy.retry_count ?? 2);
+  const maxRetries = Math.min(2, Number(policy.retry_count ?? 2));
   if (nextAttempt > maxRetries && !opts.force) {
     throw Object.assign(new Error(`Max retries (${maxRetries}) exceeded`), { status: 400 });
   }

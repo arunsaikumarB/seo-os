@@ -363,9 +363,35 @@ export function campaignItemsToExecutionJobs(
     if (!EXECUTION_SUMMARY_LIFECYCLES.includes(item.currentStatus)) continue;
     const job = jobsByOpportunity?.get(item.id);
     if (job) {
+      let status = String(job.status);
+      // Phase 6.3.6 — Submitting CSM + unknown job status must still count as in-flight
+      const knownInFlight = [
+        'queued',
+        'preparing',
+        'retry_scheduled',
+        'launching_browser',
+        'authenticating',
+        'navigating',
+        'analyzing_form',
+        'uploading_assets',
+        'filling_fields',
+        'validating',
+        'submitting',
+        'running',
+        'waiting_human',
+        'paused',
+        'needs_approval',
+        'waiting_infrastructure',
+        'awaiting_user',
+        'ready_for_review',
+        'ready_to_continue',
+      ];
+      if (item.currentStatus === 'Submitting' && !knownInFlight.includes(status)) {
+        status = 'running';
+      }
       out.push({
         id: String(job.id),
-        status: String(job.status),
+        status,
         site_domain: job.site_domain ?? item.domain ?? null,
         opportunity_id: item.id,
         disposition: job.disposition ?? null,

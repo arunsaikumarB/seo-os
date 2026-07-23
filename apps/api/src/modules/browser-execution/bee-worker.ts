@@ -6,7 +6,6 @@ import {
   gateStatusFromBlocker,
   isAutoRetryable,
   isWatchableGate,
-  retryBackoffSeconds,
   type ExecutionGate,
 } from '@seo-os/backlink-builder';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
@@ -17,10 +16,8 @@ import {
 } from '../browser-execution/browser-runtime.service.js';
 import {
   appendLog,
-  getOrCreatePolicy,
   recordHistory,
   mergeJobMetrics,
-  retryJob,
 } from '../browser-execution/bee.service.js';
 import { enqueueJob, QUEUES } from '../../jobs/boss.js';
 import { DEFAULT_FEATURE_FLAGS } from '@seo-os/shared';
@@ -744,7 +741,7 @@ async function runBeeExecutionJobInner(
     .eq('workspace_id', workspaceId)
     .single();
   if (!job) return;
-  if (['cancelled', 'completed', 'verified'].includes(String(job.status))) return;
+  if (['cancelled', 'completed', 'verified', 'skipped', 'failed', 'deleted'].includes(String(job.status))) return;
 
   const sessionId = String(data.sessionId ?? job.session_id ?? '');
   const runtime = getSessionRuntime(sessionId || jobId);
@@ -874,7 +871,7 @@ async function runBeeExecutionJobInner(
         .select('status, approved_at')
         .eq('id', jobId)
         .single();
-      if (!live || ['cancelled', 'paused'].includes(String(live.status))) {
+      if (!live || ['cancelled', 'paused', 'skipped', 'failed', 'deleted'].includes(String(live.status))) {
         await appendLog(workspaceId, jobId, 'info', 'Execution halted', { status: live?.status });
         return;
       }
@@ -1562,77 +1559,25 @@ async function runBeeExecutionJobInner(
       }
     }
 
-    await updateJob(jobId, {
-      status: 'failed',
-      error_code: failureCode,
-      error_message: failLabel,
-      finished_at: new Date().toISOString(),
-    });
-    // Phase 6.3.4 — Campaign Health Why/Blocker must not stay empty
-    try {
-      const { stampRequeueTrace } = await import('./bee-record-failure.service.js');
-      await stampRequeueTrace({
-        workspaceId,
-        jobId,
-        reason: `${failLabel}\n${err instanceof Error ? (err.stack ?? err.message) : String(err)}`.slice(
-          0,
-          2000
-        ),
-        source: 'runBeeExecutionJobInner',
-      });
-    } catch {
-      /* best-effort */
-    }
-    await appendLog(workspaceId, jobId, 'error', failLabel, {
-      failureCode,
-      failureMessage: nav.message || classified.failureMessage,
-      failureStep: classified.failureStep,
-      failureTimestamp: classified.failureTimestamp,
-      suggestedFix: classified.suggestedFix,
-      retryable: nav.retryable,
-      analysis,
-      stack: err instanceof Error ? err.stack?.slice(0, 2000) : null,
-    });
-    await recordHistory(workspaceId, jobId, 'failed', {
-      errorCode: failureCode,
-      timing: { failureTimestamp: classified.failureTimestamp },
-    });
-
+    // Phase 6.3.6 — unified attempt cap via recordFailure (no homemade unbounded retry)
     if (sessionId) {
       await persistSessionStorageState(sessionId).catch(() => undefined);
-      await disposeSessionRuntime(sessionId);
+      await disposeSessionRuntime(sessionId).catch(() => undefined);
     }
-
-    // Never stall the queue — fill free workers immediately
+    const { recordFailure } = await import('./bee-record-failure.service.js');
+    await recordFailure({
+      workspaceId,
+      jobId,
+      err,
+      source: 'runBeeExecutionJobInner',
+      step: classified.failureStep,
+      allowRetry: true,
+    });
     await enqueueJob(QUEUES.LOW, 'bee_queue', {
       type: 'bee_queue',
       workspaceId,
       afterJobId: jobId,
     });
-
-    // Smart auto-retry for temporary / retryable failures (async — does not block queue)
-    const retryable = nav.retryable || isAutoRetryable(failureCode);
-    if (retryable) {
-      const policy = await getOrCreatePolicy(workspaceId);
-      const attempt = Number(liveJob?.retry_count ?? 0) + 1;
-      const max = Number(policy.retry_count ?? 2);
-      const delaySec = retryBackoffSeconds(attempt);
-      if (delaySec != null && attempt <= max) {
-        await appendLog(
-          workspaceId,
-          jobId,
-          'warn',
-          `Auto-retry ${attempt}/${max} in ${delaySec}s — ${failLabel}`,
-          { delaySeconds: delaySec, failureCode }
-        );
-        await retryJob(workspaceId, jobId, { delaySeconds: delaySec }).catch((retryErr) => {
-          logger.warn({ retryErr, jobId }, 'Auto-retry schedule failed');
-        });
-        return;
-      }
-    }
-
-    // Fail-fast: mark done and continue — do not rethrow (avoids worker stall)
   }
 }
 

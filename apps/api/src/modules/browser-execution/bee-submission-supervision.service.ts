@@ -30,8 +30,90 @@ let lastDrainAt = 0;
 /** workspaceId → consecutive ticks with Queued>0 && Idle>0 && Free>0 */
 const capacityStallStreak = new Map<string, number>();
 
+/** jobId → { fingerprint, ticks } — unchanged status+error while holding a worker */
+const crashLoopWatch = new Map<string, { fp: string; ticks: number }>();
+
 function admin() {
   return getSupabaseAdmin();
+}
+
+/**
+ * Phase 6.3.6 — Crash-loop watchdog.
+ * Job whose status+error_message are unchanged for > CRASH_LOOP_TICKS intervals while
+ * in-flight → force-fail with frozen error and release the slot (~40s at 20s ticks).
+ */
+async function forceFailCrashLoopedJobs(workspaceId?: string): Promise<{
+  forced: number;
+  workspaces: string[];
+}> {
+  const tickLimit = BEE_RELIABILITY.CRASH_LOOP_TICKS;
+  let q = admin()
+    .from('execution_jobs')
+    .select('id, workspace_id, status, error_message, session_id, retry_count, updated_at')
+    .in('status', [...IN_FLIGHT_STATUSES])
+    .is('deleted_at', null)
+    .limit(500);
+  if (workspaceId) q = q.eq('workspace_id', workspaceId);
+  const { data: rows } = await q;
+
+  let forced = 0;
+  const touched = new Set<string>();
+  const seen = new Set<string>();
+  for (const row of rows ?? []) {
+    const jobId = String(row.id);
+    const ws = String(row.workspace_id);
+    seen.add(jobId);
+    const fp = `${row.status}|${row.error_message ?? ''}`;
+    const prev = crashLoopWatch.get(jobId);
+    if (prev && prev.fp === fp) {
+      const ticks = prev.ticks + 1;
+      crashLoopWatch.set(jobId, { fp, ticks });
+      if (ticks >= tickLimit) {
+        logger.error(
+          { jobId, workspaceId: ws, status: row.status, ticks, error: row.error_message },
+          'CRASH-LOOP WATCHDOG — force-failing wedged in-flight job'
+        );
+        if (row.session_id) {
+          await closeSession(String(row.session_id));
+          try {
+            const { disposeSessionRuntime } = await import('./browser-runtime.service.js');
+            await disposeSessionRuntime(String(row.session_id)).catch(() => undefined);
+          } catch {
+            /* best-effort */
+          }
+        }
+        const frozen =
+          String(row.error_message || '').trim() ||
+          `Wedged in ${row.status} — crash-loop watchdog`;
+        const { recordFailure } = await import('./bee-record-failure.service.js');
+        await recordFailure({
+          workspaceId: ws,
+          jobId,
+          err: Object.assign(new Error(frozen), {
+            failureCode: /crash|oom/i.test(frozen) ? 'BROWSER_CLOSED' : 'INTERNAL_ERROR',
+            code: /crash|oom/i.test(frozen) ? 'BROWSER_CLOSED' : 'INTERNAL_ERROR',
+          }),
+          source: 'crashLoopWatchdog',
+          allowRetry: false,
+        });
+        crashLoopWatch.delete(jobId);
+        forced++;
+        touched.add(ws);
+        await enqueueJob(
+          QUEUES.LOW,
+          'bee_queue',
+          { type: 'bee_queue', workspaceId: ws },
+          { singletonKey: `bee-queue-drain-${ws}`, startAfter: 0 }
+        );
+      }
+    } else {
+      crashLoopWatch.set(jobId, { fp, ticks: 1 });
+    }
+  }
+  for (const id of [...crashLoopWatch.keys()]) {
+    if (!seen.has(id)) crashLoopWatch.delete(id);
+  }
+  return { forced, workspaces: [...touched] };
 }
 
 async function closeSession(sessionId: string | null | undefined) {
@@ -118,6 +200,7 @@ export async function resumeInterruptedSubmissions(workspaceId?: string): Promis
   workspacesDrained: number;
   started: number;
   capacityHeals: number;
+  crashLoopsForced: number;
 }> {
   const now = Date.now();
   const staleBefore = new Date(now - STALE_IN_FLIGHT_MS).toISOString();
@@ -126,9 +209,17 @@ export async function resumeInterruptedSubmissions(workspaceId?: string): Promis
   let queuedFound = 0;
   let started = 0;
   let capacityHeals = 0;
+  let crashLoopsForced = 0;
   const workspaces = new Set<string>();
 
-  // 1) Stale in-flight without a live lease (never leased, or lease already cleared)
+  // 0) Crash-loop watchdog — wedged launching_browser/etc. must not hold the lane forever
+  try {
+    const crash = await forceFailCrashLoopedJobs(workspaceId);
+    crashLoopsForced = crash.forced;
+    for (const ws of crash.workspaces) workspaces.add(ws);
+  } catch (err) {
+    logger.warn({ err }, 'crash-loop watchdog failed');
+  }
   let staleQ = admin()
     .from('execution_jobs')
     .select('id, workspace_id, opportunity_id, status, session_id, lease_holder, lease_expires_at, updated_at')
@@ -246,7 +337,13 @@ export async function resumeInterruptedSubmissions(workspaceId?: string): Promis
   }
 
   lastDrainAt = Date.now();
-  if (requeuedStale > 0 || ghostSessionsClosed > 0 || started > 0 || capacityHeals > 0) {
+  if (
+    requeuedStale > 0 ||
+    ghostSessionsClosed > 0 ||
+    started > 0 ||
+    capacityHeals > 0 ||
+    crashLoopsForced > 0
+  ) {
     logger.info(
       {
         requeuedStale,
@@ -255,6 +352,7 @@ export async function resumeInterruptedSubmissions(workspaceId?: string): Promis
         workspacesDrained: workspaces.size,
         started,
         capacityHeals,
+        crashLoopsForced,
         staleMs: STALE_IN_FLIGHT_MS,
       },
       'submission supervision recovery finished'
@@ -268,6 +366,7 @@ export async function resumeInterruptedSubmissions(workspaceId?: string): Promis
     workspacesDrained: workspaces.size,
     started,
     capacityHeals,
+    crashLoopsForced,
   };
 }
 
