@@ -41,11 +41,17 @@ type AssistedPackage = {
   minutesSpent: number | null;
   failureReason: string | null;
   classifierOutdated?: boolean;
+  readerVersion?: number | null;
+  classifierVersion?: number | null;
+  currentReaderVersion?: number;
+  currentClassifierVersion?: number;
   package: {
     gateNotes: string;
     honestyNotes: string[];
     fields: PackageField[];
     multiStepLabel: string | null;
+    readerVersion?: number;
+    classifierVersion?: number;
   };
   blocked?: boolean;
   blockReason?: string;
@@ -173,12 +179,17 @@ export function AssistedManualPage() {
 
   const clearCorrections = useMutation({
     mutationFn: (packageId: string) =>
-      request(
+      request<{ data: AssistedPackage }>(
         `/v1/projects/${projectId}/backlink-builder/assisted-manual/${packageId}/clear-corrections`,
         { method: 'POST' }
       ),
-    onSuccess: () => {
-      toast.success('Corrections cleared; form re-read');
+    onSuccess: (res) => {
+      const reason = res.data?.failureReason;
+      if (reason?.includes('Re-read failed')) {
+        toast.error(reason);
+      } else {
+        toast.success('Corrections cleared; form re-read');
+      }
       void qc.invalidateQueries({ queryKey: ['assisted-manual', projectId] });
       void qc.invalidateQueries({ queryKey: ['assisted-manual-metrics', projectId] });
     },
@@ -187,12 +198,20 @@ export function AssistedManualPage() {
 
   const reread = useMutation({
     mutationFn: (packageId: string) =>
-      request(`/v1/projects/${projectId}/backlink-builder/assisted-manual/${packageId}/reread`, {
-        method: 'POST',
-        body: JSON.stringify({}),
-      }),
-    onSuccess: () => {
-      toast.success('Form re-read — roles refreshed');
+      request<{ data: AssistedPackage }>(
+        `/v1/projects/${projectId}/backlink-builder/assisted-manual/${packageId}/reread`,
+        {
+          method: 'POST',
+          body: JSON.stringify({}),
+        }
+      ),
+    onSuccess: (res) => {
+      const reason = res.data?.failureReason;
+      if (reason?.includes('Re-read failed')) {
+        toast.error(reason);
+      } else {
+        toast.success('Form re-read — roles refreshed');
+      }
       void qc.invalidateQueries({ queryKey: ['assisted-manual', projectId] });
       void qc.invalidateQueries({ queryKey: ['assisted-manual-metrics', projectId] });
     },
@@ -376,6 +395,9 @@ export function AssistedManualPage() {
                       <p className="text-xs text-amber-700 flex items-center gap-1 mt-2">
                         <AlertTriangle className="h-3.5 w-3.5" /> Classifier updated — Re-read form
                         to refresh field roles
+                        {pkg.classifierVersion != null || pkg.currentClassifierVersion != null
+                          ? ` (package v${pkg.classifierVersion ?? '?'} / current v${pkg.currentClassifierVersion ?? '?'})`
+                          : ''}
                       </p>
                     ) : null}
                     <p className="text-xs text-muted-foreground mt-1">{pkg.package?.gateNotes}</p>

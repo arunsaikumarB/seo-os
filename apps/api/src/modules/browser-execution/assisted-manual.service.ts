@@ -46,19 +46,21 @@ async function fetchHtml(url: string): Promise<string | null> {
   try {
     const res = await fetch(url, {
       redirect: 'follow',
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(25_000),
       headers: {
-        'User-Agent': 'SEO-OS-AssistedManual/1.0 (+form-reader; never submits)',
-        Accept: 'text/html,application/xhtml+xml',
+        // Browser-like UA — some directories block custom bots and return an empty shell
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
       },
     });
-    if (!res.ok) return null;
-    const ct = res.headers.get('content-type') ?? '';
-    if (!ct.includes('text/html') && !ct.includes('application/xhtml')) {
-      const text = await res.text();
-      return text.slice(0, 500_000);
+    if (!res.ok) {
+      logger.warn({ url, status: res.status }, 'assisted-manual: fetch html non-OK');
+      return null;
     }
-    return (await res.text()).slice(0, 500_000);
+    const text = (await res.text()).slice(0, 500_000);
+    return text || null;
   } catch (err) {
     logger.warn({ err, url }, 'assisted-manual: fetch html failed');
     return null;
@@ -301,6 +303,8 @@ async function prepareOnePackage(
     packageId?: string;
     /** Prefer package.domain when re-reading an existing card (avoids www mismatch). */
     domainOverride?: string;
+    /** Drop human pins before rebuild (Clear corrections). */
+    clearPins?: boolean;
   } = {}
 ) {
   const { data: opp } = await admin()
@@ -326,9 +330,27 @@ async function prepareOnePackage(
     .eq('domain', domain)
     .maybeSingle();
 
-  const existingRecipe = asRecipe(profile?.recipe);
-  // Force re-read: only keep confirmed human role replacements — never reuse
-  // machine guesses or known_bad pins (those must re-run inferFieldRole).
+  let existingRecipe = asRecipe(profile?.recipe);
+  if (opts.clearPins && existingRecipe) {
+    existingRecipe = clearHumanCorrections(existingRecipe);
+  }
+
+  // Prior package — used as fallback if the live form read returns nothing
+  let priorPackage: Record<string, unknown> | null = null;
+  if (opts.packageId) {
+    const { data } = await admin()
+      .from('assisted_packages')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .eq('id', opts.packageId)
+      .maybeSingle();
+    priorPackage = data;
+  }
+  const priorPayload = (priorPackage?.payload as AssistedPackagePayload | undefined) ?? null;
+  const priorFieldCount =
+    priorPayload?.fields?.length ?? existingRecipe?.fields?.length ?? 0;
+
+  // Force re-read: only keep confirmed human role replacements
   const existingForBuild = opts.forceReread
     ? recipePinsOnly(existingRecipe)
     : existingRecipe;
@@ -336,16 +358,20 @@ async function prepareOnePackage(
   const forceReclassify = Boolean(opts.forceReread) || versionStale;
 
   const html = await fetchHtml(entryUrl);
-  const formFound = Boolean(html && extractFormFieldFacts(html).length > 0);
+  const liveFacts = html ? extractFormFieldFacts(html) : [];
+  const formFound = liveFacts.length > 0;
 
   let recipe: SiteRecipe;
-  if (html) {
+  let rereadFailed = false;
+  let rereadFailReason: string | null = null;
+
+  if (html && formFound) {
     recipe = buildSiteRecipe({
       domain,
       entryUrl,
       html,
       existing: existingForBuild,
-      forceReclassify: true, // always re-infer non-pins when we have live HTML
+      forceReclassify: true,
     });
   } else if (existingRecipe && !opts.forceReread) {
     recipe = recipeVersionsCurrent(existingRecipe)
@@ -359,30 +385,111 @@ async function prepareOnePackage(
             .join(' · '),
         };
   } else {
+    // Force re-read (or first prepare) with no usable form HTML
+    rereadFailed = Boolean(opts.forceReread) || priorFieldCount > 0;
+    rereadFailReason = !html
+      ? 'Re-read failed — could not fetch form HTML; previous fields kept'
+      : 'Re-read failed — no form fields found in page HTML; previous fields kept';
+
+    if (existingRecipe && existingRecipe.fields.length > 0) {
+      // Guard: never wipe a populated recipe with an empty read
+      recipe = {
+        ...existingRecipe,
+        notes: [existingRecipe.notes, rereadFailReason].filter(Boolean).join(' · '),
+        lastVerifiedAt: new Date().toISOString(),
+      };
+    } else if (priorPayload?.fields?.length) {
+      recipe = {
+        domain,
+        entryUrl,
+        formFingerprint: String(priorPackage?.form_fingerprint ?? 'fp_prior'),
+        fields: priorPayload.fields.map((f) => ({
+          selector: f.selector,
+          role: f.role,
+          maxlength: f.maxlength,
+          required: Boolean(f.required),
+          confidence: f.confidence,
+          source: f.source,
+          label: f.label,
+          options: f.options,
+        })),
+        dropdownOptions: {},
+        gate: (priorPayload.gate as SiteRecipe['gate']) ?? 'none',
+        notes: rereadFailReason,
+        lastVerifiedAt: new Date().toISOString(),
+        correctionCount: Number(priorPackage?.correction_count ?? 0),
+        multiStep: Boolean(priorPayload.multiStep),
+        readerVersion: priorPayload.readerVersion,
+        classifierVersion: priorPayload.classifierVersion,
+      };
+    } else {
+      recipe = {
+        domain,
+        entryUrl,
+        formFingerprint: 'fp_missing',
+        fields: [],
+        dropdownOptions: {},
+        gate: 'none',
+        notes:
+          rereadFailReason ??
+          (opts.forceReread
+            ? 'Force re-read failed — no form HTML fetched'
+            : 'No form HTML fetched'),
+        lastVerifiedAt: new Date().toISOString(),
+        correctionCount: 0,
+        multiStep: false,
+      };
+    }
+  }
+
+  // Only stamp current versions when we actually got a live form read
+  if (html && formFound && !rereadFailed) {
     recipe = {
-      domain,
-      entryUrl,
-      formFingerprint: 'fp_missing',
-      fields: [],
-      dropdownOptions: {},
-      gate: 'none',
-      notes: opts.forceReread
-        ? 'Force re-read failed — no form HTML fetched'
-        : 'No form HTML fetched',
-      lastVerifiedAt: new Date().toISOString(),
-      correctionCount: existingRecipe?.correctionCount ?? 0,
-      multiStep: false,
+      ...recipe,
       readerVersion: ASSISTED_FORM_READER_VERSION,
       classifierVersion: ASSISTED_FIELD_CLASSIFIER_VERSION,
     };
   }
 
-  // Always stamp current versions on the recipe before persist
-  recipe = {
-    ...recipe,
-    readerVersion: ASSISTED_FORM_READER_VERSION,
-    classifierVersion: ASSISTED_FIELD_CLASSIFIER_VERSION,
-  };
+  // Final empty-guard: if somehow still empty but prior had fields, restore
+  if (recipe.fields.length === 0 && priorFieldCount > 0) {
+    rereadFailed = true;
+    rereadFailReason =
+      rereadFailReason ??
+      'Re-read failed — empty field list; previous fields kept';
+    if (existingRecipe && existingRecipe.fields.length > 0) {
+      recipe = {
+        ...existingRecipe,
+        notes: [existingRecipe.notes, rereadFailReason].filter(Boolean).join(' · '),
+        lastVerifiedAt: new Date().toISOString(),
+      };
+    } else if (priorPayload?.fields?.length) {
+      // Reconstruct minimal recipe from prior package fields
+      recipe = {
+        domain,
+        entryUrl,
+        formFingerprint: String(priorPackage?.form_fingerprint ?? 'fp_prior'),
+        fields: priorPayload.fields.map((f) => ({
+          selector: f.selector,
+          role: f.role,
+          maxlength: f.maxlength,
+          required: Boolean(f.required),
+          confidence: f.confidence,
+          source: f.source,
+          label: f.label,
+          options: f.options,
+        })),
+        dropdownOptions: {},
+        gate: (priorPayload.gate as SiteRecipe['gate']) ?? 'none',
+        notes: rereadFailReason,
+        lastVerifiedAt: new Date().toISOString(),
+        correctionCount: Number(priorPackage?.correction_count ?? 0),
+        multiStep: Boolean(priorPayload.multiStep),
+        readerVersion: priorPayload.readerVersion,
+        classifierVersion: priorPayload.classifierVersion,
+      };
+    }
+  }
 
   await upsertRecipeOnProfile(workspaceId, domain, recipe);
 
@@ -392,21 +499,39 @@ async function prepareOnePackage(
     Date.now() + ASSISTED_PACKAGE_TTL_DAYS * 24 * 60 * 60 * 1000
   ).toISOString();
 
-  const payload = buildAssistedPackage({
+  let payload = buildAssistedPackage({
     recipe,
     content,
     preparedAt,
     fingerprintStatus: 'fresh',
-    formFound,
+    formFound: formFound || recipe.fields.length > 0,
   });
-  // Belt-and-suspenders: never leave package payload without current versions
-  payload.readerVersion = ASSISTED_FORM_READER_VERSION;
-  payload.classifierVersion = ASSISTED_FIELD_CLASSIFIER_VERSION;
 
-  // Block use if over-limit values remain after fit
+  if (html && formFound && !rereadFailed) {
+    payload.readerVersion = ASSISTED_FORM_READER_VERSION;
+    payload.classifierVersion = ASSISTED_FIELD_CLASSIFIER_VERSION;
+  } else if (rereadFailed && priorPayload) {
+    // Keep prior version stamps (don't pretend the classifier refreshed)
+    payload.readerVersion = priorPayload.readerVersion;
+    payload.classifierVersion = priorPayload.classifierVersion;
+    payload.failureReason = rereadFailReason;
+    payload.bucket = 'needs_person';
+    // Prefer prior field values if rebuild emptied them
+    if (!payload.fields.length && priorPayload.fields?.length) {
+      payload = {
+        ...payload,
+        fields: priorPayload.fields,
+        bucket: 'needs_person',
+        failureReason: rereadFailReason,
+      };
+    }
+  }
+
   if (payload.fields.some((f) => f.overLimit)) {
     payload.bucket = 'needs_person';
-    payload.failureReason = 'Content exceeds known character limit — regenerate or edit';
+    payload.failureReason =
+      payload.failureReason ??
+      'Content exceeds known character limit — regenerate or edit';
   }
 
   const row = {
@@ -430,7 +555,6 @@ async function prepareOnePackage(
 
   let saved: Record<string, unknown>;
   if (opts.packageId) {
-    // Update the exact package the user is looking at (avoids stale-card confusion)
     const { data, error } = await admin()
       .from('assisted_packages')
       .update(row)
@@ -463,10 +587,15 @@ async function prepareOnePackage(
       packageId: saved.id,
       forceReread: Boolean(opts.forceReread),
       forceReclassify,
-      readerVersion: recipe.readerVersion,
-      classifierVersion: recipe.classifierVersion,
+      rereadFailed,
+      htmlBytes: html?.length ?? 0,
+      liveFactCount: liveFacts.length,
+      fieldCount: recipe.fields.length,
+      readerVersion: payload.readerVersion ?? null,
+      classifierVersion: payload.classifierVersion ?? null,
       fieldRoles: recipe.fields.map((f) => `${f.selector}:${f.role}:${f.source}`),
       bucket: payload.bucket,
+      failureReason: payload.failureReason,
     },
     'assisted-manual package prepared'
   );
@@ -646,9 +775,14 @@ async function refreshPackageFreshness(row: Record<string, unknown>) {
 
 function formatPackageRow(row: Record<string, unknown>) {
   const payload = (row.payload as AssistedPackagePayload) ?? ({} as AssistedPackagePayload);
+  // Coerce — JSONB can occasionally surface numeric strings; compare the same keys we stamp
+  const readerVersion = Number(payload.readerVersion);
+  const classifierVersion = Number(payload.classifierVersion);
   const classifierOutdated =
-    payload.classifierVersion !== ASSISTED_FIELD_CLASSIFIER_VERSION ||
-    payload.readerVersion !== ASSISTED_FORM_READER_VERSION;
+    !Number.isFinite(classifierVersion) ||
+    !Number.isFinite(readerVersion) ||
+    classifierVersion !== ASSISTED_FIELD_CLASSIFIER_VERSION ||
+    readerVersion !== ASSISTED_FORM_READER_VERSION;
   return {
     id: row.id,
     opportunityId: row.opportunity_id,
@@ -666,8 +800,10 @@ function formatPackageRow(row: Record<string, unknown>) {
     failureReason: row.failure_reason,
     pilotBatchId: row.pilot_batch_id,
     classifierOutdated,
-    readerVersion: payload.readerVersion ?? null,
-    classifierVersion: payload.classifierVersion ?? null,
+    readerVersion: Number.isFinite(readerVersion) ? readerVersion : null,
+    classifierVersion: Number.isFinite(classifierVersion) ? classifierVersion : null,
+    currentReaderVersion: ASSISTED_FORM_READER_VERSION,
+    currentClassifierVersion: ASSISTED_FIELD_CLASSIFIER_VERSION,
     package: payload,
   };
 }
@@ -819,6 +955,7 @@ export async function correctAssistedField(
 
 /**
  * Undo all human pins / known-bad flags for this site, then force re-read so fields re-infer.
+ * Does not wipe fields if the live form read fails — previous mapping is kept.
  */
 export async function clearAssistedCorrections(workspaceId: string, packageId: string) {
   const { data: row } = await admin()
@@ -830,26 +967,13 @@ export async function clearAssistedCorrections(workspaceId: string, packageId: s
   if (!row) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Package not found');
 
   const domain = normalizeSiteDomain(String(row.domain));
-  const { data: profile } = await admin()
-    .from('site_profiles')
-    .select('id, recipe')
-    .eq('workspace_id', workspaceId)
-    .eq('domain', domain)
-    .maybeSingle();
-
-  const recipe = asRecipe(profile?.recipe);
-  if (!recipe) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'Site recipe missing — re-prepare first');
-  }
-
-  const cleared = clearHumanCorrections(recipe);
-  await upsertRecipeOnProfile(workspaceId, domain, cleared);
 
   const saved = await prepareOnePackage(workspaceId, String(row.opportunity_id), {
     entryUrlOverride: row.entry_url ? String(row.entry_url) : undefined,
     forceReread: true,
     packageId,
     domainOverride: domain,
+    clearPins: true,
   });
   return formatPackageRow(saved);
 }
