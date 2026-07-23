@@ -85,6 +85,27 @@ async function appendLog(
   });
 }
 
+/** Throttle auto-publish-off sweeps so frequent policy reads do not hammer the DB. */
+const autoPublishOffSweepAt = new Map<string, number>();
+const AUTO_PUBLISH_OFF_SWEEP_MS = 15_000;
+
+function scheduleAutoPublishOffSweep(workspaceId: string): void {
+  const now = Date.now();
+  const last = autoPublishOffSweepAt.get(workspaceId) ?? 0;
+  if (now - last < AUTO_PUBLISH_OFF_SWEEP_MS) return;
+  autoPublishOffSweepAt.set(workspaceId, now);
+  void (async () => {
+    try {
+      const { cancelQueuedJobsWhenAutoPublishOff } = await import(
+        './bee-submission-supervision.service.js'
+      );
+      await cancelQueuedJobsWhenAutoPublishOff(workspaceId);
+    } catch (err) {
+      logger.warn({ err, workspaceId }, 'auto-publish-off policy-read sweep failed');
+    }
+  })();
+}
+
 export async function getOrCreatePolicy(workspaceId: string) {
   const { data: existing } = await getSupabaseAdmin()
     .from('execution_policies')
@@ -92,7 +113,13 @@ export async function getOrCreatePolicy(workspaceId: string) {
     .eq('workspace_id', workspaceId)
     .is('deleted_at', null)
     .maybeSingle();
-  if (existing) return existing;
+  if (existing) {
+    // Predating jobs: cancel whenever policy is read as OFF (not only on toggle).
+    if (existing.auto_publish_automatable !== true) {
+      scheduleAutoPublishOffSweep(workspaceId);
+    }
+    return existing;
+  }
 
   const row = {
     id: randomUUID(),
@@ -115,6 +142,7 @@ export async function getOrCreatePolicy(workspaceId: string) {
     .select('*')
     .single();
   if (error) throw error;
+  scheduleAutoPublishOffSweep(workspaceId);
   return data;
 }
 
@@ -235,6 +263,8 @@ export async function createExecution(params: {
   userId?: string;
   htmlSnippet?: string;
   mappingOverrides?: Record<string, unknown>;
+  /** Explicit Advanced / ensure-ready opt-in — bypasses auto-publish OFF gate. */
+  force?: boolean;
 }) {
   if (!beeEnabled()) {
     throw Object.assign(new Error('Browser Execution Engine is disabled'), { status: 403 });
@@ -249,6 +279,14 @@ export async function createExecution(params: {
   if (!opp) throw Object.assign(new Error('Opportunity not found'), { status: 404 });
 
   const policy = await getOrCreatePolicy(params.workspaceId);
+  if (!params.force && policy.auto_publish_automatable !== true) {
+    throw Object.assign(
+      new Error(
+        'Browser auto-submit is off — use Assisted Manual, or enable auto-publish / Start from Advanced → Browser Auto-Submit.'
+      ),
+      { status: 409, code: 'AUTO_PUBLISH_OFF' }
+    );
+  }
   const domain = String(opp.domain ?? 'unknown');
   const url = String(opp.url ?? `https://${domain}`);
 
@@ -536,6 +574,7 @@ export async function startExecutionsForOpportunities(params: {
         opportunityId,
         mode: params.mode ?? 'prepare',
         userId: params.userId,
+        force: true, // explicit Advanced Start / bulk opt-in
       });
       jobId = String(job.id);
       let status = String(job.status);
@@ -1554,6 +1593,7 @@ export async function restartJob(workspaceId: string, jobId: string, userId?: st
     mode: (job.mode as 'prepare') ?? 'prepare',
     userId,
     mappingOverrides: (job.mapping_overrides as Record<string, unknown>) ?? {},
+    force: true,
   });
 }
 
@@ -1566,6 +1606,7 @@ export async function replayJob(workspaceId: string, sourceJobId: string, userId
     mode: 'manual',
     userId,
     mappingOverrides: (source.mapping_overrides as Record<string, unknown>) ?? {},
+    force: true,
   });
   await getSupabaseAdmin()
     .from('execution_history')

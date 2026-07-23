@@ -386,7 +386,25 @@ export function campaignItemsToExecutionJobs(
         'ready_for_review',
         'ready_to_continue',
       ];
-      if (item.currentStatus === 'Submitting' && !knownInFlight.includes(status)) {
+      const terminal = [
+        'skipped',
+        'cancelled',
+        'failed',
+        'completed',
+        'submitted',
+        'verified',
+        'deleted',
+        'ignored',
+        'unsupported',
+        'approved',
+        'rejected',
+      ];
+      // Do not resurrect cancelled/skipped jobs as Running when CSM lags on Submitting
+      if (
+        item.currentStatus === 'Submitting' &&
+        !knownInFlight.includes(status) &&
+        !terminal.includes(status)
+      ) {
         status = 'running';
       }
       out.push({

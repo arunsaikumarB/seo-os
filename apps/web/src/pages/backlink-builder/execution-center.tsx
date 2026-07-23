@@ -231,11 +231,15 @@ export function BrowserExecutionCenterPage() {
     runtime.data?.data.health === 'healthy' && runtime.data?.data.launch_ok !== false;
 
   const stats = useQuery({
-    queryKey: ['bee-stats', projectId],
-    queryFn: () =>
-      request<{ data: BeeStats }>(`/v1/projects/${projectId}/browser/statistics`),
+    queryKey: ['execution-summary', projectId],
+    queryFn: async () => {
+      const res = await request<{ data: BeeStats }>(
+        `/v1/projects/${projectId}/browser/statistics`
+      );
+      return res;
+    },
     enabled: !!projectId,
-    refetchInterval: 1_000,
+    refetchInterval: 1_500,
   });
 
   const opportunities = useQuery({

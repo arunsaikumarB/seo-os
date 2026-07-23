@@ -111,6 +111,7 @@ browserExecutionRouter.post(
         userId,
         htmlSnippet: body.htmlSnippet,
         mappingOverrides: body.mappingOverrides,
+        force: true, // explicit Advanced create
       });
       if (body.startImmediately === false) {
         res.status(201).json({ data: job });
@@ -223,6 +224,7 @@ browserExecutionRouter.post(
         opportunityId: body.opportunityId,
         mode: 'preview',
         userId,
+        force: true,
       });
       res.status(201).json({ data });
     } catch (err) {

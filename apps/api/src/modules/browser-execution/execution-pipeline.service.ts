@@ -520,6 +520,14 @@ export async function ensureExecutionJobsForReady(params: {
         { workspaceId: params.workspaceId },
         'ensureExecutionJobsForReady skipped — auto_publish_automatable is OFF'
       );
+      try {
+        const { cancelQueuedJobsWhenAutoPublishOff } = await import(
+          './bee-submission-supervision.service.js'
+        );
+        await cancelQueuedJobsWhenAutoPublishOff(params.workspaceId);
+      } catch {
+        /* best-effort */
+      }
       const diagnostics = await getExecutionDiagnostics(params.workspaceId);
       return {
         diagnostics: {
@@ -702,6 +710,7 @@ export async function ensureExecutionJobsForReady(params: {
             opportunityId: item.id,
             mode: 'prepare',
             userId: params.userId,
+            force: true, // ensure already gated on auto-publish ON or force
           });
           jobId = String(job.id);
           summary.created++;

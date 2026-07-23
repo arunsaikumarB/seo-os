@@ -260,19 +260,8 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
   const { BEE_RELIABILITY } = await import('./bee-config.js');
   const cappedWorkers = Math.min(maxWorkers, BEE_RELIABILITY.MAX_BROWSER_SESSIONS);
   const c = state.counts;
-  const completed =
-    c.Submitted + c.Completed + c.Verified + c.Approved;
-  const inFlight = c.Running + c.Starting;
-  // Phase 6.3.6 — Remaining includes in-flight so Submitting cohort never looks like all-zeros
-  const remaining = c.Queued + inFlight;
-  // Phase 6.3.2 — Finished only when cohort is fully terminal (no Starting/Queued/open)
-  const executionComplete =
-    Boolean(c.executionComplete) &&
-    c.campaignOpen === 0 &&
-    c.Running === 0 &&
-    c.Starting === 0 &&
-    c.Queued === 0 &&
-    c['Waiting Human'] === 0;
+  const completed = c.Submitted + c.Completed + c.Verified + c.Approved;
+
   let submissionReady = 0;
   let handoff: Awaited<
     ReturnType<typeof import('../campaigns/generation-handoff.service.js').getHandoffAudit>
@@ -286,28 +275,110 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
     /* CSM optional during partial boot */
   }
 
-  const aiStatusLine =
+  let inFlight = c.Running + c.Starting;
+  let queued = c.Queued;
+  let campaignState = c.campaignState;
+  let campaignIsRunning = c.campaignIsRunning;
+  let aiStatusLine =
     submissionReady > 0 && c.campaignState === 'Idle'
       ? 'Campaign ready for submission'
       : c.aiStatusLine;
 
+  // Auto-publish OFF: Ready CSM items must not look like a browser submit queue.
+  // Live job rows still drive Waiting Human / Running if the user opted in earlier.
+  if (policy.auto_publish_automatable !== true) {
+    const liveFromJobs = state.items.filter((i) => {
+      const s = i.rawStatus;
+      return (
+        [
+          'queued',
+          'retry_scheduled',
+          'waiting_infrastructure',
+          'preparing',
+          'starting',
+          'launching_browser',
+          'authenticating',
+          'navigating',
+          'analyzing_form',
+          'uploading_assets',
+          'filling_fields',
+          'validating',
+          'submitting',
+          'running',
+          'waiting_human',
+          'needs_approval',
+          'paused',
+          'awaiting_user',
+          'ready_for_review',
+          'ready_to_continue',
+        ].includes(s) ||
+        s.startsWith('watching_') ||
+        s.startsWith('blocked_')
+      );
+    });
+    const liveRunning = liveFromJobs.filter((i) =>
+      ['Running', 'Starting'].includes(i.status)
+    ).length;
+    const liveWaiting = liveFromJobs.filter((i) => i.status === 'Waiting Human').length;
+    const liveQueued = liveFromJobs.filter((i) => i.status === 'Queued').length;
+    inFlight = liveRunning;
+    queued = liveQueued;
+    if (liveRunning > 0) {
+      campaignState = 'Running';
+      campaignIsRunning = true;
+      aiStatusLine = `Submitting (${liveRunning} running / ${liveQueued} queued)`;
+    } else if (liveWaiting > 0) {
+      campaignState = 'Waiting Human';
+      campaignIsRunning = false;
+      aiStatusLine = 'Waiting for you';
+    } else if (liveQueued > 0) {
+      campaignState = 'Starting';
+      campaignIsRunning = false;
+      aiStatusLine = `Submitting (0 running / ${liveQueued} queued)`;
+    } else {
+      campaignState = 'Idle';
+      campaignIsRunning = false;
+      aiStatusLine =
+        submissionReady > 0
+          ? 'Ready for Assisted Manual'
+          : 'Campaign ready for submission';
+    }
+  }
+
+  // Phase 6.3.6 — Remaining includes in-flight so Submitting cohort never looks like all-zeros
+  const remaining = queued + inFlight;
+  const liveWaitingHuman =
+    policy.auto_publish_automatable !== true
+      ? state.items.filter((i) => i.status === 'Waiting Human').length
+      : c['Waiting Human'];
+  // Phase 6.3.2 — Finished only when cohort is fully terminal (no Starting/Queued/open)
+  const executionComplete =
+    policy.auto_publish_automatable !== true
+      ? inFlight === 0 && queued === 0 && liveWaitingHuman === 0
+      : Boolean(c.executionComplete) &&
+        c.campaignOpen === 0 &&
+        c.Running === 0 &&
+        c.Starting === 0 &&
+        c.Queued === 0 &&
+        c['Waiting Human'] === 0;
+
   return {
     state,
     running: inFlight,
-    queued: c.Queued,
+    queued,
     /** CSM Submission Ready count (Phase 5.5) — was wrongly bound to execution job Ready */
     ready: submissionReady,
     submissionReady,
     handoff,
     paused: 0,
-    needs_approval: c['Waiting Human'],
+    needs_approval: liveWaitingHuman,
     /** Success completions — same as submitted / aiSubmitted (Phase 4.7 consistency) */
     completed,
     failed: c.Failed,
     failedToStart: c['Failed to Start'],
     blocked: handoff?.blocked ?? 0,
     cancelled: c.Deleted,
-    watching: c['Waiting Human'],
+    watching: liveWaitingHuman,
     submitted: completed,
     skipped: c.Skipped,
     deleted: c.Deleted,
@@ -315,10 +386,10 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
     verified: c.Verified,
     approved: c.Approved,
     rejected: c.Rejected,
-    needsYou: c['Waiting Human'],
-    waitingUser: c['Waiting Human'],
-    waitingApproval: c['Waiting Human'],
-    waitingHuman: c['Waiting Human'],
+    needsYou: liveWaitingHuman,
+    waitingUser: liveWaitingHuman,
+    waitingApproval: liveWaitingHuman,
+    waitingHuman: liveWaitingHuman,
     waitingVerification: 0,
     waitingLogin: 0,
     waitingMfa: 0,
@@ -330,8 +401,8 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
     remainingJobs: remaining,
     progressPercent: c.progressPercent,
     executionComplete,
-    campaignState: executionComplete ? 'Completed' : c.campaignState,
-    campaignIsRunning: c.campaignIsRunning,
+    campaignState: executionComplete ? 'Completed' : campaignState,
+    campaignIsRunning,
     aiStatusLine: executionComplete ? 'Campaign complete' : aiStatusLine,
     successRate:
       completed + c.Failed > 0
@@ -343,17 +414,17 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
     etaSeconds: 0,
     estimatedApprovalTime: '7–14 days',
     estimatedVerificationTime: '24 hours',
-    needsYourAction: c['Waiting Human'],
+    needsYourAction: liveWaitingHuman,
     trackResults: state.trackResults,
     failedQueue: state.failedQueue,
     failedToStartQueue: state.failedToStart,
     metricsSource: state.metricsSource,
     /** Phase 4.7 — one summary object for all surfaces */
     executionSummary: {
-      queued: c.Queued,
+      queued,
       running: inFlight,
       completed,
-      waitingHuman: c['Waiting Human'],
+      waitingHuman: liveWaitingHuman,
       skipped: c.Skipped,
       failed: c.Failed,
       deleted: c.Deleted,
@@ -362,7 +433,7 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
       progressPercent: c.progressPercent,
       etaSeconds: 0,
       executionComplete,
-      campaignState: executionComplete ? 'Completed' : c.campaignState,
+      campaignState: executionComplete ? 'Completed' : campaignState,
       aiStatusLine: executionComplete ? 'Campaign complete' : aiStatusLine,
       submissionReady,
     },

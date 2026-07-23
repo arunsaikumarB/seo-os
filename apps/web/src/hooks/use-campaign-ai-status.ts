@@ -94,12 +94,14 @@ export function useCampaignAiStatus(projectId: string) {
   const genActive = genLive || generationInterrupted;
 
   const campaignState = s?.campaignState ?? 'Idle';
+  // Same activity rules as execution page (live jobs / waiting human — not Ready CSM as "queued")
   const beeRunning = Boolean(
     (s?.running ?? 0) > 0 ||
+      (s?.waitingHuman ?? 0) > 0 ||
       campaignState === 'Running' ||
-      campaignState === 'Starting' ||
       campaignState === 'Paused' ||
-      campaignState === 'Waiting Human'
+      campaignState === 'Waiting Human' ||
+      (campaignState === 'Starting' && (s?.queued ?? 0) > 0)
   );
 
   const aiActive = genActive || beeRunning;

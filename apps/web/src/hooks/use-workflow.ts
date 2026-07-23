@@ -7,7 +7,6 @@ import {
   type WorkflowStep,
 } from '@/config/workflow-steps';
 import { useAppStore, WORKFLOW_GLOBAL_KEY } from '@/stores/app-store';
-import { useBeeExecutionProgress } from '@/hooks/use-bee-execution-progress';
 import { useExecutionSummary } from '@/hooks/use-execution-summary';
 import { useInterventions } from '@/components/browser/needs-your-action-queue';
 import { formatEta } from '@/lib/bee-execution-ui';
@@ -143,7 +142,6 @@ export function useWorkflow(projectId: string) {
     unmarkStepComplete,
   ]);
 
-  const bee = useBeeExecutionProgress(projectId, 5_000);
   const execSummary = useExecutionSummary(projectId, 2_000);
   const summary = execSummary.data;
   const interventions = useInterventions(projectId, 3_000);
@@ -151,30 +149,19 @@ export function useWorkflow(projectId: string) {
   const needsHumanAction = actionItems.length > 0;
   const firstAction = actionItems[0] ?? null;
 
-  const campaignState = summary?.campaignState ?? bee.data?.campaignState ?? 'Idle';
-  const campaignIsRunning = Boolean(
-    (summary?.running ?? 0) > 0 || bee.data?.campaignIsRunning
-  );
+  const campaignState = summary?.campaignState ?? 'Idle';
+  const campaignIsRunning = Boolean((summary?.running ?? 0) > 0 || campaignState === 'Running');
   const jobsOpen =
     campaignIsRunning ||
     campaignState === 'Waiting Human' ||
     campaignState === 'Paused' ||
-    campaignState === 'Starting';
+    (campaignState === 'Starting' && (summary?.queued ?? 0) > 0);
 
   useEffect(() => {
-    if (
-      (summary?.executionComplete || bee.data?.executionComplete) &&
-      campaignState === 'Completed'
-    ) {
+    if (summary?.executionComplete && campaignState === 'Completed') {
       markStepComplete(projectId, 'submit-backlinks');
     }
-  }, [
-    summary?.executionComplete,
-    bee.data?.executionComplete,
-    campaignState,
-    projectId,
-    markStepComplete,
-  ]);
+  }, [summary?.executionComplete, campaignState, projectId, markStepComplete]);
 
   const importGateActive = importsLoaded && !hasSuccessfulImport;
 
@@ -219,7 +206,7 @@ export function useWorkflow(projectId: string) {
 
   const progressPercent =
     jobsOpen || campaignState === 'Completed' || campaignState === 'Failed To Start'
-      ? Math.round(summary?.progressPercent ?? bee.data?.progressPercent ?? 0)
+      ? Math.round(summary?.progressPercent ?? 0)
       : Math.round((completedCount / Math.max(WORKFLOW_STEPS.length, 1)) * 100);
 
   const continueHref = importGateActive
@@ -248,15 +235,13 @@ export function useWorkflow(projectId: string) {
       ? 'Import websites to begin AI review'
       : summary?.aiStatusLine
         ? summary.aiStatusLine
-        : bee.data?.aiStatusLine
-          ? bee.data.aiStatusLine
-          : allComplete
-            ? 'Campaign complete'
-            : `Working on ${currentStep.title}`;
+        : allComplete
+          ? 'Campaign complete'
+          : `Working on ${currentStep.title}`;
 
   const etaLabel =
-    jobsOpen && (summary?.etaSeconds || bee.data?.etaSeconds)
-      ? formatEta(summary?.etaSeconds || bee.data?.etaSeconds || 0)
+    jobsOpen && summary?.etaSeconds
+      ? formatEta(summary.etaSeconds)
       : currentStep.estimatedMinutes
         ? `~${currentStep.estimatedMinutes} min`
         : null;
@@ -283,7 +268,21 @@ export function useWorkflow(projectId: string) {
     needsHumanAction,
     firstAction,
     actionItems,
-    bee: bee.data,
+    bee: summary
+      ? {
+          totalJobs: summary.total,
+          completedJobs: summary.completed,
+          remainingJobs: summary.remaining,
+          progressPercent: summary.progressPercent,
+          executionComplete: summary.executionComplete,
+          running: summary.running,
+          queued: summary.queued,
+          campaignState: summary.campaignState,
+          campaignIsRunning,
+          aiStatusLine: summary.aiStatusLine,
+          etaSeconds: summary.etaSeconds,
+        }
+      : undefined,
     expertMode,
     learningMode,
     allComplete,

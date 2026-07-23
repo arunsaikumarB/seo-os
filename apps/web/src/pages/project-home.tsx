@@ -6,7 +6,7 @@ import { useApi } from '@/hooks/use-api';
 import { useAppStore } from '@/stores/app-store';
 import { useAuth } from '@/providers/auth-provider';
 import { useWorkflow } from '@/hooks/use-workflow';
-import { useBeeExecutionProgress } from '@/hooks/use-bee-execution-progress';
+import { useExecutionSummary } from '@/hooks/use-execution-summary';
 import { useInterventions } from '@/components/browser/needs-your-action-queue';
 import { WorkflowRoadmap } from '@/components/workflow/workflow-roadmap';
 import { Card, CardContent } from '@/components/ui/card';
@@ -22,11 +22,17 @@ export function ProjectHomePage() {
   const { fetchProjects, request } = useApi();
   const { currentStep, continueHref, continueLabel, allComplete, aiStatusLine } =
     useWorkflow(projectId);
-  const beeProgress = useBeeExecutionProgress(projectId);
+  const execSummary = useExecutionSummary(projectId, 2_000);
   const interventions = useInterventions(projectId, 3_000);
   const actionItems = interventions.data?.data.items ?? [];
-  const jobsOpen =
-    (beeProgress.data?.totalJobs ?? 0) > 0 && !beeProgress.data?.executionComplete;
+  const campaignState = execSummary.data?.campaignState ?? 'Idle';
+  const jobsOpen = Boolean(
+    (execSummary.data?.running ?? 0) > 0 ||
+      campaignState === 'Waiting Human' ||
+      campaignState === 'Paused' ||
+      (campaignState === 'Starting' && (execSummary.data?.queued ?? 0) > 0) ||
+      campaignState === 'Running'
+  );
   const showComplete = allComplete && !jobsOpen;
 
   const firstName =
@@ -156,8 +162,8 @@ export function ProjectHomePage() {
             ) : jobsOpen ? (
               <p>
                 AI is submitting backlinks
-                {beeProgress.data?.etaSeconds
-                  ? ` · ETA ${formatEta(beeProgress.data.etaSeconds)}`
+                {execSummary.data?.etaSeconds
+                  ? ` · ETA ${formatEta(execSummary.data.etaSeconds)}`
                   : ''}
                 .
               </p>
@@ -209,9 +215,7 @@ export function ProjectHomePage() {
               ['Verified', num(s.verified, s.won)],
               [
                 'Success',
-                beeProgress.data?.successRate != null
-                  ? `${beeProgress.data.successRate}%`
-                  : '—',
+                '—',
               ],
             ] as const
           ).map(([label, value]) => (

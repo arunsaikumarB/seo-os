@@ -499,40 +499,102 @@ export async function kickSubmissionDrain(
   return { ensured, drain };
 }
 
-/** Drop Queued / retry_scheduled jobs so the UI does not imply browser submit is running. */
-async function cancelQueuedJobsWhenAutoPublishOff(workspaceId: string): Promise<number> {
-  const { data: rows } = await admin()
+/**
+ * Cancel browser-lane jobs that should not run when auto-publish is OFF
+ * (queued / retry / infra wait / preparing / failed_to_start).
+ * Also rolls CSM Submitting/Retrying back to Ready so Execution Summary
+ * does not keep saying "Submitting · N queued".
+ */
+export async function cancelQueuedJobsWhenAutoPublishOff(
+  workspaceId: string
+): Promise<number> {
+  const now = new Date().toISOString();
+  const msg =
+    'Browser auto-submit is off — use Assisted Manual. Opt in under Advanced → Browser Auto-Submit.';
+  const patch = {
+    status: 'skipped',
+    disposition: 'skipped',
+    error_code: 'AUTO_PUBLISH_OFF',
+    error_message: msg,
+    finished_at: now,
+    updated_at: now,
+    session_id: null,
+    lease_holder: null,
+    lease_expires_at: null,
+  };
+
+  const { data: openRows } = await admin()
     .from('execution_jobs')
     .select('id')
     .eq('workspace_id', workspaceId)
-    .in('status', ['queued', 'retry_scheduled', 'waiting_infrastructure'])
+    .in('status', [
+      'queued',
+      'retry_scheduled',
+      'waiting_infrastructure',
+      'preparing',
+      'starting',
+    ])
     .is('deleted_at', null)
     .limit(500);
-  if (!rows?.length) return 0;
-  const now = new Date().toISOString();
+
+  const { data: failedStartRows } = await admin()
+    .from('execution_jobs')
+    .select('id')
+    .eq('workspace_id', workspaceId)
+    .eq('status', 'failed')
+    .eq('disposition', 'failed_to_start')
+    .is('deleted_at', null)
+    .limit(500);
+
+  const ids = [
+    ...new Set([
+      ...(openRows ?? []).map((r) => String(r.id)),
+      ...(failedStartRows ?? []).map((r) => String(r.id)),
+    ]),
+  ];
+  if (ids.length === 0) {
+    await resetSubmittingCampaignItemsToReady(workspaceId);
+    return 0;
+  }
+
   const { error } = await admin()
     .from('execution_jobs')
-    .update({
-      status: 'skipped',
-      disposition: 'skipped',
-      error_code: 'AUTO_PUBLISH_OFF',
-      error_message:
-        'Browser auto-submit is off — use Assisted Manual. Opt in under Advanced → Browser Auto-Submit.',
-      finished_at: now,
-      updated_at: now,
-    })
+    .update(patch)
     .eq('workspace_id', workspaceId)
-    .in('status', ['queued', 'retry_scheduled', 'waiting_infrastructure'])
+    .in('id', ids)
     .is('deleted_at', null);
   if (error) {
     logger.warn({ err: error, workspaceId }, 'cancelQueuedJobsWhenAutoPublishOff failed');
     return 0;
   }
+
+  await resetSubmittingCampaignItemsToReady(workspaceId);
+
   logger.info(
-    { workspaceId, cancelled: rows.length },
-    'cancelled queued execution jobs — auto_publish off'
+    { workspaceId, cancelled: ids.length },
+    'cancelled browser-lane execution jobs — auto_publish off'
   );
-  return rows.length;
+  return ids.length;
+}
+
+/** CSM still on Submitting after jobs are cleared → Ready (Assisted Manual path). */
+async function resetSubmittingCampaignItemsToReady(workspaceId: string): Promise<void> {
+  try {
+    const { listCampaignItems, updateCampaignItem } = await import(
+      '../campaigns/campaign-state.service.js'
+    );
+    const items = await listCampaignItems(workspaceId, { includeDeleted: false });
+    for (const item of items) {
+      if (item.currentStatus !== 'Submitting' && item.currentStatus !== 'Retrying') continue;
+      await updateCampaignItem(workspaceId, item.id, {
+        currentStatus: 'Ready',
+        lastError: null,
+        force: true,
+      }).catch(() => undefined);
+    }
+  } catch (err) {
+    logger.warn({ err, workspaceId }, 'resetSubmittingCampaignItemsToReady failed');
+  }
 }
 
 async function superviseSubmissionConsumer(): Promise<void> {
