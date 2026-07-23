@@ -469,7 +469,7 @@ describe('Phase 7 Assisted Manual', () => {
     expect(textSimilarity(text, text)).toBeGreaterThan(0.85);
   });
 
-  it('stores human correction and never re-guesses (AT7)', () => {
+  it('stores human correction and never re-guesses when it agrees (AT7)', () => {
     const recipe = buildSiteRecipe({
       domain: 'justdial.com',
       entryUrl: 'https://justdial.com/add',
@@ -478,7 +478,7 @@ describe('Phase 7 Assisted Manual', () => {
     const sel = recipe.fields[0]!.selector;
     const corrected = applyHumanFieldCorrection(recipe, {
       selector: sel,
-      role: 'long_desc',
+      role: recipe.fields[0]!.role,
     });
     expect(corrected.fields[0]!.source).toBe('human_corrected');
     expect(corrected.fields[0]!.confidence).toBe('high');
@@ -491,7 +491,90 @@ describe('Phase 7 Assisted Manual', () => {
       existing: corrected,
     });
     expect(rebuilt.fields[0]!.source).toBe('human_corrected');
-    expect(rebuilt.fields[0]!.role).toBe('long_desc');
+    expect(rebuilt.fields[0]!.role).toBe(recipe.fields[0]!.role);
+  });
+
+  it('drops human_corrected pin that contradicts high-confidence dom_label', () => {
+    const html = `
+<form>
+  <label for="title">Title (Optional) Leave blank to auto-fetch from website</label>
+  <input id="title" name="title" type="text" />
+</form>`;
+    const pinned = {
+      domain: 'viesearch.com',
+      entryUrl: 'https://viesearch.com/submit',
+      formFingerprint: 'fp_x',
+      fields: [
+        {
+          selector: '#title',
+          role: 'url' as const,
+          confidence: 'high' as const,
+          source: 'human_corrected' as const,
+          label: 'Title',
+          required: false,
+          maxlength: null,
+        },
+      ],
+      dropdownOptions: {},
+      gate: 'none' as const,
+      notes: '',
+      lastVerifiedAt: null,
+      correctionCount: 1,
+      multiStep: false,
+      readerVersion: 2,
+      classifierVersion: 5,
+    };
+    const next = buildSiteRecipe({
+      domain: 'viesearch.com',
+      entryUrl: 'https://viesearch.com/submit',
+      html,
+      existing: pinned,
+      forceReclassify: true,
+    });
+    const title = next.fields.find((f) => f.selector === '#title')!;
+    expect(title.role).toBe('title');
+    expect(title.source).toBe('dom_label');
+  });
+
+  it('dropHumanPins ignores all human_corrected entries', () => {
+    const html = `
+<form>
+  <label for="title">Title (Optional) Leave blank to auto-fetch from website</label>
+  <input id="title" name="title" type="text" />
+</form>`;
+    const pinned = {
+      domain: 'viesearch.com',
+      entryUrl: 'https://viesearch.com/submit',
+      formFingerprint: 'fp_x',
+      fields: [
+        {
+          selector: '#title',
+          role: 'url' as const,
+          confidence: 'high' as const,
+          source: 'human_corrected' as const,
+          label: 'Title',
+          required: false,
+          maxlength: null,
+        },
+      ],
+      dropdownOptions: {},
+      gate: 'none' as const,
+      notes: '',
+      lastVerifiedAt: null,
+      correctionCount: 3,
+      multiStep: false,
+    };
+    const next = buildSiteRecipe({
+      domain: 'viesearch.com',
+      entryUrl: 'https://viesearch.com/submit',
+      html,
+      existing: pinned,
+      forceReclassify: true,
+      dropHumanPins: true,
+    });
+    expect(next.fields.find((f) => f.selector === '#title')?.role).toBe('title');
+    expect(next.fields.find((f) => f.selector === '#title')?.source).not.toBe('human_corrected');
+    expect(next.correctionCount).toBe(0);
   });
 
   it('mark wrong is known_bad and re-infers on next read (does not pin)', () => {
@@ -519,7 +602,7 @@ describe('Phase 7 Assisted Manual', () => {
     expect(field.source).not.toBe('human_corrected');
   });
 
-  it('clearHumanCorrections drops pins so rebuild can re-guess', () => {
+  it('clearHumanCorrections strips pins so rebuild can re-guess', () => {
     const recipe = buildSiteRecipe({
       domain: 'justdial.com',
       entryUrl: 'https://justdial.com/add',
@@ -533,16 +616,18 @@ describe('Phase 7 Assisted Manual', () => {
     expect(corrected.fields[0]!.source).toBe('human_corrected');
     expect(corrected.fields[0]!.role).toBe('phone');
     const cleared = clearHumanCorrections(corrected);
-    expect(cleared.fields[0]!.source).toBe('known_bad');
+    expect(cleared.fields[0]!.source).not.toBe('human_corrected');
+    expect(cleared.fields[0]!.source).not.toBe('known_bad');
+    expect(cleared.correctionCount).toBe(0);
     const rebuilt = buildSiteRecipe({
       domain: 'justdial.com',
       entryUrl: 'https://justdial.com/add',
       html: LOW_CONF,
       existing: cleared,
       forceReclassify: true,
+      dropHumanPins: true,
     });
     expect(rebuilt.fields[0]!.source).not.toBe('human_corrected');
-    // Pinned phone must not survive clear + reclassify
     expect(rebuilt.fields[0]!.role === 'phone' && rebuilt.fields[0]!.source === 'human_corrected').toBe(
       false
     );

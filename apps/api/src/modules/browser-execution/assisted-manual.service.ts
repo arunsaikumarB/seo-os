@@ -334,6 +334,8 @@ async function prepareOnePackage(
   let existingRecipe = asRecipe(profile?.recipe);
   if (opts.clearPins && existingRecipe) {
     existingRecipe = clearHumanCorrections(existingRecipe);
+    // Persist stripped pins immediately so a failed re-read cannot resurrect them
+    await upsertRecipeOnProfile(workspaceId, domain, existingRecipe);
   }
 
   // Prior package — used as fallback if the live form read returns nothing
@@ -351,12 +353,16 @@ async function prepareOnePackage(
   const priorFieldCount =
     priorPayload?.fields?.length ?? existingRecipe?.fields?.length ?? 0;
 
-  // Force re-read: only keep confirmed human role replacements
-  const existingForBuild = opts.forceReread
-    ? recipePinsOnly(existingRecipe)
-    : existingRecipe;
+  // Clear → no pins. Force re-read → only real human_corrected (contradictions dropped in build).
+  const existingForBuild = opts.clearPins
+    ? existingRecipe
+      ? { ...existingRecipe, fields: [] }
+      : null
+    : opts.forceReread
+      ? recipePinsOnly(existingRecipe)
+      : existingRecipe;
   const versionStale = !recipeVersionsCurrent(existingForBuild);
-  const forceReclassify = Boolean(opts.forceReread) || versionStale;
+  const forceReclassify = Boolean(opts.forceReread) || versionStale || Boolean(opts.clearPins);
 
   const html = await fetchHtml(entryUrl);
   const liveFacts = html ? extractFormFieldFacts(html) : [];
@@ -386,6 +392,7 @@ async function prepareOnePackage(
       html,
       existing: existingForBuild,
       forceReclassify: true,
+      dropHumanPins: Boolean(opts.clearPins),
     });
   } else if (existingRecipe && !opts.forceReread) {
     recipe = recipeVersionsCurrent(existingRecipe)
@@ -530,11 +537,18 @@ async function prepareOnePackage(
     payload.classifierVersion = priorPayload.classifierVersion;
     payload.failureReason = rereadFailReason;
     payload.bucket = 'needs_person';
-    // Prefer prior field values if rebuild emptied them
+    // Prefer prior field values if rebuild emptied them — never resurrect cleared pins
     if (!payload.fields.length && priorPayload.fields?.length) {
+      const kept = opts.clearPins
+        ? priorPayload.fields.map((f) =>
+            f.source === 'human_corrected' || f.source === 'known_bad'
+              ? { ...f, source: 'name_guess' as const, confidence: 'low' as const }
+              : f
+          )
+        : priorPayload.fields;
       payload = {
         ...payload,
-        fields: priorPayload.fields,
+        fields: kept,
         bucket: 'needs_person',
         failureReason: rereadFailReason,
       };

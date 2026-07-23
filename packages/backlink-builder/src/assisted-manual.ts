@@ -19,9 +19,9 @@ export const ASSISTED_FORM_READER_VERSION = 2;
 /**
  * Bump when field-role / confidence rules change.
  * Mismatched recipes re-classify even when form fingerprint is unchanged.
- * v5: explicit <label> outranks name/id; attribute tokens get Optional-stripping.
+ * v6: drop contradictory / legacy human_corrected pins; clear deletes pins.
  */
-export const ASSISTED_FIELD_CLASSIFIER_VERSION = 5;
+export const ASSISTED_FIELD_CLASSIFIER_VERSION = 6;
 
 export type FieldConfidence = 'high' | 'medium' | 'low';
 export type FieldSource =
@@ -753,7 +753,7 @@ export function confidenceAfterValue(
   return base;
 }
 
-/** Build or merge a Site Recipe from Form Reader facts. Human corrections win permanently. */
+/** Build or merge a Site Recipe from Form Reader facts. */
 export function buildSiteRecipe(input: {
   domain: string;
   entryUrl: string;
@@ -764,6 +764,8 @@ export function buildSiteRecipe(input: {
    * even if the form fingerprint matches the stored recipe.
    */
   forceReclassify?: boolean;
+  /** When true, ignore all human_corrected / known_bad pins (Clear corrections). */
+  dropHumanPins?: boolean;
 }): SiteRecipe {
   const facts = extractFormFieldFacts(input.html);
   const fingerprint = computeFormFingerprint(facts);
@@ -772,26 +774,40 @@ export function buildSiteRecipe(input: {
 
   const versionStale = !recipeVersionsCurrent(input.existing);
   const forceReclassify = Boolean(input.forceReclassify) || versionStale;
+  const dropPins = Boolean(input.dropHumanPins);
 
   const existingBySelector = new Map(
-    (input.existing?.fields ?? []).map((f) => [f.selector, f] as const)
+    (dropPins ? [] : input.existing?.fields ?? [])
+      .filter((f) => f.source === 'human_corrected')
+      .map((f) => [f.selector, f] as const)
   );
 
   const fields: RecipeField[] = facts.map((f) => {
     const prev = existingBySelector.get(f.selector);
-    // Human correction never re-guessed (§3 rule 2) — even across classifier upgrades
-    // known_bad is intentionally NOT preserved — re-infer on every rebuild
-    if (prev?.source === 'human_corrected') {
-      return {
-        ...prev,
-        maxlength: f.maxlength ?? prev.maxlength,
-        options: f.options.length ? f.options : prev.options,
-        required: f.required,
-        label: f.label ?? f.ariaLabel ?? f.placeholder ?? prev.label,
-      };
-    }
-    // Machine guess: always re-infer when forceReclassify / version stale / fingerprint change / no prev
     const inferred = inferFieldRole(f);
+
+    // Real human role replacement — keep unless it contradicts a high-confidence DOM label
+    if (prev?.source === 'human_corrected') {
+      const contradictsDom =
+        inferred.source === 'dom_label' &&
+        inferred.confidence === 'high' &&
+        inferred.role !== prev.role;
+      // Force reclassify also drops legacy pins that disagree with fresh inference
+      const dropLegacyOnForce =
+        forceReclassify && inferred.role !== prev.role && inferred.confidence !== 'low';
+
+      if (!contradictsDom && !dropLegacyOnForce) {
+        return {
+          ...prev,
+          maxlength: f.maxlength ?? prev.maxlength,
+          options: f.options.length ? f.options : prev.options,
+          required: f.required,
+          label: f.label ?? f.ariaLabel ?? f.placeholder ?? prev.label,
+        };
+      }
+      // Fall through — pin discarded; use inference
+    }
+
     return {
       selector: f.selector,
       role: inferred.role,
@@ -814,7 +830,9 @@ export function buildSiteRecipe(input: {
   const upgradeNote =
     forceReclassify && input.existing && versionStale
       ? `Reclassified (reader v${ASSISTED_FORM_READER_VERSION} / classifier v${ASSISTED_FIELD_CLASSIFIER_VERSION})`
-      : null;
+      : dropPins
+        ? 'Human corrections cleared'
+        : null;
 
   return {
     domain: input.domain,
@@ -827,7 +845,7 @@ export function buildSiteRecipe(input: {
       ? 'Multi-step form — step 1 prepared, later steps unknown'
       : [input.existing?.notes, upgradeNote].filter(Boolean).join(' · ') || '',
     lastVerifiedAt: new Date().toISOString(),
-    correctionCount: input.existing?.correctionCount ?? 0,
+    correctionCount: dropPins ? 0 : (input.existing?.correctionCount ?? 0),
     multiStep,
     multiStepLabel: multiStep
       ? 'Multi-step form — step 1 prepared, later steps unknown'
@@ -893,21 +911,24 @@ export function applyHumanFieldCorrection(
   };
 }
 
-/** Drop all human pins / known-bad flags so the next force re-read can re-infer. */
+/**
+ * Delete all human pins / known-bad flags for this site recipe.
+ * Pins are stripped (not converted to known_bad) so they cannot survive merge.
+ */
 export function clearHumanCorrections(recipe: SiteRecipe): SiteRecipe {
   const fields = recipe.fields.map((f) => {
     if (f.source !== 'human_corrected' && f.source !== 'known_bad') return f;
+    // Strip pin identity entirely — buildSiteRecipe will not preserve these
     return {
       ...f,
-      role: 'other' as FieldRole,
-      source: 'known_bad' as const,
+      source: 'name_guess' as const,
       confidence: 'low' as const,
     };
   });
   return {
     ...recipe,
     fields,
-    // Force version-stale so any prepare path reclassifies
+    correctionCount: 0,
     readerVersion: 0,
     classifierVersion: 0,
     notes: [recipe.notes, 'Human corrections cleared'].filter(Boolean).join(' · '),
@@ -921,12 +942,26 @@ export function clearHumanCorrections(recipe: SiteRecipe): SiteRecipe {
  */
 export function recipePinsOnly(recipe: SiteRecipe | null | undefined): SiteRecipe | null {
   if (!recipe) return null;
+  const pins = recipe.fields.filter((f) => f.source === 'human_corrected');
   return {
     ...recipe,
-    fields: recipe.fields.filter((f) => f.source === 'human_corrected'),
+    fields: pins,
     readerVersion: 0,
     classifierVersion: 0,
   };
+}
+
+/** True when a stored pin should be discarded against a fresh high-confidence DOM label. */
+export function humanPinContradictsInference(
+  pin: { role: FieldRole; source: FieldSource },
+  inferred: { role: FieldRole; source: FieldSource; confidence: FieldConfidence }
+): boolean {
+  if (pin.source !== 'human_corrected') return false;
+  return (
+    inferred.source === 'dom_label' &&
+    inferred.confidence === 'high' &&
+    inferred.role !== pin.role
+  );
 }
 
 // ─── Limit-aware content + package build ─────────────────────────────────────
