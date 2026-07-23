@@ -57,12 +57,18 @@ export type AssistedGate =
   | 'manual_review'
   | 'multi_step';
 
-/** Gates that require a human — never paste-and-submit Ready. */
-export function gateBlocksReady(gate: AssistedGate | string | null | undefined): boolean {
+/** OTP is one extra human step — Check these fields, not Needs a person / Ready. */
+export function gateIsOtp(gate: AssistedGate | string | null | undefined): boolean {
+  return String(gate ?? '').startsWith('otp_');
+}
+
+/**
+ * Hard blockers — never paste-and-submit Ready; always Needs a person.
+ * (OTP is excluded — see gateIsOtp / assignAssistedBucket.)
+ */
+export function gateRequiresPerson(gate: AssistedGate | string | null | undefined): boolean {
   const g = String(gate ?? 'none');
-  if (g === 'none' || g === '') return false;
-  // Explicit blockers + any otp_* future variants
-  if (g.startsWith('otp_')) return true;
+  if (g === 'none' || g === '' || gateIsOtp(g)) return false;
   return (
     g === 'login' ||
     g === 'captcha' ||
@@ -71,6 +77,12 @@ export function gateBlocksReady(gate: AssistedGate | string | null | undefined):
     g === 'manual_review' ||
     g === 'multi_step'
   );
+}
+
+/** True when the package cannot be Ready (gate must be none). Includes OTP. */
+export function gateBlocksReady(gate: AssistedGate | string | null | undefined): boolean {
+  const g = String(gate ?? 'none');
+  return g !== 'none' && g !== '';
 }
 
 export type AssistedBucket = 'ready' | 'check_fields' | 'needs_person';
@@ -1086,8 +1098,8 @@ export function assignAssistedBucket(input: {
   if (input.fingerprintStatus === 'changed' || input.fingerprintStatus === 'stale') {
     return 'needs_person';
   }
-  // Ready = paste-and-submit with no blocker. Any gate ≠ none → Needs a person.
-  if (gateBlocksReady(input.recipe.gate) || input.recipe.multiStep) {
+  // Hard gates (login/captcha/cloudflare/registration/multi_step) → Needs a person
+  if (gateRequiresPerson(input.recipe.gate) || input.recipe.multiStep) {
     return 'needs_person';
   }
   if (input.fields.some((f) => f.overLimit)) return 'needs_person';
@@ -1111,7 +1123,9 @@ export function assignAssistedBucket(input: {
   if (requiredHigh.some((f) => f.confidence !== 'high' && f.role !== 'terms')) {
     return 'check_fields';
   }
-  // Final Ready gate: only when gate is explicitly none
+  // OTP: still paste-and-submit + one code step — Check these fields (with gate warning)
+  if (gateIsOtp(input.recipe.gate)) return 'check_fields';
+  // Ready only when gate is explicitly none
   if (input.recipe.gate !== 'none') return 'needs_person';
   return 'ready';
 }
@@ -1289,8 +1303,13 @@ export function buildAssistedPackage(input: {
     failureReason = 'Package expired — re-prepare';
   } else if (input.recipe.multiStep || input.recipe.gate === 'multi_step') {
     failureReason = input.recipe.multiStepLabel ?? 'Multi-step form';
-  } else if (gateBlocksReady(input.recipe.gate)) {
+  } else if (gateRequiresPerson(input.recipe.gate)) {
     failureReason = `Gate: ${input.recipe.gate} — needs a person (not paste-and-submit Ready)`;
+  } else if (gateIsOtp(input.recipe.gate)) {
+    failureReason =
+      input.recipe.gate === 'otp_phone'
+        ? 'SMS confirmation code required after submit — keep your phone ready.'
+        : 'Email confirmation code required after submit — check inbox before finishing.';
   } else if (!formFound) {
     failureReason = 'No form found';
   }

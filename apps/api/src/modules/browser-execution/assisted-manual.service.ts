@@ -22,7 +22,8 @@ import {
   fieldFactSnapshot,
   normalizeSiteDomain,
   recipeVersionsCurrent,
-  gateBlocksReady,
+  gateIsOtp,
+  gateRequiresPerson,
   type AssistedPackagePayload,
   type FieldRole,
   type PackageStatus,
@@ -985,28 +986,40 @@ export async function updateAssistedPackageStatus(
 }
 
 /**
- * Demote Ready packages that have a human gate (login/captcha/otp/…) to Needs a person.
- * Ready is paste-and-submit only when gate = none.
+ * Re-bucket packages whose gate disagrees with Ready / Needs a person rules:
+ * - Hard blockers in Ready → needs_person
+ * - OTP in Ready or Needs a person → check_fields (submittable + code warning)
  */
 async function healReadyPackagesWithBlockingGates(workspaceId: string) {
   const { data: rows } = await admin()
     .from('assisted_packages')
     .select('id, gate, bucket, payload, failure_reason')
     .eq('workspace_id', workspaceId)
-    .eq('bucket', 'ready')
+    .in('bucket', ['ready', 'needs_person'])
     .limit(100);
   if (!rows?.length) return;
 
   for (const row of rows) {
     const gate = String(row.gate ?? 'none');
-    if (!gateBlocksReady(gate)) continue;
-    const payload = {
-      ...((row.payload as AssistedPackagePayload) ?? ({} as AssistedPackagePayload)),
-      bucket: 'needs_person' as const,
-      failureReason:
-        row.failure_reason ||
-        `Gate: ${gate} — needs a person (not paste-and-submit Ready)`,
-      gateNotes:
+    const bucket = String(row.bucket ?? '');
+    let nextBucket: 'needs_person' | 'check_fields' | null = null;
+    let failureReason: string | null = null;
+    let gateNotes: string | null = null;
+
+    if (gateIsOtp(gate) && (bucket === 'ready' || bucket === 'needs_person')) {
+      nextBucket = 'check_fields';
+      failureReason =
+        gate === 'otp_phone'
+          ? 'SMS confirmation code required after submit — keep your phone ready.'
+          : 'Email confirmation code required after submit — check inbox before finishing.';
+      gateNotes =
+        gate === 'otp_phone'
+          ? 'SMS code will be sent to the phone you enter — keep your phone ready.'
+          : 'Email code will be sent to the address you enter — check inbox before submitting.';
+    } else if (bucket === 'ready' && gateRequiresPerson(gate)) {
+      nextBucket = 'needs_person';
+      failureReason = `Gate: ${gate} — needs a person (not paste-and-submit Ready)`;
+      gateNotes =
         gate === 'login'
           ? 'Login required — sign in yourself; the app will not bypass auth.'
           : gate === 'captcha'
@@ -1015,20 +1028,29 @@ async function healReadyPackagesWithBlockingGates(workspaceId: string) {
               ? 'Cloudflare / anti-bot challenge — clear it yourself; the app will not bypass it.'
               : gate === 'registration'
                 ? 'Registration required — create an account yourself; the app will not sign up.'
-                : `Gate: ${gate} — needs a person.`,
+                : `Gate: ${gate} — needs a person.`;
+    }
+
+    if (!nextBucket) continue;
+
+    const payload = {
+      ...((row.payload as AssistedPackagePayload) ?? ({} as AssistedPackagePayload)),
+      bucket: nextBucket,
+      failureReason: failureReason ?? row.failure_reason,
+      ...(gateNotes ? { gateNotes } : {}),
     };
     await admin()
       .from('assisted_packages')
       .update({
-        bucket: 'needs_person',
+        bucket: nextBucket,
         failure_reason: payload.failureReason,
         payload,
         updated_at: new Date().toISOString(),
       })
       .eq('id', row.id);
     logger.info(
-      { workspaceId, packageId: row.id, gate },
-      'assisted heal: Ready→needs_person (blocking gate)'
+      { workspaceId, packageId: row.id, gate, from: bucket, to: nextBucket },
+      'assisted heal: gate bucket correction'
     );
   }
 }

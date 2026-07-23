@@ -15,6 +15,8 @@ import {
   findSimilarPackagePairs,
   fitValueToLimit,
   gateBlocksReady,
+  gateIsOtp,
+  gateRequiresPerson,
   inferFieldRole,
   leadingAttrToken,
   recipeVersionsCurrent,
@@ -459,13 +461,12 @@ describe('Phase 7 Assisted Manual', () => {
     expect(bucket).toBe('needs_person');
   });
 
-  it('blocking gates never land in Ready — login/captcha/otp → needs_person', () => {
+  it('hard gates → needs_person; otp_* → check_fields; none can be Ready', () => {
     const baseRecipe = buildSiteRecipe({
       domain: 'forum.parallels.com',
       entryUrl: 'https://forum.parallels.com/submit',
       html: SIMPLE_FORM,
     });
-    // High-confidence fields alone must not override a login gate
     const highFields = baseRecipe.fields.map((f) => ({
       selector: f.selector,
       label: f.label ?? f.role,
@@ -482,17 +483,33 @@ describe('Phase 7 Assisted Manual', () => {
       options: f.options,
     }));
 
-    for (const gate of ['login', 'captcha', 'cloudflare', 'registration', 'otp_email', 'otp_phone'] as const) {
-      const bucket = assignAssistedBucket({
-        recipe: { ...baseRecipe, gate },
-        fields: highFields,
-        fingerprintStatus: 'fresh',
-        formFound: true,
-      });
-      expect(bucket).toBe('needs_person');
+    for (const gate of ['login', 'captcha', 'cloudflare', 'registration', 'multi_step'] as const) {
+      expect(
+        assignAssistedBucket({
+          recipe: { ...baseRecipe, gate, multiStep: gate === 'multi_step' },
+          fields: highFields,
+          fingerprintStatus: 'fresh',
+          formFound: true,
+        })
+      ).toBe('needs_person');
     }
 
-    // gate=none must not be forced to needs_person by the gate rule alone
+    for (const gate of ['otp_email', 'otp_phone'] as const) {
+      expect(
+        assignAssistedBucket({
+          recipe: { ...baseRecipe, gate },
+          fields: highFields,
+          fingerprintStatus: 'fresh',
+          formFound: true,
+        })
+      ).toBe('check_fields');
+    }
+
+    expect(gateIsOtp('otp_phone')).toBe(true);
+    expect(gateRequiresPerson('otp_phone')).toBe(false);
+    expect(gateBlocksReady('otp_phone')).toBe(true);
+    expect(gateRequiresPerson('login')).toBe(true);
+
     const noneBucket = assignAssistedBucket({
       recipe: { ...baseRecipe, gate: 'none' },
       fields: highFields,
