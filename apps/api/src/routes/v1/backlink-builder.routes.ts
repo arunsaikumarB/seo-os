@@ -345,6 +345,27 @@ backlinkBuilderRouter.post(
   }
 );
 
+backlinkBuilderRouter.post(
+  '/assisted-manual/:packageId/clear-corrections',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const { clearAssistedCorrections } = await import(
+        '../../modules/browser-execution/assisted-manual.service.js'
+      );
+      res.json({
+        data: await clearAssistedCorrections(
+          param(req.params.projectId),
+          param(req.params.packageId)
+        ),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 /** Dev-only Campaign Health audit — all items including Deleted. */
 backlinkBuilderRouter.get(
   '/campaign-health',

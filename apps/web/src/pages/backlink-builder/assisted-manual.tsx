@@ -157,12 +157,32 @@ export function AssistedManualPage() {
           }),
         }
       ),
-    onSuccess: () => {
-      toast.success('Saved to Site Recipe');
+    onSuccess: (_data, vars) => {
+      toast.success(
+        vars.markPackageGood
+          ? 'Marked good'
+          : vars.selector
+            ? 'Marked wrong — will re-infer on next read'
+            : 'Saved'
+      );
       void qc.invalidateQueries({ queryKey: ['assisted-manual', projectId] });
       void qc.invalidateQueries({ queryKey: ['assisted-manual-metrics', projectId] });
     },
     onError: (e) => toast.error(getApiErrorMessage(e, 'Correction failed')),
+  });
+
+  const clearCorrections = useMutation({
+    mutationFn: (packageId: string) =>
+      request(
+        `/v1/projects/${projectId}/backlink-builder/assisted-manual/${packageId}/clear-corrections`,
+        { method: 'POST' }
+      ),
+    onSuccess: () => {
+      toast.success('Corrections cleared; form re-read');
+      void qc.invalidateQueries({ queryKey: ['assisted-manual', projectId] });
+      void qc.invalidateQueries({ queryKey: ['assisted-manual-metrics', projectId] });
+    },
+    onError: (e) => toast.error(getApiErrorMessage(e, 'Clear corrections failed')),
   });
 
   const reread = useMutation({
@@ -370,7 +390,7 @@ export function AssistedManualPage() {
                         variant="outline"
                         disabled={reread.isPending}
                         onClick={() => reread.mutate(pkg.id)}
-                        title="Fetch the live form again and re-classify fields (keeps your corrections)"
+                        title="Fetch the live form again and re-classify. Confirmed role replacements are kept; known-bad fields re-infer."
                       >
                         <RefreshCw
                           className={cn(
@@ -379,6 +399,15 @@ export function AssistedManualPage() {
                           )}
                         />
                         Re-read form (ignore cache)
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={clearCorrections.isPending}
+                        onClick={() => clearCorrections.mutate(pkg.id)}
+                        title="Remove all pinned human corrections for this site and re-read the form"
+                      >
+                        Clear corrections for this site
                       </Button>
                       <Button
                         size="sm"
@@ -469,8 +498,9 @@ export function AssistedManualPage() {
                               onClick={() =>
                                 correct.mutate({ packageId: pkg.id, selector: f.selector })
                               }
+                              title="Clear this mapping and re-infer on next read (does not pin as a correction)"
                             >
-                              Mark field wrong (save correction)
+                              Mark field wrong
                             </Button>
                           </div>
                         ))}

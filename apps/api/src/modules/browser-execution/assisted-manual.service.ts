@@ -10,6 +10,8 @@ import {
   ASSISTED_FORM_READER_VERSION,
   ASSISTED_FIELD_CLASSIFIER_VERSION,
   applyHumanFieldCorrection,
+  clearHumanCorrections,
+  markFieldMappingWrong,
   buildAssistedPackage,
   buildSiteRecipe,
   computeAssistedLaneCounts,
@@ -651,7 +653,7 @@ export async function getAssistedPackage(workspaceId: string, packageId: string)
 
 /**
  * Force re-fetch HTML + re-classify (ignore fingerprint / TTL / cached recipe versions).
- * Human field corrections on the Site Recipe are preserved.
+ * Confirmed human_corrected roles are preserved; known_bad fields re-infer.
  */
 export async function rereadAssistedPackage(workspaceId: string, packageId: string) {
   const { data: row } = await admin()
@@ -727,11 +729,15 @@ export async function correctAssistedField(
       lastVerifiedAt: new Date().toISOString(),
       notes: [recipe.notes, 'Package marked good'].filter(Boolean).join(' · '),
     };
-  } else {
+  } else if (body.role) {
+    // Only pin when the user supplies a real replacement role
     recipe = applyHumanFieldCorrection(recipe, {
       selector: body.selector,
       role: body.role,
     });
+  } else {
+    // Mark wrong → known-bad, re-infer on next read (do not freeze as human_corrected)
+    recipe = markFieldMappingWrong(recipe, body.selector);
   }
 
   await upsertRecipeOnProfile(workspaceId, domain, recipe);
@@ -762,6 +768,41 @@ export async function correctAssistedField(
   if (error) throw new AppError(500, 'INTERNAL_ERROR', error.message);
 
   return formatPackageRow(updated);
+}
+
+/**
+ * Undo all human pins / known-bad flags for this site, then force re-read so fields re-infer.
+ */
+export async function clearAssistedCorrections(workspaceId: string, packageId: string) {
+  const { data: row } = await admin()
+    .from('assisted_packages')
+    .select('id, domain, opportunity_id, entry_url')
+    .eq('workspace_id', workspaceId)
+    .eq('id', packageId)
+    .maybeSingle();
+  if (!row) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Package not found');
+
+  const domain = String(row.domain);
+  const { data: profile } = await admin()
+    .from('site_profiles')
+    .select('id, recipe')
+    .eq('workspace_id', workspaceId)
+    .eq('domain', domain)
+    .maybeSingle();
+
+  const recipe = asRecipe(profile?.recipe);
+  if (!recipe) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Site recipe missing — re-prepare first');
+  }
+
+  const cleared = clearHumanCorrections(recipe);
+  await upsertRecipeOnProfile(workspaceId, domain, cleared);
+
+  const saved = await prepareOnePackage(workspaceId, String(row.opportunity_id), {
+    entryUrlOverride: row.entry_url ? String(row.entry_url) : undefined,
+    forceReread: true,
+  });
+  return formatPackageRow(saved);
 }
 
 export async function getAssistedPilotMetrics(workspaceId: string) {

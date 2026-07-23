@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyHumanFieldCorrection,
+  markFieldMappingWrong,
+  clearHumanCorrections,
   assignAssistedBucket,
   buildAssistedPackage,
   buildSiteRecipe,
@@ -348,6 +350,60 @@ describe('Phase 7 Assisted Manual', () => {
     });
     expect(rebuilt.fields[0]!.source).toBe('human_corrected');
     expect(rebuilt.fields[0]!.role).toBe('long_desc');
+  });
+
+  it('mark wrong is known_bad and re-infers on next read (does not pin)', () => {
+    const recipe = buildSiteRecipe({
+      domain: 'justdial.com',
+      entryUrl: 'https://justdial.com/add',
+      html: LOW_CONF,
+    });
+    const sel = recipe.fields[0]!.selector;
+    const marked = markFieldMappingWrong(recipe, sel);
+    expect(marked.fields[0]!.source).toBe('known_bad');
+    expect(marked.fields[0]!.confidence).toBe('low');
+    expect(marked.fields[0]!.role).toBe('other');
+    expect(marked.fields[0]!.source).not.toBe('human_corrected');
+
+    const rebuilt = buildSiteRecipe({
+      domain: 'justdial.com',
+      entryUrl: 'https://justdial.com/add',
+      html: LOW_CONF,
+      existing: marked,
+      forceReclassify: true,
+    });
+    const field = rebuilt.fields.find((f) => f.selector === sel)!;
+    expect(field.source).not.toBe('known_bad');
+    expect(field.source).not.toBe('human_corrected');
+  });
+
+  it('clearHumanCorrections drops pins so rebuild can re-guess', () => {
+    const recipe = buildSiteRecipe({
+      domain: 'justdial.com',
+      entryUrl: 'https://justdial.com/add',
+      html: LOW_CONF,
+    });
+    const sel = recipe.fields[0]!.selector;
+    const corrected = applyHumanFieldCorrection(recipe, {
+      selector: sel,
+      role: 'phone',
+    });
+    expect(corrected.fields[0]!.source).toBe('human_corrected');
+    expect(corrected.fields[0]!.role).toBe('phone');
+    const cleared = clearHumanCorrections(corrected);
+    expect(cleared.fields[0]!.source).toBe('known_bad');
+    const rebuilt = buildSiteRecipe({
+      domain: 'justdial.com',
+      entryUrl: 'https://justdial.com/add',
+      html: LOW_CONF,
+      existing: cleared,
+      forceReclassify: true,
+    });
+    expect(rebuilt.fields[0]!.source).not.toBe('human_corrected');
+    // Pinned phone must not survive clear + reclassify
+    expect(rebuilt.fields[0]!.role === 'phone' && rebuilt.fields[0]!.source === 'human_corrected').toBe(
+      false
+    );
   });
 
   it('conservation: automatable + manualTotal === active; packages bucket-sum OK', () => {

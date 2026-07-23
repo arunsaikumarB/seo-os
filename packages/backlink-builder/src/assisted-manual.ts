@@ -23,7 +23,13 @@ export const ASSISTED_FORM_READER_VERSION = 2;
 export const ASSISTED_FIELD_CLASSIFIER_VERSION = 3;
 
 export type FieldConfidence = 'high' | 'medium' | 'low';
-export type FieldSource = 'dom_label' | 'llm_inferred' | 'human_corrected' | 'name_guess';
+export type FieldSource =
+  | 'dom_label'
+  | 'llm_inferred'
+  | 'human_corrected'
+  | 'name_guess'
+  /** User rejected the mapping; must re-infer on next read — never pin. */
+  | 'known_bad';
 export type FieldRole =
   | 'title'
   | 'short_desc'
@@ -697,6 +703,7 @@ export function buildSiteRecipe(input: {
   const fields: RecipeField[] = facts.map((f) => {
     const prev = existingBySelector.get(f.selector);
     // Human correction never re-guessed (§3 rule 2) — even across classifier upgrades
+    // known_bad is intentionally NOT preserved — re-infer on every rebuild
     if (prev?.source === 'human_corrected') {
       return {
         ...prev,
@@ -753,15 +760,47 @@ export function buildSiteRecipe(input: {
   };
 }
 
+/**
+ * User rejected a mapping with no replacement. Clears the role pin so the next
+ * read re-infers — must NOT set human_corrected (that would freeze the error).
+ */
+export function markFieldMappingWrong(
+  recipe: SiteRecipe,
+  selector: string,
+  notes?: string
+): SiteRecipe {
+  const fields = recipe.fields.map((f) => {
+    if (f.selector !== selector) return f;
+    return {
+      ...f,
+      role: 'other' as FieldRole,
+      source: 'known_bad' as const,
+      confidence: 'low' as const,
+    };
+  });
+  return {
+    ...recipe,
+    fields,
+    correctionCount: recipe.correctionCount + 1,
+    notes: notes
+      ? [recipe.notes, notes].filter(Boolean).join(' · ')
+      : [recipe.notes, 'Field marked wrong (re-infer)'].filter(Boolean).join(' · '),
+    lastVerifiedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Pin a real replacement role/value. Only call when the user supplies a role.
+ */
 export function applyHumanFieldCorrection(
   recipe: SiteRecipe,
-  correction: { selector: string; role?: FieldRole; notes?: string }
+  correction: { selector: string; role: FieldRole; notes?: string }
 ): SiteRecipe {
   const fields = recipe.fields.map((f) => {
     if (f.selector !== correction.selector) return f;
     return {
       ...f,
-      role: correction.role ?? f.role,
+      role: correction.role,
       source: 'human_corrected' as const,
       confidence: 'high' as const,
     };
@@ -773,6 +812,25 @@ export function applyHumanFieldCorrection(
     notes: correction.notes
       ? [recipe.notes, correction.notes].filter(Boolean).join(' · ')
       : recipe.notes,
+    lastVerifiedAt: new Date().toISOString(),
+  };
+}
+
+/** Drop all human pins / known-bad flags so the next force re-read can re-infer. */
+export function clearHumanCorrections(recipe: SiteRecipe): SiteRecipe {
+  const fields = recipe.fields.map((f) => {
+    if (f.source !== 'human_corrected' && f.source !== 'known_bad') return f;
+    return {
+      ...f,
+      role: 'other' as FieldRole,
+      source: 'known_bad' as const,
+      confidence: 'low' as const,
+    };
+  });
+  return {
+    ...recipe,
+    fields,
+    notes: [recipe.notes, 'Human corrections cleared'].filter(Boolean).join(' · '),
     lastVerifiedAt: new Date().toISOString(),
   };
 }
