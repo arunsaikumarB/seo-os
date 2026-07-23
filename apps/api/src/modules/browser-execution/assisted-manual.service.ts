@@ -22,6 +22,7 @@ import {
   fieldFactSnapshot,
   normalizeSiteDomain,
   recipeVersionsCurrent,
+  gateBlocksReady,
   type AssistedPackagePayload,
   type FieldRole,
   type PackageStatus,
@@ -697,6 +698,9 @@ export async function listAssistedPackages(workspaceId: string) {
   await healAssistedDoneSubmissions(workspaceId).catch((err) =>
     logger.warn({ err, workspaceId }, 'assisted heal Done→Submitted failed')
   );
+  await healReadyPackagesWithBlockingGates(workspaceId).catch((err) =>
+    logger.warn({ err, workspaceId }, 'assisted heal gate→needs_person failed')
+  );
 
   const { data: rows } = await admin()
     .from('assisted_packages')
@@ -978,6 +982,55 @@ export async function updateAssistedPackageStatus(
   }
 
   return formatPackageRow(data);
+}
+
+/**
+ * Demote Ready packages that have a human gate (login/captcha/otp/…) to Needs a person.
+ * Ready is paste-and-submit only when gate = none.
+ */
+async function healReadyPackagesWithBlockingGates(workspaceId: string) {
+  const { data: rows } = await admin()
+    .from('assisted_packages')
+    .select('id, gate, bucket, payload, failure_reason')
+    .eq('workspace_id', workspaceId)
+    .eq('bucket', 'ready')
+    .limit(100);
+  if (!rows?.length) return;
+
+  for (const row of rows) {
+    const gate = String(row.gate ?? 'none');
+    if (!gateBlocksReady(gate)) continue;
+    const payload = {
+      ...((row.payload as AssistedPackagePayload) ?? ({} as AssistedPackagePayload)),
+      bucket: 'needs_person' as const,
+      failureReason:
+        row.failure_reason ||
+        `Gate: ${gate} — needs a person (not paste-and-submit Ready)`,
+      gateNotes:
+        gate === 'login'
+          ? 'Login required — sign in yourself; the app will not bypass auth.'
+          : gate === 'captcha'
+            ? 'CAPTCHA present — clear it yourself; the app will not solve it.'
+            : gate === 'cloudflare'
+              ? 'Cloudflare / anti-bot challenge — clear it yourself; the app will not bypass it.'
+              : gate === 'registration'
+                ? 'Registration required — create an account yourself; the app will not sign up.'
+                : `Gate: ${gate} — needs a person.`,
+    };
+    await admin()
+      .from('assisted_packages')
+      .update({
+        bucket: 'needs_person',
+        failure_reason: payload.failureReason,
+        payload,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', row.id);
+    logger.info(
+      { workspaceId, packageId: row.id, gate },
+      'assisted heal: Ready→needs_person (blocking gate)'
+    );
+  }
 }
 
 /**

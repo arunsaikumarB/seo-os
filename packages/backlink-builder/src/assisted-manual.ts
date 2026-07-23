@@ -49,11 +49,29 @@ export type FieldRole =
 export type AssistedGate =
   | 'none'
   | 'captcha'
+  | 'cloudflare'
+  | 'registration'
   | 'otp_email'
   | 'otp_phone'
   | 'login'
   | 'manual_review'
   | 'multi_step';
+
+/** Gates that require a human — never paste-and-submit Ready. */
+export function gateBlocksReady(gate: AssistedGate | string | null | undefined): boolean {
+  const g = String(gate ?? 'none');
+  if (g === 'none' || g === '') return false;
+  // Explicit blockers + any otp_* future variants
+  if (g.startsWith('otp_')) return true;
+  return (
+    g === 'login' ||
+    g === 'captcha' ||
+    g === 'cloudflare' ||
+    g === 'registration' ||
+    g === 'manual_review' ||
+    g === 'multi_step'
+  );
+}
 
 export type AssistedBucket = 'ready' | 'check_fields' | 'needs_person';
 export type PackageStatus = 'not_started' | 'in_progress' | 'done' | 'failed';
@@ -381,12 +399,26 @@ export function detectMultiStepForm(html: string): boolean {
 export function detectGateFromHtml(html: string): AssistedGate {
   const h = html.toLowerCase();
   if (detectMultiStepForm(html)) return 'multi_step';
-  if (/recaptcha|hcaptcha|g-recaptcha|cf-turnstile|captcha/i.test(h)) return 'captcha';
+  if (/cloudflare|cf-challenge|cf-turnstile|attention required|checking your browser/i.test(h)) {
+    return 'cloudflare';
+  }
+  if (/recaptcha|hcaptcha|g-recaptcha|captcha/i.test(h)) return 'captcha';
   if (/one[- ]?time|otp|verification code|enter the code/i.test(h) && /email/i.test(h)) {
     return 'otp_email';
   }
   if (/sms|phone.*(code|verify)|text.*(code|verify)/i.test(h)) return 'otp_phone';
-  if (/type=["']password["']/i.test(h) && /login|sign\s*in|log\s*in/i.test(h)) return 'login';
+  if (
+    /type=["']password["']/i.test(h) &&
+    /login|sign\s*in|log\s*in/i.test(h)
+  ) {
+    return 'login';
+  }
+  if (
+    /sign\s*up|create\s*(an?\s*)?account|register|registration/i.test(h) &&
+    /type=["']password["']/i.test(h)
+  ) {
+    return 'registration';
+  }
   if (/pending review|manual approval|we will review/i.test(h)) return 'manual_review';
   return 'none';
 }
@@ -1054,7 +1086,10 @@ export function assignAssistedBucket(input: {
   if (input.fingerprintStatus === 'changed' || input.fingerprintStatus === 'stale') {
     return 'needs_person';
   }
-  if (input.recipe.multiStep || input.recipe.gate === 'multi_step') return 'needs_person';
+  // Ready = paste-and-submit with no blocker. Any gate ≠ none → Needs a person.
+  if (gateBlocksReady(input.recipe.gate) || input.recipe.multiStep) {
+    return 'needs_person';
+  }
   if (input.fields.some((f) => f.overLimit)) return 'needs_person';
   const emptyRequired = input.fields.some(
     (f) =>
@@ -1076,6 +1111,8 @@ export function assignAssistedBucket(input: {
   if (requiredHigh.some((f) => f.confidence !== 'high' && f.role !== 'terms')) {
     return 'check_fields';
   }
+  // Final Ready gate: only when gate is explicitly none
+  if (input.recipe.gate !== 'none') return 'needs_person';
   return 'ready';
 }
 
@@ -1250,8 +1287,10 @@ export function buildAssistedPackage(input: {
     failureReason = 'Form changed — re-prepare';
   } else if (fingerprintStatus === 'stale') {
     failureReason = 'Package expired — re-prepare';
-  } else if (input.recipe.multiStep) {
+  } else if (input.recipe.multiStep || input.recipe.gate === 'multi_step') {
     failureReason = input.recipe.multiStepLabel ?? 'Multi-step form';
+  } else if (gateBlocksReady(input.recipe.gate)) {
+    failureReason = `Gate: ${input.recipe.gate} — needs a person (not paste-and-submit Ready)`;
   } else if (!formFound) {
     failureReason = 'No form found';
   }
@@ -1263,11 +1302,15 @@ export function buildAssistedPackage(input: {
         ? 'SMS code will be sent to the phone you enter — keep your phone ready.'
         : input.recipe.gate === 'captcha'
           ? 'CAPTCHA present — clear it yourself; the app will not solve it.'
-          : input.recipe.gate === 'login'
-            ? 'Login required — sign in yourself; the app will not bypass auth.'
-            : input.recipe.gate === 'multi_step'
-              ? honestyNotes[3]
-              : 'No special gate detected beyond normal form submit.';
+          : input.recipe.gate === 'cloudflare'
+            ? 'Cloudflare / anti-bot challenge — clear it yourself; the app will not bypass it.'
+            : input.recipe.gate === 'login'
+              ? 'Login required — sign in yourself; the app will not bypass auth.'
+              : input.recipe.gate === 'registration'
+                ? 'Registration required — create an account yourself; the app will not sign up.'
+                : input.recipe.gate === 'multi_step'
+                  ? honestyNotes[3]
+                  : 'No special gate detected beyond normal form submit.';
 
   return {
     entryUrl: input.recipe.entryUrl,

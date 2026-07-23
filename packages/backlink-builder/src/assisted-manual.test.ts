@@ -8,11 +8,13 @@ import {
   buildSiteRecipe,
   computeAssistedLaneCounts,
   computeFormFingerprint,
+  detectGateFromHtml,
   evaluateFingerprintStatus,
   extractFormFieldFacts,
   fieldFactSnapshot,
   findSimilarPackagePairs,
   fitValueToLimit,
+  gateBlocksReady,
   inferFieldRole,
   leadingAttrToken,
   recipeVersionsCurrent,
@@ -455,6 +457,62 @@ describe('Phase 7 Assisted Manual', () => {
       formFound: true,
     });
     expect(bucket).toBe('needs_person');
+  });
+
+  it('blocking gates never land in Ready — login/captcha/otp → needs_person', () => {
+    const baseRecipe = buildSiteRecipe({
+      domain: 'forum.parallels.com',
+      entryUrl: 'https://forum.parallels.com/submit',
+      html: SIMPLE_FORM,
+    });
+    // High-confidence fields alone must not override a login gate
+    const highFields = baseRecipe.fields.map((f) => ({
+      selector: f.selector,
+      label: f.label ?? f.role,
+      role: f.role,
+      value: 'ok',
+      charCount: 2,
+      maxlength: f.maxlength,
+      confidence: 'high' as const,
+      source: f.source,
+      required: f.required,
+      overLimit: false,
+      humanStep: null,
+      recommendedOption: null,
+      options: f.options,
+    }));
+
+    for (const gate of ['login', 'captcha', 'cloudflare', 'registration', 'otp_email', 'otp_phone'] as const) {
+      const bucket = assignAssistedBucket({
+        recipe: { ...baseRecipe, gate },
+        fields: highFields,
+        fingerprintStatus: 'fresh',
+        formFound: true,
+      });
+      expect(bucket).toBe('needs_person');
+    }
+
+    // gate=none must not be forced to needs_person by the gate rule alone
+    const noneBucket = assignAssistedBucket({
+      recipe: { ...baseRecipe, gate: 'none' },
+      fields: highFields,
+      fingerprintStatus: 'fresh',
+      formFound: true,
+    });
+    expect(noneBucket).not.toBe('needs_person');
+  });
+
+  it('detectGateFromHtml maps login/captcha/cloudflare/registration', () => {
+    expect(detectGateFromHtml('<form><input type="password"/><button>Log in</button></form>')).toBe(
+      'login'
+    );
+    expect(detectGateFromHtml('<div class="g-recaptcha"></div><form></form>')).toBe('captcha');
+    expect(detectGateFromHtml('<div>Checking your browser — Cloudflare</div>')).toBe('cloudflare');
+    expect(
+      detectGateFromHtml('<form><input type="password"/><button>Create account</button></form>')
+    ).toBe('registration');
+    expect(gateBlocksReady('login')).toBe(true);
+    expect(gateBlocksReady('none')).toBe(false);
   });
 
   it('detects >0.85 similarity pairs (AT6)', () => {
