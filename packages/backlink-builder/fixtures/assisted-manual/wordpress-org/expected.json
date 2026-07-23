@@ -1,0 +1,13 @@
+{
+  "id": "wordpress-org",
+  "domain": "wordpress.org",
+  "entryUrl": "https://wordpress.org/plugins/add",
+  "gate": "none",
+  "bucketAllow": ["ready", "check_fields"],
+  "fields": [
+    { "match": { "id": "plugin_name" }, "role": "title", "roleAllow": ["title", "business_name", "name"] },
+    { "match": { "id": "plugin_uri" }, "role": "url" },
+    { "match": { "id": "description" }, "role": "long_desc" }
+  ],
+  "notes": "Plugin URI must be url; Plugin Name must not become url."
+}

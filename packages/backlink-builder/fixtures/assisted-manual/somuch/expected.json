@@ -1,0 +1,14 @@
+{
+  "id": "somuch",
+  "domain": "somuch.com",
+  "entryUrl": "https://somuch.com/submit",
+  "gate": "none",
+  "bucket": "ready",
+  "bucketAllow": ["ready", "check_fields"],
+  "fields": [
+    { "match": { "id": "site_title" }, "role": "title" },
+    { "match": { "id": "site_url" }, "role": "url" },
+    { "match": { "id": "site_desc" }, "role": "long_desc" }
+  ],
+  "notes": "Clean directory form — paste-and-submit when values are high confidence."
+}

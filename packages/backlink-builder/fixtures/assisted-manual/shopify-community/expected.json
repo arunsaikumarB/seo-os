@@ -1,0 +1,13 @@
+{
+  "id": "shopify-community",
+  "domain": "community.shopify.com",
+  "entryUrl": "https://community.shopify.com/c/register",
+  "gate": "registration",
+  "bucket": "needs_person",
+  "fields": [
+    { "match": { "id": "store_name" }, "role": "business_name", "roleAllow": ["business_name", "title", "name"] },
+    { "match": { "id": "store_url" }, "role": "url" },
+    { "match": { "id": "email" }, "role": "email" }
+  ],
+  "notes": "Registration + password → Needs a person."
+}

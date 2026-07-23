@@ -50,6 +50,9 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Assisted Manual fixture regression
+        run: npm test --workspace=@seo-os/backlink-builder -- src/assisted-fixtures.test.ts
+
       - name: Build
         run: npm run build
 

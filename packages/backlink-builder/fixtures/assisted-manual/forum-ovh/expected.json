@@ -1,0 +1,12 @@
+{
+  "id": "forum-ovh",
+  "domain": "forum.ovh.com",
+  "entryUrl": "https://forum.ovh.com/new",
+  "gate": "captcha",
+  "bucket": "needs_person",
+  "fields": [
+    { "match": { "id": "topic" }, "role": "title" },
+    { "match": { "id": "body" }, "role": "long_desc" }
+  ],
+  "notes": "CAPTCHA gate → Needs a person."
+}

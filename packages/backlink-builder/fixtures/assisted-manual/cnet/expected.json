@@ -1,0 +1,13 @@
+{
+  "id": "cnet",
+  "domain": "cnet.com",
+  "entryUrl": "https://www.cnet.com/submit",
+  "gate": "none",
+  "bucketAllow": ["ready", "check_fields"],
+  "fields": [
+    { "match": { "id": "product_name" }, "role": "title", "roleAllow": ["title", "business_name", "name"] },
+    { "match": { "id": "product_url" }, "role": "url" },
+    { "match": { "id": "summary" }, "role": "short_desc", "roleAllow": ["short_desc", "long_desc"] }
+  ],
+  "notes": "Directory-style product submit without auth gate."
+}

@@ -1458,6 +1458,126 @@ export async function clearAssistedCorrections(workspaceId: string, packageId: s
   return formatPackageRow(saved);
 }
 
+/**
+ * Phase 8 — one-click "report bad package".
+ * Captures live HTML + inferred roles into assisted_fixture_reports so a new site
+ * type becomes a regression fixture instead of a live debug session.
+ */
+export async function reportBadAssistedPackage(
+  workspaceId: string,
+  packageId: string,
+  opts: { note?: string; reportedBy?: string | null } = {}
+) {
+  const { data: row } = await admin()
+    .from('assisted_packages')
+    .select('*')
+    .eq('workspace_id', workspaceId)
+    .eq('id', packageId)
+    .maybeSingle();
+  if (!row) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Package not found');
+
+  const domain = normalizeSiteDomain(String(row.domain));
+  const entryUrl = String(row.entry_url ?? '');
+  const payload = (row.payload as AssistedPackagePayload) ?? ({} as AssistedPackagePayload);
+
+  const html = (await fetchHtml(entryUrl)) ?? '';
+  if (!html) {
+    throw new AppError(
+      503,
+      'SERVICE_UNAVAILABLE',
+      'Could not fetch page HTML for the fixture report. Try again or paste the URL later.'
+    );
+  }
+
+  const facts = extractFormFieldFacts(html);
+  const inferredFields = (payload.fields ?? []).map((f) => ({
+    selector: f.selector,
+    label: f.label,
+    role: f.role,
+    confidence: f.confidence,
+    flagged: Boolean(f.flagged),
+    flagReason: f.flagReason ?? null,
+    source: f.source ?? null,
+    valuePreview: String(f.value ?? '').slice(0, 120),
+  }));
+
+  const slugBase =
+    domain
+      .replace(/^www\./, '')
+      .replace(/\./g, '-')
+      .replace(/[^a-z0-9-]/gi, '')
+      .toLowerCase()
+      .slice(0, 48) || 'site';
+  const fixtureId = `${slugBase}-${String(row.id).slice(0, 8)}`;
+
+  const fixtureDraft = {
+    id: fixtureId,
+    domain,
+    entryUrl,
+    gate: String(row.gate ?? payload.gate ?? 'none'),
+    bucket: String(row.bucket ?? 'check_fields'),
+    fields: (payload.fields ?? []).map((f) => {
+      const idMatch = f.selector.match(/#([A-Za-z][\w:-]*)/);
+      const nameMatch = f.selector.match(/name="([^"]+)"/);
+      const match: Record<string, string> = {};
+      if (idMatch?.[1]) match.id = idMatch[1];
+      else if (nameMatch?.[1]) match.name = nameMatch[1];
+      else if (f.label) match.labelIncludes = String(f.label).slice(0, 40);
+      return { match, role: f.role };
+    }),
+    notes: opts.note?.trim() || 'User-reported bad package — review roles before accepting.',
+  };
+
+  const inferred = {
+    gate: row.gate,
+    bucket: row.bucket,
+    readerVersion: payload.readerVersion ?? null,
+    classifierVersion: payload.classifierVersion ?? null,
+    confidenceSummary: payload.confidenceSummary ?? null,
+    fieldCount: facts.length,
+    fields: inferredFields,
+    recipeFields: Array.isArray(payload.fields) ? payload.fields.length : 0,
+  };
+
+  const { data: report, error } = await admin()
+    .from('assisted_fixture_reports')
+    .insert({
+      workspace_id: workspaceId,
+      package_id: packageId,
+      opportunity_id: row.opportunity_id,
+      domain,
+      entry_url: entryUrl,
+      gate: row.gate,
+      bucket: row.bucket,
+      note: opts.note?.trim() || null,
+      html: html.slice(0, 500_000),
+      inferred,
+      fixture_draft: fixtureDraft,
+      reported_by: opts.reportedBy ?? null,
+      status: 'open',
+    })
+    .select('id, domain, entry_url, status, created_at, fixture_draft')
+    .single();
+
+  if (error) throw new AppError(500, 'INTERNAL_ERROR', error.message);
+
+  logger.info(
+    { workspaceId, packageId, reportId: report.id, domain },
+    'assisted-manual: bad package reported as fixture candidate'
+  );
+
+  return {
+    reportId: report.id,
+    domain: report.domain,
+    entryUrl: report.entry_url,
+    status: report.status,
+    createdAt: report.created_at,
+    fixtureDraft: report.fixture_draft,
+    message:
+      'Saved HTML + inferred roles. Export with scripts/export-assisted-fixture-reports.mjs to add to the regression suite.',
+  };
+}
+
 export async function getAssistedPilotMetrics(workspaceId: string) {
   const { data: rows } = await admin()
     .from('assisted_packages')

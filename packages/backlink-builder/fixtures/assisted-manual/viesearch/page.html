@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <form action="/submit" method="post">
+    <label for="title">Title (Optional) Leave blank to auto-fetch from website</label>
+    <input id="title" name="title" type="text" />
+    <label for="website">Website URL</label>
+    <input id="website" name="website" type="url" required />
+    <label for="description">Description</label>
+    <textarea id="description" name="description" required maxlength="500"></textarea>
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" />
+    <p>Enter the SMS verification code we text to your phone.</p>
+    <button type="submit">Submit</button>
+  </form>
+</body>
+</html>

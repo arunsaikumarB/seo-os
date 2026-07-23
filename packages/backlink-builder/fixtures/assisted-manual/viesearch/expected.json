@@ -1,0 +1,15 @@
+{
+  "id": "viesearch",
+  "domain": "viesearch.com",
+  "entryUrl": "https://viesearch.com/submit",
+  "gate": "otp_phone",
+  "gateAllow": ["otp_phone", "otp_email"],
+  "bucket": "check_fields",
+  "fields": [
+    { "match": { "id": "title" }, "role": "title", "mustNotBeRole": ["url"] },
+    { "match": { "id": "website" }, "role": "url" },
+    { "match": { "id": "description" }, "role": "long_desc" },
+    { "match": { "id": "email" }, "role": "email" }
+  ],
+  "notes": "Label 'Title (Optional) Leave blank…' must classify as title, never url. OTP → check_fields."
+}

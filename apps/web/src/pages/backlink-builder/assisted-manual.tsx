@@ -25,6 +25,8 @@ type PackageField = {
   options?: string[];
   humanStep?: string | null;
   overLimit?: boolean;
+  flagged?: boolean;
+  flagReason?: string | null;
 };
 
 type AssistedPackage = {
@@ -55,6 +57,7 @@ type AssistedPackage = {
     multiStepLabel: string | null;
     readerVersion?: number;
     classifierVersion?: number;
+    confidenceSummary?: string | null;
   };
   blocked?: boolean;
   blockReason?: string;
@@ -228,6 +231,23 @@ export function AssistedManualPage() {
       void qc.invalidateQueries({ queryKey: ['assisted-manual-metrics', projectId] });
     },
     onError: (e) => toast.error(getApiErrorMessage(e, 'Re-read failed')),
+  });
+
+  const reportBad = useMutation({
+    mutationFn: (vars: { packageId: string; note?: string }) =>
+      request<{
+        data: { reportId: string; message: string; fixtureDraft: unknown };
+      }>(
+        `/v1/projects/${projectId}/backlink-builder/assisted-manual/${vars.packageId}/report-bad`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ note: vars.note }),
+        }
+      ),
+    onSuccess: () => {
+      toast.success('Reported — HTML + roles saved as a fixture candidate');
+    },
+    onError: (e) => toast.error(getApiErrorMessage(e, 'Report failed')),
   });
 
   async function downloadExcel() {
@@ -413,6 +433,11 @@ export function AssistedManualPage() {
                       </p>
                     ) : null}
                     <p className="text-xs text-muted-foreground mt-1">{pkg.package?.gateNotes}</p>
+                    {pkg.package?.confidenceSummary ? (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Confidence: {pkg.package.confidenceSummary}
+                      </p>
+                    ) : null}
                   </CardHeader>
                   <CardContent className="space-y-3">
                     <div className="flex flex-wrap gap-2">
@@ -442,6 +467,25 @@ export function AssistedManualPage() {
                         title="Remove all pinned human corrections for this site and re-read the form"
                       >
                         Clear corrections for this site
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={reportBad.isPending}
+                        onClick={() => {
+                          const note = window.prompt(
+                            'What looks wrong? (optional — becomes the fixture note)',
+                            ''
+                          );
+                          if (note === null) return;
+                          reportBad.mutate({
+                            packageId: pkg.id,
+                            note: note.trim() || undefined,
+                          });
+                        }}
+                        title="Capture page HTML + inferred roles as a regression fixture candidate"
+                      >
+                        <AlertTriangle className="h-3.5 w-3.5 mr-1" /> Report bad package
                       </Button>
                       <Button
                         size="sm"
@@ -510,7 +554,7 @@ export function AssistedManualPage() {
                             key={f.selector}
                             className={cn(
                               'rounded-lg border px-3 py-2 text-sm',
-                              (f.confidence === 'low' || f.confidence === 'medium') &&
+                              (f.confidence === 'low' || f.confidence === 'medium' || f.flagged) &&
                                 'border-amber-500/40 bg-amber-500/5',
                               f.overLimit && 'border-destructive/50'
                             )}
@@ -522,10 +566,21 @@ export function AssistedManualPage() {
                                   ({f.role})
                                 </span>
                               </p>
-                              <Badge className="text-[10px]">
-                                {f.confidence}
-                              </Badge>
+                              <div className="flex flex-wrap gap-1">
+                                {f.flagged ? (
+                                  <Badge className="text-[10px] border-amber-500 text-amber-800">
+                                    flagged
+                                  </Badge>
+                                ) : null}
+                                <Badge className="text-[10px]">{f.confidence}</Badge>
+                              </div>
                             </div>
+                            {f.flagReason ? (
+                              <p className="text-xs text-amber-800 mt-1 flex items-center gap-1">
+                                <AlertTriangle className="h-3 w-3 shrink-0" />
+                                {f.flagReason}
+                              </p>
+                            ) : null}
                             {f.value ? (
                               <p className="mt-1 whitespace-pre-wrap text-muted-foreground">
                                 {f.value}

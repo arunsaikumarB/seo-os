@@ -1,3 +1,8 @@
+import {
+  confidenceGateSummary,
+  selfCheckPackageFields,
+} from './assisted-self-check.js';
+
 /**
  * Phase 7 — Assisted Manual packages (human submits; app never auto-publishes).
  * Pure logic: Form Reader, Site Recipes, packages, buckets, staleness, similarity.
@@ -20,8 +25,9 @@ export const ASSISTED_FORM_READER_VERSION = 2;
  * Bump when field-role / confidence rules change.
  * Mismatched recipes re-classify even when form fingerprint is unchanged.
  * v6: drop contradictory / legacy human_corrected pins; clear deletes pins.
+ * v7: Phase 8 self-check + confidence gate (never high on role/value mismatch).
  */
-export const ASSISTED_FIELD_CLASSIFIER_VERSION = 6;
+export const ASSISTED_FIELD_CLASSIFIER_VERSION = 7;
 
 export type FieldConfidence = 'high' | 'medium' | 'low';
 export type FieldSource =
@@ -162,6 +168,9 @@ export type PackageFieldValue = {
   humanStep?: string | null;
   imageFileName?: string | null;
   imageConstraints?: string | null;
+  /** Phase 8 — self-check failed or classifier uncertain */
+  flagged?: boolean;
+  flagReason?: string | null;
 };
 
 export type AssistedPackagePayload = {
@@ -179,6 +188,8 @@ export type AssistedPackagePayload = {
   fields: PackageFieldValue[];
   honestyNotes: string[];
   failureReason: string | null;
+  /** Phase 8 — e.g. "3 confident · 2 need a check" */
+  confidenceSummary?: string | null;
   readerVersion?: number;
   classifierVersion?: number;
 };
@@ -1115,6 +1126,8 @@ export function assignAssistedBucket(input: {
     (f) => f.role === 'category' && f.options && f.options.length > 0 && !f.recommendedOption
   );
   if (unresolvedDropdown) return 'check_fields';
+  // Phase 8 — any flagged / self-check failure → Check these fields (never Ready)
+  if (input.fields.some((f) => f.flagged)) return 'check_fields';
   const lowOrMed = input.fields.filter(
     (f) => f.required && (f.confidence === 'low' || f.confidence === 'medium')
   );
@@ -1289,9 +1302,13 @@ export function buildAssistedPackage(input: {
     };
   });
 
+  // Phase 8 — self-check + confidence gate before bucket / ship
+  const checkedFields = selfCheckPackageFields(fields);
+  const confSummary = confidenceGateSummary(checkedFields);
+
   const bucket = assignAssistedBucket({
     recipe: input.recipe,
-    fields,
+    fields: checkedFields,
     fingerprintStatus,
     formFound,
   });
@@ -1343,9 +1360,10 @@ export function buildAssistedPackage(input: {
     gateNotes,
     multiStep: input.recipe.multiStep,
     multiStepLabel: input.recipe.multiStepLabel ?? null,
-    fields,
+    fields: checkedFields,
     honestyNotes,
-    failureReason,
+    failureReason: failureReason ?? confSummary.line,
+    confidenceSummary: confSummary.line,
     readerVersion: input.recipe.readerVersion ?? ASSISTED_FORM_READER_VERSION,
     classifierVersion: input.recipe.classifierVersion ?? ASSISTED_FIELD_CLASSIFIER_VERSION,
   };

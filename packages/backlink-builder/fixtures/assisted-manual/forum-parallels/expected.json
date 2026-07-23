@@ -1,0 +1,12 @@
+{
+  "id": "forum-parallels",
+  "domain": "forum.parallels.com",
+  "entryUrl": "https://forum.parallels.com/post",
+  "gate": "login",
+  "bucket": "needs_person",
+  "fields": [
+    { "match": { "id": "thread_title" }, "role": "title" },
+    { "match": { "id": "message" }, "role": "long_desc" }
+  ],
+  "notes": "Login gate → Needs a person regardless of field confidence."
+}

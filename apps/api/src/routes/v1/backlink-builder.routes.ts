@@ -367,6 +367,32 @@ backlinkBuilderRouter.post(
   }
 );
 
+backlinkBuilderRouter.post(
+  '/assisted-manual/:packageId/report-bad',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const body = z
+        .object({ note: z.string().max(2000).optional() })
+        .parse(req.body ?? {});
+      const { userId } = (req as AuthenticatedRequest).auth;
+      const { reportBadAssistedPackage } = await import(
+        '../../modules/browser-execution/assisted-manual.service.js'
+      );
+      res.json({
+        data: await reportBadAssistedPackage(
+          param(req.params.projectId),
+          param(req.params.packageId),
+          { note: body.note, reportedBy: userId }
+        ),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 /** Dev-only Campaign Health audit — all items including Deleted. */
 backlinkBuilderRouter.get(
   '/campaign-health',
