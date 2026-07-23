@@ -19,8 +19,9 @@ export const ASSISTED_FORM_READER_VERSION = 2;
 /**
  * Bump when field-role / confidence rules change.
  * Mismatched recipes re-classify even when form fingerprint is unchanged.
+ * v4: force re-stamp after re-read wiring fix (known-bad / clear-corrections).
  */
-export const ASSISTED_FIELD_CLASSIFIER_VERSION = 3;
+export const ASSISTED_FIELD_CLASSIFIER_VERSION = 4;
 
 export type FieldConfidence = 'high' | 'medium' | 'low';
 export type FieldSource =
@@ -830,8 +831,25 @@ export function clearHumanCorrections(recipe: SiteRecipe): SiteRecipe {
   return {
     ...recipe,
     fields,
+    // Force version-stale so any prepare path reclassifies
+    readerVersion: 0,
+    classifierVersion: 0,
     notes: [recipe.notes, 'Human corrections cleared'].filter(Boolean).join(' · '),
     lastVerifiedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * For force re-read: keep only real human role replacements.
+ * known_bad and machine guesses must not pin the next inference.
+ */
+export function recipePinsOnly(recipe: SiteRecipe | null | undefined): SiteRecipe | null {
+  if (!recipe) return null;
+  return {
+    ...recipe,
+    fields: recipe.fields.filter((f) => f.source === 'human_corrected'),
+    readerVersion: 0,
+    classifierVersion: 0,
   };
 }
 

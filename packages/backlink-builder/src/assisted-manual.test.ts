@@ -231,6 +231,44 @@ describe('Phase 7 Assisted Manual', () => {
     expect(longNeverUrl.role).not.toBe('url');
   });
 
+  it('literal viesearch labels: Title…website → title; Description…website → description', () => {
+    expect(
+      inferFieldRole({
+        label: 'Title (Optional) Leave blank to auto-fetch from website',
+        name: null,
+        id: null,
+        placeholder: null,
+        ariaLabel: null,
+        type: 'text',
+        required: false,
+        maxlength: null,
+        options: [],
+        surroundingText: null,
+        accept: null,
+        sizeHint: null,
+        selector: 'input',
+      }).role
+    ).toBe('title');
+
+    expect(
+      inferFieldRole({
+        label: 'Description (Optional) Leave blank to auto-fetch from website',
+        name: null,
+        id: null,
+        placeholder: null,
+        ariaLabel: null,
+        type: 'textarea',
+        required: false,
+        maxlength: null,
+        options: [],
+        surroundingText: null,
+        accept: null,
+        sizeHint: null,
+        selector: 'textarea',
+      }).role
+    ).toBe('long_desc');
+  });
+
   it('reclassifies when recipe reader/classifier version is stale', () => {
     const html = `
 <form>

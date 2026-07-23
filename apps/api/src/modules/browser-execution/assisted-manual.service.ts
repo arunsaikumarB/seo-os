@@ -12,6 +12,7 @@ import {
   applyHumanFieldCorrection,
   clearHumanCorrections,
   markFieldMappingWrong,
+  recipePinsOnly,
   buildAssistedPackage,
   buildSiteRecipe,
   computeAssistedLaneCounts,
@@ -84,14 +85,15 @@ async function upsertRecipeOnProfile(
     .maybeSingle();
 
   if (existing?.id) {
-    await admin()
+    const { error } = await admin()
       .from('site_profiles')
       .update({ recipe, updated_at: new Date().toISOString() })
       .eq('id', existing.id);
+    if (error) throw new AppError(500, 'INTERNAL_ERROR', error.message);
     return;
   }
 
-  await admin().from('site_profiles').insert({
+  const { error } = await admin().from('site_profiles').insert({
     workspace_id: workspaceId,
     domain,
     recipe,
@@ -100,6 +102,7 @@ async function upsertRecipeOnProfile(
     learning: {},
     crawl_stats: { source: 'assisted_manual_form_reader' },
   });
+  if (error) throw new AppError(500, 'INTERNAL_ERROR', error.message);
 }
 
 async function loadContentForOpportunity(workspaceId: string, opportunityId: string) {
@@ -292,7 +295,13 @@ async function listContentReadyOpportunityIds(workspaceId: string): Promise<stri
 async function prepareOnePackage(
   workspaceId: string,
   opportunityId: string,
-  opts: { entryUrlOverride?: string; forceReread?: boolean } = {}
+  opts: {
+    entryUrlOverride?: string;
+    forceReread?: boolean;
+    packageId?: string;
+    /** Prefer package.domain when re-reading an existing card (avoids www mismatch). */
+    domainOverride?: string;
+  } = {}
 ) {
   const { data: opp } = await admin()
     .from('opportunities')
@@ -303,7 +312,9 @@ async function prepareOnePackage(
   if (!opp) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Opportunity not found');
 
   const meta = (opp.metadata as Record<string, unknown> | null) ?? {};
-  const domain = normalizeSiteDomain(String(opp.domain ?? opp.url ?? ''));
+  const domain = normalizeSiteDomain(
+    String(opts.domainOverride || opp.domain || opp.url || '')
+  );
   const entryUrl =
     opts.entryUrlOverride ||
     String(meta.divertedUrl ?? meta.entryUrl ?? opp.url ?? `https://${domain}`);
@@ -316,7 +327,12 @@ async function prepareOnePackage(
     .maybeSingle();
 
   const existingRecipe = asRecipe(profile?.recipe);
-  const versionStale = !recipeVersionsCurrent(existingRecipe);
+  // Force re-read: only keep confirmed human role replacements — never reuse
+  // machine guesses or known_bad pins (those must re-run inferFieldRole).
+  const existingForBuild = opts.forceReread
+    ? recipePinsOnly(existingRecipe)
+    : existingRecipe;
+  const versionStale = !recipeVersionsCurrent(existingForBuild);
   const forceReclassify = Boolean(opts.forceReread) || versionStale;
 
   const html = await fetchHtml(entryUrl);
@@ -328,8 +344,8 @@ async function prepareOnePackage(
       domain,
       entryUrl,
       html,
-      existing: existingRecipe,
-      forceReclassify,
+      existing: existingForBuild,
+      forceReclassify: true, // always re-infer non-pins when we have live HTML
     });
   } else if (existingRecipe && !opts.forceReread) {
     recipe = recipeVersionsCurrent(existingRecipe)
@@ -361,6 +377,13 @@ async function prepareOnePackage(
     };
   }
 
+  // Always stamp current versions on the recipe before persist
+  recipe = {
+    ...recipe,
+    readerVersion: ASSISTED_FORM_READER_VERSION,
+    classifierVersion: ASSISTED_FIELD_CLASSIFIER_VERSION,
+  };
+
   await upsertRecipeOnProfile(workspaceId, domain, recipe);
 
   const content = await loadContentForOpportunity(workspaceId, opportunityId);
@@ -376,6 +399,9 @@ async function prepareOnePackage(
     fingerprintStatus: 'fresh',
     formFound,
   });
+  // Belt-and-suspenders: never leave package payload without current versions
+  payload.readerVersion = ASSISTED_FORM_READER_VERSION;
+  payload.classifierVersion = ASSISTED_FIELD_CLASSIFIER_VERSION;
 
   // Block use if over-limit values remain after fit
   if (payload.fields.some((f) => f.overLimit)) {
@@ -402,12 +428,27 @@ async function prepareOnePackage(
     updated_at: new Date().toISOString(),
   };
 
-  const { data: saved, error } = await admin()
-    .from('assisted_packages')
-    .upsert(row, { onConflict: 'workspace_id,opportunity_id' })
-    .select('*')
-    .single();
-  if (error) throw new AppError(500, 'INTERNAL_ERROR', error.message);
+  let saved: Record<string, unknown>;
+  if (opts.packageId) {
+    // Update the exact package the user is looking at (avoids stale-card confusion)
+    const { data, error } = await admin()
+      .from('assisted_packages')
+      .update(row)
+      .eq('workspace_id', workspaceId)
+      .eq('id', opts.packageId)
+      .select('*')
+      .single();
+    if (error) throw new AppError(500, 'INTERNAL_ERROR', error.message);
+    saved = data;
+  } else {
+    const { data, error } = await admin()
+      .from('assisted_packages')
+      .upsert(row, { onConflict: 'workspace_id,opportunity_id' })
+      .select('*')
+      .single();
+    if (error) throw new AppError(500, 'INTERNAL_ERROR', error.message);
+    saved = data;
+  }
 
   await admin()
     .from('opportunities')
@@ -419,9 +460,12 @@ async function prepareOnePackage(
       workspaceId,
       opportunityId,
       domain,
+      packageId: saved.id,
+      forceReread: Boolean(opts.forceReread),
       forceReclassify,
       readerVersion: recipe.readerVersion,
       classifierVersion: recipe.classifierVersion,
+      fieldRoles: recipe.fields.map((f) => `${f.selector}:${f.role}:${f.source}`),
       bucket: payload.bucket,
     },
     'assisted-manual package prepared'
@@ -654,11 +698,12 @@ export async function getAssistedPackage(workspaceId: string, packageId: string)
 /**
  * Force re-fetch HTML + re-classify (ignore fingerprint / TTL / cached recipe versions).
  * Confirmed human_corrected roles are preserved; known_bad fields re-infer.
+ * Always stamps readerVersion / classifierVersion on the package payload.
  */
 export async function rereadAssistedPackage(workspaceId: string, packageId: string) {
   const { data: row } = await admin()
     .from('assisted_packages')
-    .select('id, opportunity_id, entry_url')
+    .select('id, opportunity_id, entry_url, domain')
     .eq('workspace_id', workspaceId)
     .eq('id', packageId)
     .maybeSingle();
@@ -667,6 +712,8 @@ export async function rereadAssistedPackage(workspaceId: string, packageId: stri
   const saved = await prepareOnePackage(workspaceId, String(row.opportunity_id), {
     entryUrlOverride: row.entry_url ? String(row.entry_url) : undefined,
     forceReread: true,
+    packageId,
+    domainOverride: row.domain ? String(row.domain) : undefined,
   });
   return formatPackageRow(saved);
 }
@@ -782,7 +829,7 @@ export async function clearAssistedCorrections(workspaceId: string, packageId: s
     .maybeSingle();
   if (!row) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Package not found');
 
-  const domain = String(row.domain);
+  const domain = normalizeSiteDomain(String(row.domain));
   const { data: profile } = await admin()
     .from('site_profiles')
     .select('id, recipe')
@@ -801,6 +848,8 @@ export async function clearAssistedCorrections(workspaceId: string, packageId: s
   const saved = await prepareOnePackage(workspaceId, String(row.opportunity_id), {
     entryUrlOverride: row.entry_url ? String(row.entry_url) : undefined,
     forceReread: true,
+    packageId,
+    domainOverride: domain,
   });
   return formatPackageRow(saved);
 }

@@ -14,7 +14,7 @@ FROM node:22-bookworm-slim AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npx turbo run build --filter=@seo-os/api
+RUN TURBO_FORCE=true npx turbo run build --filter=@seo-os/api --force
 
 # Pin to the same major.minor as apps/api playwright (^1.49.1 → 1.49.1)
 FROM mcr.microsoft.com/playwright:v1.49.1-jammy AS runner

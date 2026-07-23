@@ -57,12 +57,25 @@ export async function readyHandler(_req: Request, res: Response): Promise<void> 
   });
 }
 
-export function versionHandler(_req: Request, res: Response): void {
-  res.json({
-    version: '1.2.7-queue-init',
-    api: 'v1',
-    release: 'Enterprise Production Polish',
-  });
+export async function versionHandler(_req: Request, res: Response): Promise<void> {
+  try {
+    const bb = await import('@seo-os/backlink-builder');
+    res.json({
+      version: '1.2.7-queue-init',
+      api: 'v1',
+      release: 'Enterprise Production Polish',
+      assisted: {
+        readerVersion: bb.ASSISTED_FORM_READER_VERSION,
+        classifierVersion: bb.ASSISTED_FIELD_CLASSIFIER_VERSION,
+      },
+    });
+  } catch {
+    res.json({
+      version: '1.2.7-queue-init',
+      api: 'v1',
+      release: 'Enterprise Production Polish',
+    });
+  }
 }
 
 export function metricsHandler(_req: Request, res: Response): void {

@@ -86,8 +86,22 @@ const projectScopeRouter = Router({ mergeParams: true });
 projectScopeRouter.use(authMiddleware);
 projectScopeRouter.use(requireProjectAccess);
 
-v1Router.get('/version', (_req, res) => {
-  res.json({ data: { version: '1.2.7-queue-init', api: 'v1' } });
+v1Router.get('/version', async (_req, res) => {
+  try {
+    const bb = await import('@seo-os/backlink-builder');
+    res.json({
+      data: {
+        version: '1.2.7-queue-init',
+        api: 'v1',
+        assisted: {
+          readerVersion: bb.ASSISTED_FORM_READER_VERSION,
+          classifierVersion: bb.ASSISTED_FIELD_CLASSIFIER_VERSION,
+        },
+      },
+    });
+  } catch {
+    res.json({ data: { version: '1.2.7-queue-init', api: 'v1' } });
+  }
 });
 
 v1Router.use('/notifications', notificationsRouter);
