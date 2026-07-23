@@ -1,6 +1,9 @@
 /**
  * AI Review — confidence-based triage (Phase 2).
  * Reuses existing Card/Badge/Button styling; data from CSM via /ai-review.
+ *
+ * Classification drafts are held in local state so a save/refetch on one row
+ * never wipes other rows' in-progress type selections.
  */
 import { useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
@@ -63,6 +66,8 @@ type FilterKey =
   | 'dead'
   | 'all';
 
+type TypeOption = { id: string; displayName: string };
+
 export function ClassificationDashboardPage() {
   const { projectId = '' } = useParams();
   const { request } = useApi();
@@ -70,6 +75,12 @@ export function ClassificationDashboardPage() {
   const [filter, setFilter] = useState<FilterKey>('recommended');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [openAuto, setOpenAuto] = useState(false);
+  /** Per-row website type drafts — survive list refetch / sibling saves */
+  const [draftTypes, setDraftTypes] = useState<Record<string, string>>({});
+  const [bulkType, setBulkType] = useState('');
+  const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
+
+  const draftCount = Object.keys(draftTypes).length;
 
   const board = useQuery({
     queryKey: ['ai-review', projectId],
@@ -78,23 +89,42 @@ export function ClassificationDashboardPage() {
         `/v1/projects/${projectId}/backlink-builder/automation/ai-review`
       ),
     enabled: !!projectId,
-    refetchInterval: 5_000,
+    // Pause polling while the user is mid-classify so drafts aren't fighting a remount race
+    refetchInterval: draftCount > 0 || savingIds.size > 0 ? false : 5_000,
   });
 
   const types = useQuery({
     queryKey: ['classification-types'],
     queryFn: () =>
-      request<{ data: Array<{ id: string; displayName: string }> }>(
+      request<{ data: TypeOption[] }>(
         `/v1/projects/${projectId}/backlink-builder/automation/classification/types`
       ),
     enabled: !!projectId,
   });
 
-  const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ['ai-review', projectId] });
+  const typeList = types.data?.data ?? [];
+
+  const invalidateSide = () => {
     qc.invalidateQueries({ queryKey: ['classification-analytics', projectId] });
     qc.invalidateQueries({ queryKey: ['bee-execution-progress', projectId] });
     qc.invalidateQueries({ queryKey: ['campaign-health', projectId] });
+  };
+
+  const applyBoard = (next: AiReviewBoard) => {
+    qc.setQueryData(['ai-review', projectId], { data: next });
+  };
+
+  const clearDrafts = (ids: string[]) => {
+    setDraftTypes((prev) => {
+      const next = { ...prev };
+      for (const id of ids) delete next[id];
+      return next;
+    });
+    setSavingIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) next.delete(id);
+      return next;
+    });
   };
 
   const bulk = useMutation({
@@ -128,25 +158,89 @@ export function ClassificationDashboardPage() {
       if (d.errors.length) parts.push(`${d.errors.length} errors`);
       toast.success(parts.join(', '));
       setSelected(new Set());
-      invalidate();
+      void qc.invalidateQueries({ queryKey: ['ai-review', projectId] });
+      invalidateSide();
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const classify = useMutation({
     mutationFn: (payload: { opportunityId: string; classificationId: string }) =>
-      request(
+      request<{ data: AiReviewBoard }>(
         `/v1/projects/${projectId}/backlink-builder/automation/ai-review/${payload.opportunityId}/classify`,
         {
           method: 'POST',
           body: JSON.stringify({ classificationId: payload.classificationId }),
         }
       ),
-    onSuccess: () => {
-      toast.success('Type saved — Approve / Reject unlocked');
-      invalidate();
+    onMutate: (vars) => {
+      setSavingIds((prev) => new Set(prev).add(vars.opportunityId));
+      setDraftTypes((prev) => ({
+        ...prev,
+        [vars.opportunityId]: vars.classificationId,
+      }));
     },
-    onError: (e: Error) => toast.error(e.message),
+    onSuccess: (res, vars) => {
+      if (res.data) applyBoard(res.data);
+      clearDrafts([vars.opportunityId]);
+      toast.success('Type saved — Approve / Reject unlocked');
+      invalidateSide();
+    },
+    onError: (e: Error, vars) => {
+      setSavingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(vars.opportunityId);
+        return next;
+      });
+      toast.error(e.message);
+    },
+  });
+
+  const bulkClassify = useMutation({
+    mutationFn: (payload: { itemIds: string[]; classificationId: string }) =>
+      request<{
+        data: {
+          succeeded: number;
+          skipped: number;
+          errors: string[];
+          board: AiReviewBoard;
+        };
+      }>(`/v1/projects/${projectId}/backlink-builder/automation/ai-review/bulk-classify`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    onMutate: (vars) => {
+      setSavingIds((prev) => {
+        const next = new Set(prev);
+        for (const id of vars.itemIds) next.add(id);
+        return next;
+      });
+      setDraftTypes((prev) => {
+        const next = { ...prev };
+        for (const id of vars.itemIds) next[id] = vars.classificationId;
+        return next;
+      });
+    },
+    onSuccess: (res, vars) => {
+      const d = res.data;
+      if (d.board) applyBoard(d.board);
+      clearDrafts(vars.itemIds);
+      setSelected(new Set());
+      setBulkType('');
+      const parts = [`${d.succeeded} typed`];
+      if (d.skipped) parts.push(`${d.skipped} skipped`);
+      if (d.errors?.length) parts.push(`${d.errors.length} errors`);
+      toast.success(parts.join(', '));
+      invalidateSide();
+    },
+    onError: (e: Error, vars) => {
+      setSavingIds((prev) => {
+        const next = new Set(prev);
+        for (const id of vars.itemIds) next.delete(id);
+        return next;
+      });
+      toast.error(e.message);
+    },
   });
 
   const data = board.data?.data;
@@ -203,6 +297,14 @@ export function ClassificationDashboardPage() {
       return next;
     });
   };
+
+  const setDraft = (opportunityId: string, classificationId: string) => {
+    setDraftTypes((prev) => ({ ...prev, [opportunityId]: classificationId }));
+    classify.mutate({ opportunityId, classificationId });
+  };
+
+  const typeLabel = (id: string | null | undefined) =>
+    typeList.find((t) => t.id === id)?.displayName ?? id ?? null;
 
   return (
     <PageTransition className="space-y-6 max-w-4xl">
@@ -294,6 +396,34 @@ export function ClassificationDashboardPage() {
                 <span className="text-sm font-medium tabular-nums mr-2">
                   {selected.size} selected
                 </span>
+                <select
+                  className="h-8 rounded border px-2 text-xs"
+                  value={bulkType}
+                  onChange={(e) => setBulkType(e.target.value)}
+                  aria-label="Website type for selected"
+                >
+                  <option value="">Set type for selected…</option>
+                  {typeList
+                    .filter((t) => t.id !== 'unknown')
+                    .map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.displayName}
+                      </option>
+                    ))}
+                </select>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={!bulkType || bulkClassify.isPending}
+                  onClick={() =>
+                    bulkClassify.mutate({
+                      itemIds: [...selected],
+                      classificationId: bulkType,
+                    })
+                  }
+                >
+                  {bulkClassify.isPending ? 'Saving…' : 'Apply type'}
+                </Button>
                 <Button
                   size="sm"
                   disabled={bulk.isPending}
@@ -372,10 +502,11 @@ export function ClassificationDashboardPage() {
                       item={item}
                       selected={selected.has(item.id)}
                       onToggle={() => toggleOne(item.id)}
-                      types={types.data?.data ?? []}
-                      onClassify={(classificationId) =>
-                        classify.mutate({ opportunityId: item.id, classificationId })
-                      }
+                      types={typeList}
+                      draftType={draftTypes[item.id] ?? ''}
+                      saving={savingIds.has(item.id)}
+                      onClassify={(classificationId) => setDraft(item.id, classificationId)}
+                      typeLabel={typeLabel}
                       recommend
                       auto
                     />
@@ -405,7 +536,7 @@ export function ClassificationDashboardPage() {
                 {filter === 'recommended'
                   ? 'AI recommends approval — confirm or reject'
                   : filter === 'needsClassification'
-                    ? 'Choose a website type before Approve is available'
+                    ? 'Choose a website type before Approve is available. Select many rows and use “Apply type” to classify in one step.'
                     : 'Review decisions'}
               </CardDescription>
             </CardHeader>
@@ -417,10 +548,11 @@ export function ClassificationDashboardPage() {
                     item={item}
                     selected={selected.has(item.id)}
                     onToggle={() => toggleOne(item.id)}
-                    types={types.data?.data ?? []}
-                    onClassify={(classificationId) =>
-                      classify.mutate({ opportunityId: item.id, classificationId })
-                    }
+                    types={typeList}
+                    draftType={draftTypes[item.id] ?? ''}
+                    saving={savingIds.has(item.id)}
+                    onClassify={(classificationId) => setDraft(item.id, classificationId)}
+                    typeLabel={typeLabel}
                     recommend={filter === 'recommended'}
                     onApprove={() => bulk.mutate({ action: 'approve', itemIds: [item.id] })}
                     onReject={() => bulk.mutate({ action: 'reject', itemIds: [item.id] })}
@@ -439,8 +571,11 @@ function ReviewRow(props: {
   item: AiReviewItem;
   selected: boolean;
   onToggle: () => void;
-  types: Array<{ id: string; displayName: string }>;
+  types: TypeOption[];
+  draftType: string;
+  saving?: boolean;
   onClassify: (id: string) => void;
+  typeLabel: (id: string | null | undefined) => string | null;
   recommend?: boolean;
   auto?: boolean;
   onApprove?: () => void;
@@ -450,6 +585,10 @@ function ReviewRow(props: {
   const needsClass =
     item.reviewDecision === 'Needs Classification' ||
     item.reviewTier === 'needs_classification';
+
+  const shownType = props.draftType || item.classification || '';
+  const shownLabel =
+    props.typeLabel(props.draftType || item.classification) || item.classificationLabel;
 
   return (
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 py-2 border-b border-border/30 last:border-0">
@@ -465,9 +604,8 @@ function ReviewRow(props: {
           <p className="text-sm font-medium truncate">{item.website}</p>
           <p className="text-[11px] text-muted-foreground">
             {item.confidenceScore != null ? `${item.confidenceScore}%` : '—'}
-            {item.classificationLabel || item.classification
-              ? ` · ${item.classificationLabel || item.classification}`
-              : ''}
+            {shownLabel ? ` · ${shownLabel}` : ''}
+            {props.saving ? ' · saving…' : ''}
             {props.recommend ? ' · AI recommends approval' : ''}
             {props.auto ? ` · auto` : ''}
             {item.approvedBy ? ` · by ${item.approvedBy}` : ''}
@@ -479,12 +617,12 @@ function ReviewRow(props: {
         {needsClass ? (
           <select
             className="h-8 rounded border px-2 text-xs"
-            defaultValue=""
+            value={shownType}
+            disabled={props.saving}
             onChange={(e) => {
               const v = e.target.value;
               if (!v) return;
               props.onClassify(v);
-              e.target.value = '';
             }}
           >
             <option value="">Choose website type…</option>

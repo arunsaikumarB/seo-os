@@ -178,6 +178,34 @@ automationRouter.post(
 );
 
 automationRouter.post(
+  '/ai-review/bulk-classify',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const body = z
+        .object({
+          classificationId: z.string().min(1),
+          itemIds: z.array(z.string().uuid()).min(1).max(500),
+        })
+        .parse(req.body);
+      const { bulkSetAiReviewClassification } = await import(
+        '../../modules/campaigns/ai-review.service.js'
+      );
+      res.json({
+        data: await bulkSetAiReviewClassification(
+          param(req.params.projectId),
+          body.itemIds,
+          body.classificationId
+        ),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+automationRouter.post(
   '/ai-review/:opportunityId/classify',
   authMiddleware,
   requireRole('member'),

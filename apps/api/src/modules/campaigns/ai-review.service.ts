@@ -283,6 +283,57 @@ export async function setAiReviewClassification(
   return getAiReviewBoard(workspaceId);
 }
 
+/** Set the same website type on many items in one step (Needs Classification bulk). */
+export async function bulkSetAiReviewClassification(
+  workspaceId: string,
+  itemIds: string[],
+  classificationId: string
+) {
+  const conf = 75;
+  const tier = assignReviewTier(conf, classificationId);
+  let succeeded = 0;
+  let skipped = 0;
+  const skipReasons: string[] = [];
+  const errors: string[] = [];
+
+  const before = await getAiReviewBoard(workspaceId);
+  const byId = new Map(before.items.map((i) => [i.id, i]));
+
+  for (const id of itemIds) {
+    const item = byId.get(id);
+    if (!item) {
+      skipped++;
+      skipReasons.push(`${id}: not found`);
+      continue;
+    }
+    try {
+      await updateCampaignItem(workspaceId, id, {
+        classification: classificationId,
+        confidenceScore: conf,
+        reviewTier: tier,
+        reviewDecision: tier === 'needs_classification' ? 'Needs Classification' : 'Pending',
+        currentStatus: 'Classified',
+        force: true,
+      });
+      succeeded++;
+    } catch (err) {
+      errors.push(`${item.website}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  const board = await getAiReviewBoard(workspaceId);
+  return {
+    action: 'classify' as const,
+    classificationId,
+    succeeded,
+    skipped,
+    skipReasons: skipReasons.slice(0, 20),
+    errors: errors.slice(0, 20),
+    summary: board.summary,
+    board,
+  };
+}
+
 /** Apply analysis result through CSM (auto-approve / gate / dead / duplicate). */
 export async function applyAnalysisToCampaignItem(
   workspaceId: string,
