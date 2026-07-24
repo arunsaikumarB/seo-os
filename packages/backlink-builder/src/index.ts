@@ -43,3 +43,4 @@ export * from './manual-lane.js';
 export * from './assisted-manual.js';
 export * from './assisted-self-check.js';
 export * from './form-url-discovery.js';
+export * from './strategy-media.js';

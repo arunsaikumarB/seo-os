@@ -51,6 +51,10 @@ export function ProjectFormDialog({ open, onOpenChange, mode, project }: Project
           url: project.url ?? undefined,
           industry: project.industry ?? undefined,
           description: project.description ?? undefined,
+          contactEmail: project.contactEmail ?? undefined,
+          contactName: project.contactName ?? undefined,
+          contactPhone: project.contactPhone ?? undefined,
+          companyName: project.companyName ?? undefined,
         }
       : undefined,
   });
@@ -63,6 +67,10 @@ export function ProjectFormDialog({ open, onOpenChange, mode, project }: Project
         url: project.url ?? undefined,
         industry: project.industry ?? undefined,
         description: project.description ?? undefined,
+        contactEmail: project.contactEmail ?? undefined,
+        contactName: project.contactName ?? undefined,
+        contactPhone: project.contactPhone ?? undefined,
+        companyName: project.companyName ?? undefined,
       });
     }
   }, [project, mode, reset]);
@@ -113,8 +121,35 @@ export function ProjectFormDialog({ open, onOpenChange, mode, project }: Project
             {errors.domain && <p className="text-xs text-destructive">{errors.domain.message}</p>}
           </div>
           <div className="space-y-1">
-            <Label htmlFor="pf-url">URL (optional)</Label>
-            <Input id="pf-url" placeholder="https://example.com" {...register('url')} />
+            <Label htmlFor="pf-url">Website URL</Label>
+            <Input id="pf-url" placeholder="https://go.example.com" {...register('url')} />
+            <p className="text-[11px] text-muted-foreground">
+              We crawl this URL to ground titles and descriptions in your real site.
+            </p>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="pf-company">Company name</Label>
+            <Input id="pf-company" placeholder="Acme Inc" {...register('companyName')} />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="pf-contact-name">Contact name</Label>
+            <Input id="pf-contact-name" placeholder="Jane Doe" {...register('contactName')} />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="pf-contact-email">Contact email</Label>
+            <Input
+              id="pf-contact-email"
+              type="email"
+              placeholder="hello@example.com"
+              {...register('contactEmail')}
+            />
+            {errors.contactEmail && (
+              <p className="text-xs text-destructive">{errors.contactEmail.message}</p>
+            )}
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="pf-contact-phone">Phone</Label>
+            <Input id="pf-contact-phone" placeholder="+1 555 0100" {...register('contactPhone')} />
           </div>
           <Button type="submit" disabled={isSubmitting}>
             {mode === 'create' ? 'Create' : 'Save'}

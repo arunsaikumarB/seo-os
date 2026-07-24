@@ -9,8 +9,10 @@ import {
   computeGenerationProgress,
   qualityFailureReason,
   tierFromQualityScore,
+  strategyNeedsMedia,
   type CampaignDetailStatus,
   type GenerationStatus,
+  type SiteRecipe,
 } from '@seo-os/backlink-builder';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { enqueueJob, QUEUES } from '../../jobs/boss.js';
@@ -21,6 +23,84 @@ import {
   type CampaignItemRow,
 } from './campaign-state.service.js';
 import { createContentPack, createMediaBrief } from '../backlinks/v11.service.js';
+
+async function resolveMediaNeedForOpportunity(
+  workspaceId: string,
+  _opportunityId: string,
+  item: CampaignItemRow
+) {
+  const domain = String(item.domain ?? '')
+    .replace(/^www\./i, '')
+    .toLowerCase();
+  let hasAttachmentField = false;
+  let attachmentSupport: boolean | null = null;
+  let logoRequired: boolean | null = null;
+
+  if (domain) {
+    const { data: profile } = await getSupabaseAdmin()
+      .from('site_profiles')
+      .select('recipe, learning')
+      .eq('workspace_id', workspaceId)
+      .eq('domain', domain)
+      .maybeSingle();
+    const recipe = profile?.recipe as SiteRecipe | null;
+    if (recipe?.fields?.some((f) => f.role === 'attachment')) {
+      hasAttachmentField = true;
+    }
+    const learning = (profile?.learning ?? {}) as Record<string, unknown>;
+    if (typeof learning.attachmentSupport === 'boolean') {
+      attachmentSupport = learning.attachmentSupport;
+    }
+    const directory =
+      typeof learning.directory === 'object' && learning.directory
+        ? (learning.directory as Record<string, unknown>)
+        : {};
+    if (directory.logoRequired != null) logoRequired = Boolean(directory.logoRequired);
+  }
+
+  let htmlHasImageUpload = false;
+  let htmlHasVideoUpload = false;
+  let mediaRequirements: { images?: boolean; videos?: boolean } | null = null;
+  try {
+    const { detectSubmissionRequirements } = await import('@seo-os/backlink-builder');
+    const entry =
+      item.websiteUrl ||
+      (item.domain ? `https://${item.domain}` : null);
+    let htmlSnippet: string | undefined;
+    if (entry) {
+      const res = await fetch(entry, {
+        signal: AbortSignal.timeout(8_000),
+        headers: { 'User-Agent': 'SEO-OS-ContentGen/1.0' },
+      });
+      if (res.ok) {
+        htmlSnippet = (await res.text()).slice(0, 60_000);
+        const low = htmlSnippet.toLowerCase();
+        htmlHasImageUpload =
+          low.includes('type="file"') ||
+          low.includes('accept="image') ||
+          low.includes('upload image') ||
+          low.includes('upload logo');
+        htmlHasVideoUpload = low.includes('accept="video') || low.includes('upload video');
+      }
+    }
+    const detected = detectSubmissionRequirements(String(item.classification ?? 'directory'), {
+      htmlSnippet,
+      url: entry ?? '',
+    });
+    mediaRequirements = detected.mediaRequirements ?? null;
+  } catch {
+    /* estimated */
+  }
+
+  return strategyNeedsMedia({
+    hasAttachmentField,
+    mediaRequirements,
+    htmlHasImageUpload,
+    htmlHasVideoUpload,
+    attachmentSupport,
+    logoRequired,
+  });
+}
 
 export type ContentGenStage =
   | 'all'
@@ -939,49 +1019,73 @@ export async function processContentGenerationJob(job: {
       });
     }
 
+    const needsMediaStage =
+      stage === 'all' || stage === 'images' || stage === 'video_metadata';
+    const mediaNeed = needsMediaStage
+      ? await resolveMediaNeedForOpportunity(workspaceId, opportunityId, item)
+      : { images: true, videos: true, reason: 'stage_skip' as const };
+
     if (stage === 'all' || stage === 'images') {
-      await updateCampaignItem(workspaceId, opportunityId, {
-        imageStatus: 'generating',
-        force: true,
-      });
-      await createMediaBrief(workspaceId, opportunityId, 'image');
-      try {
-        const { enqueueImageGenerate } = await import(
-          '../image-intelligence/iie.service.js'
-        );
-        await enqueueImageGenerate({
-          workspaceId,
-          opportunityId,
-          imageType: 'featured',
-          count: 1,
-        });
-        await updateCampaignItem(workspaceId, opportunityId, {
-          imageStatus: 'generated',
-          force: true,
-        });
-      } catch (err) {
-        logger.warn(
-          { err, opportunityId },
-          'Image provider unavailable — marking image_status failed (no fabricated assets)'
+      if (!mediaNeed.images) {
+        logger.info(
+          { opportunityId, reason: mediaNeed.reason },
+          'content_generate: skipping images — text-only strategy'
         );
         await updateCampaignItem(workspaceId, opportunityId, {
-          imageStatus: 'failed',
-          lastError: 'image provider not available',
+          imageStatus: 'n/a',
           force: true,
         });
+      } else {
+        await updateCampaignItem(workspaceId, opportunityId, {
+          imageStatus: 'generating',
+          force: true,
+        });
+        await createMediaBrief(workspaceId, opportunityId, 'image');
+        try {
+          const { enqueueImageGenerate } = await import(
+            '../image-intelligence/iie.service.js'
+          );
+          await enqueueImageGenerate({
+            workspaceId,
+            opportunityId,
+            imageType: 'featured',
+            count: 1,
+          });
+          await updateCampaignItem(workspaceId, opportunityId, {
+            imageStatus: 'generated',
+            force: true,
+          });
+        } catch (err) {
+          logger.warn(
+            { err, opportunityId },
+            'Image provider unavailable — marking image_status failed (no fabricated assets)'
+          );
+          await updateCampaignItem(workspaceId, opportunityId, {
+            imageStatus: 'failed',
+            lastError: 'image provider not available',
+            force: true,
+          });
+        }
       }
     }
 
     if (stage === 'all' || stage === 'video_metadata') {
-      await updateCampaignItem(workspaceId, opportunityId, {
-        videoMetadataStatus: 'generating',
-        force: true,
-      });
-      await createMediaBrief(workspaceId, opportunityId, 'video');
-      await updateCampaignItem(workspaceId, opportunityId, {
-        videoMetadataStatus: 'n/a',
-        force: true,
-      });
+      if (!mediaNeed.videos) {
+        await updateCampaignItem(workspaceId, opportunityId, {
+          videoMetadataStatus: 'n/a',
+          force: true,
+        });
+      } else {
+        await updateCampaignItem(workspaceId, opportunityId, {
+          videoMetadataStatus: 'generating',
+          force: true,
+        });
+        await createMediaBrief(workspaceId, opportunityId, 'video');
+        await updateCampaignItem(workspaceId, opportunityId, {
+          videoMetadataStatus: 'n/a',
+          force: true,
+        });
+      }
     }
 
     if (stage === 'all' || stage === 'images' || stage === 'metadata' || stage === 'video_metadata') {

@@ -27,6 +27,10 @@ export const createProjectSchema = z.object({
   url: z.preprocess(emptyToUndefined, z.string().url().optional()),
   industry: z.preprocess(emptyToUndefined, z.string().max(100).optional()),
   description: z.preprocess(emptyToUndefined, z.string().max(2000).optional()),
+  contactEmail: z.preprocess(emptyToUndefined, z.string().email().optional()),
+  contactName: z.preprocess(emptyToUndefined, z.string().max(120).optional()),
+  contactPhone: z.preprocess(emptyToUndefined, z.string().max(40).optional()),
+  companyName: z.preprocess(emptyToUndefined, z.string().max(120).optional()),
 });
 
 export const updateProjectSchema = createProjectSchema.partial().extend({

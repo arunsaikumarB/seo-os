@@ -13,10 +13,21 @@ import { getTypeLabel } from './backlink-types.js';
 export interface BrandContext {
   brandName: string;
   projectDomain?: string;
+  projectUrl?: string;
   industry?: string;
   brandVoice?: string;
   knowledgeSnippets?: string[];
   memoryNotes?: string[];
+  /** Crawled tagline / meta description */
+  tagline?: string;
+  /** Crawled primary topics / H1s */
+  primaryTopics?: string[];
+  /** Key features / facts from the real site */
+  keyFeatures?: string[];
+  contactEmail?: string;
+  contactName?: string;
+  contactPhone?: string;
+  companyName?: string;
 }
 
 export type ContentDraftType =

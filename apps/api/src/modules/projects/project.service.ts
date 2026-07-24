@@ -12,6 +12,14 @@ export function mapWorkspaceRow(row: Record<string, unknown>): Project {
     url: (row.url as string) ?? null,
     industry: (row.industry as string) ?? null,
     description: (row.description as string) ?? null,
+    contactEmail: (row.contact_email as string) ?? null,
+    contactName: (row.contact_name as string) ?? null,
+    contactPhone: (row.contact_phone as string) ?? null,
+    companyName: (row.company_name as string) ?? null,
+    brandProfile:
+      row.brand_profile && typeof row.brand_profile === 'object'
+        ? (row.brand_profile as Record<string, unknown>)
+        : null,
     status: row.status as Project['status'],
     domainVerified: row.domain_verified as boolean,
     createdAt: row.created_at as string,
@@ -65,10 +73,22 @@ export async function getProjectByWorkspaceId(projectId: string): Promise<Projec
   return mapWorkspace(data);
 }
 
+type ProjectProfileInput = {
+  name: string;
+  domain: string;
+  url?: string;
+  industry?: string;
+  description?: string;
+  contactEmail?: string;
+  contactName?: string;
+  contactPhone?: string;
+  companyName?: string;
+};
+
 export async function createProject(
   orgId: string,
   userId: string,
-  input: { name: string; domain: string; url?: string; industry?: string; description?: string }
+  input: ProjectProfileInput
 ): Promise<Project> {
   await ensureProfile(userId);
 
@@ -79,6 +99,11 @@ export async function createProject(
     url: input.url ?? null,
     industry: input.industry ?? null,
     description: input.description ?? null,
+    contact_email: input.contactEmail ?? null,
+    contact_name: input.contactName ?? null,
+    contact_phone: input.contactPhone ?? null,
+    company_name: input.companyName ?? input.name.trim(),
+    brand_profile: {},
     created_by: userId,
   };
 
@@ -114,6 +139,12 @@ export async function createProject(
   }
 
   logger.info({ orgId, userId, projectId: data.id }, 'Workspace created');
+
+  // Phase 9 — crawl homepage and ground brand_profile (fire-and-forget)
+  void refreshBrandProfile(String(data.id)).catch((err) =>
+    logger.warn({ err, workspaceId: data.id }, 'brand profile crawl failed on create')
+  );
+
   return mapWorkspace(data);
 }
 
@@ -128,6 +159,10 @@ export async function updateProject(
   if (input.url !== undefined) payload.url = input.url;
   if (input.industry !== undefined) payload.industry = input.industry;
   if (input.description !== undefined) payload.description = input.description;
+  if (input.contactEmail !== undefined) payload.contact_email = input.contactEmail;
+  if (input.contactName !== undefined) payload.contact_name = input.contactName;
+  if (input.contactPhone !== undefined) payload.contact_phone = input.contactPhone;
+  if (input.companyName !== undefined) payload.company_name = input.companyName;
   if (input.status !== undefined) payload.status = input.status;
 
   const { data, error } = await getSupabaseAdmin()
@@ -139,9 +174,89 @@ export async function updateProject(
     .single();
 
   if (error) throw error;
+
+  // Re-crawl when URL/domain changes
+  if (input.url !== undefined || input.domain !== undefined) {
+    void refreshBrandProfile(projectId).catch((err) =>
+      logger.warn({ err, workspaceId: projectId }, 'brand profile crawl failed on update')
+    );
+  }
+
   return mapWorkspace(data);
 }
 
 export async function archiveProject(projectId: string, orgId: string): Promise<Project> {
   return updateProject(projectId, orgId, { status: 'archived' });
+}
+
+/**
+ * Fetch the project homepage and store a grounded brand_profile.
+ * Uses seo-intelligence buildBrandProfile — no invented features.
+ */
+export async function refreshBrandProfile(workspaceId: string): Promise<Record<string, unknown> | null> {
+  const { data: ws } = await getSupabaseAdmin()
+    .from('workspaces')
+    .select('id, name, domain, url, industry')
+    .eq('id', workspaceId)
+    .maybeSingle();
+  if (!ws) return null;
+
+  const target =
+    (ws.url as string | null) ||
+    (ws.domain ? `https://${String(ws.domain).replace(/^https?:\/\//i, '')}` : null);
+  if (!target) return null;
+
+  try {
+    const res = await fetch(target, {
+      redirect: 'follow',
+      signal: AbortSignal.timeout(20_000),
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (compatible; SEO-OS-BrandProfile/1.0; +https://seoos.io)',
+        Accept: 'text/html',
+      },
+    });
+    if (!res.ok) {
+      logger.warn({ workspaceId, status: res.status, target }, 'brand profile fetch non-OK');
+      return null;
+    }
+    const html = (await res.text()).slice(0, 400_000);
+    const { extractMetadataFromHtml, buildBrandProfile } = await import(
+      '@seo-os/seo-intelligence'
+    );
+    const meta = extractMetadataFromHtml(target, html);
+    const profile = buildBrandProfile(meta, html);
+
+    // Extract a few feature-like list items / bold phrases (bounded)
+    const features: string[] = [];
+    const liRe = /<li[^>]*>([\s\S]*?)<\/li>/gi;
+    let m: RegExpExecArray | null;
+    while ((m = liRe.exec(html)) && features.length < 8) {
+      const t = m[1]
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (t.length >= 12 && t.length <= 140) features.push(t);
+    }
+
+    const brandProfile = {
+      ...profile,
+      crawledAt: new Date().toISOString(),
+      sourceUrl: target,
+      keyFeatures: features.slice(0, 6),
+      industry: ws.industry ?? null,
+      projectName: ws.name,
+    };
+
+    await getSupabaseAdmin()
+      .from('workspaces')
+      .update({ brand_profile: brandProfile, updated_at: new Date().toISOString() })
+      .eq('id', workspaceId);
+
+    logger.info({ workspaceId, target, topics: profile.primaryTopics?.length }, 'brand profile saved');
+    return brandProfile;
+  } catch (err) {
+    logger.warn({ err, workspaceId, target }, 'brand profile crawl error');
+    return null;
+  }
 }

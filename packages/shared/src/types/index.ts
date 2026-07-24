@@ -47,6 +47,11 @@ export interface Project {
   url: string | null;
   industry: string | null;
   description: string | null;
+  contactEmail: string | null;
+  contactName: string | null;
+  contactPhone: string | null;
+  companyName: string | null;
+  brandProfile: Record<string, unknown> | null;
   status: WorkspaceStatus;
   domainVerified: boolean;
   createdAt: string;

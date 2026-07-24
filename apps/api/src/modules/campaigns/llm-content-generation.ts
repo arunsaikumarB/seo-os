@@ -46,9 +46,18 @@ function buildPrompt(params: {
 
 PROJECT / BRAND (use these exact names — never invent "Our Brand"):
 - Brand name: ${params.brand.brandName}
+- Company name: ${params.brand.companyName ?? params.brand.brandName}
 - Domain: ${params.brand.projectDomain ?? 'unknown'}
 - URL: ${brandUrl || 'unknown'}
 - Industry: ${params.brand.industry ?? 'business'}
+- Contact name: ${params.brand.contactName ?? '(not provided — do not invent)'}
+- Contact email: ${params.brand.contactEmail ?? '(not provided — do not invent)'}
+
+GROUNDED FACTS FROM THE REAL WEBSITE (must drive titles/descriptions — do not invent products/integrations not listed):
+- Tagline: ${params.brand.tagline ?? '(none crawled)'}
+- Topics: ${(params.brand.primaryTopics ?? []).join('; ') || '(none)'}
+- Key features / facts: ${(params.brand.keyFeatures ?? []).join('; ') || '(none)'}
+- Knowledge snippets: ${(params.brand.knowledgeSnippets ?? []).join('; ') || '(none)'}
 
 TARGET SITE:
 - Name: ${site}
@@ -80,6 +89,7 @@ Return ONLY a JSON object with:
 
 Rules:
 - Mention ${params.brand.brandName} and ${params.brand.projectDomain ?? brandUrl} naturally.
+- Base claims ONLY on the grounded website facts above. If features are empty, write a cautious, general description — NEVER invent third-party integrations (QuickBooks, Shopify, etc.) that are not listed.
 - Never use placeholders: "Our Brand", "Insight 1", "example.com", "{{", "Key Takeaways" scaffold lists.
 - Links must use https://${params.brand.projectDomain ?? 'the brand domain'} — never example.com.
 - Tone matches the site type (${params.storageType}).`;

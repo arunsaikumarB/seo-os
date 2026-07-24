@@ -37,11 +37,28 @@ async function brandFor(workspaceId: string, orgId?: string) {
       `Workspace brand missing for ${workspaceId} — cannot generate content without project name`
     );
   }
+  const profile = (project.brandProfile ?? {}) as Record<string, unknown>;
+  const topics = Array.isArray(profile.primaryTopics)
+    ? (profile.primaryTopics as string[])
+    : [];
+  const features = Array.isArray(profile.keyFeatures)
+    ? (profile.keyFeatures as string[])
+    : [];
+  const tagline = profile.tagline ? String(profile.tagline) : undefined;
   return {
-    brandName: project.name,
+    brandName: project.companyName || project.name,
     projectDomain: project.domain ?? undefined,
     projectUrl: project.url ?? undefined,
     industry: project.industry ?? undefined,
+    brandVoice: profile.tone ? String(profile.tone) : undefined,
+    tagline,
+    primaryTopics: topics,
+    keyFeatures: features,
+    knowledgeSnippets: [tagline, ...topics, ...features].filter(Boolean).slice(0, 8) as string[],
+    contactEmail: project.contactEmail ?? undefined,
+    contactName: project.contactName ?? undefined,
+    contactPhone: project.contactPhone ?? undefined,
+    companyName: project.companyName || project.name,
   };
 }
 

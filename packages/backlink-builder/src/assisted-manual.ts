@@ -27,8 +27,10 @@ export const ASSISTED_FORM_READER_VERSION = 3;
  * Mismatched recipes re-classify even when form fingerprint is unchanged.
  * v6: drop contradictory / legacy human_corrected pins; clear deletes pins.
  * v7: Phase 8 self-check + confidence gate (never high on role/value mismatch).
+ * v8: Phase 9 role-value binding — no description fallback into url/name/email;
+ *     owner/contact tokens map correctly; unknown long fields → other (empty).
  */
-export const ASSISTED_FIELD_CLASSIFIER_VERSION = 7;
+export const ASSISTED_FIELD_CLASSIFIER_VERSION = 8;
 
 export type FieldConfidence = 'high' | 'medium' | 'low';
 export type FieldSource =
@@ -293,10 +295,32 @@ function optionsFromSelect(block: string): string[] {
   while ((m = re.exec(block)) !== null) {
     const text = m[1].replace(/<[^>]+>/g, '').trim();
     const val = attr(m[0], 'value');
-    const label = text || val || '';
-    if (label && !/^select\b/i.test(label)) opts.push(label);
+    const label = sanitizeOptionLabel(text || val || '');
+    if (label && !/^select\b/i.test(label) && !/^-+\s*$/.test(label)) opts.push(label);
   }
-  return opts;
+  return [...new Set(opts)];
+}
+
+/** Decode entities and strip directory indent markers (|__, &nbsp;, underscores). */
+export function sanitizeOptionLabel(raw: string): string {
+  let s = String(raw ?? '');
+  s = s
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&#(\d+);/g, (_, n) => {
+      const code = Number(n);
+      return Number.isFinite(code) ? String.fromCharCode(code) : '';
+    })
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => {
+      const code = parseInt(h, 16);
+      return Number.isFinite(code) ? String.fromCharCode(code) : '';
+    });
+  s = s.replace(/\|+/g, ' ').replace(/_+/g, ' ').replace(/\u00a0/g, ' ');
+  return s.replace(/\s+/g, ' ').trim();
 }
 
 function findLabel(html: string, id: string | null, name: string | null): string | null {
@@ -497,8 +521,10 @@ export function primaryLabelText(raw: string | null | undefined): string {
 export function leadingLabelToken(raw: string | null | undefined): string {
   const primary = primaryLabelText(raw);
   if (!primary) return '';
-  const word = primary.split(/[\s:–—|/\\]+/).find((w) => /[a-z]/i.test(w)) ?? '';
-  return word.toLowerCase().replace(/[^a-z0-9_-]/gi, '');
+  // Treat underscores as separators so OWNER_NAME / owner_email → owner / email
+  const normalized = primary.replace(/_/g, ' ');
+  const word = normalized.split(/[\s:–—|/\\]+/).find((w) => /[a-z]/i.test(w)) ?? '';
+  return word.toLowerCase().replace(/[^a-z0-9-]/gi, '');
 }
 
 /**
@@ -562,14 +588,35 @@ function roleFromLeadingToken(
   token: string,
   facts: FormFieldFacts
 ): FieldRole | null {
+  const blob = [facts.label, facts.name, facts.id, facts.placeholder]
+    .filter(Boolean)
+    .join(' ');
+  // Compound owner/contact attrs win before bare "owner" → name
+  if (/owner[_\s-]?email|contact[_\s-]?email/i.test(blob)) return 'email';
+  if (
+    /owner[_\s-]?name|contact[_\s-]?name|contact[_\s-]?person|full[_\s-]?name|your[_\s-]?name/i.test(
+      blob
+    )
+  ) {
+    return 'name';
+  }
   if (!token) return null;
-  if (/^(title|headline|name)$/i.test(token)) return 'title';
-  if (/^(description|about|summary|tagline|blurb|excerpt|details|bio|content|message)$/i.test(token)) {
+  if (/^(title|headline)$/i.test(token)) return 'title';
+  if (/^(name)$/i.test(token) && !/company|business|site/i.test(facts.label ?? '')) {
+    if (/owner|contact|person|full.?name|your.?name/i.test(blob)) return 'name';
+    return 'title';
+  }
+  if (
+    /^(description|about|summary|tagline|blurb|excerpt|details|bio|content|message|notes)$/i.test(
+      token
+    )
+  ) {
     return descriptionRoleFromControl(facts);
   }
   if (/^(url|website|link|homepage)$/i.test(token)) return 'url';
   if (/^(email|e-?mail)$/i.test(token)) return 'email';
   if (/^(phone|mobile|tel)$/i.test(token)) return 'phone';
+  if (/^(owner|contact|person)$/i.test(token)) return 'name';
   if (/^(company|business|organization|org)$/i.test(token)) return 'business_name';
   if (/^(category|industry|type|topic|niche)$/i.test(token)) return 'category';
   if (/^(address|street|city|zip|postal)$/i.test(token)) return 'address';
@@ -579,7 +626,7 @@ function roleFromLeadingToken(
 }
 
 const ROLE_HINTS: Array<{ role: FieldRole; patterns: RegExp[] }> = [
-  { role: 'email', patterns: [/e-?mail/i, /^email$/i] },
+  { role: 'email', patterns: [/e-?mail/i, /^email$/i, /owner.?email/i, /contact.?email/i] },
   { role: 'phone', patterns: [/phone|mobile|tel/i] },
   {
     role: 'url',
@@ -594,11 +641,39 @@ const ROLE_HINTS: Array<{ role: FieldRole; patterns: RegExp[] }> = [
       /^company\s*url$/i,
     ],
   },
-  { role: 'title', patterns: [/^title$/i, /^headline$/i, /^listing.?name$/i, /^business.?name$/i, /^name$/i] },
-  { role: 'business_name', patterns: [/company|business|organization|org.?name/i] },
-  { role: 'name', patterns: [/full.?name|your.?name|contact.?name|first.?name|last.?name/i] },
-  { role: 'short_desc', patterns: [/^short.?desc/i, /^tagline$/i, /^summary$/i, /^blurb$/i, /^excerpt$/i] },
-  { role: 'long_desc', patterns: [/^desc/i, /^about$/i, /^message$/i, /^body$/i, /^content$/i, /^details$/i, /^bio$/i] },
+  { role: 'title', patterns: [/^title$/i, /^headline$/i, /^listing.?name$/i, /^site.?name$/i] },
+  { role: 'business_name', patterns: [/company|business|organization|org.?name|trading.?name/i] },
+  {
+    role: 'name',
+    patterns: [
+      /full.?name|your.?name|contact.?name|first.?name|last.?name|owner.?name|contact.?person|owner$/i,
+    ],
+  },
+  {
+    role: 'short_desc',
+    patterns: [
+      /^short\s*desc/i,
+      /short\s+description/i,
+      /^tagline$/i,
+      /^summary$/i,
+      /^blurb$/i,
+      /^excerpt$/i,
+    ],
+  },
+  {
+    role: 'long_desc',
+    patterns: [
+      /^desc/i,
+      /description/i,
+      /^about$/i,
+      /^message$/i,
+      /^body$/i,
+      /^content$/i,
+      /^details$/i,
+      /^bio$/i,
+      /\bnotes\b/i,
+    ],
+  },
   { role: 'category', patterns: [/categor|industry|^type$|topic|niche/i] },
   { role: 'address', patterns: [/address|street|city|zip|postal/i] },
   { role: 'attachment', patterns: [/logo|image|photo|file|upload|attach/i] },
@@ -683,37 +758,65 @@ export function inferFieldRole(facts: FormFieldFacts): {
     };
   }
 
-  // Textarea / long maxlength → description family, never url
+  // Textarea / long maxlength → description family ONLY when the label says so.
+  // Never remap an explicit email/name/phone label into a description.
+  // URL leading token on a long control ("Website notes") is notes, not a URL field.
   if (isLongTextControl(facts)) {
     const fromLead = roleFromLeadingToken(leading, facts);
-    if (fromLead === 'url') {
+    if (fromLead === 'short_desc' || fromLead === 'long_desc') {
       return {
         role: descriptionRoleFromControl(facts),
         confidence: 'high',
         source: leadSource,
       };
     }
-    if (fromLead === 'short_desc' || fromLead === 'long_desc' || fromLead === 'title') {
-      // Title on a textarea is unusual — still prefer description when long control
-      if (fromLead === 'title' && facts.type === 'textarea') {
-        return {
-          role: descriptionRoleFromControl(facts),
-          confidence: 'high',
-          source: leadSource,
-        };
-      }
+    if (fromLead === 'title' && facts.type === 'textarea') {
       return {
-        role: fromLead === 'title' ? fromLead : descriptionRoleFromControl(facts),
+        role: descriptionRoleFromControl(facts),
         confidence: 'high',
         source: leadSource,
       };
     }
-    if (fromLead) {
-      return { role: fromLead, confidence: 'high', source: leadSource };
+    // Textarea (or notes-style label) with "website" in the name ≠ URL field.
+    // Plain text inputs labeled URL/Website keep url even when maxlength is large.
+    if (
+      fromLead === 'url' &&
+      (facts.type === 'textarea' ||
+        /\b(notes|about|description|details|comment)\b/i.test(primary || text))
+    ) {
+      return {
+        role: descriptionRoleFromControl(facts),
+        confidence: 'medium',
+        source: leadSource,
+      };
     }
+    if (fromLead) {
+      return {
+        role: fromLead,
+        confidence: leadingFromLabel ? 'high' : 'medium',
+        source: leadSource,
+      };
+    }
+    // Labeled long control: try description / other known roles before empty other
+    const hay = primary || text;
+    for (const hint of ROLE_HINTS) {
+      if (hint.role === 'url') continue;
+      if (hay && hint.patterns.some((p) => p.test(hay))) {
+        const role =
+          hint.role === 'short_desc' || hint.role === 'long_desc'
+            ? descriptionRoleFromControl(facts)
+            : hint.role;
+        return {
+          role,
+          confidence: 'medium',
+          source: hasExplicitLabel ? 'dom_label' : 'name_guess',
+        };
+      }
+    }
+    // Unknown long control → other (empty fill), never dump the description into it
     return {
-      role: descriptionRoleFromControl(facts),
-      confidence: hasExplicitLabel ? 'medium' : 'low',
+      role: 'other',
+      confidence: 'low',
       source: hasExplicitLabel ? 'dom_label' : 'name_guess',
     };
   }
@@ -722,13 +825,6 @@ export function inferFieldRole(facts: FormFieldFacts): {
   // Explicit label token outranks type=url and name/id
   const fromLead = roleFromLeadingToken(leading, facts);
   if (fromLead) {
-    if (fromLead === 'url' && isLongTextControl(facts)) {
-      return {
-        role: descriptionRoleFromControl(facts),
-        confidence: 'high',
-        source: leadSource,
-      };
-    }
     return {
       role: fromLead,
       confidence: leadingFromLabel ? 'high' : 'medium',
@@ -1087,12 +1183,34 @@ export function recommendDropdownOption(
   preferredHints: string[]
 ): string | null {
   if (!options.length) return null;
-  const lowerHints = preferredHints.map((h) => h.toLowerCase());
-  for (const opt of options) {
+  const cleaned = options.map((o) => sanitizeOptionLabel(o)).filter(Boolean);
+  if (!cleaned.length) return null;
+  const lowerHints = preferredHints
+    .map((h) => sanitizeOptionLabel(h).toLowerCase())
+    .filter((h) => h.length >= 2);
+
+  // Prefer hint matches (brand / industry / topics)
+  let best: { opt: string; score: number } | null = null;
+  for (const opt of cleaned) {
     const o = opt.toLowerCase();
-    if (lowerHints.some((h) => o.includes(h) || h.includes(o))) return opt;
+    let score = 0;
+    for (const h of lowerHints) {
+      if (o === h) score += 10;
+      else if (o.includes(h) || h.includes(o)) score += 5;
+      // token overlap
+      const oTok = new Set(o.split(/\s+/).filter((t) => t.length > 2));
+      for (const t of h.split(/\s+/)) {
+        if (t.length > 2 && oTok.has(t)) score += 2;
+      }
+    }
+    // Soft-penalize generic chat/forum buckets for business brands
+    if (/chat|forum|community|social\s*network/i.test(o) && lowerHints.some((h) => /business|saas|software|platform|commerce|retail|service/i.test(h))) {
+      score -= 4;
+    }
+    if (score > 0 && (!best || score > best.score)) best = { opt, score };
   }
-  return options[0] ?? null;
+  // Never silently pick options[0] — wrong category is worse than empty recommendation
+  return best?.opt ?? null;
 }
 
 export type ContentSource = {
@@ -1100,6 +1218,10 @@ export type ContentSource = {
   shortDescription?: string | null;
   longDescription?: string | null;
   businessName?: string | null;
+  /** Company / trading name for business_name fields */
+  companyName?: string | null;
+  /** Person / owner / contact name — never the brand description */
+  contactName?: string | null;
   url?: string | null;
   email?: string | null;
   phone?: string | null;
@@ -1108,26 +1230,34 @@ export type ContentSource = {
   imageFileName?: string | null;
 };
 
-function valueForRole(role: FieldRole, content: ContentSource): string {
+/**
+ * Phase 9 hard rule: a field only gets a value that matches its type.
+ * Missing profile data → empty (never fall back to the description paragraph).
+ */
+export function valueForRole(role: FieldRole, content: ContentSource): string {
   switch (role) {
     case 'title':
-      return content.title || content.businessName || '';
+      return String(content.title ?? '').trim();
     case 'business_name':
-      return content.businessName || content.title || '';
+      return String(content.companyName || content.businessName || '').trim();
     case 'short_desc':
-      return content.shortDescription || content.longDescription?.slice(0, 160) || '';
+      return String(content.shortDescription ?? '').trim();
     case 'long_desc':
-      return content.longDescription || content.shortDescription || '';
+      return String(content.longDescription ?? '').trim();
     case 'url':
-      return content.url || '';
+      return String(content.url ?? '').trim();
     case 'email':
-      return content.email || '';
+      return String(content.email ?? '').trim();
     case 'phone':
-      return content.phone || '';
+      return String(content.phone ?? '').trim();
     case 'address':
-      return content.address || '';
+      return String(content.address ?? '').trim();
     case 'name':
-      return content.businessName || content.title || '';
+      return String(content.contactName ?? '').trim();
+    case 'category':
+    case 'attachment':
+    case 'terms':
+    case 'other':
     default:
       return '';
   }
@@ -1297,9 +1427,16 @@ export function buildAssistedPackage(input: {
       };
     }
     if (rf.role === 'category' && rf.options?.length) {
+      const cleanedOptions = rf.options.map((o) => sanitizeOptionLabel(o)).filter(Boolean);
       const recommended = recommendDropdownOption(
-        rf.options,
-        input.content.categoryHints ?? [input.content.businessName ?? '', 'Food', 'Business']
+        cleanedOptions,
+        input.content.categoryHints ?? [
+          input.content.companyName ?? '',
+          input.content.businessName ?? '',
+          'Business',
+          'Software',
+          'Services',
+        ]
       );
       return {
         selector: rf.selector,
@@ -1316,17 +1453,50 @@ export function buildAssistedPackage(input: {
           recommended ?? ''
         ),
         source: rf.source,
-        options: rf.options,
+        options: cleanedOptions,
         recommendedOption: recommended,
         overLimit: false,
+        flagged: !recommended,
+        flagReason: recommended
+          ? null
+          : 'No confident category match — pick from the list',
         humanStep: recommended
-          ? `Category: [${recommended}] ← recommended · ${rf.options.length - 1} other options available`
-          : 'Pick a category from the real list.',
+          ? `Category: [${recommended}] ← recommended · ${cleanedOptions.length - 1} other options available`
+          : 'Pick a category from the real list — none auto-selected.',
+      };
+    }
+
+    // Phase 9 — unknown / other / low-confidence roles get EMPTY, never a guessed paragraph
+    if (rf.role === 'other' || rf.confidence === 'low' || rf.source === 'known_bad') {
+      return {
+        selector: rf.selector,
+        role: rf.role,
+        label: rf.label ?? rf.role,
+        value: '',
+        charCount: 0,
+        maxlength: rf.maxlength,
+        required: rf.required,
+        confidence: 'low',
+        source: rf.source,
+        overLimit: false,
+        flagged: true,
+        flagReason:
+          rf.role === 'other'
+            ? 'Unknown field role — left empty (will not guess)'
+            : 'Low-confidence mapping — left empty until confirmed',
+        humanStep: 'Fill this field yourself — the app will not invent a value.',
       };
     }
 
     const raw = valueForRole(rf.role, input.content);
     const fitted = fitValueToLimit(raw, rf.maxlength);
+    const emptyBound =
+      !fitted.value &&
+      (rf.role === 'url' ||
+        rf.role === 'email' ||
+        rf.role === 'phone' ||
+        rf.role === 'name' ||
+        rf.role === 'business_name');
     return {
       selector: rf.selector,
       role: rf.role,
@@ -1339,6 +1509,10 @@ export function buildAssistedPackage(input: {
       source: rf.source,
       overLimit: fitted.overLimit,
       truncatedAtSentence: fitted.truncatedAtSentence,
+      flagged: emptyBound || undefined,
+      flagReason: emptyBound
+        ? `No project ${rf.role} on file — add it in Settings`
+        : null,
     };
   });
 

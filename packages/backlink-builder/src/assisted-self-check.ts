@@ -1,6 +1,6 @@
 /**
- * Phase 8 — value/role self-check + confidence gating.
- * Never ship a wrong value as high confidence; flag mismatches for the human.
+ * Phase 8/9 — value/role self-check + confidence gating.
+ * Never ship a wrong value as high confidence; clear violating values (Phase 9).
  */
 
 export type SelfCheckConfidence = 'high' | 'medium' | 'low';
@@ -34,6 +34,7 @@ export type SelfCheckFieldInput = {
   humanStep?: string | null;
   flagged?: boolean;
   flagReason?: string | null;
+  charCount?: number;
 };
 
 const URL_RE =
@@ -43,6 +44,8 @@ const LOOKS_LIKE_URL_RE =
   /^(https?:\/\/|www\.)|[a-z0-9-]+\.(com|org|net|io|co|app|dev|ai|info|biz)(\/|$)/i;
 export const MIN_LONG_DESC_CHARS = 40;
 export const MIN_SHORT_DESC_CHARS = 12;
+export const MAX_NAME_CHARS = 80;
+export const MAX_TITLE_CHARS = 200;
 
 export type RoleValueCheck = {
   ok: boolean;
@@ -61,22 +64,44 @@ export function valueMatchesRole(role: string, value: string): RoleValueCheck {
       if (!URL_RE.test(v) && !LOOKS_LIKE_URL_RE.test(v)) {
         return { ok: false, reason: 'URL field value is not a URL' };
       }
+      // Prose pasted into URL
+      if (/\s{2,}|\.\s+[A-Z]/.test(v) && v.length > 80) {
+        return { ok: false, reason: 'URL field contains prose, not a URL' };
+      }
       return { ok: true };
 
     case 'title':
     case 'business_name':
-    case 'name':
       if (LOOKS_LIKE_URL_RE.test(v) || /^https?:\/\//i.test(v)) {
         return { ok: false, reason: `${role} must not be a URL` };
       }
-      if (v.length > 200) {
+      if (v.length > MAX_TITLE_CHARS) {
         return { ok: false, reason: `${role} looks too long for a title` };
+      }
+      return { ok: true };
+
+    case 'name':
+      if (LOOKS_LIKE_URL_RE.test(v) || /^https?:\/\//i.test(v)) {
+        return { ok: false, reason: 'name must not be a URL' };
+      }
+      if (EMAIL_RE.test(v)) {
+        return { ok: false, reason: 'name must not be an email' };
+      }
+      if (v.length > MAX_NAME_CHARS) {
+        return { ok: false, reason: `name is ${v.length} chars — looks like a description` };
+      }
+      // Multi-sentence prose
+      if ((v.match(/[.!?]/g) ?? []).length >= 2 && v.length > 60) {
+        return { ok: false, reason: 'name looks like prose, not a person name' };
       }
       return { ok: true };
 
     case 'short_desc':
       if (LOOKS_LIKE_URL_RE.test(v) && v.length < 80) {
         return { ok: false, reason: 'short description must be prose, not a URL' };
+      }
+      if (EMAIL_RE.test(v)) {
+        return { ok: false, reason: 'short description must not be an email' };
       }
       if (v.length > 0 && v.length < MIN_SHORT_DESC_CHARS) {
         return { ok: false, reason: `short description under ${MIN_SHORT_DESC_CHARS} chars` };
@@ -86,6 +111,9 @@ export function valueMatchesRole(role: string, value: string): RoleValueCheck {
     case 'long_desc':
       if (LOOKS_LIKE_URL_RE.test(v) && !/\s/.test(v)) {
         return { ok: false, reason: 'description must be prose, not a URL' };
+      }
+      if (EMAIL_RE.test(v)) {
+        return { ok: false, reason: 'description must not be an email' };
       }
       if (v.length > 0 && v.length < MIN_LONG_DESC_CHARS) {
         return {
@@ -99,11 +127,22 @@ export function valueMatchesRole(role: string, value: string): RoleValueCheck {
       if (!EMAIL_RE.test(v)) {
         return { ok: false, reason: 'email field value is not an email' };
       }
+      // Prose with an @ somewhere still fails EMAIL_RE — covered
       return { ok: true };
 
     case 'phone':
       if ((v.match(/\d/g) ?? []).length < 7) {
         return { ok: false, reason: 'phone field needs more digits' };
+      }
+      if (v.length > 40 && /\s{2,}/.test(v)) {
+        return { ok: false, reason: 'phone field looks like prose' };
+      }
+      return { ok: true };
+
+    case 'other':
+      // Never accept a filled "other" value as validated
+      if (v.length > 0) {
+        return { ok: false, reason: 'unknown role — value cleared' };
       }
       return { ok: true };
 
@@ -125,18 +164,28 @@ export function confidenceAfterSelfCheck(
   source: string,
   base: SelfCheckConfidence,
   value: string
-): { confidence: SelfCheckConfidence; flagged: boolean; flagReason: string | null } {
+): { confidence: SelfCheckConfidence; flagged: boolean; flagReason: string | null; clearValue: boolean } {
   const trimmed = String(value ?? '').trim();
 
   if (role === 'terms' || role === 'attachment') {
-    return { confidence: base, flagged: false, flagReason: null };
+    return { confidence: base, flagged: false, flagReason: null, clearValue: false };
   }
 
-  if (!trimmed && role !== 'other') {
+  if (role === 'other') {
     return {
       confidence: 'low',
       flagged: true,
-      flagReason: 'No value — do not treat as confident',
+      flagReason: 'Unknown field role — left empty',
+      clearValue: trimmed.length > 0,
+    };
+  }
+
+  if (!trimmed) {
+    return {
+      confidence: 'low',
+      flagged: true,
+      flagReason: 'Empty — verify or fill yourself',
+      clearValue: false,
     };
   }
 
@@ -146,6 +195,7 @@ export function confidenceAfterSelfCheck(
       confidence: source === 'human_corrected' ? demoteConfidence(base) : 'low',
       flagged: true,
       flagReason: check.reason ?? 'Value does not match role',
+      clearValue: true,
     };
   }
 
@@ -157,6 +207,7 @@ export function confidenceAfterSelfCheck(
         base === 'high' || base === 'medium'
           ? 'Classifier uncertain — verify this field'
           : null,
+      clearValue: false,
     };
   }
 
@@ -165,13 +216,14 @@ export function confidenceAfterSelfCheck(
       confidence: 'medium',
       flagged: true,
       flagReason: 'Inferred without a clear DOM label — verify',
+      clearValue: false,
     };
   }
 
-  return { confidence: base, flagged: false, flagReason: null };
+  return { confidence: base, flagged: false, flagReason: null, clearValue: false };
 }
 
-/** Apply self-check + confidence gate to every package field. */
+/** Apply self-check + confidence gate; CLEAR values that violate the role (Phase 9). */
 export function selfCheckPackageFields<T extends SelfCheckFieldInput>(fields: T[]): T[] {
   return fields.map((f) => {
     const gated = confidenceAfterSelfCheck(
@@ -180,9 +232,18 @@ export function selfCheckPackageFields<T extends SelfCheckFieldInput>(fields: T[
       f.confidence,
       f.value
     );
-    if (!gated.flagged && gated.confidence === f.confidence) return f;
+    const nextValue = gated.clearValue ? '' : f.value;
+    if (
+      !gated.flagged &&
+      gated.confidence === f.confidence &&
+      nextValue === f.value
+    ) {
+      return f;
+    }
     return {
       ...f,
+      value: nextValue,
+      charCount: nextValue.length,
       confidence: gated.confidence,
       flagged: gated.flagged || Boolean(f.flagged),
       flagReason: gated.flagReason ?? f.flagReason ?? null,

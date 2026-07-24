@@ -45,6 +45,10 @@ export function ProjectSettingsPage() {
   const [url, setUrl] = useState('');
   const [industry, setIndustry] = useState('');
   const [description, setDescription] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
+  const [contactName, setContactName] = useState('');
+  const [contactPhone, setContactPhone] = useState('');
+  const [companyName, setCompanyName] = useState('');
   const [dangerMode, setDangerMode] = useState<ProjectDangerMode | null>(null);
 
   const project = useQuery({
@@ -63,7 +67,22 @@ export function ProjectSettingsPage() {
     setUrl(p.url ?? '');
     setIndustry(p.industry ?? '');
     setDescription(p.description ?? '');
-  }, [p?.id, p?.name, p?.domain, p?.url, p?.industry, p?.description]);
+    setContactEmail(p.contactEmail ?? '');
+    setContactName(p.contactName ?? '');
+    setContactPhone(p.contactPhone ?? '');
+    setCompanyName(p.companyName ?? '');
+  }, [
+    p?.id,
+    p?.name,
+    p?.domain,
+    p?.url,
+    p?.industry,
+    p?.description,
+    p?.contactEmail,
+    p?.contactName,
+    p?.contactPhone,
+    p?.companyName,
+  ]);
 
   const invalidateAll = () => {
     queryClient.invalidateQueries({ queryKey: ['project', projectId] });
@@ -80,6 +99,10 @@ export function ProjectSettingsPage() {
         url: url.trim() || undefined,
         industry: industry.trim() || undefined,
         description: description.trim() || undefined,
+        contactEmail: contactEmail.trim() || undefined,
+        contactName: contactName.trim() || undefined,
+        contactPhone: contactPhone.trim() || undefined,
+        companyName: companyName.trim() || undefined,
       }),
     onSuccess: () => {
       toast.success('Project updated');
@@ -200,7 +223,49 @@ export function ProjectSettingsPage() {
                   id="proj-url"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
-                  placeholder="https://example.com"
+                  placeholder="https://go.example.com"
+                  disabled={isArchived}
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Crawled on save to ground generated titles and descriptions.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="proj-company">Company name</Label>
+                <Input
+                  id="proj-company"
+                  value={companyName}
+                  onChange={(e) => setCompanyName(e.target.value)}
+                  disabled={isArchived}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="proj-contact-name">Contact name</Label>
+                <Input
+                  id="proj-contact-name"
+                  value={contactName}
+                  onChange={(e) => setContactName(e.target.value)}
+                  placeholder="Person who owns submissions"
+                  disabled={isArchived}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="proj-contact-email">Contact email</Label>
+                <Input
+                  id="proj-contact-email"
+                  type="email"
+                  value={contactEmail}
+                  onChange={(e) => setContactEmail(e.target.value)}
+                  placeholder="hello@example.com"
+                  disabled={isArchived}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="proj-contact-phone">Phone</Label>
+                <Input
+                  id="proj-contact-phone"
+                  value={contactPhone}
+                  onChange={(e) => setContactPhone(e.target.value)}
                   disabled={isArchived}
                 />
               </div>

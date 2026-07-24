@@ -351,13 +351,23 @@ async function loadContentForOpportunity(workspaceId: string, opportunityId: str
     shortDescription: shortDesc,
     longDescription: longDesc,
     businessName,
+    companyName: String(
+      brand.companyName || p.businessName || brand.brandName || businessName || ''
+    ),
+    contactName: String(brand.contactName ?? p.contactName ?? p.authorName ?? ''),
     url: resolveProjectListingUrl(p, projectDomain),
-    email: String(p.email ?? ''),
-    phone: String(p.phone ?? ''),
+    email: String(brand.contactEmail || p.email || ''),
+    phone: String(brand.contactPhone || p.phone || ''),
     address: String(p.address ?? ''),
     categoryHints: Array.isArray(p.categorySuggestions)
       ? (p.categorySuggestions as string[])
-      : [businessName, String(p.backlinkType ?? ''), brand.industry ?? ''].filter(Boolean),
+      : [
+          brand.companyName || businessName,
+          brand.industry ?? '',
+          ...(brand.primaryTopics ?? []),
+          ...(brand.keyFeatures ?? []).slice(0, 2),
+          String(p.backlinkType ?? ''),
+        ].filter(Boolean),
     imageFileName,
   };
 }
