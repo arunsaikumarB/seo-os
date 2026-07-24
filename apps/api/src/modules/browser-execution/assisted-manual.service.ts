@@ -24,12 +24,24 @@ import {
   recipeVersionsCurrent,
   gateIsOtp,
   gateRequiresPerson,
+  collectKnownFormUrlHints,
+  extractSubmissionCandidateLinks,
+  formDiscoveryFailureMessage,
+  FORM_DISCOVERY_DEFAULTS,
+  pickBestFormPage,
+  scoreSubmissionFormPage,
   type AssistedPackagePayload,
   type FieldRole,
+  type FormDiscoverySource,
+  type FormUrlHintBundle,
   type PackageStatus,
   type SiteRecipe,
 } from '@seo-os/backlink-builder';
 import { AppError } from '@seo-os/shared';
+import {
+  fetchRobotsTxt,
+  isPathAllowed,
+} from '@seo-os/seo-intelligence';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { logger } from '../../lib/logger.js';
 import { getBrandContextForBee } from './bee-assets.js';
@@ -68,6 +80,198 @@ async function fetchHtml(url: string): Promise<string | null> {
     logger.warn({ err, url }, 'assisted-manual: fetch html failed');
     return null;
   }
+}
+
+type FormResolveResult = {
+  importedEntryUrl: string;
+  formUrl: string;
+  html: string | null;
+  pagesChecked: string[];
+  formFound: boolean;
+  source: FormDiscoverySource;
+  discoveryFailureReason: string | null;
+};
+
+/**
+ * Locate the submission page before Form Reader runs.
+ * Order: cached recipe.resolvedFormUrl → Site Intelligence strategy/learning →
+ * imported entry → bounded same-domain crawl (top candidates, depth ≤2).
+ */
+async function resolveAssistedFormTarget(params: {
+  domain: string;
+  importedEntryUrl: string;
+  hints: FormUrlHintBundle;
+  forceRediscover?: boolean;
+}): Promise<FormResolveResult> {
+  const pagesChecked: string[] = [];
+  const fetched = new Map<string, string>();
+  const domain = params.domain;
+  const seed = params.importedEntryUrl;
+
+  let robotsDisallow: string[] = [];
+  try {
+    const origin = new URL(seed.startsWith('http') ? seed : `https://${domain}`).origin;
+    const robots = await fetchRobotsTxt(origin);
+    robotsDisallow = robots?.disallow ?? [];
+  } catch {
+    robotsDisallow = [];
+  }
+
+  const allowed = (url: string) => {
+    try {
+      return isPathAllowed(new URL(url).pathname, robotsDisallow);
+    } catch {
+      return true;
+    }
+  };
+
+  const fetchOne = async (url: string): Promise<string | null> => {
+    const key = url.replace(/\/$/, '').toLowerCase();
+    if (fetched.has(key)) return fetched.get(key)!;
+    if (!allowed(url)) {
+      logger.info({ url }, 'assisted-manual: skip robots-disallowed URL');
+      return null;
+    }
+    const html = await fetchHtml(url);
+    pagesChecked.push(url);
+    if (html) fetched.set(key, html);
+    return html;
+  };
+
+  const knownHints = collectKnownFormUrlHints(domain, params.hints).filter((u) => {
+    if (params.forceRediscover && params.hints.resolvedFormUrl) {
+      const cached = params.hints.resolvedFormUrl.replace(/\/$/, '').toLowerCase();
+      return u.replace(/\/$/, '').toLowerCase() !== cached;
+    }
+    return true;
+  });
+
+  // 1) Try known SI / cached URLs first (including cache unless forceRediscover)
+  const priorityUrls = params.forceRediscover
+    ? knownHints
+    : collectKnownFormUrlHints(domain, params.hints);
+
+  for (const url of priorityUrls.slice(0, FORM_DISCOVERY_DEFAULTS.maxPages)) {
+    const html = await fetchOne(url);
+    if (!html) continue;
+    const scored = scoreSubmissionFormPage(html);
+    if (!scored.ignorable && scored.score >= FORM_DISCOVERY_DEFAULTS.minFormScore) {
+      const source: FormDiscoverySource =
+        params.hints.resolvedFormUrl &&
+        url.replace(/\/$/, '').toLowerCase() ===
+          String(params.hints.resolvedFormUrl).replace(/\/$/, '').toLowerCase()
+          ? 'cache'
+          : url.replace(/\/$/, '').toLowerCase() === seed.replace(/\/$/, '').toLowerCase()
+            ? 'entry'
+            : 'site_intelligence';
+      return {
+        importedEntryUrl: seed,
+        formUrl: url,
+        html,
+        pagesChecked: [...pagesChecked],
+        formFound: true,
+        source,
+        discoveryFailureReason: null,
+      };
+    }
+  }
+
+  // 2) Seed entry URL (if not already tried)
+  const seedHtml = await fetchOne(seed);
+  if (seedHtml) {
+    const scored = scoreSubmissionFormPage(seedHtml);
+    if (!scored.ignorable && scored.score >= FORM_DISCOVERY_DEFAULTS.minFormScore) {
+      return {
+        importedEntryUrl: seed,
+        formUrl: seed,
+        html: seedHtml,
+        pagesChecked: [...pagesChecked],
+        formFound: true,
+        source: 'entry',
+        discoveryFailureReason: null,
+      };
+    }
+  }
+
+  // 3) Bounded discovery crawl from entry + any fetched pages
+  const candidateQueue: Array<{ url: string; score: number; depth: number }> = [];
+  const seenCand = new Set<string>(
+    [...fetched.keys(), seed.replace(/\/$/, '').toLowerCase()]
+  );
+
+  const absorbLinks = (html: string, pageUrl: string, depth: number) => {
+    if (depth >= FORM_DISCOVERY_DEFAULTS.maxDepth) return;
+    for (const c of extractSubmissionCandidateLinks(html, pageUrl, domain, depth)) {
+      const key = c.url.replace(/\/$/, '').toLowerCase();
+      if (seenCand.has(key)) continue;
+      if (c.depth > FORM_DISCOVERY_DEFAULTS.maxDepth) continue;
+      seenCand.add(key);
+      candidateQueue.push({ url: c.url, score: c.score, depth: c.depth });
+    }
+  };
+
+  for (const [key, html] of fetched) {
+    absorbLinks(html, key, 0);
+  }
+  if (seedHtml) absorbLinks(seedHtml, seed, 0);
+
+  candidateQueue.sort((a, b) => b.score - a.score);
+  const toFetch = candidateQueue.slice(0, FORM_DISCOVERY_DEFAULTS.maxCandidates);
+
+  for (const c of toFetch) {
+    if (pagesChecked.length >= FORM_DISCOVERY_DEFAULTS.maxPages) break;
+    const html = await fetchOne(c.url);
+    if (!html) continue;
+    absorbLinks(html, c.url, c.depth);
+  }
+
+  // Second-pass candidates discovered at depth 1 (still ≤ maxDepth / maxPages)
+  candidateQueue.sort((a, b) => b.score - a.score);
+  for (const c of candidateQueue) {
+    if (pagesChecked.length >= FORM_DISCOVERY_DEFAULTS.maxPages) break;
+    const key = c.url.replace(/\/$/, '').toLowerCase();
+    if (fetched.has(key)) continue;
+    if (c.depth > FORM_DISCOVERY_DEFAULTS.maxDepth) continue;
+    const html = await fetchOne(c.url);
+    if (!html) continue;
+  }
+
+  const pages = [...fetched.entries()].map(([url, html]) => ({ url, html }));
+  // Restore original URLs from pagesChecked where possible
+  const withOriginal = pages.map((p) => {
+    const match = pagesChecked.find(
+      (u) => u.replace(/\/$/, '').toLowerCase() === p.url.replace(/\/$/, '').toLowerCase()
+    );
+    return { url: match ?? p.url, html: p.html };
+  });
+
+  const best = pickBestFormPage(withOriginal);
+  if (best) {
+    const html =
+      fetched.get(best.url.replace(/\/$/, '').toLowerCase()) ??
+      withOriginal.find((p) => p.url === best.url)?.html ??
+      null;
+    return {
+      importedEntryUrl: seed,
+      formUrl: best.url,
+      html,
+      pagesChecked: [...pagesChecked],
+      formFound: Boolean(html),
+      source: 'crawl',
+      discoveryFailureReason: null,
+    };
+  }
+
+  const failure = formDiscoveryFailureMessage(pagesChecked);
+  return {
+    importedEntryUrl: seed,
+    formUrl: seed,
+    html: seedHtml,
+    pagesChecked: [...pagesChecked],
+    formFound: false,
+    source: 'none',
+    discoveryFailureReason: failure,
+  };
 }
 
 function asRecipe(raw: unknown): SiteRecipe | null {
@@ -350,13 +554,13 @@ async function prepareOnePackage(
   const domain = normalizeSiteDomain(
     String(opts.domainOverride || opp.domain || opp.url || '')
   );
-  const entryUrl =
+  const importedEntryUrl =
     opts.entryUrlOverride ||
     String(meta.divertedUrl ?? meta.entryUrl ?? opp.url ?? `https://${domain}`);
 
   const { data: profile } = await admin()
     .from('site_profiles')
-    .select('id, recipe')
+    .select('id, recipe, strategy, learning, page_classifications')
     .eq('workspace_id', workspaceId)
     .eq('domain', domain)
     .maybeSingle();
@@ -394,9 +598,74 @@ async function prepareOnePackage(
   const versionStale = !recipeVersionsCurrent(existingForBuild);
   const forceReclassify = Boolean(opts.forceReread) || versionStale || Boolean(opts.clearPins);
 
-  const html = await fetchHtml(entryUrl);
+  const strategy = (profile?.strategy ?? {}) as Record<string, unknown>;
+  const learning = (profile?.learning ?? {}) as Record<string, unknown>;
+  const directory =
+    typeof learning.directory === 'object' && learning.directory
+      ? (learning.directory as Record<string, unknown>)
+      : {};
+  const contactForm =
+    typeof learning.contactForm === 'object' && learning.contactForm
+      ? (learning.contactForm as Record<string, unknown>)
+      : {};
+  const pageClassifications = Array.isArray(profile?.page_classifications)
+    ? (profile!.page_classifications as Array<Record<string, unknown>>)
+    : [];
+  const successfulPaths = Array.isArray(learning.successfulPaths)
+    ? (learning.successfulPaths as Array<Record<string, unknown>>)
+    : [];
+
+  const resolved = await resolveAssistedFormTarget({
+    domain,
+    importedEntryUrl,
+    forceRediscover: forceReclassify,
+    hints: {
+      resolvedFormUrl: existingRecipe?.resolvedFormUrl ?? priorPayload?.resolvedFormUrl ?? null,
+      strategyEntryUrl: strategy.entryUrl ? String(strategy.entryUrl) : null,
+      strategyFallbacks: Array.isArray(strategy.fallbacks)
+        ? (strategy.fallbacks as Array<{ entryUrl?: string | null }>)
+        : [],
+      learningSubmissionUrls: Array.isArray(learning.submissionUrls)
+        ? (learning.submissionUrls as string[])
+        : [],
+      successfulPathUrls: successfulPaths
+        .map((p) => (p.entryUrl != null ? String(p.entryUrl) : null))
+        .filter((u): u is string => Boolean(u)),
+      directorySubmissionUrl: directory.submissionUrl
+        ? String(directory.submissionUrl)
+        : null,
+      contactFormSubmissionUrl: contactForm.submissionUrl
+        ? String(contactForm.submissionUrl)
+        : null,
+      pageClassificationUrls: pageClassifications
+        .filter((p) => {
+          const intent = String(p.intent ?? p.pageIntent ?? '').toLowerCase();
+          return /submit|write.?for.?us|guest|form|directory|contribute/.test(intent);
+        })
+        .map((p) => String(p.url ?? ''))
+        .filter(Boolean),
+      divertedUrl: meta.divertedUrl ? String(meta.divertedUrl) : null,
+      metaEntryUrl: meta.entryUrl ? String(meta.entryUrl) : null,
+    },
+  });
+
+  const entryUrl = resolved.formUrl;
+  const html = resolved.html;
   const liveFacts = html ? extractFormFieldFacts(html) : [];
-  const formFound = liveFacts.length > 0;
+  const formFound = resolved.formFound && liveFacts.length > 0;
+  const discoveryFailureReason = resolved.discoveryFailureReason;
+
+  logger.info(
+    {
+      domain,
+      importedEntryUrl,
+      formUrl: entryUrl,
+      discoverySource: resolved.source,
+      pagesChecked: resolved.pagesChecked.length,
+      formFound,
+    },
+    'assisted-manual form URL resolved'
+  );
 
   // Log raw facts as received by inferFieldRole (compare to unit-test inputs)
   if (liveFacts.length || opts.forceReread) {
@@ -418,7 +687,10 @@ async function prepareOnePackage(
   if (html && formFound) {
     recipe = buildSiteRecipe({
       domain,
-      entryUrl,
+      entryUrl: importedEntryUrl,
+      resolvedFormUrl: entryUrl,
+      formDiscoveryPagesChecked: resolved.pagesChecked,
+      formDiscoverySource: resolved.source,
       html,
       existing: existingForBuild,
       forceReclassify: true,
@@ -439,8 +711,10 @@ async function prepareOnePackage(
     // Force re-read (or first prepare) with no usable form HTML
     rereadFailed = Boolean(opts.forceReread) || priorFieldCount > 0;
     rereadFailReason = !html
-      ? 'Re-read failed — could not fetch form HTML; previous fields kept'
-      : 'Re-read failed — no form fields found in page HTML; previous fields kept';
+      ? discoveryFailureReason ??
+        'Re-read failed — could not fetch form HTML; previous fields kept'
+      : discoveryFailureReason ??
+        'Re-read failed — no form fields found in page HTML; previous fields kept';
 
     if (existingRecipe && existingRecipe.fields.length > 0) {
       // Guard: never wipe a populated recipe with an empty read
@@ -448,11 +722,16 @@ async function prepareOnePackage(
         ...existingRecipe,
         notes: [existingRecipe.notes, rereadFailReason].filter(Boolean).join(' · '),
         lastVerifiedAt: new Date().toISOString(),
+        formDiscoveryPagesChecked: resolved.pagesChecked,
+        formDiscoverySource: resolved.source,
       };
     } else if (priorPayload?.fields?.length) {
       recipe = {
         domain,
-        entryUrl,
+        entryUrl: importedEntryUrl,
+        resolvedFormUrl: priorPayload.resolvedFormUrl ?? entryUrl,
+        formDiscoveryPagesChecked: resolved.pagesChecked,
+        formDiscoverySource: resolved.source,
         formFingerprint: String(priorPackage?.form_fingerprint ?? 'fp_prior'),
         fields: priorPayload.fields.map((f) => ({
           selector: f.selector,
@@ -476,13 +755,17 @@ async function prepareOnePackage(
     } else {
       recipe = {
         domain,
-        entryUrl,
+        entryUrl: importedEntryUrl,
+        resolvedFormUrl: entryUrl,
+        formDiscoveryPagesChecked: resolved.pagesChecked,
+        formDiscoverySource: resolved.source,
         formFingerprint: 'fp_missing',
         fields: [],
         dropdownOptions: {},
         gate: 'none',
         notes:
           rereadFailReason ??
+          discoveryFailureReason ??
           (opts.forceReread
             ? 'Force re-read failed — no form HTML fetched'
             : 'No form HTML fetched'),
@@ -507,18 +790,24 @@ async function prepareOnePackage(
     rereadFailed = true;
     rereadFailReason =
       rereadFailReason ??
+      discoveryFailureReason ??
       'Re-read failed — empty field list; previous fields kept';
     if (existingRecipe && existingRecipe.fields.length > 0) {
       recipe = {
         ...existingRecipe,
         notes: [existingRecipe.notes, rereadFailReason].filter(Boolean).join(' · '),
         lastVerifiedAt: new Date().toISOString(),
+        formDiscoveryPagesChecked: resolved.pagesChecked,
+        formDiscoverySource: resolved.source,
       };
     } else if (priorPayload?.fields?.length) {
       // Reconstruct minimal recipe from prior package fields
       recipe = {
         domain,
-        entryUrl,
+        entryUrl: importedEntryUrl,
+        resolvedFormUrl: priorPayload.resolvedFormUrl ?? entryUrl,
+        formDiscoveryPagesChecked: resolved.pagesChecked,
+        formDiscoverySource: resolved.source,
         formFingerprint: String(priorPackage?.form_fingerprint ?? 'fp_prior'),
         fields: priorPayload.fields.map((f) => ({
           selector: f.selector,
@@ -556,7 +845,17 @@ async function prepareOnePackage(
     preparedAt,
     fingerprintStatus: 'fresh',
     formFound: formFound || recipe.fields.length > 0,
+    discoveryFailureReason:
+      !formFound && recipe.fields.length === 0 ? discoveryFailureReason : null,
   });
+
+  // Prefer the resolved form URL for Open package (falls back inside buildAssistedPackage)
+  payload.entryUrl = recipe.resolvedFormUrl || entryUrl;
+  payload.importedEntryUrl =
+    importedEntryUrl !== payload.entryUrl ? importedEntryUrl : null;
+  payload.resolvedFormUrl = recipe.resolvedFormUrl ?? entryUrl;
+  payload.formDiscoveryPagesChecked = resolved.pagesChecked;
+  payload.formDiscoverySource = resolved.source;
 
   if (html && formFound && !rereadFailed) {
     payload.readerVersion = ASSISTED_FORM_READER_VERSION;

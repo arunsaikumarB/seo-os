@@ -19,8 +19,9 @@ export const ASSISTED_PREPARE_BATCH_MAX = 500;
 /**
  * Bump when Form Reader extraction changes (search filters, DOM fact shape, etc.).
  * Mismatched recipes re-read HTML and rebuild fields on prepare even if fingerprint matches.
+ * v3: resolve submission page (SI strategy / bounded crawl) before reading.
  */
-export const ASSISTED_FORM_READER_VERSION = 2;
+export const ASSISTED_FORM_READER_VERSION = 3;
 /**
  * Bump when field-role / confidence rules change.
  * Mismatched recipes re-classify even when form fingerprint is unchanged.
@@ -127,7 +128,22 @@ export type RecipeField = {
 
 export type SiteRecipe = {
   domain: string;
+  /** Imported / seed URL (may be a landing page). */
   entryUrl: string;
+  /**
+   * Actual submission form URL used for Form Reader + package Open link.
+   * Cached per domain so discovery runs once.
+   */
+  resolvedFormUrl?: string | null;
+  /** Paths/URLs checked during form discovery (honesty / debugging). */
+  formDiscoveryPagesChecked?: string[];
+  formDiscoverySource?:
+    | 'cache'
+    | 'site_intelligence'
+    | 'entry'
+    | 'crawl'
+    | 'none'
+    | null;
   formFingerprint: string;
   fields: RecipeField[];
   dropdownOptions: Record<string, string[]>;
@@ -175,6 +191,11 @@ export type PackageFieldValue = {
 
 export type AssistedPackagePayload = {
   entryUrl: string;
+  /** Original imported URL when different from the resolved form page. */
+  importedEntryUrl?: string | null;
+  resolvedFormUrl?: string | null;
+  formDiscoveryPagesChecked?: string[];
+  formDiscoverySource?: string | null;
   domain: string;
   formFingerprint: string;
   preparedAt: string;
@@ -811,9 +832,14 @@ export function confidenceAfterValue(
 /** Build or merge a Site Recipe from Form Reader facts. */
 export function buildSiteRecipe(input: {
   domain: string;
+  /** Imported / seed URL. */
   entryUrl: string;
   html: string;
   existing?: SiteRecipe | null;
+  /** Actual form page URL (Open package + re-read target). */
+  resolvedFormUrl?: string | null;
+  formDiscoveryPagesChecked?: string[];
+  formDiscoverySource?: SiteRecipe['formDiscoverySource'];
   /**
    * When true (classifier upgrade or user force re-read), re-infer every non-human field
    * even if the form fingerprint matches the stored recipe.
@@ -892,6 +918,14 @@ export function buildSiteRecipe(input: {
   return {
     domain: input.domain,
     entryUrl: input.entryUrl,
+    resolvedFormUrl:
+      input.resolvedFormUrl ??
+      input.existing?.resolvedFormUrl ??
+      input.entryUrl,
+    formDiscoveryPagesChecked:
+      input.formDiscoveryPagesChecked ?? input.existing?.formDiscoveryPagesChecked,
+    formDiscoverySource:
+      input.formDiscoverySource ?? input.existing?.formDiscoverySource ?? null,
     formFingerprint: fingerprint,
     fields,
     dropdownOptions,
@@ -1202,6 +1236,8 @@ export function buildAssistedPackage(input: {
   fingerprintStatus?: FingerprintStatus;
   formFound?: boolean;
   status?: PackageStatus;
+  /** Honest discovery failure (overrides bare "No form found"). */
+  discoveryFailureReason?: string | null;
 }): AssistedPackagePayload {
   const preparedAt = input.preparedAt ?? new Date().toISOString();
   const fingerprintStatus = input.fingerprintStatus ?? 'fresh';
@@ -1213,6 +1249,10 @@ export function buildAssistedPackage(input: {
     'Does not fully prepare multi-step forms.',
     'Does not attach images for you.',
   ];
+
+  const openUrl =
+    input.recipe.resolvedFormUrl?.trim() ||
+    input.recipe.entryUrl;
 
   const fields: PackageFieldValue[] = input.recipe.fields.map((rf) => {
     if (rf.role === 'terms') {
@@ -1328,7 +1368,9 @@ export function buildAssistedPackage(input: {
         ? 'SMS confirmation code required after submit — keep your phone ready.'
         : 'Email confirmation code required after submit — check inbox before finishing.';
   } else if (!formFound) {
-    failureReason = 'No form found';
+    failureReason =
+      input.discoveryFailureReason?.trim() ||
+      'No submission form found after crawling — try Re-read form or Report bad package';
   }
 
   const gateNotes =
@@ -1349,7 +1391,12 @@ export function buildAssistedPackage(input: {
                   : 'No special gate detected beyond normal form submit.';
 
   return {
-    entryUrl: input.recipe.entryUrl,
+    entryUrl: openUrl,
+    importedEntryUrl:
+      input.recipe.entryUrl !== openUrl ? input.recipe.entryUrl : null,
+    resolvedFormUrl: input.recipe.resolvedFormUrl ?? openUrl,
+    formDiscoveryPagesChecked: input.recipe.formDiscoveryPagesChecked,
+    formDiscoverySource: input.recipe.formDiscoverySource ?? null,
     domain: input.recipe.domain,
     formFingerprint: input.recipe.formFingerprint,
     preparedAt,

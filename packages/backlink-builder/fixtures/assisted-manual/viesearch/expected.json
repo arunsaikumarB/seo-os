@@ -2,6 +2,8 @@
   "id": "viesearch",
   "domain": "viesearch.com",
   "entryUrl": "https://viesearch.com/submit",
+  "resolvedFormUrl": "https://viesearch.com/submit",
+  "discoveredPaths": ["/submit"],
   "gate": "otp_phone",
   "gateAllow": ["otp_phone", "otp_email"],
   "bucket": "check_fields",
@@ -11,5 +13,5 @@
     { "match": { "id": "description" }, "role": "long_desc" },
     { "match": { "id": "email" }, "role": "email" }
   ],
-  "notes": "Label 'Title (Optional) Leave blank…' must classify as title, never url. OTP → check_fields."
+  "notes": "Label 'Title (Optional) Leave blank…' must classify as title, never url. OTP → check_fields. Form URL is /submit."
 }

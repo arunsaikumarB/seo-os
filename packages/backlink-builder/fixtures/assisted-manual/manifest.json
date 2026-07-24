@@ -3,12 +3,13 @@
   "phase": 8,
   "description": "Regression fixtures for Assisted Manual Form Reader + classifier. Every future bug adds a fixture.",
   "fixtures": [
-    "viesearch",
-    "somuch",
-    "forum-parallels",
-    "forum-ovh",
-    "shopify-community",
     "cnet",
+    "discovery-landing",
+    "forum-ovh",
+    "forum-parallels",
+    "shopify-community",
+    "somuch",
+    "viesearch",
     "wordpress-org"
   ]
 }

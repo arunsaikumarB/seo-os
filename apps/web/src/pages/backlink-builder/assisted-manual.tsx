@@ -58,6 +58,9 @@ type AssistedPackage = {
     readerVersion?: number;
     classifierVersion?: number;
     confidenceSummary?: string | null;
+    importedEntryUrl?: string | null;
+    resolvedFormUrl?: string | null;
+    formDiscoverySource?: string | null;
   };
   blocked?: boolean;
   blockReason?: string;
@@ -404,6 +407,23 @@ export function AssistedManualPage() {
                           >
                             {pkg.entryUrl}
                           </a>
+                          {pkg.package?.importedEntryUrl &&
+                          pkg.package.importedEntryUrl !== pkg.entryUrl ? (
+                            <span className="block text-[11px] text-muted-foreground mt-0.5">
+                              Imported:{' '}
+                              <a
+                                href={pkg.package.importedEntryUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="underline-offset-2 hover:underline"
+                              >
+                                {pkg.package.importedEntryUrl}
+                              </a>
+                              {pkg.package.formDiscoverySource
+                                ? ` · found via ${pkg.package.formDiscoverySource}`
+                                : ''}
+                            </span>
+                          ) : null}
                         </CardDescription>
                       </div>
                       <div className="flex flex-wrap gap-1">

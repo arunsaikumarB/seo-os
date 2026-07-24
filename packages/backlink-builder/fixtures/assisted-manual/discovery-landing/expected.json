@@ -1,0 +1,16 @@
+{
+  "id": "discovery-landing",
+  "domain": "example-directory.test",
+  "entryUrl": "https://example-directory.test/",
+  "resolvedFormUrl": "https://example-directory.test/submit",
+  "discoveredPaths": ["/submit"],
+  "gate": "none",
+  "bucket": "ready",
+  "fields": [
+    { "match": { "id": "title" }, "role": "title" },
+    { "match": { "id": "website" }, "role": "url" },
+    { "match": { "id": "description" }, "role": "long_desc" },
+    { "match": { "id": "email" }, "role": "email" }
+  ],
+  "notes": "Landing page has only site search; Form Reader must follow /submit intent link to the real form (form.html)."
+}

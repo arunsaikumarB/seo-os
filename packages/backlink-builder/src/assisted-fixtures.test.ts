@@ -18,6 +18,10 @@ import {
   confidenceAfterSelfCheck,
   valueMatchesRole,
 } from './assisted-self-check.js';
+import {
+  extractSubmissionCandidateLinks,
+  pickBestFormPage,
+} from './form-url-discovery.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_ROOT = join(__dirname, '../fixtures/assisted-manual');
@@ -33,6 +37,8 @@ type ExpectedFixture = {
   id: string;
   domain: string;
   entryUrl: string;
+  resolvedFormUrl?: string;
+  discoveredPaths?: string[];
   gate: string;
   gateAllow?: string[];
   bucket?: string;
@@ -41,13 +47,19 @@ type ExpectedFixture = {
   notes?: string;
 };
 
-function loadFixture(id: string): { html: string; expected: ExpectedFixture } {
+function loadFixture(id: string): {
+  html: string;
+  formHtml: string | null;
+  expected: ExpectedFixture;
+} {
   const dir = join(FIXTURE_ROOT, id);
   const html = readFileSync(join(dir, 'page.html'), 'utf8');
+  const formPath = join(dir, 'form.html');
+  const formHtml = existsSync(formPath) ? readFileSync(formPath, 'utf8') : null;
   const expected = JSON.parse(
     readFileSync(join(dir, 'expected.json'), 'utf8')
   ) as ExpectedFixture;
-  return { html, expected };
+  return { html, formHtml, expected };
 }
 
 function findRecipeField(
@@ -104,12 +116,48 @@ describe('Phase 8 Assisted Manual fixtures', () => {
 
   for (const id of manifest.fixtures) {
     it(`fixture ${id}: roles, gate, bucket`, () => {
-      const { html, expected } = loadFixture(id);
+      const { html, formHtml, expected } = loadFixture(id);
+
+      // Discovery fixtures: landing page.html must expose submission intent paths;
+      // Form Reader reads form.html (resolved submission page).
+      if (expected.discoveredPaths?.length && formHtml) {
+        const links = extractSubmissionCandidateLinks(
+          html,
+          expected.entryUrl,
+          expected.domain,
+          0
+        );
+        for (const path of expected.discoveredPaths) {
+          expect(
+            links.some((l) => l.url.includes(path)),
+            `expected discovery path ${path} from landing`
+          ).toBe(true);
+        }
+        const best = pickBestFormPage([
+          { url: expected.entryUrl, html },
+          {
+            url: expected.resolvedFormUrl ?? `${expected.entryUrl.replace(/\/$/, '')}${expected.discoveredPaths[0]}`,
+            html: formHtml,
+          },
+        ]);
+        expect(best?.url).toContain(expected.discoveredPaths[0]!);
+      }
+
+      const readHtml = formHtml ?? html;
       const recipe = buildSiteRecipe({
         domain: expected.domain,
         entryUrl: expected.entryUrl,
-        html,
+        resolvedFormUrl: expected.resolvedFormUrl ?? expected.entryUrl,
+        formDiscoverySource: formHtml ? 'crawl' : 'entry',
+        formDiscoveryPagesChecked: formHtml
+          ? [expected.entryUrl, expected.resolvedFormUrl ?? expected.entryUrl]
+          : [expected.entryUrl],
+        html: readHtml,
       });
+
+      if (expected.resolvedFormUrl) {
+        expect(recipe.resolvedFormUrl).toBe(expected.resolvedFormUrl);
+      }
 
       const allowedGates = expected.gateAllow ?? [expected.gate];
       expect(allowedGates).toContain(recipe.gate);
@@ -130,6 +178,9 @@ describe('Phase 8 Assisted Manual fixtures', () => {
         content: SAMPLE_CONTENT,
         formFound: true,
       });
+      if (expected.resolvedFormUrl) {
+        expect(pkg.entryUrl).toBe(expected.resolvedFormUrl);
+      }
       const allowedBuckets = expected.bucketAllow ?? (expected.bucket ? [expected.bucket] : []);
       if (allowedBuckets.length) {
         expect(allowedBuckets).toContain(pkg.bucket);

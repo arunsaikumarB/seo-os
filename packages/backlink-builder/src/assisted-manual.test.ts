@@ -596,7 +596,7 @@ describe('Phase 7 Assisted Manual', () => {
       lastVerifiedAt: null,
       correctionCount: 1,
       multiStep: false,
-      readerVersion: 2,
+      readerVersion: 3,
       classifierVersion: 5,
     };
     const next = buildSiteRecipe({

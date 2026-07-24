@@ -42,3 +42,4 @@ export * from './submission-lanes.js';
 export * from './manual-lane.js';
 export * from './assisted-manual.js';
 export * from './assisted-self-check.js';
+export * from './form-url-discovery.js';
