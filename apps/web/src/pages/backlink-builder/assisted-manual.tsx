@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ClipboardList, Download, RefreshCw, Check, AlertTriangle } from 'lucide-react';
+import { ClipboardList, Copy, Check, Download, RefreshCw, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApi } from '@/hooks/use-api';
 import { useAuth } from '@/providers/auth-provider';
@@ -80,6 +80,17 @@ export function AssistedManualPage() {
   const qc = useQueryClient();
   const [openId, setOpenId] = useState<string | null>(null);
   const [minutesDraft, setMinutesDraft] = useState('');
+  /** Local paste edits — keyed by `${packageId}::${selector}` so edits survive hide/show */
+  const [fieldEdits, setFieldEdits] = useState<Record<string, string>>({});
+
+  const fieldKey = (packageId: string, selector: string) => `${packageId}::${selector}`;
+  const fieldValue = (packageId: string, f: PackageField) => {
+    const key = fieldKey(packageId, f.selector);
+    return key in fieldEdits ? fieldEdits[key]! : (f.value ?? '');
+  };
+  const setFieldValue = (packageId: string, selector: string, value: string) => {
+    setFieldEdits((prev) => ({ ...prev, [fieldKey(packageId, selector)]: value }));
+  };
 
   const board = useQuery({
     queryKey: ['assisted-manual', projectId],
@@ -570,64 +581,15 @@ export function AssistedManualPage() {
                     {open ? (
                       <div className="space-y-2 border-t pt-3">
                         {(pkg.package?.fields ?? []).map((f) => (
-                          <div
+                          <EditableFieldCard
                             key={f.selector}
-                            className={cn(
-                              'rounded-lg border px-3 py-2 text-sm',
-                              (f.confidence === 'low' || f.confidence === 'medium' || f.flagged) &&
-                                'border-amber-500/40 bg-amber-500/5',
-                              f.overLimit && 'border-destructive/50'
-                            )}
-                          >
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <p className="font-medium">
-                                {f.label}{' '}
-                                <span className="text-muted-foreground font-normal">
-                                  ({f.role})
-                                </span>
-                              </p>
-                              <div className="flex flex-wrap gap-1">
-                                {f.flagged ? (
-                                  <Badge className="text-[10px] border-amber-500 text-amber-800">
-                                    flagged
-                                  </Badge>
-                                ) : null}
-                                <Badge className="text-[10px]">{f.confidence}</Badge>
-                              </div>
-                            </div>
-                            {f.flagReason ? (
-                              <p className="text-xs text-amber-800 mt-1 flex items-center gap-1">
-                                <AlertTriangle className="h-3 w-3 shrink-0" />
-                                {f.flagReason}
-                              </p>
-                            ) : null}
-                            {f.value ? (
-                              <p className="mt-1 whitespace-pre-wrap text-muted-foreground">
-                                {f.value}
-                              </p>
-                            ) : null}
-                            <p className="text-[11px] text-muted-foreground mt-1 tabular-nums">
-                              {f.charCount}
-                              {f.maxlength != null ? ` / ${f.maxlength}` : ''} chars
-                              {f.recommendedOption
-                                ? ` · Category: [${f.recommendedOption}] ← recommended · ${(f.options?.length ?? 1) - 1} other options`
-                                : ''}
-                            </p>
-                            {f.humanStep ? (
-                              <p className="text-xs mt-1">{f.humanStep}</p>
-                            ) : null}
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 px-2 mt-1 text-xs"
-                              onClick={() =>
-                                correct.mutate({ packageId: pkg.id, selector: f.selector })
-                              }
-                              title="Clear this mapping and re-infer on next read (does not pin as a correction)"
-                            >
-                              Mark field wrong
-                            </Button>
-                          </div>
+                            field={f}
+                            value={fieldValue(pkg.id, f)}
+                            onChange={(v) => setFieldValue(pkg.id, f.selector, v)}
+                            onMarkWrong={() =>
+                              correct.mutate({ packageId: pkg.id, selector: f.selector })
+                            }
+                          />
                         ))}
                         {pkg.package?.multiStepLabel ? (
                           <p className="text-sm text-amber-700">{pkg.package.multiStepLabel}</p>
@@ -642,6 +604,115 @@ export function AssistedManualPage() {
         </section>
       ))}
     </PageTransition>
+  );
+}
+
+function EditableFieldCard(props: {
+  field: PackageField;
+  value: string;
+  onChange: (value: string) => void;
+  onMarkWrong: () => void;
+}) {
+  const { field: f, value, onChange, onMarkWrong } = props;
+  const [copied, setCopied] = useState(false);
+  const charCount = value.length;
+  const overLimit = f.maxlength != null && charCount > f.maxlength;
+  const rows = Math.min(12, Math.max(2, value.split('\n').length + (value.length > 120 ? 2 : 0)));
+
+  async function copyValue() {
+    const text = value;
+    if (!text.trim()) {
+      toast.error('Nothing to copy');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      toast.success(`Copied ${f.label || f.role}`);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error('Clipboard unavailable');
+    }
+  }
+
+  return (
+    <div
+      className={cn(
+        'rounded-lg border px-3 py-2 text-sm',
+        (f.confidence === 'low' || f.confidence === 'medium' || f.flagged) &&
+          'border-amber-500/40 bg-amber-500/5',
+        (f.overLimit || overLimit) && 'border-destructive/50'
+      )}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="font-medium">
+          {f.label}{' '}
+          <span className="text-muted-foreground font-normal">({f.role})</span>
+        </p>
+        <div className="flex flex-wrap items-center gap-1">
+          {f.flagged ? (
+            <Badge className="text-[10px] border-amber-500 text-amber-800">flagged</Badge>
+          ) : null}
+          <Badge className="text-[10px]">{f.confidence}</Badge>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 px-2"
+            onClick={() => void copyValue()}
+            title="Copy field value"
+            disabled={!value.trim()}
+          >
+            {copied ? (
+              <Check className="h-3.5 w-3.5 text-emerald-600" />
+            ) : (
+              <Copy className="h-3.5 w-3.5" />
+            )}
+            <span className="ml-1 text-xs">{copied ? 'Copied' : 'Copy'}</span>
+          </Button>
+        </div>
+      </div>
+      {f.flagReason ? (
+        <p className="text-xs text-amber-800 mt-1 flex items-center gap-1">
+          <AlertTriangle className="h-3 w-3 shrink-0" />
+          {f.flagReason}
+        </p>
+      ) : null}
+      <textarea
+        className={cn(
+          'mt-2 w-full rounded-md border bg-background px-2.5 py-2 text-sm leading-relaxed',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          overLimit && 'border-destructive'
+        )}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={rows}
+        spellCheck
+        aria-label={`${f.label || f.role} value`}
+      />
+      <p
+        className={cn(
+          'text-[11px] text-muted-foreground mt-1 tabular-nums',
+          overLimit && 'text-destructive'
+        )}
+      >
+        {charCount}
+        {f.maxlength != null ? ` / ${f.maxlength}` : ''} chars
+        {f.recommendedOption
+          ? ` · Category: [${f.recommendedOption}] ← recommended · ${(f.options?.length ?? 1) - 1} other options`
+          : ''}
+      </p>
+      {f.humanStep ? <p className="text-xs mt-1">{f.humanStep}</p> : null}
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-7 px-2 mt-1 text-xs"
+        onClick={onMarkWrong}
+        title="Clear this mapping and re-infer on next read (does not pin as a correction)"
+      >
+        Mark field wrong
+      </Button>
+    </div>
   );
 }
 
