@@ -44,6 +44,7 @@ type ExpectedFixture = {
   bucket?: string;
   bucketAllow?: string[];
   fields: ExpectedField[];
+  formFound?: boolean;
   notes?: string;
 };
 
@@ -162,6 +163,11 @@ describe('Phase 8 Assisted Manual fixtures', () => {
       const allowedGates = expected.gateAllow ?? [expected.gate];
       expect(allowedGates).toContain(recipe.gate);
 
+      if (expected.formFound === false) {
+        expect(recipe.formFound).toBe(false);
+        expect(recipe.fields).toHaveLength(0);
+      }
+
       for (const spec of expected.fields) {
         const field = findRecipeField(recipe, spec.match);
         expect(field, `missing field for ${JSON.stringify(spec.match)}`).toBeTruthy();
@@ -173,10 +179,13 @@ describe('Phase 8 Assisted Manual fixtures', () => {
         }
       }
 
+      const formFound =
+        expected.formFound === false ? false : recipe.formFound !== false;
       const pkg = buildAssistedPackage({
         recipe,
         content: SAMPLE_CONTENT,
-        formFound: true,
+        formFound,
+        discoveryFailureReason: recipe.formFailureReason,
       });
       if (expected.resolvedFormUrl) {
         expect(pkg.entryUrl).toBe(expected.resolvedFormUrl);
@@ -191,7 +200,7 @@ describe('Phase 8 Assisted Manual fixtures', () => {
         recipe,
         fields: pkg.fields,
         fingerprintStatus: 'fresh',
-        formFound: true,
+        formFound,
       });
       if (allowedBuckets.length) {
         expect(allowedBuckets).toContain(bucket);

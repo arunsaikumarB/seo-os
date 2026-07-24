@@ -23,6 +23,7 @@ export type SelfCheckRole =
   | 'business_name'
   | 'category'
   | 'terms'
+  | 'captcha'
   | 'attachment'
   | 'other';
 
@@ -167,7 +168,7 @@ export function confidenceAfterSelfCheck(
 ): { confidence: SelfCheckConfidence; flagged: boolean; flagReason: string | null; clearValue: boolean } {
   const trimmed = String(value ?? '').trim();
 
-  if (role === 'terms' || role === 'attachment') {
+  if (role === 'terms' || role === 'attachment' || role === 'captcha') {
     return { confidence: base, flagged: false, flagReason: null, clearValue: false };
   }
 

@@ -18,6 +18,7 @@ import {
   computeAssistedLaneCounts,
   evaluateFingerprintStatus,
   extractFormFieldFacts,
+  extractTargetFormFieldFacts,
   findSimilarPackagePairs,
   fieldFactSnapshot,
   normalizeSiteDomain,
@@ -661,9 +662,23 @@ async function prepareOnePackage(
 
   const entryUrl = resolved.formUrl;
   const html = resolved.html;
-  const liveFacts = html ? extractFormFieldFacts(html) : [];
-  const formFound = resolved.formFound && liveFacts.length > 0;
-  const discoveryFailureReason = resolved.discoveryFailureReason;
+  const targetRead = html
+    ? extractTargetFormFieldFacts(html)
+    : {
+        fields: [] as ReturnType<typeof extractFormFieldFacts>,
+        formFound: false,
+        failureReason: 'No HTML fetched',
+        targetFormSelector: null,
+        targetFormIndex: null,
+        targetFormAction: null,
+        targetFormHtml: null,
+        humanSteps: [] as string[],
+        gateHtml: '',
+      };
+  const liveFacts = targetRead.fields;
+  const formFound = Boolean(resolved.formFound && targetRead.formFound && liveFacts.length > 0);
+  const discoveryFailureReason =
+    targetRead.failureReason || resolved.discoveryFailureReason;
 
   logger.info(
     {

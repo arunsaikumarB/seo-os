@@ -2,6 +2,11 @@ import {
   confidenceGateSummary,
   selfCheckPackageFields,
 } from './assisted-self-check.js';
+import {
+  detectFormHumanSteps,
+  formatYouMustSteps,
+  selectTargetForm,
+} from './target-form.js';
 
 /**
  * Phase 7 — Assisted Manual packages (human submits; app never auto-publishes).
@@ -20,8 +25,9 @@ export const ASSISTED_PREPARE_BATCH_MAX = 500;
  * Bump when Form Reader extraction changes (search filters, DOM fact shape, etc.).
  * Mismatched recipes re-read HTML and rebuild fields on prepare even if fingerprint matches.
  * v3: resolve submission page (SI strategy / bounded crawl) before reading.
+ * v4: select ONE target <form> — never merge login/search widgets with the submit form.
  */
-export const ASSISTED_FORM_READER_VERSION = 3;
+export const ASSISTED_FORM_READER_VERSION = 4;
 /**
  * Bump when field-role / confidence rules change.
  * Mismatched recipes re-classify even when form fingerprint is unchanged.
@@ -29,8 +35,9 @@ export const ASSISTED_FORM_READER_VERSION = 3;
  * v7: Phase 8 self-check + confidence gate (never high on role/value mismatch).
  * v8: Phase 9 role-value binding — no description fallback into url/name/email;
  *     owner/contact tokens map correctly; unknown long fields → other (empty).
+ * v9: url only on text/url inputs (never LINK_TYPE selects); captcha as human step.
  */
-export const ASSISTED_FIELD_CLASSIFIER_VERSION = 8;
+export const ASSISTED_FIELD_CLASSIFIER_VERSION = 9;
 
 export type FieldConfidence = 'high' | 'medium' | 'low';
 export type FieldSource =
@@ -53,6 +60,7 @@ export type FieldRole =
   | 'address'
   | 'attachment'
   | 'terms'
+  | 'captcha'
   | 'other';
 
 export type AssistedGate =
@@ -155,6 +163,15 @@ export type SiteRecipe = {
   correctionCount: number;
   multiStep: boolean;
   multiStepLabel?: string;
+  /** Locked target <form> — re-reads prefer this form. */
+  targetFormSelector?: string | null;
+  targetFormIndex?: number | null;
+  targetFormAction?: string | null;
+  /** Captcha / agreement steps — not fillable fields. */
+  humanSteps?: string[];
+  /** Honest: Form Reader found no qualifying submission form. */
+  formFound?: boolean;
+  formFailureReason?: string | null;
   /** Form Reader extraction version — bump when DOM parsing changes. */
   readerVersion?: number;
   /** Field-role / confidence classifier version — bump when mapping rules change. */
@@ -213,6 +230,9 @@ export type AssistedPackagePayload = {
   failureReason: string | null;
   /** Phase 8 — e.g. "3 confident · 2 need a check" */
   confidenceSummary?: string | null;
+  /** Captcha / agreement — "you must: …" */
+  humanSteps?: string[];
+  targetFormSelector?: string | null;
   readerVersion?: number;
   classifierVersion?: number;
 };
@@ -283,8 +303,19 @@ function hasRequired(tag: string): boolean {
 function parseMaxlength(tag: string, surrounding: string): number | null {
   const fromAttr = Number(attr(tag, 'maxlength') ?? 0) || 0;
   if (fromAttr > 0) return fromAttr;
-  const hint = /max(?:imum)?\s*[:\s]*(\d+)\s*char/i.exec(surrounding);
-  if (hint) return Number(hint[1]);
+  const patterns = [
+    /max(?:imum)?\s*(?:length|chars?|characters?)?\s*[:\s]*(\d+)/i,
+    /(\d+)\s*(?:chars?|characters?)\b/i,
+    /\(\s*(\d+)\s*(?:chars?|characters?|max)?\s*\)/i,
+    /(?:limit|upto|up to)\s*[:\s]*(\d+)/i,
+  ];
+  for (const p of patterns) {
+    const hint = p.exec(surrounding);
+    if (hint) {
+      const n = Number(hint[1]);
+      if (n >= 10 && n <= 100_000) return n;
+    }
+  }
   return null;
 }
 
@@ -353,19 +384,21 @@ function findLabel(html: string, id: string | null, name: string | null): string
   return null;
 }
 
-function surroundingSnippet(html: string, index: number, len = 120): string {
-  const start = Math.max(0, index - 40);
+function surroundingSnippet(html: string, index: number, len = 220): string {
+  const start = Math.max(0, index - 80);
   const end = Math.min(html.length, index + len);
   return html.slice(start, end).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-/** Extract every form field as DOM facts (Phase 7 §2.1–2.3). */
+/** Extract form fields as DOM facts from a single HTML fragment (one form or page). */
 export function extractFormFieldFacts(html: string): FormFieldFacts[] {
   const fields: FormFieldFacts[] = [];
   const seen = new Set<string>();
 
   const push = (f: FormFieldFacts) => {
     if (isSearchOrNavField(f)) return;
+    // Password fields belong to login widgets — never emit as fill targets
+    if (f.type === 'password') return;
     const key = f.selector || `${f.name}|${f.id}|${f.type}`;
     if (seen.has(key)) return;
     seen.add(key);
@@ -455,6 +488,66 @@ export function extractFormFieldFacts(html: string): FormFieldFacts[] {
   return fields;
 }
 
+/**
+ * Phase 10 — extract fields from the single target submission form only.
+ * Login / search / newsletter forms are disqualified, never merged.
+ */
+export function extractTargetFormFieldFacts(
+  pageHtml: string,
+  opts?: {
+    lockedSelector?: string | null;
+    lockedIndex?: number | null;
+  }
+): {
+  fields: FormFieldFacts[];
+  formFound: boolean;
+  failureReason: string | null;
+  targetFormSelector: string | null;
+  targetFormIndex: number | null;
+  targetFormAction: string | null;
+  targetFormHtml: string | null;
+  humanSteps: string[];
+  gateHtml: string;
+} {
+  const pick = selectTargetForm(pageHtml, {
+    lockedSelector: opts?.lockedSelector,
+    lockedIndex: opts?.lockedIndex,
+  });
+
+  if (!pick.formFound || !pick.form) {
+    return {
+      fields: [],
+      formFound: false,
+      failureReason: pick.failureReason,
+      targetFormSelector: null,
+      targetFormIndex: null,
+      targetFormAction: null,
+      targetFormHtml: null,
+      humanSteps: [],
+      gateHtml: pageHtml,
+    };
+  }
+
+  const formHtml = pick.form.fullHtml;
+  const fields = extractFormFieldFacts(formHtml);
+  const humanSteps = detectFormHumanSteps(formHtml);
+
+  return {
+    fields,
+    formFound: fields.length > 0,
+    failureReason:
+      fields.length === 0
+        ? 'No submission form found — target form had no fillable fields'
+        : null,
+    targetFormSelector: pick.form.selector,
+    targetFormIndex: pick.form.index,
+    targetFormAction: pick.form.action,
+    targetFormHtml: formHtml,
+    humanSteps,
+    gateHtml: formHtml,
+  };
+}
+
 export function detectMultiStepForm(html: string): boolean {
   const h = html.toLowerCase();
   if (/\bstep\s*[1-9]\s*(of|\/)\s*[2-9]/i.test(h)) return true;
@@ -470,22 +563,22 @@ export function detectGateFromHtml(html: string): AssistedGate {
   if (/cloudflare|cf-challenge|cf-turnstile|attention required|checking your browser/i.test(h)) {
     return 'cloudflare';
   }
-  if (/recaptcha|hcaptcha|g-recaptcha|captcha/i.test(h)) return 'captcha';
+  if (/recaptcha|hcaptcha|g-recaptcha|captcha|security.?code|enter the code/i.test(h)) {
+    return 'captcha';
+  }
   if (/one[- ]?time|otp|verification code|enter the code/i.test(h) && /email/i.test(h)) {
     return 'otp_email';
   }
   if (/sms|phone.*(code|verify)|text.*(code|verify)/i.test(h)) return 'otp_phone';
-  if (
-    /type=["']password["']/i.test(h) &&
-    /login|sign\s*in|log\s*in/i.test(h)
-  ) {
+  // Login/registration only when THIS fragment has a password field
+  if (/type=["']password["']/i.test(h)) {
+    if (/sign\s*up|create\s*(an?\s*)?account|register|registration/i.test(h)) {
+      return 'registration';
+    }
+    if (/login|sign\s*in|log\s*in|remember.?me|password/i.test(h)) {
+      return 'login';
+    }
     return 'login';
-  }
-  if (
-    /sign\s*up|create\s*(an?\s*)?account|register|registration/i.test(h) &&
-    /type=["']password["']/i.test(h)
-  ) {
-    return 'registration';
   }
   if (/pending review|manual approval|we will review/i.test(h)) return 'manual_review';
   return 'none';
@@ -583,7 +676,13 @@ function descriptionRoleFromControl(facts: FormFieldFacts): 'short_desc' | 'long
   return 'long_desc';
 }
 
-/** Leading-token → role. URL only for URL/Website/Link (or type=url handled separately). */
+/** True when a control can genuinely hold a website URL value. */
+export function isUrlCapableControl(facts: FormFieldFacts): boolean {
+  const t = (facts.type || 'text').toLowerCase();
+  return t === 'text' || t === 'url' || t === '';
+}
+
+/** Leading-token → role. URL only for URL/Website (text/url inputs — never selects). */
 function roleFromLeadingToken(
   token: string,
   facts: FormFieldFacts
@@ -600,6 +699,9 @@ function roleFromLeadingToken(
   ) {
     return 'name';
   }
+  if (/captcha|security.?code|seccode|verify.?code|human.?check/i.test(blob)) {
+    return 'captcha';
+  }
   if (!token) return null;
   if (/^(title|headline)$/i.test(token)) return 'title';
   if (/^(name)$/i.test(token) && !/company|business|site/i.test(facts.label ?? '')) {
@@ -607,13 +709,20 @@ function roleFromLeadingToken(
     return 'title';
   }
   if (
-    /^(description|about|summary|tagline|blurb|excerpt|details|bio|content|message|notes)$/i.test(
+    /^(description|about|summary|tagline|blurb|excerpt|details|bio|content|message|notes|article)$/i.test(
       token
     )
   ) {
     return descriptionRoleFromControl(facts);
   }
-  if (/^(url|website|link|homepage)$/i.test(token)) return 'url';
+  // url / website / homepage — never from bare "link" (LINK_TYPE selects)
+  if (/^(url|website|homepage)$/i.test(token)) {
+    return isUrlCapableControl(facts) ? 'url' : null;
+  }
+  if (/^(link)$/i.test(token)) {
+    // "Link" / LINK_TYPE on a select is not a URL field
+    return isUrlCapableControl(facts) ? 'url' : null;
+  }
   if (/^(email|e-?mail)$/i.test(token)) return 'email';
   if (/^(phone|mobile|tel)$/i.test(token)) return 'phone';
   if (/^(owner|contact|person)$/i.test(token)) return 'name';
@@ -622,6 +731,7 @@ function roleFromLeadingToken(
   if (/^(address|street|city|zip|postal)$/i.test(token)) return 'address';
   if (/^(logo|image|photo|file|upload|attach)$/i.test(token)) return 'attachment';
   if (/^(terms|agree|privacy|consent)$/i.test(token)) return 'terms';
+  if (/^(captcha|seccode)$/i.test(token)) return 'captcha';
   return null;
 }
 
@@ -740,6 +850,18 @@ export function inferFieldRole(facts: FormFieldFacts): {
         ? 'dom_label'
         : 'name_guess';
 
+  const captchaBlob = [facts.label, facts.name, facts.id, facts.placeholder]
+    .filter(Boolean)
+    .join(' ');
+  // Do NOT use surroundingText — a nearby g-recaptcha widget must not mark Title as captcha
+  if (/captcha|security.?code|seccode|verify.?code|human.?check/i.test(captchaBlob)) {
+    return {
+      role: 'captcha',
+      confidence: 'high',
+      source: hasExplicitLabel ? 'dom_label' : 'name_guess',
+    };
+  }
+
   if (facts.type === 'file') {
     return {
       role: 'attachment',
@@ -747,7 +869,7 @@ export function inferFieldRole(facts: FormFieldFacts): {
       source: hasExplicitLabel ? 'dom_label' : 'name_guess',
     };
   }
-  if (facts.type === 'checkbox' && /terms|agree|privacy/i.test(text)) {
+  if (facts.type === 'checkbox' && /terms|agree|privacy|rules|consent/i.test(text + captchaBlob)) {
     return { role: 'terms', confidence: 'high', source: 'dom_label' };
   }
   if (facts.type === 'email') {
@@ -756,6 +878,38 @@ export function inferFieldRole(facts: FormFieldFacts): {
       confidence: hasExplicitLabel ? 'high' : 'medium',
       source: hasExplicitLabel ? 'dom_label' : 'name_guess',
     };
+  }
+
+  // Selects are never URL fields (LINK_TYPE / link-type dropdowns)
+  if (facts.type === 'select' || facts.options.length > 0) {
+    const fromLeadSelect = roleFromLeadingToken(leading, facts);
+    if (fromLeadSelect === 'category' || /categor|industry|topic|niche/i.test(primary || text)) {
+      return {
+        role: 'category',
+        confidence: hasExplicitLabel ? 'high' : 'medium',
+        source: hasExplicitLabel ? 'dom_label' : 'llm_inferred',
+      };
+    }
+    if (fromLeadSelect && fromLeadSelect !== 'url') {
+      return {
+        role: fromLeadSelect,
+        confidence: leadingFromLabel ? 'high' : 'medium',
+        source: leadSource,
+      };
+    }
+    // LINK_TYPE / "link" select → other (empty), never paste the website URL
+    if (
+      /link.?type|link_type|^link$/i.test([facts.name, facts.id, primary].filter(Boolean).join(' '))
+    ) {
+      return { role: 'other', confidence: 'medium', source: leadSource };
+    }
+    if (facts.type === 'select') {
+      return {
+        role: 'other',
+        confidence: 'low',
+        source: hasExplicitLabel ? 'dom_label' : 'name_guess',
+      };
+    }
   }
 
   // Textarea / long maxlength → description family ONLY when the label says so.
@@ -787,6 +941,13 @@ export function inferFieldRole(facts: FormFieldFacts): {
       return {
         role: descriptionRoleFromControl(facts),
         confidence: 'medium',
+        source: leadSource,
+      };
+    }
+    if (fromLead === 'url' && !isUrlCapableControl(facts)) {
+      return {
+        role: 'other',
+        confidence: 'low',
         source: leadSource,
       };
     }
@@ -824,6 +985,13 @@ export function inferFieldRole(facts: FormFieldFacts): {
   // Leading token wins (Title…website helper → title, not url)
   // Explicit label token outranks type=url and name/id
   const fromLead = roleFromLeadingToken(leading, facts);
+  if (fromLead === 'url' && !isUrlCapableControl(facts)) {
+    return {
+      role: 'other',
+      confidence: 'low',
+      source: leadSource,
+    };
+  }
   if (fromLead) {
     return {
       role: fromLead,
@@ -857,17 +1025,6 @@ export function inferFieldRole(facts: FormFieldFacts): {
     };
   }
 
-  if (facts.type === 'select' || facts.options.length > 0) {
-    const cat = ROLE_HINTS.find((h) => h.role === 'category');
-    if (cat && cat.patterns.some((p) => p.test(primary || text))) {
-      return {
-        role: 'category',
-        confidence: hasExplicitLabel ? 'high' : 'medium',
-        source: hasExplicitLabel ? 'dom_label' : 'llm_inferred',
-      };
-    }
-  }
-
   // Fallback: cleaned primary label only when labeled; else placeholder / stripped attrs
   const matchHaystack = hasExplicitLabel
     ? primary || ''
@@ -888,13 +1045,15 @@ export function inferFieldRole(facts: FormFieldFacts): {
     }
   }
 
-  // name/id alone may still indicate url — never when an explicit label exists
+  // name/id alone may still indicate url — never when an explicit label exists,
+  // and never for select / non-text controls
   if (
+    isUrlCapableControl(facts) &&
     !hasExplicitLabel &&
     !leading &&
     (roleFromLeadingToken(leadingFromAttr, facts) === 'url' ||
-      /^(website|url|link|homepage)(_|$)/i.test(facts.name ?? '') ||
-      /^(website|url|link|homepage)(_|$)/i.test(facts.id ?? ''))
+      /^(website|url|homepage)(_|$)/i.test(facts.name ?? '') ||
+      /^(website|url|homepage)(_|$)/i.test(facts.id ?? ''))
   ) {
     return { role: 'url', confidence: 'low', source: 'name_guess' };
   }
@@ -917,7 +1076,7 @@ export function confidenceAfterValue(
   value: string
 ): FieldConfidence {
   if (source === 'human_corrected') return base;
-  if (role === 'terms' || role === 'attachment') return base;
+  if (role === 'terms' || role === 'attachment' || role === 'captcha') return base;
   if (role === 'other') return 'low';
   if (!String(value ?? '').trim()) return 'low';
   if (source === 'name_guess' && base === 'high') return 'low';
@@ -944,10 +1103,32 @@ export function buildSiteRecipe(input: {
   /** When true, ignore all human_corrected / known_bad pins (Clear corrections). */
   dropHumanPins?: boolean;
 }): SiteRecipe {
-  const facts = extractFormFieldFacts(input.html);
+  const target = extractTargetFormFieldFacts(input.html, {
+    lockedSelector: input.existing?.targetFormSelector,
+    lockedIndex: input.existing?.targetFormIndex,
+  });
+  const facts = target.fields;
   const fingerprint = computeFormFingerprint(facts);
-  const multiStep = detectMultiStepForm(input.html);
-  const gate = detectGateFromHtml(input.html);
+  const gateSource = target.gateHtml || input.html;
+  const multiStep = detectMultiStepForm(gateSource);
+  // Cloudflare can be page-level; other gates come from the target form only
+  const pageGate = detectGateFromHtml(input.html);
+  const formGate = detectGateFromHtml(gateSource);
+  // When no submission form qualifies, do not inherit login gate from a sibling widget
+  const gate =
+    !target.formFound
+      ? 'none'
+      : pageGate === 'cloudflare'
+        ? 'cloudflare'
+        : formGate !== 'none'
+          ? formGate
+          : pageGate === 'captcha'
+            ? 'captcha'
+            : 'none';
+  const humanSteps = [
+    ...(target.humanSteps ?? []),
+    ...detectFormHumanSteps(gateSource),
+  ].filter((s, i, a) => a.indexOf(s) === i);
 
   const versionStale = !recipeVersionsCurrent(input.existing);
   const forceReclassify = Boolean(input.forceReclassify) || versionStale;
@@ -959,45 +1140,60 @@ export function buildSiteRecipe(input: {
       .map((f) => [f.selector, f] as const)
   );
 
-  const fields: RecipeField[] = facts.map((f) => {
-    const prev = existingBySelector.get(f.selector);
-    const inferred = inferFieldRole(f);
+  // Recipe fields exclude captcha/terms — those become humanSteps only
+  const fields: RecipeField[] = facts
+    .map((f) => {
+      const prev = existingBySelector.get(f.selector);
+      const inferred = inferFieldRole(f);
 
-    // Real human role replacement — keep unless it contradicts a high-confidence DOM label
-    if (prev?.source === 'human_corrected') {
-      const contradictsDom =
-        inferred.source === 'dom_label' &&
-        inferred.confidence === 'high' &&
-        inferred.role !== prev.role;
-      // Force reclassify also drops legacy pins that disagree with fresh inference
-      const dropLegacyOnForce =
-        forceReclassify && inferred.role !== prev.role && inferred.confidence !== 'low';
+      // Real human role replacement — keep unless it contradicts a high-confidence DOM label
+      if (prev?.source === 'human_corrected') {
+        const contradictsDom =
+          inferred.source === 'dom_label' &&
+          inferred.confidence === 'high' &&
+          inferred.role !== prev.role;
+        // Force reclassify also drops legacy pins that disagree with fresh inference
+        const dropLegacyOnForce =
+          forceReclassify && inferred.role !== prev.role && inferred.confidence !== 'low';
 
-      if (!contradictsDom && !dropLegacyOnForce) {
-        return {
-          ...prev,
-          maxlength: f.maxlength ?? prev.maxlength,
-          options: f.options.length ? f.options : prev.options,
-          required: f.required,
-          label: f.label ?? f.ariaLabel ?? f.placeholder ?? prev.label,
-        };
+        if (!contradictsDom && !dropLegacyOnForce) {
+          return {
+            ...prev,
+            maxlength: f.maxlength ?? prev.maxlength,
+            options: f.options.length ? f.options : prev.options,
+            required: f.required,
+            label: f.label ?? f.ariaLabel ?? f.placeholder ?? prev.label,
+          };
+        }
+        // Fall through — pin discarded; use inference
       }
-      // Fall through — pin discarded; use inference
-    }
 
-    return {
-      selector: f.selector,
-      role: inferred.role,
-      maxlength: f.maxlength,
-      required: f.required,
-      confidence: inferred.confidence,
-      source: inferred.source,
-      label: f.label ?? f.ariaLabel ?? f.placeholder ?? f.name,
-      options: f.options.length ? f.options : undefined,
-      accept: f.accept,
-      sizeHint: f.sizeHint,
-    };
-  });
+      return {
+        selector: f.selector,
+        role: inferred.role,
+        maxlength: f.maxlength,
+        required: f.required,
+        confidence: inferred.confidence,
+        source: inferred.source,
+        label: f.label ?? f.ariaLabel ?? f.placeholder ?? f.name,
+        options: f.options.length ? f.options : undefined,
+        accept: f.accept,
+        sizeHint: f.sizeHint,
+      };
+    })
+    .filter((f) => f.role !== 'captcha' && f.role !== 'terms');
+
+  // Ensure agreement/captcha still surface even if widgets aren't input fields
+  const ensuredSteps = [...humanSteps];
+  if (gate === 'captcha' && !ensuredSteps.some((s) => /code/i.test(s))) {
+    ensuredSteps.push('enter the code shown');
+  }
+  if (
+    /terms|agree|submission.?rules/i.test(gateSource) &&
+    !ensuredSteps.some((s) => /agreement|tick/i.test(s))
+  ) {
+    ensuredSteps.push('tick the submission-rules agreement');
+  }
 
   const dropdownOptions: Record<string, string[]> = {};
   for (const f of fields) {
@@ -1010,6 +1206,12 @@ export function buildSiteRecipe(input: {
       : dropPins
         ? 'Human corrections cleared'
         : null;
+
+  const formNote = target.formFound
+    ? target.targetFormSelector
+      ? `Target form: ${target.targetFormSelector}`
+      : null
+    : target.failureReason;
 
   return {
     domain: input.domain,
@@ -1028,13 +1230,19 @@ export function buildSiteRecipe(input: {
     gate: multiStep ? 'multi_step' : gate,
     notes: multiStep
       ? 'Multi-step form — step 1 prepared, later steps unknown'
-      : [input.existing?.notes, upgradeNote].filter(Boolean).join(' · ') || '',
+      : [input.existing?.notes, upgradeNote, formNote].filter(Boolean).join(' · ') || '',
     lastVerifiedAt: new Date().toISOString(),
     correctionCount: dropPins ? 0 : (input.existing?.correctionCount ?? 0),
     multiStep,
     multiStepLabel: multiStep
       ? 'Multi-step form — step 1 prepared, later steps unknown'
       : undefined,
+    targetFormSelector: target.targetFormSelector,
+    targetFormIndex: target.targetFormIndex,
+    targetFormAction: target.targetFormAction,
+    humanSteps: ensuredSteps,
+    formFound: target.formFound,
+    formFailureReason: target.failureReason,
     readerVersion: ASSISTED_FORM_READER_VERSION,
     classifierVersion: ASSISTED_FIELD_CLASSIFIER_VERSION,
   };
@@ -1385,21 +1593,6 @@ export function buildAssistedPackage(input: {
     input.recipe.entryUrl;
 
   const fields: PackageFieldValue[] = input.recipe.fields.map((rf) => {
-    if (rf.role === 'terms') {
-      return {
-        selector: rf.selector,
-        role: rf.role,
-        label: rf.label ?? 'Terms',
-        value: '',
-        charCount: 0,
-        maxlength: null,
-        required: rf.required,
-        confidence: confidenceAfterValue(rf.role, rf.source, rf.confidence, ''),
-        source: rf.source,
-        overLimit: false,
-        humanStep: 'Accept terms yourself — never pre-answered by the app.',
-      };
-    }
     if (rf.role === 'attachment') {
       const fileName = input.content.imageFileName ?? 'listing-image.jpg';
       const constraints = [
@@ -1528,7 +1721,12 @@ export function buildAssistedPackage(input: {
   });
 
   let failureReason: string | null = null;
-  if (fingerprintStatus === 'changed') {
+  if (!formFound) {
+    failureReason =
+      input.discoveryFailureReason?.trim() ||
+      input.recipe.formFailureReason?.trim() ||
+      'No submission form found after crawling — try Re-read form or Report bad package';
+  } else if (fingerprintStatus === 'changed') {
     failureReason = 'Form changed — re-prepare';
   } else if (fingerprintStatus === 'stale') {
     failureReason = 'Package expired — re-prepare';
@@ -1541,13 +1739,10 @@ export function buildAssistedPackage(input: {
       input.recipe.gate === 'otp_phone'
         ? 'SMS confirmation code required after submit — keep your phone ready.'
         : 'Email confirmation code required after submit — check inbox before finishing.';
-  } else if (!formFound) {
-    failureReason =
-      input.discoveryFailureReason?.trim() ||
-      'No submission form found after crawling — try Re-read form or Report bad package';
   }
 
-  const gateNotes =
+  const youMust = formatYouMustSteps(input.recipe.humanSteps ?? []);
+  const gateNotesBase =
     input.recipe.gate === 'otp_email'
       ? 'Email code will be sent to the address you enter — check inbox before submitting.'
       : input.recipe.gate === 'otp_phone'
@@ -1563,6 +1758,7 @@ export function buildAssistedPackage(input: {
                 : input.recipe.gate === 'multi_step'
                   ? honestyNotes[3]
                   : 'No special gate detected beyond normal form submit.';
+  const gateNotes = youMust ? `${gateNotesBase} · ${youMust}` : gateNotesBase;
 
   return {
     entryUrl: openUrl,
@@ -1585,6 +1781,8 @@ export function buildAssistedPackage(input: {
     honestyNotes,
     failureReason: failureReason ?? confSummary.line,
     confidenceSummary: confSummary.line,
+    humanSteps: input.recipe.humanSteps ?? [],
+    targetFormSelector: input.recipe.targetFormSelector ?? null,
     readerVersion: input.recipe.readerVersion ?? ASSISTED_FORM_READER_VERSION,
     classifierVersion: input.recipe.classifierVersion ?? ASSISTED_FIELD_CLASSIFIER_VERSION,
   };
@@ -1595,7 +1793,11 @@ export function verifyMappingAgainstDom(
   recipe: SiteRecipe,
   liveHtml: string
 ): { ok: boolean; mismatches: string[] } {
-  const live = extractFormFieldFacts(liveHtml);
+  const target = extractTargetFormFieldFacts(liveHtml, {
+    lockedSelector: recipe.targetFormSelector,
+    lockedIndex: recipe.targetFormIndex,
+  });
+  const live = target.fields;
   const bySelector = new Map(live.map((f) => [f.selector, f]));
   const mismatches: string[] = [];
   for (const rf of recipe.fields) {

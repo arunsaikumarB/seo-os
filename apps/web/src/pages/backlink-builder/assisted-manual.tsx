@@ -61,6 +61,8 @@ type AssistedPackage = {
     importedEntryUrl?: string | null;
     resolvedFormUrl?: string | null;
     formDiscoverySource?: string | null;
+    humanSteps?: string[];
+    targetFormSelector?: string | null;
   };
   blocked?: boolean;
   blockReason?: string;
@@ -464,6 +466,11 @@ export function AssistedManualPage() {
                       </p>
                     ) : null}
                     <p className="text-xs text-muted-foreground mt-1">{pkg.package?.gateNotes}</p>
+                    {pkg.package?.humanSteps && pkg.package.humanSteps.length > 0 ? (
+                      <p className="text-xs text-amber-800 mt-1">
+                        You must: {pkg.package.humanSteps.join(' · ')}
+                      </p>
+                    ) : null}
                     {pkg.package?.confidenceSummary ? (
                       <p className="text-xs text-muted-foreground mt-1">
                         Confidence: {pkg.package.confidenceSummary}
