@@ -239,8 +239,9 @@ describe('Phase 9 strategy media', () => {
   it('skips media for text-only directory forms', () => {
     const d = strategyNeedsMedia({
       hasAttachmentField: false,
-      mediaRequirements: { images: false, videos: false },
+      mediaRequirements: { images: true, videos: false }, // type hint ignored
       htmlHasImageUpload: false,
+      logoRequired: true, // heuristic ignored
     });
     expect(d.images).toBe(false);
     expect(d.videos).toBe(false);
@@ -249,5 +250,18 @@ describe('Phase 9 strategy media', () => {
   it('requires images when recipe has attachment field', () => {
     const d = strategyNeedsMedia({ hasAttachmentField: true });
     expect(d.images).toBe(true);
+  });
+
+  it('requires images when HTML has file/image upload', () => {
+    const d = strategyNeedsMedia({ htmlHasImageUpload: true });
+    expect(d.images).toBe(true);
+  });
+
+  it('ignores directory type mediaRequirements alone', () => {
+    const d = strategyNeedsMedia({
+      mediaRequirements: { images: true, videos: true },
+    });
+    expect(d.images).toBe(false);
+    expect(d.videos).toBe(false);
   });
 });

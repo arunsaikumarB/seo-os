@@ -26,7 +26,7 @@ import { createContentPack, createMediaBrief } from '../backlinks/v11.service.js
 
 async function resolveMediaNeedForOpportunity(
   workspaceId: string,
-  _opportunityId: string,
+  opportunityId: string,
   item: CampaignItemRow
 ) {
   const domain = String(item.domain ?? '')
@@ -34,7 +34,7 @@ async function resolveMediaNeedForOpportunity(
     .toLowerCase();
   let hasAttachmentField = false;
   let attachmentSupport: boolean | null = null;
-  let logoRequired: boolean | null = null;
+  let formUrl: string | null = null;
 
   if (domain) {
     const { data: profile } = await getSupabaseAdmin()
@@ -47,58 +47,65 @@ async function resolveMediaNeedForOpportunity(
     if (recipe?.fields?.some((f) => f.role === 'attachment')) {
       hasAttachmentField = true;
     }
+    formUrl = recipe?.resolvedFormUrl?.trim() || recipe?.entryUrl?.trim() || null;
     const learning = (profile?.learning ?? {}) as Record<string, unknown>;
     if (typeof learning.attachmentSupport === 'boolean') {
       attachmentSupport = learning.attachmentSupport;
     }
-    const directory =
-      typeof learning.directory === 'object' && learning.directory
-        ? (learning.directory as Record<string, unknown>)
-        : {};
-    if (directory.logoRequired != null) logoRequired = Boolean(directory.logoRequired);
+  }
+
+  // Prefer already-prepared Assisted Manual recipe: attachment role = real upload field
+  if (!hasAttachmentField) {
+    try {
+      const { data: pkg } = await getSupabaseAdmin()
+        .from('assisted_packages')
+        .select('payload')
+        .eq('workspace_id', workspaceId)
+        .eq('opportunity_id', opportunityId)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const fields = (pkg?.payload as { fields?: Array<{ role?: string }> } | null)?.fields;
+      if (fields?.some((f) => f.role === 'attachment')) {
+        hasAttachmentField = true;
+      }
+    } catch {
+      /* table may be missing in older envs */
+    }
   }
 
   let htmlHasImageUpload = false;
   let htmlHasVideoUpload = false;
-  let mediaRequirements: { images?: boolean; videos?: boolean } | null = null;
   try {
-    const { detectSubmissionRequirements } = await import('@seo-os/backlink-builder');
+    const {
+      htmlHasFileOrImageUpload,
+      htmlHasVideoUploadControl,
+    } = await import('@seo-os/backlink-builder');
+    // Prefer resolved form URL (not marketing homepage)
     const entry =
+      formUrl ||
       item.websiteUrl ||
       (item.domain ? `https://${item.domain}` : null);
-    let htmlSnippet: string | undefined;
     if (entry) {
       const res = await fetch(entry, {
         signal: AbortSignal.timeout(8_000),
         headers: { 'User-Agent': 'SEO-OS-ContentGen/1.0' },
       });
       if (res.ok) {
-        htmlSnippet = (await res.text()).slice(0, 60_000);
-        const low = htmlSnippet.toLowerCase();
-        htmlHasImageUpload =
-          low.includes('type="file"') ||
-          low.includes('accept="image') ||
-          low.includes('upload image') ||
-          low.includes('upload logo');
-        htmlHasVideoUpload = low.includes('accept="video') || low.includes('upload video');
+        const htmlSnippet = (await res.text()).slice(0, 60_000);
+        htmlHasImageUpload = htmlHasFileOrImageUpload(htmlSnippet);
+        htmlHasVideoUpload = htmlHasVideoUploadControl(htmlSnippet);
       }
     }
-    const detected = detectSubmissionRequirements(String(item.classification ?? 'directory'), {
-      htmlSnippet,
-      url: entry ?? '',
-    });
-    mediaRequirements = detected.mediaRequirements ?? null;
   } catch {
-    /* estimated */
+    /* estimated — default text-only (no Flux) */
   }
 
   return strategyNeedsMedia({
     hasAttachmentField,
-    mediaRequirements,
     htmlHasImageUpload,
     htmlHasVideoUpload,
     attachmentSupport,
-    logoRequired,
   });
 }
 
@@ -1216,7 +1223,7 @@ async function finalizeQuality(
     }
     await recordSample(workspaceId, {
       durationMs: Date.now() - startedAt,
-      images: 1,
+      images: item.imageStatus === 'n/a' ? 0 : 1,
     });
     return;
   }
@@ -1228,7 +1235,7 @@ async function finalizeQuality(
 
   await recordSample(workspaceId, {
     durationMs: Date.now() - startedAt,
-    images: 1,
+    images: item.imageStatus === 'n/a' ? 0 : 1,
   });
 
   if (tier === 'Completed') {
