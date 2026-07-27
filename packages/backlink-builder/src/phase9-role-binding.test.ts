@@ -242,6 +242,7 @@ describe('Phase 9 category handling', () => {
       'Computers & Internet',
       'Arts',
       'Shopping',
+      'Business',
     ];
     const pick = recommendDropdownOption(opts, [
       'Chefgaa',
@@ -252,7 +253,55 @@ describe('Phase 9 category handling', () => {
     ]);
     expect(pick).not.toBe('Men');
     expect(pick).not.toBe('Women');
+    expect(pick).not.toBe('Business'); // prefer specific multi-word label
     expect(['Business & Economy', 'Computers & Internet']).toContain(pick);
+  });
+
+  it('scores a large directory select — never Men, prefers Business & Economy / Computers & Internet', () => {
+    const opts = [
+      'Arts',
+      'Business',
+      'Business & Economy',
+      'Computers',
+      'Computers & Internet',
+      'Games',
+      'Health',
+      'Home',
+      'Kids and Teens',
+      'News',
+      'Recreation',
+      'Reference',
+      'Regional',
+      'Science',
+      'Shopping',
+      'Society',
+      'Men',
+      'Women',
+      'Sports',
+      'World',
+      'Adult',
+      'Dating',
+      'Restaurants',
+      'Food & Beverage',
+      'Software',
+      'Technology',
+      'Society/People/Men',
+      'Shopping/Men',
+    ];
+    for (let i = 0; i < 520; i++) opts.push(`Niche Category ${i}`);
+
+    const pick = recommendDropdownOption(opts, [
+      'Chefgaa',
+      'restaurant POS software',
+      'point of sale',
+      'business software',
+      'restaurants',
+    ]);
+    expect(pick).not.toBe('Men');
+    expect(pick).not.toMatch(/men/i);
+    expect(['Business & Economy', 'Computers & Internet', 'Food & Beverage', 'Restaurants']).toContain(
+      pick
+    );
   });
 
   it('leaves empty + no guess when nothing fits', () => {

@@ -1550,11 +1550,40 @@ export function buildCategoryHints(input: {
 }
 
 const IRRELEVANT_PERSONAL_CATEGORY =
-  /^(men|women|kids|boys|girls|fashion|clothing|apparel|dating|adult|xxx|sex|porn|gay|lesbian)\b/i;
+  /^(men|women|kids|boys|girls|fashion|clothing|apparel|dating|adult|xxx|sex|porn|gay|lesbian)(\b|$)/i;
+
+/** True for gender/fashion/personal buckets that must never be recommended for B2B brands. */
+export function isIrrelevantPersonalCategory(option: string): boolean {
+  const o = sanitizeOptionLabel(option).toLowerCase();
+  if (IRRELEVANT_PERSONAL_CATEGORY.test(o)) return true;
+  // Hierarchical: "Society/People/Men", "Shopping > Men"
+  if (/(^|[\s/>:-])(men|women|kids|dating|adult)(\b|$)/i.test(o) && !/women'?s\s+health|children'?s\s+health/i.test(o)) {
+    return /men|women|kids|dating|adult/i.test(o) && !/business|comput|software|restaur|food|internet|tech/i.test(o);
+  }
+  return false;
+}
+
+function brandLooksBusinessTech(brandBlob: string): boolean {
+  return /business|software|saas|tech|pos|platform|commerce|retail|service|restaur|food|internet|computer|chef|kitchen|hospitality|enterprise|compan|agenc/.test(
+    brandBlob
+  );
+}
+
+/** Jaccard similarity on category tokens (0–1). */
+export function categoryTextSimilarity(a: string, b: string): number {
+  const ta = new Set(categoryTokens(a));
+  const tb = new Set(categoryTokens(b));
+  if (!ta.size || !tb.size) return 0;
+  let inter = 0;
+  for (const t of ta) if (tb.has(t)) inter++;
+  const union = ta.size + tb.size - inter;
+  return union > 0 ? inter / union : 0;
+}
 
 /**
- * Score each real &lt;select&gt; option against brand category keywords.
- * Returns null when no option clearly fits — never invents a wrong pick like "Men".
+ * Score each real &lt;select&gt; option against brand category keywords via text similarity.
+ * Returns null when no option clears the relevance threshold — never invents a wrong pick
+ * like "Men", and never falls back to position / first option.
  */
 export function recommendDropdownOption(
   options: string[],
@@ -1562,48 +1591,47 @@ export function recommendDropdownOption(
   opts?: { minScore?: number }
 ): string | null {
   if (!options.length) return null;
-  const cleaned = options.map((o) => sanitizeOptionLabel(o)).filter(Boolean);
+  const cleaned = options
+    .map((o) => sanitizeOptionLabel(o))
+    .filter((o) => Boolean(o) && !/^select\b/i.test(o) && !/^choose\b/i.test(o));
   if (!cleaned.length) return null;
 
   const hints = expandCategoryHints(preferredHints);
   const lowerHints = hints.map((h) => h.toLowerCase()).filter((h) => h.length >= 2);
   if (!lowerHints.length) return null;
 
-  const hintTok = new Set(lowerHints.flatMap((h) => categoryTokens(h)));
   const brandBlob = lowerHints.join(' ');
-  const brandIsBusinessTech =
-    /business|software|saas|tech|pos|platform|commerce|retail|service|restaur|food|internet|computer/.test(
-      brandBlob
-    );
+  const businessBrand = brandLooksBusinessTech(brandBlob);
+  // Require a real similarity hit — synonym-only fluff must not crown a wrong short label
+  const minScore = opts?.minScore ?? 14;
 
-  const minScore = opts?.minScore ?? 6;
-  const scored: Array<{ opt: string; score: number }> = [];
+  const scored: Array<{ opt: string; score: number; sim: number }> = [];
 
   for (const opt of cleaned) {
     const o = opt.toLowerCase();
-    let score = 0;
-    const oTok = categoryTokens(opt);
+    if (businessBrand && isIrrelevantPersonalCategory(opt)) {
+      continue; // never consider Men/Women/Dating for a restaurant POS brand
+    }
 
+    let bestSim = 0;
     for (const h of lowerHints) {
       if (o === h) {
-        score += 14;
-        continue;
+        bestSim = 1;
+        break;
       }
-      // Substring only when BOTH sides are long enough.
-      // Short options like "Men" must NOT match inside "management" / "women" / "document".
+      // Substring only when BOTH sides are long enough (blocks Men ⊂ management)
       if (o.length >= 5 && h.length >= 5 && (o.includes(h) || h.includes(o))) {
-        score += 6;
+        bestSim = Math.max(bestSim, 0.55);
       }
+      bestSim = Math.max(bestSim, categoryTextSimilarity(opt, h));
     }
 
-    for (const t of oTok) {
-      if (!hintTok.has(t)) continue;
-      score += t.length >= 6 ? 5 : t.length >= 4 ? 3 : 1;
-    }
+    let score = bestSim * 100;
 
-    // Synonym / directory-style boosts from brand text → option label
     const brandIsTech =
-      /software|saas|tech|pos|app|platform|internet|computer|digital|e-?commerce/.test(brandBlob);
+      /software|saas|tech|pos|app|platform|internet|computer|digital|e-?commerce|point.?of.?sale/.test(
+        brandBlob
+      );
     const brandIsFood =
       /restaur|food|cafe|dining|chef|kitchen|hospitality|pos|point.?of.?sale/.test(brandBlob);
     const brandIsBiz =
@@ -1611,51 +1639,73 @@ export function recommendDropdownOption(
       brandIsTech ||
       brandIsFood;
 
-    if (brandIsTech && /comput|internet|software|tech/.test(o)) {
-      score += 10;
-    }
-    if (brandIsTech && /business|economy/.test(o)) {
-      score += 6;
-    }
-    if (brandIsFood && /food|restaur|dining|hospitality/.test(o)) {
-      score += 10;
-    }
-    if (brandIsFood && /business|economy|comput|internet|software/.test(o)) {
-      score += 6;
-    }
-    if (brandIsBiz && /business|economy|services|professional|compan/.test(o)) {
-      score += 4;
+    if (brandIsTech && /comput|internet|software|tech/.test(o)) score += 18;
+    if (brandIsTech && /business|economy/.test(o)) score += 12;
+    if (brandIsFood && /food|restaur|dining|hospitality|beverage/.test(o)) score += 18;
+    if (brandIsFood && /business|economy|comput|internet|software/.test(o)) score += 12;
+    if (brandIsBiz && /business|economy|services|professional|compan/.test(o)) score += 8;
+
+    if (/chat|forum|community|social\s*network/i.test(o) && businessBrand) {
+      score -= 12;
     }
 
-    if (
-      /chat|forum|community|social\s*network/i.test(o) &&
-      brandIsBusinessTech
-    ) {
-      score -= 6;
-    }
-    if (IRRELEVANT_PERSONAL_CATEGORY.test(o) && brandIsBusinessTech) {
-      score -= 20;
+    // Prefer specific multi-word directory labels over bare "Business"
+    const words = categoryTokens(opt).length;
+    if (score >= minScore * 0.5) {
+      if (words >= 2) score += 6;
+      if (words >= 3) score += 4;
+      // Tiny single-token labels need near-exact similarity
+      if (words === 1 && opt.length <= 5 && bestSim < 0.85) score -= 20;
     }
 
-    if (score > 0) scored.push({ opt, score });
+    if (score > 0) scored.push({ opt, score, sim: bestSim });
   }
 
-  scored.sort((a, b) => b.score - a.score);
+  scored.sort((a, b) => b.score - a.score || b.sim - a.sim || b.opt.length - a.opt.length);
   const best = scored[0];
   if (!best || best.score < minScore) return null;
 
-  // Ambiguous only when the lead is weak — two strong business fits still pick the winner
-  const second = scored[1];
-  if (
-    second &&
-    best.score < 12 &&
-    second.score >= minScore &&
-    best.score - second.score < 2
-  ) {
-    return null;
-  }
-
   return best.opt;
+}
+
+/**
+ * Re-score category fields on an existing package (heals stale "Men" picks after matcher upgrades).
+ */
+export function refreshCategoryFields(
+  fields: Array<{
+    role: string;
+    options?: string[] | null;
+    recommendedOption?: string | null;
+    value?: string;
+    label?: string;
+    flagged?: boolean;
+    flagReason?: string | null;
+    humanStep?: string | null;
+    confidence?: string;
+    [key: string]: unknown;
+  }>,
+  preferredHints: string[]
+): { fields: typeof fields; changed: boolean } {
+  let changed = false;
+  const next = fields.map((f) => {
+    if (f.role !== 'category' || !f.options?.length) return f;
+    const recommended = recommendDropdownOption(f.options, preferredHints);
+    const prev = f.recommendedOption ?? f.value ?? '';
+    if (String(prev) === String(recommended ?? '')) return f;
+    changed = true;
+    return {
+      ...f,
+      value: recommended ?? '',
+      recommendedOption: recommended,
+      flagged: !recommended,
+      flagReason: recommended ? null : 'pick a category — no confident match',
+      humanStep: recommended
+        ? `Category: [${recommended}] ← recommended · ${f.options.length - 1} other options available`
+        : 'you fill this — pick a category from the real option list',
+      confidence: recommended ? 'high' : 'low',
+    };
+  });
+  return { fields: next, changed };
 }
 
 export type ContentSource = {
@@ -1943,10 +1993,10 @@ export function buildAssistedPackage(input: {
         recommendedOption: recommended,
         overLimit: false,
         flagged: !recommended,
-        flagReason: recommended ? null : 'pick a category',
+        flagReason: recommended ? null : 'pick a category — no confident match',
         humanStep: recommended
           ? `Category: [${recommended}] ← recommended · ${cleanedOptions.length - 1} other options available`
-          : 'you fill this — pick a category from the real option list',
+          : 'you fill this — pick a category — no confident match',
       });
       continue;
     }

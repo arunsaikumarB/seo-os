@@ -28,6 +28,7 @@ import {
   looksLikeSpaShell,
   normalizeSiteDomain,
   recipeVersionsCurrent,
+  refreshCategoryFields,
   gateIsOtp,
   gateRequiresPerson,
   collectKnownFormUrlHints,
@@ -1409,6 +1410,9 @@ export async function listAssistedPackages(workspaceId: string) {
   await healReadyPackagesWithBlockingGates(workspaceId).catch((err) =>
     logger.warn({ err, workspaceId }, 'assisted heal gate→needs_person failed')
   );
+  await healStaleCategoryRecommendations(workspaceId).catch((err) =>
+    logger.warn({ err, workspaceId }, 'assisted heal category recommendations failed')
+  );
 
   const { data: rows } = await admin()
     .from('assisted_packages')
@@ -1764,6 +1768,58 @@ async function healReadyPackagesWithBlockingGates(workspaceId: string) {
       { workspaceId, packageId: row.id, gate, from: bucket, to: nextBucket },
       'assisted heal: gate bucket correction'
     );
+  }
+}
+
+/**
+ * Re-score category dropdown recommendations against brand_profile.
+ * Heals stale packages that still show irrelevant picks (e.g. "Men" for a POS brand)
+ * without requiring a full form re-read.
+ */
+async function healStaleCategoryRecommendations(workspaceId: string) {
+  const brand = await getBrandContextForBee(workspaceId);
+  const hints = buildCategoryHints({
+    industry: brand.industry,
+    primaryTopics: brand.primaryTopics,
+    keyFeatures: brand.keyFeatures,
+    companyName: brand.companyName || brand.brandName,
+    businessName: brand.brandName,
+    tagline: brand.tagline,
+  });
+  if (!hints.length) return;
+
+  const { data: rows } = await admin()
+    .from('assisted_packages')
+    .select('id, payload, status')
+    .eq('workspace_id', workspaceId)
+    .neq('status', 'skipped')
+    .limit(100);
+  if (!rows?.length) return;
+
+  for (const row of rows) {
+    const payload = (row.payload as AssistedPackagePayload) ?? null;
+    if (!payload?.fields?.length) continue;
+    const hasCategory = payload.fields.some(
+      (f) => f.role === 'category' && Array.isArray(f.options) && f.options.length > 0
+    );
+    if (!hasCategory) continue;
+
+    const { fields, changed } = refreshCategoryFields(payload.fields, hints);
+    if (!changed) continue;
+
+    const nextPayload: AssistedPackagePayload = {
+      ...payload,
+      fields: fields as AssistedPackagePayload['fields'],
+    };
+    // If category was the only empty required and now has a value, leave bucket as-is
+    // (re-prepare is the proper path for full bucket recompute).
+    await admin()
+      .from('assisted_packages')
+      .update({
+        payload: nextPayload,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', row.id);
   }
 }
 
