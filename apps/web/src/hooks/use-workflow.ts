@@ -81,7 +81,9 @@ export function useWorkflow(projectId: string) {
 
   const api = progressQ.data?.data;
   const hasSuccessfulImport = (api?.input.importedCount ?? 0) >= 1;
-  const importsLoaded = progressQ.isFetched || progressQ.isError;
+  // Until the CSM progress endpoint responds, do not treat Import as missing
+  // (avoids locking the stepper during deploy / first paint).
+  const importsLoaded = progressQ.isSuccess;
 
   const completedSteps = useMemo(() => {
     const set = new Set<string>();
