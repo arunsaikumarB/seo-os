@@ -793,6 +793,37 @@ export type AiReviewSummary = {
   invariantOk: boolean;
 };
 
+/** Decisions that remove an item from Recommended / Needs Classification cohorts. */
+export const AI_REVIEW_TERMINAL_DECISIONS = new Set<ReviewDecision>([
+  'Approved',
+  'Rejected',
+  'Unsupported',
+  'Duplicate',
+  'Dead Website',
+]);
+
+/** Lifecycle statuses that mean the item left the awaiting-classification worklist. */
+export const AI_REVIEW_TERMINAL_STATUSES = new Set([
+  'Rejected',
+  'Approved',
+  'Ignored',
+  'Skipped',
+  'Deleted',
+]);
+
+export function isAiReviewTerminal(item: {
+  reviewDecision?: ReviewDecision | string | null;
+  currentStatus?: string | null;
+}): boolean {
+  const d = item.reviewDecision ?? null;
+  if (d && AI_REVIEW_TERMINAL_DECISIONS.has(d as ReviewDecision)) return true;
+  const s = String(item.currentStatus ?? '');
+  if (AI_REVIEW_TERMINAL_STATUSES.has(s)) return true;
+  // Dead website outcomes land as Failed + Dead Website decision (covered above),
+  // or Failed with a dead lastError when decision wasn't written yet.
+  return false;
+}
+
 /** Live AI Review summary — every item in exactly one bucket. */
 export function computeAiReviewSummary(items: CampaignItemInput[]): AiReviewSummary {
   const visible = items.filter((i) => i.currentStatus !== 'Deleted');
@@ -810,37 +841,27 @@ export function computeAiReviewSummary(items: CampaignItemInput[]): AiReviewSumm
 
   for (const item of visible) {
     const d = item.reviewDecision ?? 'Pending';
-    if (d === 'Approved') {
-      summary.approved++;
-    } else if (d === 'Rejected') {
+    // Terminal lifecycle first — never leave Rejected/Approved in Needs Classification
+    if (d === 'Rejected' || item.currentStatus === 'Rejected') {
       summary.rejected++;
-    } else if (d === 'Needs Classification') {
-      summary.needsClassification++;
-    } else if (d === 'Unsupported') {
-      summary.unsupported++;
-    } else if (d === 'Duplicate') {
-      summary.duplicate++;
-    } else if (d === 'Dead Website') {
-      summary.dead++;
     } else if (
+      d === 'Approved' ||
       item.currentStatus === 'Approved' ||
       campaignLifecycleRank(item.currentStatus) > campaignLifecycleRank('Approved')
     ) {
-      // Approved (or further) without explicit review_decision — treat as approved
       summary.approved++;
-    } else if (item.reviewTier === 'needs_classification') {
-      summary.needsClassification++;
-    } else if (item.currentStatus === 'Rejected') {
-      summary.rejected++;
-    } else if (item.currentStatus === 'Ignored') {
+    } else if (d === 'Unsupported' || item.currentStatus === 'Ignored') {
       summary.unsupported++;
-    } else if (item.currentStatus === 'Skipped') {
+    } else if (d === 'Duplicate' || item.currentStatus === 'Skipped') {
       summary.duplicate++;
     } else if (
-      item.currentStatus === 'Failed' &&
-      String(item.lastError ?? '').toLowerCase().includes('dead')
+      d === 'Dead Website' ||
+      (item.currentStatus === 'Failed' &&
+        String(item.lastError ?? '').toLowerCase().includes('dead'))
     ) {
       summary.dead++;
+    } else if (d === 'Needs Classification' || item.reviewTier === 'needs_classification') {
+      summary.needsClassification++;
     } else {
       summary.pending++;
     }

@@ -112,6 +112,32 @@ describe('campaign state manager', () => {
     ).toBe(4);
   });
 
+  it('rejected items leave Needs Classification cohort', () => {
+    const s = computeAiReviewSummary([
+      {
+        id: 'a',
+        currentStatus: 'Rejected',
+        reviewDecision: 'Rejected',
+        reviewTier: 'needs_classification',
+      },
+      {
+        id: 'b',
+        currentStatus: 'Classified',
+        reviewDecision: 'Needs Classification',
+        reviewTier: 'needs_classification',
+      },
+      {
+        id: 'c',
+        currentStatus: 'Rejected',
+        reviewDecision: 'Needs Classification',
+        reviewTier: 'needs_classification',
+      },
+    ]);
+    expect(s.rejected).toBe(2);
+    expect(s.needsClassification).toBe(1);
+    expect(s.invariantOk).toBe(true);
+  });
+
   it('quality tiers use exact Phase 2/3 boundaries', () => {
     expect(tierFromQualityScore(91)).toBe('Completed');
     expect(tierFromQualityScore(90)).toBe('Needs Review');

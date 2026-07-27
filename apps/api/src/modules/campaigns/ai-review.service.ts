@@ -5,6 +5,7 @@ import {
   assignReviewTier,
   computeAiReviewSummary,
   decideAfterAnalysis,
+  isAiReviewTerminal,
   type ApprovedBy,
   type ReviewDecision,
   type ReviewTier,
@@ -35,14 +36,13 @@ export type AiReviewItem = {
 
 function toReviewItem(i: CampaignItemRow): AiReviewItem {
   const decision = i.reviewDecision ?? null;
+  const terminal = isAiReviewTerminal({
+    reviewDecision: decision,
+    currentStatus: i.currentStatus,
+  });
   const needsClass =
-    decision === 'Needs Classification' || i.reviewTier === 'needs_classification';
-  const terminal =
-    decision === 'Approved' ||
-    decision === 'Rejected' ||
-    decision === 'Unsupported' ||
-    decision === 'Duplicate' ||
-    decision === 'Dead Website';
+    !terminal &&
+    (decision === 'Needs Classification' || i.reviewTier === 'needs_classification');
   const classified =
     Boolean(i.classification) && String(i.classification).toLowerCase() !== 'unknown';
 
@@ -76,11 +76,17 @@ export async function getAiReviewBoard(workspaceId: string) {
   const rows = items.map(toReviewItem);
 
   const autoApproved = rows
-    .filter((r) => r.reviewTier === 'auto_approved' || (r.reviewDecision === 'Approved' && r.approvedBy === 'auto'))
+    .filter(
+      (r) =>
+        !isAiReviewTerminal(r) &&
+        (r.reviewTier === 'auto_approved' ||
+          (r.reviewDecision === 'Approved' && r.approvedBy === 'auto'))
+    )
     .sort((a, b) => (b.confidenceScore ?? 0) - (a.confidenceScore ?? 0));
   const recommended = rows
     .filter(
       (r) =>
+        !isAiReviewTerminal(r) &&
         r.reviewTier === 'recommended' &&
         (r.reviewDecision === 'Pending' || r.reviewDecision == null)
     )
@@ -88,8 +94,9 @@ export async function getAiReviewBoard(workspaceId: string) {
   const needsClassification = rows
     .filter(
       (r) =>
-        r.reviewTier === 'needs_classification' ||
-        r.reviewDecision === 'Needs Classification'
+        !isAiReviewTerminal(r) &&
+        (r.reviewTier === 'needs_classification' ||
+          r.reviewDecision === 'Needs Classification')
     )
     .sort((a, b) => (b.confidenceScore ?? 0) - (a.confidenceScore ?? 0));
   const rejected = rows.filter((r) => r.reviewDecision === 'Rejected');
