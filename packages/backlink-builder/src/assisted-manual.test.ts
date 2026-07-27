@@ -67,7 +67,7 @@ describe('Phase 7 Assisted Manual', () => {
     expect(fitted.value.length).toBeLessThanOrEqual(250);
   });
 
-  it('shows real dropdown options with one recommended (AT2)', () => {
+  it('omits category fields entirely and notes to pick on the site', () => {
     const recipe = buildSiteRecipe({
       domain: 'example.com',
       entryUrl: 'https://example.com/submit',
@@ -82,10 +82,9 @@ describe('Phase 7 Assisted Manual', () => {
         imageFileName: 'chefgaa-somuch-listing.jpg',
       },
     });
-    const cat = pkg.fields.find((f) => f.role === 'category');
-    expect(cat?.options).toEqual(['Food & Beverage', 'Technology', 'Health']);
-    expect(cat?.recommendedOption).toBe('Food & Beverage');
-    expect(cat?.options).not.toContain('Invented Category');
+    expect(pkg.fields.some((f) => f.role === 'category')).toBe(false);
+    expect(pkg.otherFields?.some((o) => /categor/i.test(o.label))).toBeFalsy();
+    expect(pkg.categoryNote).toBe('Pick the category yourself on the site');
   });
 
   it('scores explicit label high and name=desc2 low (AT3)', () => {
@@ -503,7 +502,8 @@ describe('Phase 7 Assisted Manual', () => {
     expect(pkg.multiStepLabel).toBe(
       'Multi-step — content ready, paste on the later step'
     );
-    expect(pkg.fields.some((f) => f.role === 'category')).toBe(true);
+    expect(pkg.fields.some((f) => f.role === 'category')).toBe(false);
+    expect(pkg.categoryNote).toBe('Pick the category yourself on the site');
     expect(pkg.fields.some((f) => f.role === 'title')).toBe(false);
     expect(pkg.pasteReadyContent?.map((c) => c.role)).toEqual(
       expect.arrayContaining(['title', 'long_desc', 'url'])

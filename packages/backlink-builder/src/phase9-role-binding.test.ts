@@ -1,13 +1,13 @@
 /**
- * Phase 9 — role-value binding, category sanitize, media skip.
+ * Phase 9 — role-value binding, media skip. Category is never packaged.
  */
 import { describe, expect, it } from 'vitest';
 import {
   buildAssistedPackage,
   buildSiteRecipe,
   inferFieldRole,
-  recommendDropdownOption,
   sanitizeOptionLabel,
+  stripCategoryFromAssistedPayload,
   valueForRole,
   type ContentSource,
 } from './assisted-manual.js';
@@ -212,104 +212,90 @@ describe('Phase 9 role-value binding', () => {
   });
 });
 
-describe('Phase 9 category handling', () => {
-  it('sanitizes HTML entities and indent markers', () => {
+describe('Phase 9 category omission', () => {
+  it('sanitizes HTML entities and indent markers (option labels still cleaned in Form Reader)', () => {
     expect(sanitizeOptionLabel('|&nbsp;&nbsp;|__Chats and Forums')).toBe('Chats and Forums');
   });
 
-  it('recommends brand-relevant option, not first chat/forum bucket', () => {
-    const opts = [
-      'Chats and Forums',
-      'Business Software',
-      'Shopping',
-    ];
-    const pick = recommendDropdownOption(opts, ['Business', 'Software', 'platform']);
-    expect(pick).toBe('Business Software');
+  it('never puts category fields or recommendations on packages', () => {
+    const html = `
+<form>
+  <label for="title">Title</label>
+  <input id="title" name="title" type="text" required maxlength="80" />
+  <label for="cat">Category</label>
+  <select id="cat" name="category" required>
+    <option>Men</option>
+    <option>Business &amp; Economy</option>
+    <option>Computers &amp; Internet</option>
+  </select>
+  <label for="url">URL</label>
+  <input id="url" name="url" type="url" required />
+</form>`;
+    const recipe = buildSiteRecipe({
+      domain: 'dir.example',
+      entryUrl: 'https://dir.example/submit',
+      html,
+    });
+    expect(recipe.fields.some((f) => f.role === 'category')).toBe(true);
+    const pkg = buildAssistedPackage({
+      recipe,
+      content: {
+        ...CONTENT,
+        categoryHints: ['Business', 'Software', 'POS'],
+      },
+      formFound: true,
+    });
+    expect(pkg.fields.some((f) => f.role === 'category')).toBe(false);
+    expect(pkg.fields.every((f) => !f.recommendedOption)).toBe(true);
+    expect(pkg.categoryNote).toBe('Pick the category yourself on the site');
+    // Category must not force Check these fields when other required fields are filled
+    expect(pkg.bucket).toBe('ready');
   });
 
-  it('returns null instead of blindly picking options[0]', () => {
-    const pick = recommendDropdownOption(['Chats and Forums', 'Random Niche'], [
-      'Quantum Astrophysics',
-    ]);
-    expect(pick).toBeNull();
-  });
-
-  it('does not pick Men via substring of management for a restaurant POS brand', () => {
-    const opts = [
-      'Men',
-      'Women',
-      'Business & Economy',
-      'Computers & Internet',
-      'Arts',
-      'Shopping',
-      'Business',
-    ];
-    const pick = recommendDropdownOption(opts, [
-      'Chefgaa',
-      'restaurant POS',
-      'restaurant management software',
-      'point of sale',
-      'business software',
-    ]);
-    expect(pick).not.toBe('Men');
-    expect(pick).not.toBe('Women');
-    expect(pick).not.toBe('Business'); // prefer specific multi-word label
-    expect(['Business & Economy', 'Computers & Internet']).toContain(pick);
-  });
-
-  it('scores a large directory select — never Men, prefers Business & Economy / Computers & Internet', () => {
-    const opts = [
-      'Arts',
-      'Business',
-      'Business & Economy',
-      'Computers',
-      'Computers & Internet',
-      'Games',
-      'Health',
-      'Home',
-      'Kids and Teens',
-      'News',
-      'Recreation',
-      'Reference',
-      'Regional',
-      'Science',
-      'Shopping',
-      'Society',
-      'Men',
-      'Women',
-      'Sports',
-      'World',
-      'Adult',
-      'Dating',
-      'Restaurants',
-      'Food & Beverage',
-      'Software',
-      'Technology',
-      'Society/People/Men',
-      'Shopping/Men',
-    ];
-    for (let i = 0; i < 520; i++) opts.push(`Niche Category ${i}`);
-
-    const pick = recommendDropdownOption(opts, [
-      'Chefgaa',
-      'restaurant POS software',
-      'point of sale',
-      'business software',
-      'restaurants',
-    ]);
-    expect(pick).not.toBe('Men');
-    expect(pick).not.toMatch(/men/i);
-    expect(['Business & Economy', 'Computers & Internet', 'Food & Beverage', 'Restaurants']).toContain(
-      pick
-    );
-  });
-
-  it('leaves empty + no guess when nothing fits', () => {
-    const pick = recommendDropdownOption(
-      ['Men', 'Women', 'Dating', 'Adult'],
-      ['Chefgaa', 'restaurant POS software', 'business']
-    );
-    expect(pick).toBeNull();
+  it('strips legacy category fields and clears check_fields when that was the only issue', () => {
+    const base = buildAssistedPackage({
+      recipe: buildSiteRecipe({
+        domain: 'x.com',
+        entryUrl: 'https://x.com/submit',
+        html: `
+<form>
+  <label for="title">Title</label>
+  <input id="title" name="title" type="text" required />
+  <label for="url">URL</label>
+  <input id="url" name="url" type="url" required />
+</form>`,
+      }),
+      content: CONTENT,
+      formFound: true,
+    });
+    const legacy = {
+      ...base,
+      bucket: 'check_fields' as const,
+      fields: [
+        ...base.fields,
+        {
+          selector: '#cat',
+          role: 'category' as const,
+          label: 'Category',
+          value: '',
+          charCount: 0,
+          maxlength: null,
+          required: true,
+          confidence: 'low' as const,
+          source: 'dom_label' as const,
+          options: ['Men', 'Business'],
+          recommendedOption: null,
+          overLimit: false,
+          flagged: true,
+          flagReason: 'pick a category — no confident match',
+        },
+      ],
+    };
+    const { payload, changed } = stripCategoryFromAssistedPayload(legacy);
+    expect(changed).toBe(true);
+    expect(payload.fields.some((f) => f.role === 'category')).toBe(false);
+    expect(payload.categoryNote).toBe('Pick the category yourself on the site');
+    expect(payload.bucket).toBe('ready');
   });
 });
 

@@ -49,8 +49,9 @@ export const ASSISTED_FORM_READER_VERSION = 5;
  * v8: Phase 9 role-value binding — no description fallback into url/name/email;
  *     owner/contact tokens map correctly; unknown long fields → other (empty).
  * v9: url only on text/url inputs (never LINK_TYPE selects); captcha as human step.
+ * v10: category <select> omitted from packages entirely (team picks on live form).
  */
-export const ASSISTED_FIELD_CLASSIFIER_VERSION = 9;
+export const ASSISTED_FIELD_CLASSIFIER_VERSION = 10;
 
 export type FieldConfidence = 'high' | 'medium' | 'low';
 export type FieldSource =
@@ -224,6 +225,9 @@ export type PackageFieldValue = {
 export const MULTI_STEP_FORM_LABEL =
   'Multi-step — content ready, paste on the later step';
 
+/** Shown when the live form has a category select — never auto-filled in packages. */
+export const CATEGORY_PICK_YOURSELF_NOTE = 'Pick the category yourself on the site';
+
 export type PasteReadyContentItem = {
   role: 'title' | 'short_desc' | 'long_desc' | 'url' | 'business_name' | 'email' | 'phone';
   label: string;
@@ -259,6 +263,11 @@ export type AssistedPackagePayload = {
    * when step 1 has no title/desc/url fields (or multi-step in general).
    */
   pasteReadyContent?: PasteReadyContentItem[];
+  /**
+   * Intentional omission — category selects are never mapped or recommended.
+   * Present only when the form has a category field the team must pick live.
+   */
+  categoryNote?: string | null;
   honestyNotes: string[];
   failureReason: string | null;
   /**
@@ -1449,265 +1458,54 @@ export function fitValueToLimit(
   };
 }
 
-/** Tokens for category matching — length ≥3; strips junk. */
-function categoryTokens(text: string): string[] {
-  return sanitizeOptionLabel(text)
-    .toLowerCase()
-    .split(/[^a-z0-9&]+/)
-    .map((t) => t.replace(/^&+|&=+$/g, ''))
-    .filter((t) => t.length >= 3);
+export function looksLikeCategoryFieldLabel(label: string): boolean {
+  return /categor|industry|^type$|topic|niche/i.test(String(label ?? '').trim());
 }
 
 /**
- * Expand brand/industry hints into directory-style labels so options like
- * "Business & Economy" / "Computers & Internet" can score for a restaurant POS brand.
+ * Remove category fields from an existing package payload and recompute bucket.
+ * Category is never recommended and never blocks Ready / Check these fields.
  */
-export function expandCategoryHints(hints: string[]): string[] {
-  const base = hints.map((h) => sanitizeOptionLabel(h)).filter((h) => h.length >= 2);
-  const blob = base.join(' ').toLowerCase();
-  const extra: string[] = [];
+export function stripCategoryFromAssistedPayload(
+  payload: AssistedPackagePayload
+): { payload: AssistedPackagePayload; changed: boolean } {
+  const hadCategoryField = payload.fields.some((f) => f.role === 'category');
+  const nextFields = payload.fields.filter((f) => f.role !== 'category');
+  const prevOther = payload.otherFields ?? [];
+  const nextOther = prevOther.filter((o) => !looksLikeCategoryFieldLabel(o.label));
+  const hadCategoryOther = nextOther.length !== prevOther.length;
+  const wantNote = hadCategoryField || hadCategoryOther || Boolean(payload.categoryNote);
+  const nextNote = wantNote ? CATEGORY_PICK_YOURSELF_NOTE : null;
 
-  const isTech =
-    /software|saas|tech|pos|point.?of.?sale|app\b|platform|internet|computer|digital|e-?commerce|commerce|api|cloud/.test(
-      blob
-    );
-  const isFood =
-    /restaur|food|cafe|dining|chef|kitchen|hospitality|grocery|beverage|culinary/.test(blob);
-  const isBusiness =
-    isTech ||
-    isFood ||
-    /business|b2b|compan|enterprise|agenc|service|professional|retail|brand|startup|smb/.test(
-      blob
-    );
-
-  if (isTech) {
-    extra.push(
-      'Computers & Internet',
-      'Computers and Internet',
-      'Computers',
-      'Internet',
-      'Technology',
-      'Software',
-      'Business Software',
-      'Business & Economy',
-      'Business and Economy',
-      'Business'
-    );
-  }
-  if (isFood) {
-    extra.push(
-      'Food & Beverage',
-      'Food and Beverage',
-      'Restaurants',
-      'Food',
-      'Hospitality',
-      'Business & Economy',
-      'Business and Economy',
-      'Business'
-    );
-  }
-  if (isBusiness && !isTech && !isFood) {
-    extra.push('Business & Economy', 'Business and Economy', 'Business', 'Services', 'Companies');
-  }
-
-  // Dedupe case-insensitively, preserve order
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const h of [...base, ...extra]) {
-    const k = h.toLowerCase();
-    if (seen.has(k)) continue;
-    seen.add(k);
-    out.push(h);
-  }
-  return out;
-}
-
-/**
- * Merge pack suggestions with live brand_profile signals.
- * Pack suggestions alone used to REPLACE brand hints and starve matching.
- */
-export function buildCategoryHints(input: {
-  categorySuggestions?: string[] | null;
-  industry?: string | null;
-  primaryTopics?: string[] | null;
-  keyFeatures?: string[] | null;
-  companyName?: string | null;
-  businessName?: string | null;
-  tagline?: string | null;
-  backlinkType?: string | null;
-}): string[] {
-  const raw = [
-    ...(Array.isArray(input.categorySuggestions) ? input.categorySuggestions : []),
-    input.industry ?? '',
-    ...(input.primaryTopics ?? []),
-    ...(input.keyFeatures ?? []).slice(0, 4),
-    input.companyName ?? '',
-    input.businessName ?? '',
-    input.tagline ?? '',
-    input.backlinkType ? String(input.backlinkType).replace(/_/g, ' ') : '',
-  ]
-    .map((h) => sanitizeOptionLabel(String(h ?? '')))
-    .filter((h) => h.length >= 2);
-  return expandCategoryHints(raw);
-}
-
-const IRRELEVANT_PERSONAL_CATEGORY =
-  /^(men|women|kids|boys|girls|fashion|clothing|apparel|dating|adult|xxx|sex|porn|gay|lesbian)(\b|$)/i;
-
-/** True for gender/fashion/personal buckets that must never be recommended for B2B brands. */
-export function isIrrelevantPersonalCategory(option: string): boolean {
-  const o = sanitizeOptionLabel(option).toLowerCase();
-  if (IRRELEVANT_PERSONAL_CATEGORY.test(o)) return true;
-  // Hierarchical: "Society/People/Men", "Shopping > Men"
-  if (/(^|[\s/>:-])(men|women|kids|dating|adult)(\b|$)/i.test(o) && !/women'?s\s+health|children'?s\s+health/i.test(o)) {
-    return /men|women|kids|dating|adult/i.test(o) && !/business|comput|software|restaur|food|internet|tech/i.test(o);
-  }
-  return false;
-}
-
-function brandLooksBusinessTech(brandBlob: string): boolean {
-  return /business|software|saas|tech|pos|platform|commerce|retail|service|restaur|food|internet|computer|chef|kitchen|hospitality|enterprise|compan|agenc/.test(
-    brandBlob
-  );
-}
-
-/** Jaccard similarity on category tokens (0–1). */
-export function categoryTextSimilarity(a: string, b: string): number {
-  const ta = new Set(categoryTokens(a));
-  const tb = new Set(categoryTokens(b));
-  if (!ta.size || !tb.size) return 0;
-  let inter = 0;
-  for (const t of ta) if (tb.has(t)) inter++;
-  const union = ta.size + tb.size - inter;
-  return union > 0 ? inter / union : 0;
-}
-
-/**
- * Score each real &lt;select&gt; option against brand category keywords via text similarity.
- * Returns null when no option clears the relevance threshold — never invents a wrong pick
- * like "Men", and never falls back to position / first option.
- */
-export function recommendDropdownOption(
-  options: string[],
-  preferredHints: string[],
-  opts?: { minScore?: number }
-): string | null {
-  if (!options.length) return null;
-  const cleaned = options
-    .map((o) => sanitizeOptionLabel(o))
-    .filter((o) => Boolean(o) && !/^select\b/i.test(o) && !/^choose\b/i.test(o));
-  if (!cleaned.length) return null;
-
-  const hints = expandCategoryHints(preferredHints);
-  const lowerHints = hints.map((h) => h.toLowerCase()).filter((h) => h.length >= 2);
-  if (!lowerHints.length) return null;
-
-  const brandBlob = lowerHints.join(' ');
-  const businessBrand = brandLooksBusinessTech(brandBlob);
-  // Require a real similarity hit — synonym-only fluff must not crown a wrong short label
-  const minScore = opts?.minScore ?? 14;
-
-  const scored: Array<{ opt: string; score: number; sim: number }> = [];
-
-  for (const opt of cleaned) {
-    const o = opt.toLowerCase();
-    if (businessBrand && isIrrelevantPersonalCategory(opt)) {
-      continue; // never consider Men/Women/Dating for a restaurant POS brand
-    }
-
-    let bestSim = 0;
-    for (const h of lowerHints) {
-      if (o === h) {
-        bestSim = 1;
-        break;
-      }
-      // Substring only when BOTH sides are long enough (blocks Men ⊂ management)
-      if (o.length >= 5 && h.length >= 5 && (o.includes(h) || h.includes(o))) {
-        bestSim = Math.max(bestSim, 0.55);
-      }
-      bestSim = Math.max(bestSim, categoryTextSimilarity(opt, h));
-    }
-
-    let score = bestSim * 100;
-
-    const brandIsTech =
-      /software|saas|tech|pos|app|platform|internet|computer|digital|e-?commerce|point.?of.?sale/.test(
-        brandBlob
-      );
-    const brandIsFood =
-      /restaur|food|cafe|dining|chef|kitchen|hospitality|pos|point.?of.?sale/.test(brandBlob);
-    const brandIsBiz =
-      /business|b2b|compan|enterprise|agenc|service|professional/.test(brandBlob) ||
-      brandIsTech ||
-      brandIsFood;
-
-    if (brandIsTech && /comput|internet|software|tech/.test(o)) score += 18;
-    if (brandIsTech && /business|economy/.test(o)) score += 12;
-    if (brandIsFood && /food|restaur|dining|hospitality|beverage/.test(o)) score += 18;
-    if (brandIsFood && /business|economy|comput|internet|software/.test(o)) score += 12;
-    if (brandIsBiz && /business|economy|services|professional|compan/.test(o)) score += 8;
-
-    if (/chat|forum|community|social\s*network/i.test(o) && businessBrand) {
-      score -= 12;
-    }
-
-    // Prefer specific multi-word directory labels over bare "Business"
-    const words = categoryTokens(opt).length;
-    if (score >= minScore * 0.5) {
-      if (words >= 2) score += 6;
-      if (words >= 3) score += 4;
-      // Tiny single-token labels need near-exact similarity
-      if (words === 1 && opt.length <= 5 && bestSim < 0.85) score -= 20;
-    }
-
-    if (score > 0) scored.push({ opt, score, sim: bestSim });
-  }
-
-  scored.sort((a, b) => b.score - a.score || b.sim - a.sim || b.opt.length - a.opt.length);
-  const best = scored[0];
-  if (!best || best.score < minScore) return null;
-
-  return best.opt;
-}
-
-/**
- * Re-score category fields on an existing package (heals stale "Men" picks after matcher upgrades).
- */
-export function refreshCategoryFields(
-  fields: Array<{
-    role: string;
-    options?: string[] | null;
-    recommendedOption?: string | null;
-    value?: string;
-    label?: string;
-    flagged?: boolean;
-    flagReason?: string | null;
-    humanStep?: string | null;
-    confidence?: string;
-    [key: string]: unknown;
-  }>,
-  preferredHints: string[]
-): { fields: typeof fields; changed: boolean } {
-  let changed = false;
-  const next = fields.map((f) => {
-    if (f.role !== 'category' || !f.options?.length) return f;
-    const recommended = recommendDropdownOption(f.options, preferredHints);
-    const prev = f.recommendedOption ?? f.value ?? '';
-    if (String(prev) === String(recommended ?? '')) return f;
-    changed = true;
-    return {
-      ...f,
-      value: recommended ?? '',
-      recommendedOption: recommended,
-      flagged: !recommended,
-      flagReason: recommended ? null : 'pick a category — no confident match',
-      humanStep: recommended
-        ? `Category: [${recommended}] ← recommended · ${f.options.length - 1} other options available`
-        : 'you fill this — pick a category from the real option list',
-      confidence: recommended ? 'high' : 'low',
-    };
+  const formFound = payload.formUnavailable !== true;
+  const nextBucket = assignAssistedBucket({
+    recipe: {
+      gate: payload.gate,
+      multiStep: payload.multiStep,
+    } as SiteRecipe,
+    fields: nextFields,
+    fingerprintStatus: payload.fingerprintStatus,
+    formFound,
   });
-  return { fields: next, changed };
+
+  const changed =
+    hadCategoryField ||
+    hadCategoryOther ||
+    nextBucket !== payload.bucket ||
+    (nextNote ?? null) !== (payload.categoryNote ?? null);
+
+  if (!changed) return { payload, changed: false };
+
+  return {
+    changed: true,
+    payload: {
+      ...payload,
+      fields: nextFields,
+      otherFields: nextOther.length ? nextOther : undefined,
+      categoryNote: nextNote,
+      bucket: nextBucket,
+    },
+  };
 }
 
 export type ContentSource = {
@@ -1724,6 +1522,7 @@ export type ContentSource = {
   email?: string | null;
   phone?: string | null;
   address?: string | null;
+  /** @deprecated Category is never auto-matched; ignored by package builder. */
   categoryHints?: string[];
   imageFileName?: string | null;
   /** Cross-package uniqueness failed after max attempts */
@@ -1792,20 +1591,21 @@ export function assignAssistedBucket(input: {
       f.required &&
       f.role !== 'terms' &&
       f.role !== 'attachment' &&
+      f.role !== 'category' &&
       !String(f.value ?? '').trim()
   );
   if (emptyRequired) return 'check_fields';
-  const unresolvedDropdown = input.fields.some(
-    (f) => f.role === 'category' && f.options && f.options.length > 0 && !f.recommendedOption
-  );
-  if (unresolvedDropdown) return 'check_fields';
   // Phase 8 — any flagged / self-check failure → Check these fields (never Ready)
-  if (input.fields.some((f) => f.flagged)) return 'check_fields';
+  // Category is never packaged; ignore leftover category flags on legacy payloads.
+  if (input.fields.some((f) => f.flagged && f.role !== 'category')) return 'check_fields';
   const lowOrMed = input.fields.filter(
-    (f) => f.required && (f.confidence === 'low' || f.confidence === 'medium')
+    (f) =>
+      f.required &&
+      f.role !== 'category' &&
+      (f.confidence === 'low' || f.confidence === 'medium')
   );
   if (lowOrMed.length > 0) return 'check_fields';
-  const requiredHigh = input.fields.filter((f) => f.required);
+  const requiredHigh = input.fields.filter((f) => f.required && f.role !== 'category');
   if (requiredHigh.some((f) => f.confidence !== 'high' && f.role !== 'terms')) {
     return 'check_fields';
   }
@@ -1940,7 +1740,13 @@ export function buildAssistedPackage(input: {
   const otherFields: NonNullable<AssistedPackagePayload['otherFields']> = [];
 
   const mappedFields: PackageFieldValue[] = [];
+  let formHasCategoryField = false;
   for (const rf of input.recipe.fields) {
+    // Category selects are never mapped, recommended, or listed — team picks on the live form.
+    if (rf.role === 'category') {
+      formHasCategoryField = true;
+      continue;
+    }
     if (rf.role === 'attachment') {
       const fileName = input.content.imageFileName ?? 'listing-image.jpg';
       const constraints = [
@@ -1968,43 +1774,13 @@ export function buildAssistedPackage(input: {
       });
       continue;
     }
-    if (rf.role === 'category' && rf.options?.length) {
-      const cleanedOptions = rf.options.map((o) => sanitizeOptionLabel(o)).filter(Boolean);
-      const hints = buildCategoryHints({
-        categorySuggestions: input.content.categoryHints,
-        companyName: input.content.companyName,
-        businessName: input.content.businessName,
-      });
-      const recommended = recommendDropdownOption(cleanedOptions, hints);
-      mappedFields.push({
-        selector: rf.selector,
-        role: rf.role,
-        label: rf.label ?? 'Category',
-        value: recommended ?? '',
-        charCount: (recommended ?? '').length,
-        maxlength: null,
-        required: rf.required,
-        confidence: confidenceAfterValue(
-          rf.role,
-          rf.source,
-          rf.confidence,
-          recommended ?? ''
-        ),
-        source: rf.source,
-        options: cleanedOptions,
-        recommendedOption: recommended,
-        overLimit: false,
-        flagged: !recommended,
-        flagReason: recommended ? null : 'pick a category — no confident match',
-        humanStep: recommended
-          ? `Category: [${recommended}] ← recommended · ${cleanedOptions.length - 1} other options available`
-          : 'you fill this — pick a category — no confident match',
-      });
-      continue;
-    }
 
     // Unknown / other → list under "other fields", not as blank content slots
     if (rf.role === 'other' || rf.source === 'known_bad') {
+      if (looksLikeCategoryFieldLabel(rf.label ?? '')) {
+        formHasCategoryField = true;
+        continue;
+      }
       otherFields.push({
         selector: rf.selector,
         label: rf.label ?? rf.role,
@@ -2108,6 +1884,10 @@ export function buildAssistedPackage(input: {
     }
 
     if (rf.confidence === 'low' && !isProfile && !isContent && empty) {
+      if (looksLikeCategoryFieldLabel(rf.label ?? rf.role)) {
+        formHasCategoryField = true;
+        continue;
+      }
       otherFields.push({
         selector: rf.selector,
         label: rf.label ?? rf.role,
@@ -2237,6 +2017,7 @@ export function buildAssistedPackage(input: {
     fields: checkedFields,
     otherFields: otherFields.length ? otherFields : undefined,
     pasteReadyContent: pasteReadyContent.length ? pasteReadyContent : undefined,
+    categoryNote: formHasCategoryField ? CATEGORY_PICK_YOURSELF_NOTE : null,
     honestyNotes,
     failureReason: failureReason ?? confSummary.line,
     formUnavailable: formUnavailable || undefined,
@@ -2262,7 +2043,14 @@ export function verifyMappingAgainstDom(
   const bySelector = new Map(live.map((f) => [f.selector, f]));
   const mismatches: string[] = [];
   for (const rf of recipe.fields) {
-    if (rf.role === 'other' || rf.role === 'captcha' || rf.role === 'terms') continue;
+    if (
+      rf.role === 'other' ||
+      rf.role === 'captcha' ||
+      rf.role === 'terms' ||
+      rf.role === 'category'
+    ) {
+      continue;
+    }
     const fact = bySelector.get(rf.selector);
     if (!fact) {
       mismatches.push(rf.selector);

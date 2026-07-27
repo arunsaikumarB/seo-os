@@ -14,7 +14,6 @@ import {
   markFieldMappingWrong,
   recipePinsOnly,
   buildAssistedPackage,
-  buildCategoryHints,
   buildSiteRecipe,
   computeAssistedLaneCounts,
   dedupeContentFields,
@@ -30,7 +29,7 @@ import {
   normalizeSiteDomain,
   MULTI_STEP_FORM_LABEL,
   recipeVersionsCurrent,
-  refreshCategoryFields,
+  stripCategoryFromAssistedPayload,
   gateIsOtp,
   gateRequiresPerson,
   collectKnownFormUrlHints,
@@ -625,18 +624,6 @@ async function loadContentForOpportunity(workspaceId: string, opportunityId: str
     email: String(brand.contactEmail || p.email || ''),
     phone: String(brand.contactPhone || p.phone || ''),
     address: String(p.address ?? ''),
-    categoryHints: buildCategoryHints({
-      categorySuggestions: Array.isArray(p.categorySuggestions)
-        ? (p.categorySuggestions as string[])
-        : null,
-      industry: brand.industry,
-      primaryTopics: brand.primaryTopics,
-      keyFeatures: brand.keyFeatures,
-      companyName: brand.companyName || businessName,
-      businessName,
-      tagline: brand.tagline,
-      backlinkType: p.backlinkType != null ? String(p.backlinkType) : null,
-    }),
     imageFileName,
     contentTooSimilar: Boolean(p.contentTooSimilar),
   };
@@ -1548,8 +1535,8 @@ export async function listAssistedPackages(workspaceId: string) {
   await healReadyPackagesWithBlockingGates(workspaceId).catch((err) =>
     logger.warn({ err, workspaceId }, 'assisted heal gate→needs_person failed')
   );
-  await healStaleCategoryRecommendations(workspaceId).catch((err) =>
-    logger.warn({ err, workspaceId }, 'assisted heal category recommendations failed')
+  await healStripCategoryFromPackages(workspaceId).catch((err) =>
+    logger.warn({ err, workspaceId }, 'assisted heal strip category fields failed')
   );
 
   const { data: rows } = await admin()
@@ -1910,25 +1897,13 @@ async function healReadyPackagesWithBlockingGates(workspaceId: string) {
 }
 
 /**
- * Re-score category dropdown recommendations against brand_profile.
- * Heals stale packages that still show irrelevant picks (e.g. "Men" for a POS brand)
- * without requiring a full form re-read.
+ * Strip category fields from all packages — never recommend, never block Ready.
+ * Applies to legacy payloads that still carry category selects / flags.
  */
-async function healStaleCategoryRecommendations(workspaceId: string) {
-  const brand = await getBrandContextForBee(workspaceId);
-  const hints = buildCategoryHints({
-    industry: brand.industry,
-    primaryTopics: brand.primaryTopics,
-    keyFeatures: brand.keyFeatures,
-    companyName: brand.companyName || brand.brandName,
-    businessName: brand.brandName,
-    tagline: brand.tagline,
-  });
-  if (!hints.length) return;
-
+async function healStripCategoryFromPackages(workspaceId: string) {
   const { data: rows } = await admin()
     .from('assisted_packages')
-    .select('id, payload, status')
+    .select('id, payload, bucket, failure_reason')
     .eq('workspace_id', workspaceId)
     .neq('status', 'skipped')
     .limit(100);
@@ -1936,25 +1911,19 @@ async function healStaleCategoryRecommendations(workspaceId: string) {
 
   for (const row of rows) {
     const payload = (row.payload as AssistedPackagePayload) ?? null;
-    if (!payload?.fields?.length) continue;
-    const hasCategory = payload.fields.some(
-      (f) => f.role === 'category' && Array.isArray(f.options) && f.options.length > 0
-    );
-    if (!hasCategory) continue;
-
-    const { fields, changed } = refreshCategoryFields(payload.fields, hints);
+    if (!payload?.fields) continue;
+    const { payload: nextPayload, changed } = stripCategoryFromAssistedPayload(payload);
     if (!changed) continue;
 
-    const nextPayload: AssistedPackagePayload = {
-      ...payload,
-      fields: fields as AssistedPackagePayload['fields'],
-    };
-    // If category was the only empty required and now has a value, leave bucket as-is
-    // (re-prepare is the proper path for full bucket recompute).
     await admin()
       .from('assisted_packages')
       .update({
         payload: nextPayload,
+        bucket: nextPayload.bucket,
+        failure_reason:
+          nextPayload.bucket === 'ready'
+            ? null
+            : nextPayload.failureReason ?? row.failure_reason ?? null,
         updated_at: new Date().toISOString(),
       })
       .eq('id', row.id);

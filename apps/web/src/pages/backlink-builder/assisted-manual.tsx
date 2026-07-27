@@ -85,6 +85,7 @@ type AssistedPackage = {
     fields: PackageField[];
     otherFields?: Array<{ selector: string; label: string; humanStep: string }>;
     pasteReadyContent?: PasteReadyItem[];
+    categoryNote?: string | null;
     multiStep?: boolean;
     multiStepLabel: string | null;
     readerVersion?: number;
@@ -593,8 +594,14 @@ export function AssistedManualPage() {
                           </div>
                         ) : null}
 
+                        {pkg.package?.categoryNote ? (
+                          <p className="text-xs text-muted-foreground">{pkg.package.categoryNote}</p>
+                        ) : null}
+
                         <div className="space-y-2">
-                          {(pkg.package?.fields ?? []).map((f) => (
+                          {(pkg.package?.fields ?? [])
+                            .filter((f) => f.role !== 'category')
+                            .map((f) => (
                             <EditableFieldCard
                               key={f.selector}
                               field={f}
@@ -629,13 +636,20 @@ export function AssistedManualPage() {
                               ))}
                             </div>
                           ) : null}
-                          {(pkg.package?.otherFields?.length ?? 0) > 0 ? (
+                          {(pkg.package?.otherFields ?? []).filter(
+                            (o) => !/categor|industry|^type$|topic|niche/i.test(o.label)
+                          ).length > 0 ? (
                             <div className="rounded-lg border border-dashed px-3 py-2 text-sm space-y-1">
                               <p className="font-medium">
                                 Other fields on this form (fill yourself)
                               </p>
                               <ul className="text-muted-foreground space-y-1">
-                                {pkg.package!.otherFields!.map((o) => (
+                                {pkg.package!.otherFields!
+                                  .filter(
+                                    (o) =>
+                                      !/categor|industry|^type$|topic|niche/i.test(o.label)
+                                  )
+                                  .map((o) => (
                                   <li key={o.selector}>
                                     {o.label} — {o.humanStep}
                                   </li>
@@ -920,9 +934,6 @@ function EditableFieldCard(props: {
       >
         {charCount}
         {f.maxlength != null ? ` / ${f.maxlength}` : ''} chars
-        {f.recommendedOption
-          ? ` · Category: [${f.recommendedOption}] ← recommended · ${(f.options?.length ?? 1) - 1} other options`
-          : ''}
       </p>
       {f.humanStep ? (
         <p className="text-xs mt-1 text-amber-800 font-medium">{f.humanStep}</p>
