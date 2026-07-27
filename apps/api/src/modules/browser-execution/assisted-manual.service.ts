@@ -20,7 +20,6 @@ import {
   evaluateFingerprintStatus,
   extractFormFieldFacts,
   extractTargetFormFieldFacts,
-  findSimilarPackagePairs,
   fieldFactSnapshot,
   fitDescriptionToCap,
   formUnavailableMessage,
@@ -1338,7 +1337,7 @@ async function prepareOnePackage(
 async function enforceSimilarity(workspaceId: string) {
   const { data: rows } = await admin()
     .from('assisted_packages')
-    .select('id, payload')
+    .select('id, payload, prepared_at')
     .eq('workspace_id', workspaceId)
     .eq('pilot_batch_id', PILOT_BATCH);
   if (!rows?.length) return;
@@ -1349,22 +1348,48 @@ async function enforceSimilarity(workspaceId: string) {
       p.fields?.find((f) => f.role === 'long_desc')?.value ||
       p.fields?.find((f) => f.role === 'short_desc')?.value ||
       '';
-    return { id: String(r.id), text: desc };
+    return { id: String(r.id), text: desc, preparedAt: String(r.prepared_at ?? '') };
   });
 
-  const pairs = findSimilarPackagePairs(texts);
+  const {
+    findSimilarPackagePairs,
+    maxPairwiseSimilarity,
+    ASSISTED_SIMILARITY_THRESHOLD,
+  } = await import('@seo-os/backlink-builder');
+
+  const maxSim = maxPairwiseSimilarity(texts.map((t) => t.text));
+  logger.info(
+    {
+      workspaceId,
+      packageCount: texts.length,
+      maxPairwiseSimilarity: Number(maxSim.toFixed(4)),
+      threshold: ASSISTED_SIMILARITY_THRESHOLD,
+      uniqueOk: maxSim < ASSISTED_SIMILARITY_THRESHOLD,
+    },
+    'Phase 12 assisted package content uniqueness'
+  );
+
+  const pairs = findSimilarPackagePairs(texts, ASSISTED_SIMILARITY_THRESHOLD);
+  // Prefer marking the later-prepared package
+  const byId = new Map(texts.map((t) => [t.id, t] as const));
   for (const pair of pairs) {
-    // Mark the later package for regenerate (needs_person) — do not silently ship duplicates
+    const a = byId.get(pair.a);
+    const b = byId.get(pair.b);
+    const laterId =
+      a && b && a.preparedAt <= b.preparedAt ? pair.b : pair.a;
     await admin()
       .from('assisted_packages')
       .update({
         bucket: 'needs_person',
-        failure_reason: `Duplicate content vs another package (similarity ≥ 0.85) — regenerate`,
+        failure_reason: `content_too_similar — description too close to another package (similarity ${pair.score.toFixed(2)} ≥ ${ASSISTED_SIMILARITY_THRESHOLD})`,
         fingerprint_status: 'fresh',
         updated_at: new Date().toISOString(),
-        metrics: { similarityPair: pair },
+        metrics: {
+          similarityPair: pair,
+          maxPairwiseSimilarity: maxSim,
+        },
       })
-      .eq('id', pair.b);
+      .eq('id', laterId);
   }
 }
 

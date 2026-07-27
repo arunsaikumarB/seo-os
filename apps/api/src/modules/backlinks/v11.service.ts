@@ -16,7 +16,7 @@ import {
   type QueueStage,
 } from '@seo-os/backlink-builder';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
-import { getProjectById, getProjectByWorkspaceId } from '../projects/project.service.js';
+import { getProjectById, getProjectByWorkspaceId, refreshBrandProfile } from '../projects/project.service.js';
 import { publishPlatformEvent, fireAndForget } from '../platform/event-bus.service.js';
 import { enqueueJob, QUEUES } from '../../jobs/boss.js';
 import { runVerificationCheck } from './automation.service.js';
@@ -27,6 +27,38 @@ import {
 } from './content-intelligence.service.js';
 
 export { analyzeOpportunityForContent };
+
+const BRAND_PROFILE_STALE_MS = 7 * 24 * 60 * 60 * 1000;
+
+const OPENING_ANGLES = [
+  'Lead with the problem the product solves for this audience',
+  'Lead with a concrete capability from the website features list',
+  'Lead with who the product is for (buyer/role)',
+  'Lead with a tangible outcome or workflow benefit',
+  'Lead with how it fits this niche/directory category',
+];
+
+function hashToIndex(seed: string, modulo: number): number {
+  if (modulo <= 0) return 0;
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+  return h % modulo;
+}
+
+function pickFeatureEmphasis(
+  brand: Awaited<ReturnType<typeof brandFor>>,
+  opportunityId: string
+): { featureEmphasis: string | null; openingAngle: string } {
+  const pool = [
+    ...(brand.keyFeatures ?? []),
+    ...(brand.primaryTopics ?? []),
+    brand.tagline ? String(brand.tagline) : '',
+  ].filter((t) => String(t).trim().length >= 8);
+  const featureEmphasis =
+    pool.length > 0 ? pool[hashToIndex(opportunityId, pool.length)]! : null;
+  const openingAngle = OPENING_ANGLES[hashToIndex(opportunityId + ':angle', OPENING_ANGLES.length)]!;
+  return { featureEmphasis, openingAngle };
+}
 
 async function brandFor(workspaceId: string, orgId?: string) {
   const project = orgId
@@ -59,7 +91,32 @@ async function brandFor(workspaceId: string, orgId?: string) {
     contactName: project.contactName ?? undefined,
     contactPhone: project.contactPhone ?? undefined,
     companyName: project.companyName || project.name,
+    crawledAt: profile.crawledAt ? String(profile.crawledAt) : null,
   };
+}
+
+/** Phase 12 — re-crawl project website when brand_profile is empty or stale. */
+async function ensureBrandProfileForGeneration(workspaceId: string, orgId?: string) {
+  let brand = await brandFor(workspaceId, orgId);
+  const hasFacts =
+    (brand.keyFeatures?.length ?? 0) > 0 ||
+    (brand.primaryTopics?.length ?? 0) > 0 ||
+    Boolean(brand.tagline);
+  const crawledAt = brand.crawledAt ? Date.parse(brand.crawledAt) : NaN;
+  const stale =
+    !hasFacts ||
+    !Number.isFinite(crawledAt) ||
+    Date.now() - crawledAt > BRAND_PROFILE_STALE_MS;
+
+  if (stale) {
+    logger.info(
+      { workspaceId, hasFacts, crawledAt: brand.crawledAt },
+      'Phase 12: refreshing brand_profile before content generation'
+    );
+    await refreshBrandProfile(workspaceId);
+    brand = await brandFor(workspaceId, orgId);
+  }
+  return brand;
 }
 
 export async function detectAndSaveRequirements(
@@ -354,7 +411,8 @@ export async function createContentPack(
   const plan = intelligence.plan;
   const storageType = plan.storageType || backlinkType || String(opp.opportunity_type);
 
-  const brand = await brandFor(workspaceId, orgId);
+  const brand = await ensureBrandProfileForGeneration(workspaceId, orgId);
+  const { featureEmphasis, openingAngle } = pickFeatureEmphasis(brand, opportunityId);
   const { generateLiveContentPack } = await import(
     '../campaigns/llm-content-generation.js'
   );
@@ -364,12 +422,13 @@ export async function createContentPack(
     CONTENT_SIMILARITY_MAX_ATTEMPTS,
   } = await import('@seo-os/backlink-builder');
 
-  // Sibling descriptions — force unique copy per site
+  // Sibling descriptions — force unique copy per site (per-item packs, never shared blob)
   const { data: siblingPacks } = await getSupabaseAdmin()
     .from('content_packs')
-    .select('opportunity_id, pack')
+    .select('opportunity_id, pack, updated_at')
     .eq('workspace_id', workspaceId)
     .neq('opportunity_id', opportunityId)
+    .order('updated_at', { ascending: false })
     .limit(80);
   const avoidTexts = (siblingPacks ?? [])
     .map((row) => {
@@ -380,6 +439,7 @@ export async function createContentPack(
 
   let pack: ReturnType<typeof generateContentPack> & Record<string, unknown> = null as never;
   let contentTooSimilar = false;
+  let closest = 0;
   for (let attempt = 1; attempt <= CONTENT_SIMILARITY_MAX_ATTEMPTS; attempt++) {
     pack = (await generateLiveContentPack({
       workspaceId,
@@ -397,21 +457,42 @@ export async function createContentPack(
       reason: plan.reason,
       avoidTexts,
       uniquenessAttempt: attempt,
+      featureEmphasis,
+      openingAngle,
     })) as ReturnType<typeof generateContentPack> & Record<string, unknown>;
 
     const candidate = String(
       pack.longDescription ?? pack.shortDescription ?? pack.metaDescription ?? ''
     );
-    const tooClose = avoidTexts.some(
-      (prev) => textSimilarity(candidate, prev) >= CONTENT_SIMILARITY_THRESHOLD
-    );
+    let pairMax = 0;
+    const tooClose = avoidTexts.some((prev) => {
+      const score = textSimilarity(candidate, prev);
+      if (score > pairMax) pairMax = score;
+      return score >= CONTENT_SIMILARITY_THRESHOLD;
+    });
+    closest = Math.max(closest, pairMax);
     if (!tooClose) {
       contentTooSimilar = false;
       break;
     }
     contentTooSimilar = true;
+    // Explicit "make this different from" seed for the next attempt
     avoidTexts.unshift(candidate);
+    logger.info(
+      {
+        workspaceId,
+        opportunityId,
+        attempt,
+        similarity: pairMax,
+        threshold: CONTENT_SIMILARITY_THRESHOLD,
+        featureEmphasis,
+      },
+      'Phase 12: description too similar — regenerating'
+    );
   }
+  pack.featureEmphasis = featureEmphasis;
+  pack.openingAngle = openingAngle;
+  pack.maxSiblingSimilarity = closest;
   if (contentTooSimilar) {
     pack.contentTooSimilar = true;
     pack.contentFlags = [
@@ -481,6 +562,153 @@ export async function createContentPack(
       estimatedReviewHours: intelligence.estimatedReviewHours,
       quality: pack.quality,
     },
+  };
+}
+
+/**
+ * Phase 12 — after a generation batch (or on demand), re-check all packs pairwise.
+ * Concurrent jobs can miss siblings; this pass regenerates later duplicates and logs
+ * the campaign max pairwise similarity (must be < 0.80 when clean).
+ */
+export async function enforceWorkspaceContentUniqueness(workspaceId: string): Promise<{
+  maxPairwiseSimilarity: number;
+  regenerated: number;
+  flagged: number;
+  packCount: number;
+}> {
+  const {
+    textSimilarity,
+    maxPairwiseSimilarity,
+    CONTENT_SIMILARITY_THRESHOLD,
+    CONTENT_SIMILARITY_MAX_ATTEMPTS,
+  } = await import('@seo-os/backlink-builder');
+  const { generateLiveContentPack } = await import('../campaigns/llm-content-generation.js');
+
+  const { data: rows } = await getSupabaseAdmin()
+    .from('content_packs')
+    .select('id, opportunity_id, pack, backlink_type, updated_at')
+    .eq('workspace_id', workspaceId)
+    .order('updated_at', { ascending: true })
+    .limit(200);
+
+  const packs = (rows ?? []).map((r) => {
+    const p = (r.pack as Record<string, unknown> | null) ?? {};
+    const text = String(
+      p.longDescription ?? p.shortDescription ?? p.metaDescription ?? ''
+    ).trim();
+    return {
+      id: String(r.id),
+      opportunityId: String(r.opportunity_id),
+      pack: p,
+      backlinkType: String(r.backlink_type ?? 'directory'),
+      text,
+      updatedAt: String(r.updated_at ?? ''),
+    };
+  });
+
+  const texts = packs.map((p) => p.text).filter((t) => t.length >= 20);
+  let maxSim = maxPairwiseSimilarity(texts);
+  let regenerated = 0;
+  let flagged = 0;
+
+  // Resolve colliding pairs: regenerate the later pack
+  const ordered = [...packs].sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+  for (let i = 0; i < ordered.length; i++) {
+    const later = ordered[i]!;
+    if (later.text.length < 40) continue;
+    const earlierTexts = ordered
+      .slice(0, i)
+      .map((p) => p.text)
+      .filter((t) => t.length >= 40);
+    const conflict = earlierTexts.find(
+      (prev) => textSimilarity(later.text, prev) >= CONTENT_SIMILARITY_THRESHOLD
+    );
+    if (!conflict) continue;
+
+    const brand = await ensureBrandProfileForGeneration(workspaceId);
+    const { featureEmphasis, openingAngle } = pickFeatureEmphasis(brand, later.opportunityId);
+    const { data: opp } = await getSupabaseAdmin()
+      .from('opportunities')
+      .select('title, domain, website_name, score, opportunity_type')
+      .eq('id', later.opportunityId)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle();
+    if (!opp) continue;
+
+    const avoidTexts = [...earlierTexts];
+    let nextPack = { ...later.pack };
+    let stillClose = true;
+    for (let attempt = 1; attempt <= CONTENT_SIMILARITY_MAX_ATTEMPTS; attempt++) {
+      nextPack = (await generateLiveContentPack({
+        workspaceId,
+        storageType: later.backlinkType,
+        opp: {
+          title: String(opp.title),
+          domain: opp.domain as string | null,
+          opportunity_type: later.backlinkType,
+          score: Number(opp.score ?? 0),
+          website_name: opp.website_name as string | null,
+        },
+        brand,
+        avoidTexts,
+        uniquenessAttempt: attempt,
+        featureEmphasis,
+        openingAngle,
+      })) as Record<string, unknown>;
+      const candidate = String(
+        nextPack.longDescription ?? nextPack.shortDescription ?? ''
+      ).trim();
+      stillClose = avoidTexts.some(
+        (prev) => textSimilarity(candidate, prev) >= CONTENT_SIMILARITY_THRESHOLD
+      );
+      if (!stillClose) break;
+      avoidTexts.unshift(candidate);
+    }
+
+    regenerated++;
+    if (stillClose) {
+      flagged++;
+      nextPack.contentTooSimilar = true;
+      nextPack.contentFlags = [
+        ...((nextPack.contentFlags as string[]) ?? []),
+        'content_too_similar',
+      ];
+    } else {
+      nextPack.contentTooSimilar = false;
+    }
+    nextPack.featureEmphasis = featureEmphasis;
+    nextPack.openingAngle = openingAngle;
+
+    await getSupabaseAdmin()
+      .from('content_packs')
+      .update({ pack: nextPack, updated_at: new Date().toISOString() })
+      .eq('id', later.id);
+
+    later.pack = nextPack;
+    later.text = String(
+      nextPack.longDescription ?? nextPack.shortDescription ?? ''
+    ).trim();
+  }
+
+  maxSim = maxPairwiseSimilarity(ordered.map((p) => p.text));
+  logger.info(
+    {
+      workspaceId,
+      packCount: packs.length,
+      maxPairwiseSimilarity: Number(maxSim.toFixed(4)),
+      threshold: CONTENT_SIMILARITY_THRESHOLD,
+      regenerated,
+      flagged,
+      uniqueOk: maxSim < CONTENT_SIMILARITY_THRESHOLD,
+    },
+    'Phase 12 campaign content uniqueness'
+  );
+
+  return {
+    maxPairwiseSimilarity: maxSim,
+    regenerated,
+    flagged,
+    packCount: packs.length,
   };
 }
 

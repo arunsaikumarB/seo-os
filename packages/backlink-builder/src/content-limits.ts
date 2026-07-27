@@ -7,8 +7,43 @@ export const DESCRIPTION_MAX = 200;
 /** Target band so generated copy rarely hits the hard ceiling. */
 export const DESCRIPTION_TARGET_MIN = 180;
 export const DESCRIPTION_TARGET_MAX = 195;
-export const CONTENT_SIMILARITY_THRESHOLD = 0.85;
+/** Phase 12 — pairs at or above this must regenerate (was 0.85 in Phase 11). */
+export const CONTENT_SIMILARITY_THRESHOLD = 0.8;
 export const CONTENT_SIMILARITY_MAX_ATTEMPTS = 3;
+
+/** Max Jaccard similarity across a list of description texts. */
+export function maxPairwiseSimilarity(texts: string[]): number {
+  let max = 0;
+  for (let i = 0; i < texts.length; i++) {
+    for (let j = i + 1; j < texts.length; j++) {
+      const a = String(texts[i] ?? '').trim();
+      const b = String(texts[j] ?? '').trim();
+      if (a.length < 20 || b.length < 20) continue;
+      const score = jaccardTokenSimilarity(a, b);
+      if (score > max) max = score;
+    }
+  }
+  return max;
+}
+
+/** Token Jaccard — shared with assisted-manual uniqueness. */
+export function jaccardTokenSimilarity(a: string, b: string): number {
+  const tok = (s: string) =>
+    new Set(
+      s
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter((t) => t.length > 2)
+    );
+  const A = tok(a);
+  const B = tok(b);
+  if (!A.size || !B.size) return 0;
+  let inter = 0;
+  for (const t of A) if (B.has(t)) inter++;
+  const union = A.size + B.size - inter;
+  return union === 0 ? 0 : inter / union;
+}
 
 /** Cap at ≤200 (or smaller form maxlength). Prefer sentence/word boundary. */
 export function fitDescriptionToCap(

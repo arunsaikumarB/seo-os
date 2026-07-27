@@ -1,7 +1,20 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ClipboardList, Copy, Check, Download, RefreshCw, AlertTriangle } from 'lucide-react';
+import {
+  ClipboardList,
+  Copy,
+  Check,
+  Download,
+  RefreshCw,
+  AlertTriangle,
+  CheckCircle2,
+  Ban,
+  ChevronRight,
+  ChevronDown,
+  MoreHorizontal,
+  ExternalLink,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { useApi } from '@/hooks/use-api';
 import { useAuth } from '@/providers/auth-provider';
@@ -11,6 +24,14 @@ import { PageTransition } from '@/components/demo/page-transition';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 
 type PackageField = {
@@ -27,6 +48,7 @@ type PackageField = {
   overLimit?: boolean;
   flagged?: boolean;
   flagReason?: string | null;
+  required?: boolean;
 };
 
 type AssistedPackage = {
@@ -392,7 +414,7 @@ export function AssistedManualPage() {
       ) : null}
 
       {(['ready', 'check_fields', 'needs_person'] as const).map((bucket) => (
-        <section key={bucket} className="space-y-3">
+        <section key={bucket} className="space-y-2">
           <h2 className="text-sm font-medium">
             {BUCKET_LABEL[bucket]}{' '}
             <span className="text-muted-foreground tabular-nums">
@@ -400,284 +422,366 @@ export function AssistedManualPage() {
             </span>
           </h2>
           {byBucket[bucket].length === 0 ? (
-            <p className="text-sm text-muted-foreground">None yet.</p>
+            <p className="text-sm text-muted-foreground pl-1">None yet.</p>
           ) : (
-            byBucket[bucket].map((pkg) => {
-              const open = openId === pkg.id;
-              return (
-                <Card key={pkg.id}>
-                  <CardHeader className="pb-2">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div>
-                        <CardTitle className="text-base">{pkg.domain}</CardTitle>
-                        <CardDescription className="mt-1 break-all">
-                          <a
-                            href={pkg.entryUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="underline-offset-2 hover:underline"
-                          >
-                            {pkg.entryUrl}
-                          </a>
-                          {pkg.package?.importedEntryUrl &&
-                          pkg.package.importedEntryUrl !== pkg.entryUrl ? (
-                            <span className="block text-[11px] text-muted-foreground mt-0.5">
-                              Imported:{' '}
-                              <a
-                                href={pkg.package.importedEntryUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="underline-offset-2 hover:underline"
-                              >
-                                {pkg.package.importedEntryUrl}
-                              </a>
-                              {pkg.package.formDiscoverySource
-                                ? ` · found via ${pkg.package.formDiscoverySource}`
-                                : ''}
-                            </span>
-                          ) : null}
-                        </CardDescription>
+            <ul className="rounded-xl border divide-y overflow-hidden bg-card">
+              {byBucket[bucket].map((pkg) => {
+                const open = openId === pkg.id;
+                const issues = collectPackageIssues(pkg);
+                const tone = statusTone(pkg, issues);
+                return (
+                  <li key={pkg.id} className="bg-card">
+                    <div className="flex items-center gap-2 px-3 py-2.5 min-h-11">
+                      <IssueStatusIcon tone={tone} issues={issues} domain={pkg.domain} />
+                      <div className="min-w-0 flex-1 flex items-center gap-2 flex-wrap">
+                        <span className="font-medium text-sm truncate">{pkg.domain}</span>
+                        <Badge className="text-[10px] shrink-0">{BUCKET_LABEL[pkg.bucket]}</Badge>
+                        {pkg.gate && pkg.gate !== 'none' ? (
+                          <Badge className="text-[10px] shrink-0 opacity-80">{pkg.gate}</Badge>
+                        ) : null}
+                        {pkg.status === 'done' || pkg.submittedAt ? (
+                          <Badge className="text-[10px] shrink-0 border-emerald-500/40 text-emerald-700">
+                            {pkg.userVerified ? 'Verified' : 'Submitted'}
+                          </Badge>
+                        ) : null}
                       </div>
-                      <div className="flex flex-wrap gap-1">
-                        <Badge>{pkg.status}</Badge>
-                        <Badge>{pkg.gate}</Badge>
-                        <Badge
-                          className={cn(
-                            pkg.fingerprintStatus !== 'fresh' && 'border-amber-500 text-amber-700'
-                          )}
-                        >
-                          {pkg.fingerprintStatus}
-                        </Badge>
-                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 shrink-0 gap-0.5"
+                        onClick={() => setOpenId(open ? null : pkg.id)}
+                      >
+                        {open ? (
+                          <>
+                            Close <ChevronDown className="h-3.5 w-3.5" />
+                          </>
+                        ) : (
+                          <>
+                            Open <ChevronRight className="h-3.5 w-3.5" />
+                          </>
+                        )}
+                      </Button>
                     </div>
-                    {pkg.failureReason ? (
-                      <p className="text-xs text-amber-700 flex items-center gap-1 mt-2">
-                        <AlertTriangle className="h-3.5 w-3.5" /> {pkg.failureReason}
-                      </p>
-                    ) : null}
-                    {pkg.classifierOutdated && !pkg.formUnavailable ? (
-                      <p className="text-xs text-amber-700 flex items-center gap-1 mt-2">
-                        <AlertTriangle className="h-3.5 w-3.5" /> Form Reader / classifier updated —
-                        Re-read or Prepare again to refresh
-                        {` (reader v${pkg.readerVersion ?? '?'}→${pkg.currentReaderVersion ?? '?'} · classifier v${pkg.classifierVersion ?? '?'}→${pkg.currentClassifierVersion ?? '?'})`}
-                      </p>
-                    ) : null}
-                    <p className="text-xs text-muted-foreground mt-1">{pkg.package?.gateNotes}</p>
-                    {pkg.package?.humanSteps && pkg.package.humanSteps.length > 0 ? (
-                      <p className="text-xs text-amber-800 mt-1">
-                        You must: {pkg.package.humanSteps.join(' · ')}
-                      </p>
-                    ) : null}
-                    {pkg.package?.confidenceSummary ? (
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Confidence: {pkg.package.confidenceSummary}
-                      </p>
-                    ) : null}
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div className="flex flex-wrap gap-2">
-                      <Button size="sm" variant="secondary" onClick={() => setOpenId(open ? null : pkg.id)}>
-                        {open ? 'Hide fields' : 'Open package'}
-                      </Button>
-                      {!pkg.formUnavailable ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={reread.isPending}
-                          onClick={() => reread.mutate(pkg.id)}
-                          title="Fetch the live form again and re-classify. Confirmed role replacements are kept; known-bad fields re-infer."
-                        >
-                          <RefreshCw
-                            className={cn(
-                              'h-3.5 w-3.5 mr-1',
-                              reread.isPending && reread.variables === pkg.id && 'animate-spin'
-                            )}
-                          />
-                          Re-read form (ignore cache)
-                        </Button>
-                      ) : null}
-                      {pkg.bucket === 'needs_person' ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={patchStatus.isPending}
-                          onClick={() => {
-                            if (
-                              !window.confirm(
-                                `Skip ${pkg.domain}? It leaves the Assisted Manual worklist. You can still open the site manually.`
-                              )
-                            ) {
-                              return;
-                            }
-                            patchStatus.mutate({ packageId: pkg.id, status: 'skipped' });
-                          }}
-                          title="Remove from worklist — form unavailable or not worth assisting"
-                        >
-                          Skip
-                        </Button>
-                      ) : null}
-                      {!pkg.formUnavailable ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={clearCorrections.isPending}
-                          onClick={() => clearCorrections.mutate(pkg.id)}
-                          title="Remove all pinned human corrections for this site and re-read the form"
-                        >
-                          Clear corrections for this site
-                        </Button>
-                      ) : null}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={reportBad.isPending}
-                        onClick={() => {
-                          const note = window.prompt(
-                            'What looks wrong? (optional — becomes the fixture note)',
-                            ''
-                          );
-                          if (note === null) return;
-                          reportBad.mutate({
-                            packageId: pkg.id,
-                            note: note.trim() || undefined,
-                          });
-                        }}
-                        title="Capture page HTML + inferred roles as a regression fixture candidate"
-                      >
-                        <AlertTriangle className="h-3.5 w-3.5 mr-1" /> Report bad package
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={pkg.fingerprintStatus !== 'fresh'}
-                        onClick={() =>
-                          patchStatus.mutate({ packageId: pkg.id, status: 'in_progress' })
-                        }
-                      >
-                        Start
-                      </Button>
-                      <Button
-                        size="sm"
-                        disabled={patchStatus.isPending || pkg.status === 'done'}
-                        onClick={() => {
-                          const mins = Number(minutesDraft);
-                          patchStatus.mutate({
-                            packageId: pkg.id,
-                            status: 'done',
-                            minutesSpent: Number.isFinite(mins) && mins > 0 ? mins : undefined,
-                          });
-                        }}
-                        title="Mark as Submitted — flows to Track Results / Reports"
-                      >
-                        <Check className="h-3.5 w-3.5 mr-1" /> Done
-                      </Button>
-                      {/* gate=none: nothing left to confirm — optional one-click Submitted+Verified */}
-                      {(pkg.gate === 'none' || !pkg.gate) &&
-                      pkg.status !== 'done' &&
-                      !pkg.userVerified ? (
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={patchStatus.isPending}
-                          onClick={() => {
-                            const mins = Number(minutesDraft);
-                            patchStatus.mutate({
-                              packageId: pkg.id,
-                              status: 'done',
-                              userVerified: true,
-                              minutesSpent: Number.isFinite(mins) && mins > 0 ? mins : undefined,
-                            });
-                          }}
-                          title="No email/OTP step — mark Submitted and Verified together"
-                        >
-                          <Check className="h-3.5 w-3.5 mr-1" /> Done & Verified
-                        </Button>
-                      ) : null}
-                      {pkg.status === 'done' || pkg.submittedAt ? (
-                        <>
-                          {String(pkg.gate ?? '').startsWith('otp_') && !pkg.userVerified ? (
-                            <p className="text-xs text-amber-800 w-full basis-full">
-                              Submitted — confirm via{' '}
-                              {pkg.gate === 'otp_phone' ? 'SMS' : 'email'}, then Mark Verified.
-                            </p>
-                          ) : null}
+
+                    {open ? (
+                      <div className="border-t bg-muted/20 px-3 py-3 space-y-3">
+                        <div className="flex flex-wrap items-center gap-2">
                           <Button
                             size="sm"
-                            variant={pkg.userVerified ? 'secondary' : 'outline'}
-                            disabled={patchStatus.isPending}
                             onClick={() =>
+                              window.open(pkg.entryUrl, '_blank', 'noopener,noreferrer')
+                            }
+                          >
+                            <ExternalLink className="h-3.5 w-3.5 mr-1" /> Open package
+                          </Button>
+                          <Button
+                            size="sm"
+                            disabled={patchStatus.isPending || pkg.status === 'done'}
+                            onClick={() => {
+                              const mins = Number(minutesDraft);
+                              patchStatus.mutate({
+                                packageId: pkg.id,
+                                status: 'done',
+                                minutesSpent:
+                                  Number.isFinite(mins) && mins > 0 ? mins : undefined,
+                              });
+                            }}
+                            title="Mark as Submitted"
+                          >
+                            <Check className="h-3.5 w-3.5 mr-1" /> Done
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={patchStatus.isPending}
+                            onClick={() => {
+                              if (
+                                !window.confirm(
+                                  `Skip ${pkg.domain}? It leaves the Assisted Manual worklist.`
+                                )
+                              ) {
+                                return;
+                              }
+                              patchStatus.mutate({ packageId: pkg.id, status: 'skipped' });
+                            }}
+                          >
+                            Skip
+                          </Button>
+                          <input
+                            className="h-8 w-16 rounded-md border bg-background px-2 text-xs"
+                            placeholder="min"
+                            value={minutesDraft}
+                            onChange={(e) => setMinutesDraft(e.target.value)}
+                            title="Minutes spent"
+                          />
+                          <PackageMoreMenu
+                            pkg={pkg}
+                            rereadPending={reread.isPending && reread.variables === pkg.id}
+                            clearPending={
+                              clearCorrections.isPending &&
+                              clearCorrections.variables === pkg.id
+                            }
+                            reportPending={reportBad.isPending}
+                            patchPending={patchStatus.isPending}
+                            onReread={() => reread.mutate(pkg.id)}
+                            onClear={() => clearCorrections.mutate(pkg.id)}
+                            onReport={() => {
+                              const note = window.prompt(
+                                'What looks wrong? (optional)',
+                                ''
+                              );
+                              if (note === null) return;
+                              reportBad.mutate({
+                                packageId: pkg.id,
+                                note: note.trim() || undefined,
+                              });
+                            }}
+                            onMarkGood={() =>
+                              correct.mutate({ packageId: pkg.id, markPackageGood: true })
+                            }
+                            onDoneVerified={() => {
+                              const mins = Number(minutesDraft);
+                              patchStatus.mutate({
+                                packageId: pkg.id,
+                                status: 'done',
+                                userVerified: true,
+                                minutesSpent:
+                                  Number.isFinite(mins) && mins > 0 ? mins : undefined,
+                              });
+                            }}
+                            onToggleVerified={() =>
                               patchStatus.mutate({
                                 packageId: pkg.id,
                                 userVerified: !pkg.userVerified,
                               })
                             }
-                            title="Confirm after email/OTP / listing goes live"
-                          >
-                            {pkg.userVerified ? 'Verified ✓' : 'Mark Verified'}
-                          </Button>
-                        </>
-                      ) : null}
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() =>
-                          correct.mutate({ packageId: pkg.id, markPackageGood: true })
-                        }
-                      >
-                        Was this right? Yes
-                      </Button>
-                      <input
-                        className="h-8 w-20 rounded-md border bg-background px-2 text-xs"
-                        placeholder="min"
-                        value={openId === pkg.id ? minutesDraft : ''}
-                        onChange={(e) => {
-                          setOpenId(pkg.id);
-                          setMinutesDraft(e.target.value);
-                        }}
-                        title="Minutes spent (pilot metric)"
-                      />
-                    </div>
-
-                    {open ? (
-                      <div className="space-y-2 border-t pt-3">
-                        {(pkg.package?.fields ?? []).map((f) => (
-                          <EditableFieldCard
-                            key={f.selector}
-                            field={f}
-                            value={fieldValue(pkg.id, f)}
-                            onChange={(v) => setFieldValue(pkg.id, f.selector, v)}
-                            onMarkWrong={() =>
-                              correct.mutate({ packageId: pkg.id, selector: f.selector })
+                            onStart={() =>
+                              patchStatus.mutate({ packageId: pkg.id, status: 'in_progress' })
                             }
                           />
-                        ))}
-                        {(pkg.package?.otherFields?.length ?? 0) > 0 ? (
-                          <div className="rounded-lg border border-dashed px-3 py-2 text-sm space-y-1">
-                            <p className="font-medium">
-                              Other fields on this form (fill yourself)
-                            </p>
-                            <ul className="text-muted-foreground space-y-1">
-                              {pkg.package!.otherFields!.map((o) => (
-                                <li key={o.selector}>
-                                  {o.label} — {o.humanStep}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
+                        </div>
+
+                        {pkg.package?.gateNotes ? (
+                          <p className="text-xs text-muted-foreground">{pkg.package.gateNotes}</p>
                         ) : null}
-                        {pkg.package?.multiStepLabel ? (
-                          <p className="text-sm text-amber-700">{pkg.package.multiStepLabel}</p>
+                        {pkg.package?.humanSteps && pkg.package.humanSteps.length > 0 ? (
+                          <p className="text-xs text-amber-800">
+                            You must: {pkg.package.humanSteps.join(' · ')}
+                          </p>
                         ) : null}
+
+                        <div className="space-y-2">
+                          {(pkg.package?.fields ?? []).map((f) => (
+                            <EditableFieldCard
+                              key={f.selector}
+                              field={f}
+                              value={fieldValue(pkg.id, f)}
+                              onChange={(v) => setFieldValue(pkg.id, f.selector, v)}
+                              onMarkWrong={() =>
+                                correct.mutate({ packageId: pkg.id, selector: f.selector })
+                              }
+                            />
+                          ))}
+                          {(pkg.package?.otherFields?.length ?? 0) > 0 ? (
+                            <div className="rounded-lg border border-dashed px-3 py-2 text-sm space-y-1">
+                              <p className="font-medium">
+                                Other fields on this form (fill yourself)
+                              </p>
+                              <ul className="text-muted-foreground space-y-1">
+                                {pkg.package!.otherFields!.map((o) => (
+                                  <li key={o.selector}>
+                                    {o.label} — {o.humanStep}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                          {pkg.package?.multiStepLabel ? (
+                            <p className="text-sm text-amber-700">{pkg.package.multiStepLabel}</p>
+                          ) : null}
+                        </div>
                       </div>
                     ) : null}
-                  </CardContent>
-                </Card>
-              );
-            })
+                  </li>
+                );
+              })}
+            </ul>
           )}
         </section>
       ))}
     </PageTransition>
+  );
+}
+
+function collectPackageIssues(pkg: AssistedPackage): string[] {
+  const issues: string[] = [];
+  if (pkg.failureReason) issues.push(pkg.failureReason);
+  if (pkg.formUnavailable) issues.push('Form unavailable or not found');
+  if (pkg.blocked && pkg.blockReason) issues.push(pkg.blockReason);
+  if (pkg.fingerprintStatus === 'stale') issues.push('Package expired — re-prepare');
+  if (pkg.fingerprintStatus === 'changed') issues.push('Form changed — re-prepare');
+  for (const f of pkg.package?.fields ?? []) {
+    if (f.flagged && f.flagReason) issues.push(`${f.label || f.role}: ${f.flagReason}`);
+    else if (f.flagged) issues.push(`${f.label || f.role}: flagged`);
+    else if (f.required && !String(f.value ?? '').trim() && f.role !== 'attachment' && f.role !== 'terms') {
+      issues.push(`${f.label || f.role}: content missing`);
+    }
+    if (f.overLimit) issues.push(`${f.label || f.role}: over character limit`);
+  }
+  if (pkg.classifierOutdated) {
+    issues.push(
+      `Reader/classifier outdated (reader v${pkg.readerVersion ?? '?'}→${pkg.currentReaderVersion ?? '?'} · classifier v${pkg.classifierVersion ?? '?'}→${pkg.currentClassifierVersion ?? '?'}) — use ⋯ → Re-read`
+    );
+  }
+  return [...new Set(issues)];
+}
+
+function statusTone(
+  pkg: AssistedPackage,
+  issues: string[]
+): 'ok' | 'warn' | 'block' {
+  if (
+    pkg.formUnavailable ||
+    pkg.blocked ||
+    /cloudflare|login|captcha|registration|form_unavailable|no form/i.test(
+      String(pkg.failureReason ?? '')
+    ) ||
+    (pkg.bucket === 'needs_person' &&
+      (pkg.gate === 'cloudflare' || pkg.gate === 'login' || pkg.gate === 'captcha'))
+  ) {
+    return 'block';
+  }
+  if (pkg.status === 'done' || pkg.bucket === 'ready') return 'ok';
+  if (pkg.bucket === 'check_fields' || issues.length > 0 || pkg.bucket === 'needs_person') {
+    return pkg.bucket === 'needs_person' && issues.length === 0 ? 'block' : 'warn';
+  }
+  return issues.length ? 'warn' : 'ok';
+}
+
+function IssueStatusIcon({
+  tone,
+  issues,
+  domain,
+}: {
+  tone: 'ok' | 'warn' | 'block';
+  issues: string[];
+  domain: string;
+}) {
+  const Icon =
+    tone === 'ok' ? CheckCircle2 : tone === 'block' ? Ban : AlertTriangle;
+  const color =
+    tone === 'ok'
+      ? 'text-emerald-600'
+      : tone === 'block'
+        ? 'text-destructive'
+        : 'text-amber-600';
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            'shrink-0 rounded-md p-0.5 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            color
+          )}
+          title={issues.length ? `${issues.length} issue(s)` : 'No issues'}
+          aria-label={`Status for ${domain}`}
+        >
+          <Icon className="h-4.5 w-4.5 h-[18px] w-[18px]" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="max-w-sm">
+        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+          {domain}
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {issues.length === 0 ? (
+          <DropdownMenuItem disabled className="text-sm opacity-100">
+            No issues flagged
+          </DropdownMenuItem>
+        ) : (
+          issues.map((issue) => (
+            <DropdownMenuItem
+              key={issue}
+              disabled
+              className="text-sm whitespace-normal leading-snug opacity-100 cursor-default"
+            >
+              {issue}
+            </DropdownMenuItem>
+          ))
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function PackageMoreMenu(props: {
+  pkg: AssistedPackage;
+  rereadPending: boolean;
+  clearPending: boolean;
+  reportPending: boolean;
+  patchPending: boolean;
+  onReread: () => void;
+  onClear: () => void;
+  onReport: () => void;
+  onMarkGood: () => void;
+  onDoneVerified: () => void;
+  onToggleVerified: () => void;
+  onStart: () => void;
+}) {
+  const { pkg } = props;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="sm" variant="ghost" className="h-8 w-8 px-0" title="More actions">
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuLabel className="text-xs text-muted-foreground">More</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {!pkg.formUnavailable ? (
+          <DropdownMenuItem disabled={props.rereadPending} onClick={props.onReread}>
+            Re-read form
+          </DropdownMenuItem>
+        ) : null}
+        {!pkg.formUnavailable ? (
+          <DropdownMenuItem disabled={props.clearPending} onClick={props.onClear}>
+            Clear corrections
+          </DropdownMenuItem>
+        ) : null}
+        <DropdownMenuItem disabled={props.reportPending} onClick={props.onReport}>
+          Report bad package
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={props.onMarkGood}>Was this right? Yes</DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          disabled={pkg.fingerprintStatus !== 'fresh' || props.patchPending}
+          onClick={props.onStart}
+        >
+          Start
+        </DropdownMenuItem>
+        {(pkg.gate === 'none' || !pkg.gate) && pkg.status !== 'done' && !pkg.userVerified ? (
+          <DropdownMenuItem disabled={props.patchPending} onClick={props.onDoneVerified}>
+            Done & Verified
+          </DropdownMenuItem>
+        ) : null}
+        {pkg.status === 'done' || pkg.submittedAt ? (
+          <DropdownMenuItem disabled={props.patchPending} onClick={props.onToggleVerified}>
+            {pkg.userVerified ? 'Clear Verified' : 'Mark Verified'}
+          </DropdownMenuItem>
+        ) : null}
+        {pkg.classifierOutdated ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem disabled className="text-xs text-muted-foreground opacity-100">
+              Reader v{pkg.readerVersion ?? '?'}→{pkg.currentReaderVersion ?? '?'} · classifier v
+              {pkg.classifierVersion ?? '?'}→{pkg.currentClassifierVersion ?? '?'}
+            </DropdownMenuItem>
+          </>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

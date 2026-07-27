@@ -5,6 +5,7 @@ import {
   META_DESCRIPTION_MAX,
   dedupeContentFields,
   fitDescriptionToCap,
+  maxPairwiseSimilarity,
   textsAreRepetitive,
 } from './content-limits.js';
 import {
@@ -69,11 +70,20 @@ describe('content-limits (Phase 11)', () => {
     ).toBe(true);
   });
 
-  it('similarity threshold matches Phase 11 gate', () => {
-    expect(CONTENT_SIMILARITY_THRESHOLD).toBe(0.85);
+  it('similarity threshold matches Phase 12 gate', () => {
+    expect(CONTENT_SIMILARITY_THRESHOLD).toBe(0.8);
     const t =
       'Our artisan bakery serves fresh bread coffee and pastries every morning downtown with local flour';
-    expect(textSimilarity(t, t)).toBeGreaterThanOrEqual(0.85);
+    expect(textSimilarity(t, t)).toBeGreaterThanOrEqual(0.8);
+    expect(maxPairwiseSimilarity([t, t, 'Totally unrelated industrial valves catalog'])).toBeGreaterThanOrEqual(
+      0.8
+    );
+    expect(
+      maxPairwiseSimilarity([
+        'ChefGaa automates bakery production planning with live inventory.',
+        'Analytics dashboards for multi-site kitchens track waste and labor.',
+      ])
+    ).toBeLessThan(0.8);
   });
 
   it('package shows only form fields; profile empties say you fill this; other roles listed separately', () => {

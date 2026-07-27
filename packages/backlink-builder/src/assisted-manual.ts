@@ -7,7 +7,13 @@ import {
   formatYouMustSteps,
   selectTargetForm,
 } from './target-form.js';
-import { fitDescriptionToCap, textsAreRepetitive } from './content-limits.js';
+import {
+  CONTENT_SIMILARITY_THRESHOLD,
+  fitDescriptionToCap,
+  jaccardTokenSimilarity,
+  maxPairwiseSimilarity,
+  textsAreRepetitive,
+} from './content-limits.js';
 import {
   formUnavailableMessage,
 } from './form-unavailable.js';
@@ -21,7 +27,9 @@ import {
 /** Soft guide for metrics dashboards — preparation is not capped. */
 export const ASSISTED_MANUAL_PILOT_MAX = 10;
 export const ASSISTED_PACKAGE_TTL_DAYS = 7;
-export const ASSISTED_SIMILARITY_THRESHOLD = 0.85;
+/** Phase 12 — aligned with CONTENT_SIMILARITY_THRESHOLD (0.80). */
+export const ASSISTED_SIMILARITY_THRESHOLD = CONTENT_SIMILARITY_THRESHOLD;
+export { maxPairwiseSimilarity };
 /** Safety ceiling per prepare request (not a product pilot cap). */
 export const ASSISTED_PREPARE_BATCH_MAX = 500;
 
@@ -1470,13 +1478,10 @@ export function valueForRole(role: FieldRole, content: ContentSource): string {
     case 'business_name':
       return String(content.companyName || content.businessName || '').trim();
     case 'short_desc':
-      return String(
-        content.shortDescription ||
-          content.metaDescription ||
-          content.longDescription ||
-          ''
-      ).trim();
+      // Prefer short/meta — do not paste longDescription (cross-field reuse).
+      return String(content.shortDescription || content.metaDescription || '').trim();
     case 'long_desc':
+      // Prefer long; fall back to short only when long is empty (single Description field forms).
       return String(
         content.longDescription ||
           content.shortDescription ||
@@ -1563,23 +1568,9 @@ export function evaluateFingerprintStatus(input: {
   return 'fresh';
 }
 
-/** Token Jaccard similarity for cross-package uniqueness (§2.7). */
+/** Token Jaccard similarity for cross-package uniqueness (§2.7 / Phase 12). */
 export function textSimilarity(a: string, b: string): number {
-  const tok = (s: string) =>
-    new Set(
-      s
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, ' ')
-        .split(/\s+/)
-        .filter((t) => t.length > 2)
-    );
-  const A = tok(a);
-  const B = tok(b);
-  if (!A.size || !B.size) return 0;
-  let inter = 0;
-  for (const t of A) if (B.has(t)) inter++;
-  const union = A.size + B.size - inter;
-  return union === 0 ? 0 : inter / union;
+  return jaccardTokenSimilarity(a, b);
 }
 
 export function findSimilarPackagePairs(

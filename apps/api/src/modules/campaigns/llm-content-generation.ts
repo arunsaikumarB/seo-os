@@ -43,6 +43,9 @@ function buildPrompt(params: {
   /** Prior package texts to avoid repeating (cross-site uniqueness). */
   avoidTexts?: string[];
   uniquenessAttempt?: number;
+  /** Concrete feature/fact this site's copy must lead with (rotated per opportunity). */
+  featureEmphasis?: string | null;
+  openingAngle?: string | null;
 }): string {
   const site = params.opp.website_name || params.opp.domain || 'the target site';
   const brandUrl =
@@ -51,13 +54,20 @@ function buildPrompt(params: {
   const avoidBlock =
     params.avoidTexts && params.avoidTexts.length > 0
       ? `
-UNIQUENESS (attempt ${params.uniquenessAttempt ?? 1}): These descriptions were already used for OTHER sites in this campaign — write a DIFFERENT angle/opening/emphasis. Do not paraphrase them closely:
+UNIQUENESS (attempt ${params.uniquenessAttempt ?? 1}): These descriptions were already used for OTHER sites in this campaign — write a MATERIALLY DIFFERENT opening, feature emphasis, and phrasing. Do not paraphrase them:
 ${params.avoidTexts
   .slice(0, 5)
   .map((t, i) => `${i + 1}. ${t.slice(0, 280)}`)
   .join('\n')}
 `
       : '';
+  const angleBlock = `
+PER-SITE ANGLE (mandatory — this package must not read like any other listing):
+- Target site type: ${params.classificationLabel ?? params.storageType}
+- Lead with this real website fact/feature: ${params.featureEmphasis || '(use a different grounded topic than other listings)'}
+- Opening approach: ${params.openingAngle || 'different problem → capability framing'}
+- Different opening sentence, different feature emphasis, different phrasing from every other site.
+`;
   return `You are writing backlink submission content for a real marketing campaign.
 
 PROJECT / BRAND (use these exact names — never invent "Our Brand"):
@@ -82,7 +92,7 @@ TARGET SITE:
 - Backlink / storage type: ${params.storageType}
 - Classification: ${params.classificationLabel ?? params.storageType}
 - Analysis reason: ${params.reason ?? 'n/a'}
-${avoidBlock}
+${angleBlock}${avoidBlock}
 Write ORIGINAL content tailored to this site type (directory blurb, forum reply, guest post, profile, Q&A, etc.).
 This package is for THIS site only — never reuse copy from another listing.
 
@@ -152,6 +162,8 @@ export async function generateLiveContentPack(params: {
   reason?: string | null;
   avoidTexts?: string[];
   uniquenessAttempt?: number;
+  featureEmphasis?: string | null;
+  openingAngle?: string | null;
 }): Promise<Record<string, unknown>> {
   if (isGenerationMockEnabled()) {
     logger.warn(
@@ -180,6 +192,8 @@ export async function generateLiveContentPack(params: {
     reason: params.reason,
     avoidTexts: params.avoidTexts,
     uniquenessAttempt: params.uniquenessAttempt,
+    featureEmphasis: params.featureEmphasis,
+    openingAngle: params.openingAngle,
   });
 
   const messages = [

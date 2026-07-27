@@ -532,7 +532,7 @@ describe('Phase 7 Assisted Manual', () => {
     expect(gateBlocksReady('none')).toBe(false);
   });
 
-  it('detects >0.85 similarity pairs (AT6)', () => {
+  it('detects ≥0.80 similarity pairs (Phase 12)', () => {
     const text =
       'Our artisan bakery serves fresh bread coffee and pastries every morning downtown';
     const pairs = findSimilarPackagePairs([
@@ -541,7 +541,7 @@ describe('Phase 7 Assisted Manual', () => {
       { id: 'c', text: 'Completely different industrial machinery catalog content here' },
     ]);
     expect(pairs.some((p) => p.a === 'a' && p.b === 'b')).toBe(true);
-    expect(textSimilarity(text, text)).toBeGreaterThan(0.85);
+    expect(textSimilarity(text, text)).toBeGreaterThanOrEqual(0.8);
   });
 
   it('stores human correction and never re-guesses when it agrees (AT7)', () => {

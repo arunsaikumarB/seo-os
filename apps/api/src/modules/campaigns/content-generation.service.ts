@@ -1388,7 +1388,7 @@ export async function resumeInterruptedContentGeneration(workspaceId?: string) {
   return { resumed, requeuedFromGenerating, reattachedQueued };
 }
 
-/** When the generation queue drains, notify once with outcome counts. */
+/** When the generation queue drains, enforce uniqueness then notify once. */
 async function maybeNotifyContentGenerationBatch(workspaceId: string) {
   try {
     const board = await getContentGenerationBoard(workspaceId);
@@ -1397,20 +1397,44 @@ async function maybeNotifyContentGenerationBatch(workspaceId: string) {
     const done = p.completed + p.failed + p.needsReview;
     if (done <= 0) return;
 
+    let uniqueness: {
+      maxPairwiseSimilarity: number;
+      regenerated: number;
+      flagged: number;
+      packCount: number;
+    } | null = null;
+    try {
+      const { enforceWorkspaceContentUniqueness } = await import(
+        '../backlinks/v11.service.js'
+      );
+      uniqueness = await enforceWorkspaceContentUniqueness(workspaceId);
+    } catch (err) {
+      logger.warn({ err, workspaceId }, 'Phase 12 uniqueness pass failed');
+    }
+
     const { notifyStageCompleteAsync } = await import('../platform/stage-notify.service.js');
+    const simLabel =
+      uniqueness != null
+        ? ` · max similarity ${uniqueness.maxPairwiseSimilarity.toFixed(2)}`
+        : '';
     notifyStageCompleteAsync({
       workspaceId,
       kind: 'content_generation',
       stageName: 'Content Generation',
-      summary: `Generated ${p.completed}/${done} packages · ${p.failed} failed · ${p.needsReview} need review`,
-      outcome: p.failed > 0 || p.needsReview > 0 ? 'partial' : 'success',
+      summary: `Generated ${p.completed}/${done} packages · ${p.failed} failed · ${p.needsReview} need review${simLabel}`,
+      outcome: p.failed > 0 || p.needsReview > 0 || (uniqueness?.flagged ?? 0) > 0
+        ? 'partial'
+        : 'success',
       href: `/projects/${workspaceId}/backlink-builder/assisted-manual`,
       longRunning: true,
       payload: {
-        fingerprint: `content-gen:${p.completed}:${p.failed}:${p.needsReview}`,
+        fingerprint: `content-gen:${p.completed}:${p.failed}:${p.needsReview}:${uniqueness?.maxPairwiseSimilarity ?? ''}`,
         completed: p.completed,
         failed: p.failed,
         needsReview: p.needsReview,
+        maxPairwiseSimilarity: uniqueness?.maxPairwiseSimilarity ?? null,
+        uniquenessRegenerated: uniqueness?.regenerated ?? 0,
+        uniquenessFlagged: uniqueness?.flagged ?? 0,
       },
     });
   } catch (err) {
