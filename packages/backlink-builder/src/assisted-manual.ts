@@ -50,8 +50,9 @@ export const ASSISTED_FORM_READER_VERSION = 5;
  *     owner/contact tokens map correctly; unknown long fields → other (empty).
  * v9: url only on text/url inputs (never LINK_TYPE selects); captcha as human step.
  * v10: category <select> omitted from packages entirely (team picks on live form).
+ * v11: reciprocal/anchor roles; exclude *_limit config fields; broader directory URL names.
  */
-export const ASSISTED_FIELD_CLASSIFIER_VERSION = 10;
+export const ASSISTED_FIELD_CLASSIFIER_VERSION = 11;
 
 export type FieldConfidence = 'high' | 'medium' | 'low';
 export type FieldSource =
@@ -75,6 +76,8 @@ export type FieldRole =
   | 'attachment'
   | 'terms'
   | 'captcha'
+  /** Reciprocal / backlink anchor phrase (RECPR_TEXT) — short text, not a URL. */
+  | 'anchor'
   | 'other';
 
 export type AssistedGate =
@@ -444,6 +447,7 @@ export function extractFormFieldFacts(html: string): FormFieldFacts[] {
 
   const push = (f: FormFieldFacts) => {
     if (isSearchOrNavField(f)) return;
+    if (isHiddenConfigField(f)) return;
     // Password fields belong to login widgets — never emit as fill targets
     if (f.type === 'password') return;
     const key = f.selector || `${f.name}|${f.id}|${f.type}`;
@@ -754,6 +758,101 @@ export function isUrlCapableControl(facts: FormFieldFacts): boolean {
   return t === 'text' || t === 'url' || t === '';
 }
 
+/**
+ * Hidden helper / maxlength mirrors (META_DESCRIPTION_limit, TITLE_limit) — not fillable.
+ * Exclude from Form Reader + packages entirely (not even "fill yourself").
+ */
+export function isHiddenConfigField(facts: {
+  name?: string | null;
+  id?: string | null;
+  label?: string | null;
+  type?: string;
+}): boolean {
+  const name = String(facts.name ?? '');
+  const id = String(facts.id ?? '');
+  const label = String(facts.label ?? '');
+  if (/_limit$/i.test(name) || /_limit$/i.test(id)) return true;
+  if (/\blimit\b/i.test(name) && /_(meta|title|desc|description|keyword)/i.test(name)) {
+    return true;
+  }
+  // Visible inputs named like config helpers
+  if (/^(max|min|char)_?(length|limit)$/i.test(name) || /^(max|min|char)_?(length|limit)$/i.test(id)) {
+    return true;
+  }
+  if (/_limit$/i.test(label.replace(/\s+/g, '_'))) return true;
+  return false;
+}
+
+export function looksLikeLinkTypeField(labelOrName: string): boolean {
+  return /link[_\s-]?type/i.test(String(labelOrName ?? ''));
+}
+
+/**
+ * Directory field-name dictionary (name/id/label) — reciprocal, common URL aliases.
+ * Runs before leading-token heuristics so RECPR_URL is not lost as unknown "recpr".
+ */
+export function roleFromDirectoryFieldName(facts: FormFieldFacts): FieldRole | null {
+  const name = String(facts.name ?? '');
+  const id = String(facts.id ?? '');
+  const label = String(facts.label ?? '');
+  const blob = `${name} ${id} ${label}`;
+
+  // LINK_TYPE is user-choice (paid/free, featured/regular) — never a URL
+  if (looksLikeLinkTypeField(blob)) {
+    return 'other';
+  }
+
+  // Explicit Title / Description / Email labels beat name/id aliases (e.g. Title on website_url)
+  const explicitLabel = (facts.label || facts.ariaLabel || '').trim();
+  if (explicitLabel && !/recpr|reciprocal|anchor|backlink/i.test(explicitLabel)) {
+    const lead = leadingLabelToken(explicitLabel);
+    const fromLead = roleFromLeadingToken(lead, facts);
+    if (
+      fromLead &&
+      fromLead !== 'url' &&
+      fromLead !== 'anchor' &&
+      fromLead !== 'other' &&
+      fromLead !== 'category'
+    ) {
+      return null;
+    }
+  }
+
+  // Reciprocal / backlink URL
+  if (
+    /recpr[_\s-]?url|reciprocal[_\s-]?(link[_\s-]?)?url|backlink[_\s-]?url/i.test(blob)
+  ) {
+    return isUrlCapableControl(facts) ? 'url' : null;
+  }
+
+  // Reciprocal / anchor text (not URL)
+  if (
+    /recpr[_\s-]?text|reciprocal[_\s-]?(link[_\s-]?)?(text|anchor)|anchor([_\s-]?text)?|link[_\s-]?(text|title|anchor)/i.test(
+      blob
+    )
+  ) {
+    return 'anchor';
+  }
+
+  // Common directory URL field names
+  if (
+    isUrlCapableControl(facts) &&
+    (/^(your_url|site_url|homepage|home_page|website_url|web_url|listing_url|company_url|url|website|siteurl|weburl)$/i.test(
+      name
+    ) ||
+      /^(your_url|site_url|homepage|home_page|website_url|web_url|listing_url|company_url|url|website|siteurl|weburl)$/i.test(
+        id
+      ) ||
+      /^(your|site|home|web|listing|company)[_\s-]?url$/i.test(name) ||
+      /^(your|site|home|web|listing|company)[_\s-]?url$/i.test(id) ||
+      /^(website|homepage|home\s*page|site\s*url|your\s*url|listing\s*url)$/i.test(label.trim()))
+  ) {
+    return 'url';
+  }
+
+  return null;
+}
+
 /** Leading-token → role. URL only for URL/Website (text/url inputs — never selects). */
 function roleFromLeadingToken(
   token: string,
@@ -787,13 +886,21 @@ function roleFromLeadingToken(
   ) {
     return descriptionRoleFromControl(facts);
   }
-  // url / website / homepage — never from bare "link" (LINK_TYPE selects)
-  if (/^(url|website|homepage)$/i.test(token)) {
+  // url / website / homepage / site — never from bare "link" (LINK_TYPE selects)
+  if (/^(url|website|homepage|siteurl|weburl)$/i.test(token)) {
+    return isUrlCapableControl(facts) ? 'url' : null;
+  }
+  if (/^(site|home)$/i.test(token) && /url|page|website/i.test(blob)) {
     return isUrlCapableControl(facts) ? 'url' : null;
   }
   if (/^(link)$/i.test(token)) {
     // "Link" / LINK_TYPE on a select is not a URL field
+    if (looksLikeLinkTypeField(blob)) return null;
     return isUrlCapableControl(facts) ? 'url' : null;
+  }
+  if (/^(anchor|recpr)$/i.test(token)) {
+    if (/url/i.test(blob)) return isUrlCapableControl(facts) ? 'url' : null;
+    return 'anchor';
   }
   if (/^(email|e-?mail)$/i.test(token)) return 'email';
   if (/^(phone|mobile|tel)$/i.test(token)) return 'phone';
@@ -821,6 +928,22 @@ const ROLE_HINTS: Array<{ role: FieldRole; patterns: RegExp[] }> = [
       /^home\s*page$/i,
       /^listing\s*url$/i,
       /^company\s*url$/i,
+      /^your\s*url$/i,
+      /^site\s*url$/i,
+      /backlink\s*url/i,
+      /reciprocal\s*(link\s*)?url/i,
+      /recpr[_\s-]?url/i,
+    ],
+  },
+  {
+    role: 'anchor',
+    patterns: [
+      /recpr[_\s-]?text/i,
+      /reciprocal\s*(link\s*)?(text|anchor)/i,
+      /^anchor(\s*text)?$/i,
+      /^link\s*text$/i,
+      /^link\s*title$/i,
+      /^anchor\s*text$/i,
     ],
   },
   { role: 'title', patterns: [/^title$/i, /^headline$/i, /^listing.?name$/i, /^site.?name$/i] },
@@ -904,6 +1027,9 @@ export function inferFieldRole(facts: FormFieldFacts): {
   if (isSearchOrNavField(facts)) {
     return { role: 'other', confidence: 'low', source: 'name_guess' };
   }
+  if (isHiddenConfigField(facts)) {
+    return { role: 'other', confidence: 'low', source: 'name_guess' };
+  }
 
   const explicitLabel = (facts.label || facts.ariaLabel || '').trim();
   const hasExplicitLabel = Boolean(explicitLabel);
@@ -921,6 +1047,25 @@ export function inferFieldRole(facts: FormFieldFacts): {
       : hasExplicitLabel
         ? 'dom_label'
         : 'name_guess';
+
+  // Directory name dictionary first (RECPR_URL, YOUR_URL, LINK_TYPE, …)
+  const fromDirName = roleFromDirectoryFieldName(facts);
+  if (fromDirName === 'other' && looksLikeLinkTypeField(`${facts.name} ${facts.id} ${facts.label}`)) {
+    return {
+      role: 'other',
+      confidence: 'medium',
+      source: hasExplicitLabel ? 'dom_label' : 'name_guess',
+    };
+  }
+  if (fromDirName && fromDirName !== 'other') {
+    return {
+      role: fromDirName,
+      confidence: hasExplicitLabel || /recpr|reciprocal|backlink|anchor/i.test(`${facts.name} ${facts.id}`)
+        ? 'high'
+        : 'medium',
+      source: hasExplicitLabel ? 'dom_label' : 'name_guess',
+    };
+  }
 
   const captchaBlob = [facts.label, facts.name, facts.id, facts.placeholder]
     .filter(Boolean)
@@ -954,6 +1099,9 @@ export function inferFieldRole(facts: FormFieldFacts): {
 
   // Selects are never URL fields (LINK_TYPE / link-type dropdowns)
   if (facts.type === 'select' || facts.options.length > 0) {
+    if (looksLikeLinkTypeField([facts.name, facts.id, primary].filter(Boolean).join(' '))) {
+      return { role: 'other', confidence: 'medium', source: leadSource };
+    }
     const fromLeadSelect = roleFromLeadingToken(leading, facts);
     if (fromLeadSelect === 'category' || /categor|industry|topic|niche/i.test(primary || text)) {
       return {
@@ -962,7 +1110,7 @@ export function inferFieldRole(facts: FormFieldFacts): {
         source: hasExplicitLabel ? 'dom_label' : 'llm_inferred',
       };
     }
-    if (fromLeadSelect && fromLeadSelect !== 'url') {
+    if (fromLeadSelect && fromLeadSelect !== 'url' && fromLeadSelect !== 'anchor') {
       return {
         role: fromLeadSelect,
         confidence: leadingFromLabel ? 'high' : 'medium',
@@ -1124,8 +1272,12 @@ export function inferFieldRole(facts: FormFieldFacts): {
     !hasExplicitLabel &&
     !leading &&
     (roleFromLeadingToken(leadingFromAttr, facts) === 'url' ||
-      /^(website|url|homepage)(_|$)/i.test(facts.name ?? '') ||
-      /^(website|url|homepage)(_|$)/i.test(facts.id ?? ''))
+      /^(website|url|homepage|site_url|your_url|backlink_url|recpr_url)(_|$)/i.test(
+        facts.name ?? ''
+      ) ||
+      /^(website|url|homepage|site_url|your_url|backlink_url|recpr_url)(_|$)/i.test(
+        facts.id ?? ''
+      ))
   ) {
     return { role: 'url', confidence: 'low', source: 'name_guess' };
   }
@@ -1255,7 +1407,18 @@ export function buildSiteRecipe(input: {
         sizeHint: f.sizeHint,
       };
     })
-    .filter((f) => f.role !== 'captcha' && f.role !== 'terms');
+    .filter(
+      (f) =>
+        f.role !== 'captcha' &&
+        f.role !== 'terms' &&
+        !isHiddenConfigField({
+          name: f.label,
+          id: f.selector,
+          label: f.label,
+        }) &&
+        !/_limit$/i.test(f.selector) &&
+        !/_limit$/i.test(String(f.label ?? ''))
+    );
 
   // Ensure agreement/captcha still surface even if widgets aren't input fields
   const ensuredSteps = [...humanSteps];
@@ -1524,6 +1687,8 @@ export type ContentSource = {
   address?: string | null;
   /** @deprecated Category is never auto-matched; ignored by package builder. */
   categoryHints?: string[];
+  /** Short reciprocal / backlink anchor phrase; falls back to title / business name. */
+  anchorText?: string | null;
   imageFileName?: string | null;
   /** Cross-package uniqueness failed after max attempts */
   contentTooSimilar?: boolean;
@@ -1554,6 +1719,18 @@ export function valueForRole(role: FieldRole, content: ContentSource): string {
       ).trim();
     case 'url':
       return String(content.url ?? '').trim();
+    case 'anchor': {
+      const phrase = String(
+        content.anchorText || content.title || content.businessName || content.companyName || ''
+      )
+        .trim()
+        .replace(/\s+/g, ' ');
+      // Reciprocal anchor text is a short phrase, not a description
+      if (phrase.length <= 80) return phrase;
+      const cut = phrase.slice(0, 80);
+      const lastSpace = cut.lastIndexOf(' ');
+      return (lastSpace > 40 ? cut.slice(0, lastSpace) : cut).trim();
+    }
     case 'email':
       return String(content.email ?? '').trim();
     case 'phone':
@@ -1734,7 +1911,7 @@ export function buildAssistedPackage(input: {
     input.recipe.entryUrl;
 
   const PROFILE_ROLES = new Set(['url', 'email', 'phone', 'name', 'business_name', 'address']);
-  const CONTENT_ROLES = new Set(['title', 'short_desc', 'long_desc']);
+  const CONTENT_ROLES = new Set(['title', 'short_desc', 'long_desc', 'anchor']);
   const usedTitles = new Set<string>();
   const usedDescs = new Set<string>();
   const otherFields: NonNullable<AssistedPackagePayload['otherFields']> = [];
@@ -1742,6 +1919,18 @@ export function buildAssistedPackage(input: {
   const mappedFields: PackageFieldValue[] = [];
   let formHasCategoryField = false;
   for (const rf of input.recipe.fields) {
+    // Config mirrors (*_limit) — never show, even as "fill yourself"
+    if (
+      isHiddenConfigField({
+        name: rf.selector.replace(/^\[name="|"\]$/g, ''),
+        id: rf.selector.replace(/^#/, ''),
+        label: rf.label,
+      }) ||
+      /_limit$/i.test(rf.selector) ||
+      /_limit$/i.test(String(rf.label ?? ''))
+    ) {
+      continue;
+    }
     // Category selects are never mapped, recommended, or listed — team picks on the live form.
     if (rf.role === 'category') {
       formHasCategoryField = true;
@@ -1781,10 +1970,13 @@ export function buildAssistedPackage(input: {
         formHasCategoryField = true;
         continue;
       }
+      const linkType = looksLikeLinkTypeField(`${rf.label ?? ''} ${rf.selector}`);
       otherFields.push({
         selector: rf.selector,
         label: rf.label ?? rf.role,
-        humanStep: 'you fill this — unknown field role (app will not invent a value)',
+        humanStep: linkType
+          ? 'you choose — paid/free or featured/regular (app will not pick this)'
+          : 'you fill this — unknown field role (app will not invent a value)',
       });
       continue;
     }

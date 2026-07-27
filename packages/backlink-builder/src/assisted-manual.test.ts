@@ -812,4 +812,102 @@ describe('Phase 7 Assisted Manual', () => {
     });
     expect(status).toBe('stale');
   });
+
+  it('recognizes RECPR_URL / RECPR_TEXT and directory URL aliases; drops *_limit noise', () => {
+    const html = `
+<form action="/submit" method="post">
+  <label for="TITLE">Title</label>
+  <input id="TITLE" name="TITLE" type="text" required />
+  <label for="URL">URL</label>
+  <input id="URL" name="URL" type="text" required />
+  <label for="RECPR_URL">Reciprocal URL</label>
+  <input id="RECPR_URL" name="RECPR_URL" type="text" />
+  <label for="RECPR_TEXT">Reciprocal Text</label>
+  <input id="RECPR_TEXT" name="RECPR_TEXT" type="text" />
+  <label for="YOUR_URL">Your URL</label>
+  <input id="YOUR_URL" name="YOUR_URL" type="text" />
+  <label for="SITE_URL">Site URL</label>
+  <input id="SITE_URL" name="SITE_URL" type="text" />
+  <input id="META_DESCRIPTION_limit" name="META_DESCRIPTION_limit" type="text" value="250" />
+  <label for="LTYPE">Link Type</label>
+  <select id="LTYPE" name="LINK_TYPE">
+    <option>Normal</option>
+    <option>Featured</option>
+  </select>
+  <button type="submit">Submit</button>
+</form>`;
+
+    expect(
+      inferFieldRole({
+        label: 'Reciprocal URL',
+        name: 'RECPR_URL',
+        id: 'RECPR_URL',
+        placeholder: null,
+        ariaLabel: null,
+        type: 'text',
+        required: false,
+        maxlength: null,
+        options: [],
+        surroundingText: null,
+        accept: null,
+        sizeHint: null,
+        selector: '#RECPR_URL',
+      }).role
+    ).toBe('url');
+
+    expect(
+      inferFieldRole({
+        label: 'Reciprocal Text',
+        name: 'RECPR_TEXT',
+        id: 'RECPR_TEXT',
+        placeholder: null,
+        ariaLabel: null,
+        type: 'text',
+        required: false,
+        maxlength: null,
+        options: [],
+        surroundingText: null,
+        accept: null,
+        sizeHint: null,
+        selector: '#RECPR_TEXT',
+      }).role
+    ).toBe('anchor');
+
+    const facts = extractFormFieldFacts(html);
+    expect(facts.some((f) => /_limit$/i.test(f.name ?? ''))).toBe(false);
+
+    const recipe = buildSiteRecipe({
+      domain: 'dir.example',
+      entryUrl: 'https://dir.example/submit',
+      html,
+    });
+    expect(recipe.fields.some((f) => /_limit/i.test(f.selector + (f.label ?? '')))).toBe(false);
+
+    const pkg = buildAssistedPackage({
+      recipe,
+      content: {
+        title: 'Chefgaa POS',
+        url: 'https://go.chefgaa.com',
+        shortDescription: 'Restaurant point of sale software for busy kitchens.',
+        longDescription:
+          'Chefgaa helps restaurants run checkout, menus, and staff from one place every day.',
+      },
+      formFound: true,
+    });
+
+    const recprUrl = pkg.fields.find((f) => /RECPR_URL/i.test(f.selector));
+    expect(recprUrl?.role).toBe('url');
+    expect(recprUrl?.value).toBe('https://go.chefgaa.com');
+
+    const recprText = pkg.fields.find((f) => /RECPR_TEXT/i.test(f.selector));
+    expect(recprText?.role).toBe('anchor');
+    expect(recprText?.value).toBe('Chefgaa POS');
+
+    expect(pkg.fields.some((f) => /YOUR_URL|SITE_URL/i.test(f.selector))).toBe(true);
+    expect(pkg.fields.every((f) => !/_limit/i.test(f.selector))).toBe(true);
+    expect(pkg.otherFields?.every((o) => !/_limit/i.test(o.selector))).toBe(true);
+
+    const linkType = pkg.otherFields?.find((o) => /LINK_TYPE|Link Type/i.test(o.label));
+    expect(linkType?.humanStep).toMatch(/you choose/i);
+  });
 });

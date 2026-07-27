@@ -25,6 +25,7 @@ export type SelfCheckRole =
   | 'terms'
   | 'captcha'
   | 'attachment'
+  | 'anchor'
   | 'other';
 
 export type SelfCheckFieldInput = {
@@ -73,11 +74,15 @@ export function valueMatchesRole(role: string, value: string): RoleValueCheck {
 
     case 'title':
     case 'business_name':
+    case 'anchor':
       if (LOOKS_LIKE_URL_RE.test(v) || /^https?:\/\//i.test(v)) {
         return { ok: false, reason: `${role} must not be a URL` };
       }
       if (v.length > MAX_TITLE_CHARS) {
         return { ok: false, reason: `${role} looks too long for a title` };
+      }
+      if (role === 'anchor' && v.length > 80) {
+        return { ok: false, reason: 'anchor text should be a short phrase' };
       }
       return { ok: true };
 

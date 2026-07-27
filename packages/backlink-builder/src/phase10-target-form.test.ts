@@ -144,6 +144,10 @@ describe('Phase 10 target form selection', () => {
     });
     const filled = pkg.fields.find((f) => /LINK_TYPE|Link Type/i.test(f.label + f.selector));
     expect(filled?.value ?? '').not.toBe('https://go.chefgaa.com');
+    expect(filled).toBeUndefined(); // not a mapped content field
+    const other = pkg.otherFields?.find((o) => /LINK_TYPE|Link Type/i.test(o.label + o.selector));
+    expect(other).toBeTruthy();
+    expect(other?.humanStep).toMatch(/you choose/i);
   });
 
   it('honest failure when only a login form exists', () => {
