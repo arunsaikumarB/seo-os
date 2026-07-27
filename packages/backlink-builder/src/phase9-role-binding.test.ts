@@ -233,6 +233,35 @@ describe('Phase 9 category handling', () => {
     ]);
     expect(pick).toBeNull();
   });
+
+  it('does not pick Men via substring of management for a restaurant POS brand', () => {
+    const opts = [
+      'Men',
+      'Women',
+      'Business & Economy',
+      'Computers & Internet',
+      'Arts',
+      'Shopping',
+    ];
+    const pick = recommendDropdownOption(opts, [
+      'Chefgaa',
+      'restaurant POS',
+      'restaurant management software',
+      'point of sale',
+      'business software',
+    ]);
+    expect(pick).not.toBe('Men');
+    expect(pick).not.toBe('Women');
+    expect(['Business & Economy', 'Computers & Internet']).toContain(pick);
+  });
+
+  it('leaves empty + no guess when nothing fits', () => {
+    const pick = recommendDropdownOption(
+      ['Men', 'Women', 'Dating', 'Adult'],
+      ['Chefgaa', 'restaurant POS software', 'business']
+    );
+    expect(pick).toBeNull();
+  });
 });
 
 describe('Phase 9 strategy media', () => {

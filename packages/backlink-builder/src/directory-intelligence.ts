@@ -465,13 +465,7 @@ export function matchDirectoryCategory(params: {
     if (!best || score > best.score) best = { cat, score, hits };
   }
   if (!best || best.score <= 0) {
-    return {
-      category: params.categories[0]!.name,
-      subcategory: null,
-      confidence: 0.35,
-      path: [params.categories[0]!.name],
-      reasoning: 'Default top category — low confidence; override recommended',
-    };
+    return null;
   }
   const confidence = Math.min(0.98, 0.45 + best.score * 0.08);
   return {

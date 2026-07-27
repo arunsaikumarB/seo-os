@@ -1410,39 +1410,215 @@ export function fitValueToLimit(
   };
 }
 
+/** Tokens for category matching — length ≥3; strips junk. */
+function categoryTokens(text: string): string[] {
+  return sanitizeOptionLabel(text)
+    .toLowerCase()
+    .split(/[^a-z0-9&]+/)
+    .map((t) => t.replace(/^&+|&=+$/g, ''))
+    .filter((t) => t.length >= 3);
+}
+
+/**
+ * Expand brand/industry hints into directory-style labels so options like
+ * "Business & Economy" / "Computers & Internet" can score for a restaurant POS brand.
+ */
+export function expandCategoryHints(hints: string[]): string[] {
+  const base = hints.map((h) => sanitizeOptionLabel(h)).filter((h) => h.length >= 2);
+  const blob = base.join(' ').toLowerCase();
+  const extra: string[] = [];
+
+  const isTech =
+    /software|saas|tech|pos|point.?of.?sale|app\b|platform|internet|computer|digital|e-?commerce|commerce|api|cloud/.test(
+      blob
+    );
+  const isFood =
+    /restaur|food|cafe|dining|chef|kitchen|hospitality|grocery|beverage|culinary/.test(blob);
+  const isBusiness =
+    isTech ||
+    isFood ||
+    /business|b2b|compan|enterprise|agenc|service|professional|retail|brand|startup|smb/.test(
+      blob
+    );
+
+  if (isTech) {
+    extra.push(
+      'Computers & Internet',
+      'Computers and Internet',
+      'Computers',
+      'Internet',
+      'Technology',
+      'Software',
+      'Business Software',
+      'Business & Economy',
+      'Business and Economy',
+      'Business'
+    );
+  }
+  if (isFood) {
+    extra.push(
+      'Food & Beverage',
+      'Food and Beverage',
+      'Restaurants',
+      'Food',
+      'Hospitality',
+      'Business & Economy',
+      'Business and Economy',
+      'Business'
+    );
+  }
+  if (isBusiness && !isTech && !isFood) {
+    extra.push('Business & Economy', 'Business and Economy', 'Business', 'Services', 'Companies');
+  }
+
+  // Dedupe case-insensitively, preserve order
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const h of [...base, ...extra]) {
+    const k = h.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(h);
+  }
+  return out;
+}
+
+/**
+ * Merge pack suggestions with live brand_profile signals.
+ * Pack suggestions alone used to REPLACE brand hints and starve matching.
+ */
+export function buildCategoryHints(input: {
+  categorySuggestions?: string[] | null;
+  industry?: string | null;
+  primaryTopics?: string[] | null;
+  keyFeatures?: string[] | null;
+  companyName?: string | null;
+  businessName?: string | null;
+  tagline?: string | null;
+  backlinkType?: string | null;
+}): string[] {
+  const raw = [
+    ...(Array.isArray(input.categorySuggestions) ? input.categorySuggestions : []),
+    input.industry ?? '',
+    ...(input.primaryTopics ?? []),
+    ...(input.keyFeatures ?? []).slice(0, 4),
+    input.companyName ?? '',
+    input.businessName ?? '',
+    input.tagline ?? '',
+    input.backlinkType ? String(input.backlinkType).replace(/_/g, ' ') : '',
+  ]
+    .map((h) => sanitizeOptionLabel(String(h ?? '')))
+    .filter((h) => h.length >= 2);
+  return expandCategoryHints(raw);
+}
+
+const IRRELEVANT_PERSONAL_CATEGORY =
+  /^(men|women|kids|boys|girls|fashion|clothing|apparel|dating|adult|xxx|sex|porn|gay|lesbian)\b/i;
+
+/**
+ * Score each real &lt;select&gt; option against brand category keywords.
+ * Returns null when no option clearly fits — never invents a wrong pick like "Men".
+ */
 export function recommendDropdownOption(
   options: string[],
-  preferredHints: string[]
+  preferredHints: string[],
+  opts?: { minScore?: number }
 ): string | null {
   if (!options.length) return null;
   const cleaned = options.map((o) => sanitizeOptionLabel(o)).filter(Boolean);
   if (!cleaned.length) return null;
-  const lowerHints = preferredHints
-    .map((h) => sanitizeOptionLabel(h).toLowerCase())
-    .filter((h) => h.length >= 2);
 
-  // Prefer hint matches (brand / industry / topics)
-  let best: { opt: string; score: number } | null = null;
+  const hints = expandCategoryHints(preferredHints);
+  const lowerHints = hints.map((h) => h.toLowerCase()).filter((h) => h.length >= 2);
+  if (!lowerHints.length) return null;
+
+  const hintTok = new Set(lowerHints.flatMap((h) => categoryTokens(h)));
+  const brandBlob = lowerHints.join(' ');
+  const brandIsBusinessTech =
+    /business|software|saas|tech|pos|platform|commerce|retail|service|restaur|food|internet|computer/.test(
+      brandBlob
+    );
+
+  const minScore = opts?.minScore ?? 6;
+  const scored: Array<{ opt: string; score: number }> = [];
+
   for (const opt of cleaned) {
     const o = opt.toLowerCase();
     let score = 0;
+    const oTok = categoryTokens(opt);
+
     for (const h of lowerHints) {
-      if (o === h) score += 10;
-      else if (o.includes(h) || h.includes(o)) score += 5;
-      // token overlap
-      const oTok = new Set(o.split(/\s+/).filter((t) => t.length > 2));
-      for (const t of h.split(/\s+/)) {
-        if (t.length > 2 && oTok.has(t)) score += 2;
+      if (o === h) {
+        score += 14;
+        continue;
+      }
+      // Substring only when BOTH sides are long enough.
+      // Short options like "Men" must NOT match inside "management" / "women" / "document".
+      if (o.length >= 5 && h.length >= 5 && (o.includes(h) || h.includes(o))) {
+        score += 6;
       }
     }
-    // Soft-penalize generic chat/forum buckets for business brands
-    if (/chat|forum|community|social\s*network/i.test(o) && lowerHints.some((h) => /business|saas|software|platform|commerce|retail|service/i.test(h))) {
-      score -= 4;
+
+    for (const t of oTok) {
+      if (!hintTok.has(t)) continue;
+      score += t.length >= 6 ? 5 : t.length >= 4 ? 3 : 1;
     }
-    if (score > 0 && (!best || score > best.score)) best = { opt, score };
+
+    // Synonym / directory-style boosts from brand text → option label
+    const brandIsTech =
+      /software|saas|tech|pos|app|platform|internet|computer|digital|e-?commerce/.test(brandBlob);
+    const brandIsFood =
+      /restaur|food|cafe|dining|chef|kitchen|hospitality|pos|point.?of.?sale/.test(brandBlob);
+    const brandIsBiz =
+      /business|b2b|compan|enterprise|agenc|service|professional/.test(brandBlob) ||
+      brandIsTech ||
+      brandIsFood;
+
+    if (brandIsTech && /comput|internet|software|tech/.test(o)) {
+      score += 10;
+    }
+    if (brandIsTech && /business|economy/.test(o)) {
+      score += 6;
+    }
+    if (brandIsFood && /food|restaur|dining|hospitality/.test(o)) {
+      score += 10;
+    }
+    if (brandIsFood && /business|economy|comput|internet|software/.test(o)) {
+      score += 6;
+    }
+    if (brandIsBiz && /business|economy|services|professional|compan/.test(o)) {
+      score += 4;
+    }
+
+    if (
+      /chat|forum|community|social\s*network/i.test(o) &&
+      brandIsBusinessTech
+    ) {
+      score -= 6;
+    }
+    if (IRRELEVANT_PERSONAL_CATEGORY.test(o) && brandIsBusinessTech) {
+      score -= 20;
+    }
+
+    if (score > 0) scored.push({ opt, score });
   }
-  // Never silently pick options[0] — wrong category is worse than empty recommendation
-  return best?.opt ?? null;
+
+  scored.sort((a, b) => b.score - a.score);
+  const best = scored[0];
+  if (!best || best.score < minScore) return null;
+
+  // Ambiguous only when the lead is weak — two strong business fits still pick the winner
+  const second = scored[1];
+  if (
+    second &&
+    best.score < 12 &&
+    second.score >= minScore &&
+    best.score - second.score < 2
+  ) {
+    return null;
+  }
+
+  return best.opt;
 }
 
 export type ContentSource = {
@@ -1651,16 +1827,12 @@ export function buildAssistedPackage(input: {
     }
     if (rf.role === 'category' && rf.options?.length) {
       const cleanedOptions = rf.options.map((o) => sanitizeOptionLabel(o)).filter(Boolean);
-      const recommended = recommendDropdownOption(
-        cleanedOptions,
-        input.content.categoryHints ?? [
-          input.content.companyName ?? '',
-          input.content.businessName ?? '',
-          'Business',
-          'Software',
-          'Services',
-        ]
-      );
+      const hints = buildCategoryHints({
+        categorySuggestions: input.content.categoryHints,
+        companyName: input.content.companyName,
+        businessName: input.content.businessName,
+      });
+      const recommended = recommendDropdownOption(cleanedOptions, hints);
       mappedFields.push({
         selector: rf.selector,
         role: rf.role,
@@ -1680,12 +1852,10 @@ export function buildAssistedPackage(input: {
         recommendedOption: recommended,
         overLimit: false,
         flagged: !recommended,
-        flagReason: recommended
-          ? null
-          : 'No confident category match — pick from the list',
+        flagReason: recommended ? null : 'pick a category',
         humanStep: recommended
           ? `Category: [${recommended}] ← recommended · ${cleanedOptions.length - 1} other options available`
-          : 'you fill this — pick from the real option list',
+          : 'you fill this — pick a category from the real option list',
       });
       continue;
     }

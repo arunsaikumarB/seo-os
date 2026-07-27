@@ -14,6 +14,7 @@ import {
   markFieldMappingWrong,
   recipePinsOnly,
   buildAssistedPackage,
+  buildCategoryHints,
   buildSiteRecipe,
   computeAssistedLaneCounts,
   dedupeContentFields,
@@ -521,15 +522,18 @@ async function loadContentForOpportunity(workspaceId: string, opportunityId: str
     email: String(brand.contactEmail || p.email || ''),
     phone: String(brand.contactPhone || p.phone || ''),
     address: String(p.address ?? ''),
-    categoryHints: Array.isArray(p.categorySuggestions)
-      ? (p.categorySuggestions as string[])
-      : [
-          brand.companyName || businessName,
-          brand.industry ?? '',
-          ...(brand.primaryTopics ?? []),
-          ...(brand.keyFeatures ?? []).slice(0, 2),
-          String(p.backlinkType ?? ''),
-        ].filter(Boolean),
+    categoryHints: buildCategoryHints({
+      categorySuggestions: Array.isArray(p.categorySuggestions)
+        ? (p.categorySuggestions as string[])
+        : null,
+      industry: brand.industry,
+      primaryTopics: brand.primaryTopics,
+      keyFeatures: brand.keyFeatures,
+      companyName: brand.companyName || businessName,
+      businessName,
+      tagline: brand.tagline,
+      backlinkType: p.backlinkType != null ? String(p.backlinkType) : null,
+    }),
     imageFileName,
     contentTooSimilar: Boolean(p.contentTooSimilar),
   };

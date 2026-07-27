@@ -130,7 +130,18 @@ export function generateContentPack(
       website: `https://${domain}`,
       linkedin: `https://www.linkedin.com/company/${brandName.replace(/\s+/g, '').toLowerCase()}`,
     },
-    categorySuggestions: [industry, storageType.replace(/_/g, ' '), 'business'],
+    categorySuggestions: [
+      industry,
+      storageType.replace(/_/g, ' '),
+      'business',
+      // Directory-friendly seeds so selects can match Business & Economy / Computers & Internet
+      ...(/(software|saas|tech|pos|app|platform|internet|computer)/i.test(industry)
+        ? ['Computers & Internet', 'Business & Economy', 'Software']
+        : []),
+      ...(/(restaur|food|cafe|dining|chef|hospitality)/i.test(industry)
+        ? ['Food & Beverage', 'Business & Economy', 'Restaurants']
+        : []),
+    ],
     internalLinks: [
       { anchor, url: target },
       {
