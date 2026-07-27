@@ -815,12 +815,13 @@ export function isAiReviewTerminal(item: {
   reviewDecision?: ReviewDecision | string | null;
   currentStatus?: string | null;
 }): boolean {
-  const d = item.reviewDecision ?? null;
+  const d = String(item.reviewDecision ?? '').trim();
   if (d && AI_REVIEW_TERMINAL_DECISIONS.has(d as ReviewDecision)) return true;
-  const s = String(item.currentStatus ?? '');
+  // Case / alias tolerance for older rows
+  if (/^(approved|rejected|unsupported|duplicate|dead\s*website)$/i.test(d)) return true;
+  const s = String(item.currentStatus ?? '').trim();
   if (AI_REVIEW_TERMINAL_STATUSES.has(s)) return true;
-  // Dead website outcomes land as Failed + Dead Website decision (covered above),
-  // or Failed with a dead lastError when decision wasn't written yet.
+  if (/^(rejected|approved|ignored|skipped|deleted)$/i.test(s)) return true;
   return false;
 }
 

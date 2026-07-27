@@ -28,6 +28,7 @@ type AiReviewItem = {
   approvedBy: string | null;
   classification: string | null;
   classificationLabel: string | null;
+  currentStatus?: string | null;
   canApprove: boolean;
   reason: string | null;
 };
@@ -138,6 +139,7 @@ export function ClassificationDashboardPage() {
           skipped: number;
           skipReasons: string[];
           errors: string[];
+          board?: AiReviewBoard;
         };
       }>(`/v1/projects/${projectId}/backlink-builder/automation/ai-review/bulk`, {
         method: 'POST',
@@ -158,6 +160,7 @@ export function ClassificationDashboardPage() {
       if (d.errors.length) parts.push(`${d.errors.length} errors`);
       toast.success(parts.join(', '));
       setSelected(new Set());
+      if (d.board) applyBoard(d.board);
       void qc.invalidateQueries({ queryKey: ['ai-review', projectId] });
       invalidateSide();
     },
@@ -247,17 +250,48 @@ export function ClassificationDashboardPage() {
   const summary = data?.summary;
   const stillScanning = board.isFetching && (summary?.imported ?? 0) === 0;
 
+  /** Client-side guard: terminal rows must never appear in worklist buckets. */
+  const isTerminalRow = (i: AiReviewItem) => {
+    const d = String(i.reviewDecision ?? '');
+    const s = String(i.currentStatus ?? '');
+    return (
+      d === 'Approved' ||
+      d === 'Rejected' ||
+      d === 'Unsupported' ||
+      d === 'Duplicate' ||
+      d === 'Dead Website' ||
+      s === 'Rejected' ||
+      s === 'Approved' ||
+      s === 'Ignored' ||
+      s === 'Skipped' ||
+      s === 'Deleted'
+    );
+  };
+
+  const tiers = useMemo(() => {
+    if (!data?.tiers) return null;
+    return {
+      ...data.tiers,
+      recommended: data.tiers.recommended.filter((i) => !isTerminalRow(i)),
+      needsClassification: data.tiers.needsClassification.filter((i) => !isTerminalRow(i)),
+      autoApproved: data.tiers.autoApproved.filter((i) => !isTerminalRow(i)),
+      rejected: data.tiers.rejected.filter(
+        (i) => i.reviewDecision === 'Rejected' || i.currentStatus === 'Rejected'
+      ),
+    };
+  }, [data?.tiers]);
+
   const visibleItems = useMemo(() => {
-    if (!data) return [];
+    if (!data || !tiers) return [];
     switch (filter) {
       case 'recommended':
-        return data.tiers.recommended;
+        return tiers.recommended;
       case 'needsClassification':
-        return data.tiers.needsClassification;
+        return tiers.needsClassification;
       case 'autoApproved':
-        return data.tiers.autoApproved;
+        return tiers.autoApproved;
       case 'rejected':
-        return data.tiers.rejected;
+        return tiers.rejected;
       case 'unsupported':
         return data.tiers.unsupported;
       case 'duplicate':
@@ -266,17 +300,17 @@ export function ClassificationDashboardPage() {
         return data.tiers.dead;
       default:
         return [
-          ...data.tiers.recommended,
-          ...data.tiers.needsClassification,
-          ...data.tiers.autoApproved,
+          ...tiers.recommended,
+          ...tiers.needsClassification,
+          ...tiers.autoApproved,
           ...data.tiers.userApproved,
-          ...data.tiers.rejected,
+          ...tiers.rejected,
           ...data.tiers.unsupported,
           ...data.tiers.duplicate,
           ...data.tiers.dead,
         ];
     }
-  }, [data, filter]);
+  }, [data, tiers, filter]);
 
   const allVisibleSelected =
     visibleItems.length > 0 && visibleItems.every((i) => selected.has(i.id));
@@ -362,14 +396,14 @@ export function ClassificationDashboardPage() {
           <div className="flex flex-wrap gap-2">
             {(
               [
-                ['recommended', 'Recommended', data?.tiers.recommended.length ?? 0],
+                ['recommended', 'Recommended', tiers?.recommended.length ?? 0],
                 [
                   'needsClassification',
                   'Needs Classification',
-                  data?.tiers.needsClassification.length ?? 0,
+                  tiers?.needsClassification.length ?? 0,
                 ],
-                ['autoApproved', 'Auto-Approved', data?.tiers.autoApproved.length ?? 0],
-                ['rejected', 'Rejected', data?.tiers.rejected.length ?? 0],
+                ['autoApproved', 'Auto-Approved', tiers?.autoApproved.length ?? 0],
+                ['rejected', 'Rejected', tiers?.rejected.length ?? 0],
                 ['unsupported', 'Unsupported', data?.tiers.unsupported.length ?? 0],
                 ['duplicate', 'Duplicate', data?.tiers.duplicate.length ?? 0],
                 ['dead', 'Dead', data?.tiers.dead.length ?? 0],
@@ -477,7 +511,7 @@ export function ClassificationDashboardPage() {
             </Card>
           ) : null}
 
-          {filter === 'autoApproved' || (data?.tiers.autoApproved.length ?? 0) > 0 ? (
+          {filter === 'autoApproved' || (tiers?.autoApproved.length ?? 0) > 0 ? (
             <Card className="rounded-2xl border-border/40">
               <button
                 type="button"
@@ -485,7 +519,7 @@ export function ClassificationDashboardPage() {
                 onClick={() => setOpenAuto((v) => !v)}
               >
                 <span className="text-sm font-medium">
-                  Auto-Approved ({data?.tiers.autoApproved.length ?? 0})
+                  Auto-Approved ({tiers?.autoApproved.length ?? 0})
                 </span>
                 <ChevronDown
                   className={cn(
@@ -496,7 +530,7 @@ export function ClassificationDashboardPage() {
               </button>
               {openAuto || filter === 'autoApproved' ? (
                 <CardContent className="border-t space-y-2 pt-3">
-                  {(data?.tiers.autoApproved ?? []).map((item) => (
+                  {(tiers?.autoApproved ?? []).map((item) => (
                     <ReviewRow
                       key={item.id}
                       item={item}

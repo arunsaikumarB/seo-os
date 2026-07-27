@@ -72,8 +72,47 @@ function toReviewItem(i: CampaignItemRow): AiReviewItem {
 
 export async function getAiReviewBoard(workspaceId: string) {
   const items = await listCampaignItems(workspaceId, { includeDeleted: false });
-  const summary = computeAiReviewSummary(items);
-  const rows = items.map(toReviewItem);
+
+  // Heal rows stuck with terminal status/decision but stale needs_classification tier
+  for (const item of items) {
+    const terminalStatus =
+      item.currentStatus === 'Rejected' ||
+      item.currentStatus === 'Approved' ||
+      item.currentStatus === 'Ignored' ||
+      item.currentStatus === 'Skipped';
+    const decision = item.reviewDecision;
+    const decisionTerminal =
+      decision === 'Rejected' ||
+      decision === 'Approved' ||
+      decision === 'Unsupported' ||
+      decision === 'Duplicate' ||
+      decision === 'Dead Website';
+    const tierStuck = item.reviewTier === 'needs_classification';
+    const decisionStuck =
+      decision === 'Needs Classification' ||
+      decision === 'Pending' ||
+      decision == null;
+    if ((terminalStatus || decisionTerminal) && (tierStuck || (terminalStatus && decisionStuck))) {
+      const nextDecision: ReviewDecision = decisionTerminal
+        ? (decision as ReviewDecision)
+        : item.currentStatus === 'Rejected'
+          ? 'Rejected'
+          : item.currentStatus === 'Approved'
+            ? 'Approved'
+            : item.currentStatus === 'Skipped'
+              ? 'Duplicate'
+              : 'Unsupported';
+      await updateCampaignItem(workspaceId, item.id, {
+        reviewDecision: nextDecision,
+        reviewTier: null,
+        force: true,
+      }).catch(() => undefined);
+    }
+  }
+
+  const fresh = await listCampaignItems(workspaceId, { includeDeleted: false });
+  const summary = computeAiReviewSummary(fresh);
+  const rows = fresh.map(toReviewItem);
 
   const autoApproved = rows
     .filter(
@@ -91,15 +130,21 @@ export async function getAiReviewBoard(workspaceId: string) {
         (r.reviewDecision === 'Pending' || r.reviewDecision == null)
     )
     .sort((a, b) => (b.confidenceScore ?? 0) - (a.confidenceScore ?? 0));
+  // Awaiting classification only — never Rejected / Approved / Dead / etc.
   const needsClassification = rows
-    .filter(
-      (r) =>
-        !isAiReviewTerminal(r) &&
-        (r.reviewTier === 'needs_classification' ||
-          r.reviewDecision === 'Needs Classification')
-    )
+    .filter((r) => {
+      if (isAiReviewTerminal(r)) return false;
+      if (r.reviewDecision === 'Rejected' || r.currentStatus === 'Rejected') return false;
+      if (r.reviewDecision === 'Approved' || r.currentStatus === 'Approved') return false;
+      return (
+        r.reviewTier === 'needs_classification' ||
+        r.reviewDecision === 'Needs Classification'
+      );
+    })
     .sort((a, b) => (b.confidenceScore ?? 0) - (a.confidenceScore ?? 0));
-  const rejected = rows.filter((r) => r.reviewDecision === 'Rejected');
+  const rejected = rows.filter(
+    (r) => r.reviewDecision === 'Rejected' || r.currentStatus === 'Rejected'
+  );
   const unsupported = rows.filter((r) => r.reviewDecision === 'Unsupported');
   const duplicate = rows.filter((r) => r.reviewDecision === 'Duplicate');
   const dead = rows.filter((r) => r.reviewDecision === 'Dead Website');
@@ -136,8 +181,8 @@ export async function bulkAiReviewAction(
   action: AiReviewBulkAction,
   itemIds: string[]
 ) {
-  const board = await getAiReviewBoard(workspaceId);
-  const byId = new Map(board.items.map((i) => [i.id, i]));
+  const before = await getAiReviewBoard(workspaceId);
+  const byId = new Map(before.items.map((i) => [i.id, i]));
   let succeeded = 0;
   let skipped = 0;
   const skipReasons: string[] = [];
@@ -179,19 +224,22 @@ export async function bulkAiReviewAction(
         await updateCampaignItem(workspaceId, id, {
           currentStatus: 'Approved',
           reviewDecision: 'Approved',
+          reviewTier: 'recommended',
           approvedBy: 'user',
           approval: 'approved',
           force: true,
         });
         succeeded++;
       } else if (action === 'reject') {
-        if (item.reviewDecision === 'Rejected') {
+        if (item.reviewDecision === 'Rejected' || item.currentStatus === 'Rejected') {
           succeeded++;
           continue;
         }
         await updateCampaignItem(workspaceId, id, {
           currentStatus: 'Rejected',
           reviewDecision: 'Rejected',
+          // Clear tier so stale needs_classification cannot keep the row in that cohort
+          reviewTier: null,
           approvedBy: 'user',
           approval: 'rejected',
           force: true,
@@ -201,6 +249,7 @@ export async function bulkAiReviewAction(
         await updateCampaignItem(workspaceId, id, {
           currentStatus: 'Ignored',
           reviewDecision: 'Unsupported',
+          reviewTier: null,
           approvedBy: null,
           force: true,
         });
@@ -210,6 +259,7 @@ export async function bulkAiReviewAction(
         await updateCampaignItem(workspaceId, id, {
           currentStatus: 'Ignored',
           reviewDecision: 'Unsupported',
+          reviewTier: null,
           approvedBy: null,
           lastError: 'Moved to outreach',
           force: true,
@@ -232,7 +282,8 @@ export async function bulkAiReviewAction(
     }
   }
 
-  const summary = (await getAiReviewBoard(workspaceId)).summary;
+  const board = await getAiReviewBoard(workspaceId);
+  const summary = board.summary;
 
   if (succeeded > 0 || errors.length > 0) {
     try {
@@ -269,6 +320,7 @@ export async function bulkAiReviewAction(
     skipReasons: skipReasons.slice(0, 20),
     errors: errors.slice(0, 20),
     summary,
+    board,
   };
 }
 
