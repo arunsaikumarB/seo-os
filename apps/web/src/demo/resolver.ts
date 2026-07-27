@@ -1076,6 +1076,49 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
   }
   if (m.includes('/backlink-builder/automation/tracking')) return { data: DEMO_TRACKING };
   if (m.includes('/backlink-builder/automation/submissions')) return { data: DEMO_SUBMISSIONS };
+  if (m.includes('/backlink-builder/workflow-progress')) {
+    return {
+      data: {
+        currentStepId: 'generate-content',
+        completedCount: 3,
+        totalSteps: 7,
+        progressPercent: 43,
+        allComplete: false,
+        steps: [
+          { id: 'create-project', number: 1, state: 'done' },
+          { id: 'import-websites', number: 2, state: 'done' },
+          { id: 'ai-review', number: 3, state: 'done' },
+          { id: 'generate-content', number: 4, state: 'current' },
+          { id: 'submit-backlinks', number: 5, state: 'upcoming' },
+          { id: 'track-results', number: 6, state: 'upcoming' },
+          { id: 'reports-analytics', number: 7, state: 'upcoming' },
+        ],
+        flags: {
+          createDone: true,
+          importDone: true,
+          aiReviewDone: true,
+          generateDone: false,
+          submitDone: false,
+          trackResultsDone: false,
+          reportsDone: false,
+        },
+        input: {
+          projectReady: true,
+          importedCount: 6,
+          aiReviewPending: 0,
+          approvedCount: 6,
+          generatedPackages: 0,
+          pendingGeneration: 6,
+          failedGeneration: 0,
+          contentReadyCount: 0,
+          submitOpenCount: 0,
+          hasTrackedResults: false,
+          hasReport: false,
+        },
+        metricsSource: 'campaign_state',
+      },
+    };
+  }
   if (m.includes('/backlink-builder/summary')) return { data: DEMO_BACKLINK_SUMMARY };
   if (m.includes('/backlink-builder/types')) return { data: DEMO_BACKLINK_TYPES };
   if (m.includes('/backlink-builder/ai/suggestions')) return { data: DEMO_AI_BACKLINK_SUGGESTIONS };

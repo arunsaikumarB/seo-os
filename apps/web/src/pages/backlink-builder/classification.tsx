@@ -109,6 +109,7 @@ export function ClassificationDashboardPage() {
     qc.invalidateQueries({ queryKey: ['classification-analytics', projectId] });
     qc.invalidateQueries({ queryKey: ['bee-execution-progress', projectId] });
     qc.invalidateQueries({ queryKey: ['campaign-health', projectId] });
+    qc.invalidateQueries({ queryKey: ['workflow-progress', projectId] });
   };
 
   const applyBoard = (next: AiReviewBoard) => {

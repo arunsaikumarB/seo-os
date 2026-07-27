@@ -1,16 +1,14 @@
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   WORKFLOW_STEPS,
-  WORKFLOW_STEP_ALIASES,
   type WorkflowStep,
 } from '@/config/workflow-steps';
-import { useAppStore, WORKFLOW_GLOBAL_KEY } from '@/stores/app-store';
+import { useAppStore } from '@/stores/app-store';
 import { useExecutionSummary } from '@/hooks/use-execution-summary';
 import { useInterventions } from '@/components/browser/needs-your-action-queue';
 import { formatEta } from '@/lib/bee-execution-ui';
-import { isSuccessfulImportRecord } from '@/lib/import-success';
 import { useApi } from '@/hooks/use-api';
 
 export { isSuccessfulImportRecord } from '@/lib/import-success';
@@ -21,126 +19,77 @@ function stepMatchesPath(step: WorkflowStep, path: string, projectId: string): b
   return normalized === step.route || normalized.startsWith(`${step.route}/`);
 }
 
-function isStepDone(completed: Set<string>, stepId: string): boolean {
-  if (completed.has(stepId)) return true;
-  const aliases = WORKFLOW_STEP_ALIASES[stepId] ?? [];
-  return aliases.some((a) => completed.has(a));
-}
-
 export function getStepHref(step: WorkflowStep, projectId: string): string {
   if (step.orgLevel) return step.route;
   return `/projects/${projectId}/${step.route}`;
 }
 
-const VISIT_COMPLETE_BLOCKED = new Set([
-  'import-websites',
-  'submit-backlinks',
-  'track-results',
-  'reports-analytics',
-]);
+type WorkflowProgressApi = {
+  currentStepId: string;
+  completedCount: number;
+  totalSteps: number;
+  progressPercent: number;
+  allComplete: boolean;
+  steps: Array<{ id: string; number: number; state: 'done' | 'current' | 'upcoming' }>;
+  flags: {
+    createDone: boolean;
+    importDone: boolean;
+    aiReviewDone: boolean;
+    generateDone: boolean;
+    submitDone: boolean;
+    trackResultsDone: boolean;
+    reportsDone: boolean;
+  };
+  input: {
+    projectReady: boolean;
+    importedCount: number;
+    aiReviewPending: number;
+    approvedCount: number;
+    generatedPackages: number;
+    pendingGeneration: number;
+    failedGeneration: number;
+    contentReadyCount: number;
+    submitOpenCount: number;
+    hasTrackedResults: boolean;
+    hasReport: boolean;
+  };
+};
 
 /**
  * Workflow State Manager — single source of truth for guided UX.
- * Pages must not invent their own Continue targets or progress math.
+ * Step done/current/upcoming comes ONLY from CSM via getWorkflowProgress
+ * (GET .../workflow-progress). Never from page visits or localStorage.
  */
 export function useWorkflow(projectId: string) {
   const location = useLocation();
   const { request } = useApi();
 
-  const workflowProgress = useAppStore((s) => s.workflowProgress);
-  const markStepComplete = useAppStore((s) => s.markStepComplete);
-  const unmarkStepComplete = useAppStore((s) => s.unmarkStepComplete);
-  const markGlobalStepComplete = useAppStore((s) => s.markGlobalStepComplete);
   const expertMode = useAppStore((s) => s.expertMode);
   const learningMode = useAppStore((s) => s.learningMode);
 
-  const importsQuery = useQuery({
-    queryKey: ['backlink-imports', projectId],
+  const progressQ = useQuery({
+    queryKey: ['workflow-progress', projectId],
     queryFn: () =>
-      request<{
-        data: Array<{
-          status: string;
-          opportunities_created: number;
-          valid_rows: number;
-          total_rows: number;
-        }>;
-      }>(`/v1/projects/${projectId}/backlink-builder/automation/imports`),
+      request<{ data: WorkflowProgressApi }>(
+        `/v1/projects/${projectId}/backlink-builder/workflow-progress`
+      ),
     enabled: !!projectId,
-    staleTime: 15_000,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
     retry: 1,
   });
 
-  const importsLoaded = importsQuery.isFetched || importsQuery.isError;
-
-  const hasSuccessfulImport = useMemo(() => {
-    // Until history loads, do not treat Import as missing (avoids locking flash / thrash)
-    if (!importsLoaded) {
-      const stored = workflowProgress[projectId] ?? [];
-      return stored.includes('import-websites');
-    }
-    const rows = importsQuery.data?.data ?? [];
-    return rows.some((r) => isSuccessfulImportRecord(r));
-  }, [importsLoaded, importsQuery.data, workflowProgress, projectId]);
+  const api = progressQ.data?.data;
+  const hasSuccessfulImport = (api?.input.importedCount ?? 0) >= 1;
+  const importsLoaded = progressQ.isFetched || progressQ.isError;
 
   const completedSteps = useMemo(() => {
-    const projectCompleted = workflowProgress[projectId] ?? [];
-    const globalCompleted = workflowProgress[WORKFLOW_GLOBAL_KEY] ?? [];
-    const set = new Set([...projectCompleted, ...globalCompleted]);
-    if (projectId) set.add('create-project');
-    // Guard: never treat Import as done without real backend import data (once loaded)
-    if (importsLoaded && !hasSuccessfulImport) {
-      set.delete('import-websites');
+    const set = new Set<string>();
+    for (const s of api?.steps ?? []) {
+      if (s.state === 'done') set.add(s.id);
     }
     return set;
-  }, [workflowProgress, projectId, hasSuccessfulImport, importsLoaded]);
-
-  useEffect(() => {
-    if (!projectId) return;
-    const path = location.pathname;
-    for (const step of WORKFLOW_STEPS) {
-      if (step.orgLevel) continue;
-      if (VISIT_COMPLETE_BLOCKED.has(step.id)) continue;
-      // Do not advance past Import by visiting later pages with zero imports
-      if (
-        importsLoaded &&
-        !hasSuccessfulImport &&
-        step.id !== 'create-project' &&
-        step.id !== 'import-websites'
-      ) {
-        continue;
-      }
-      if (stepMatchesPath(step, path, projectId)) {
-        markStepComplete(projectId, step.id);
-        break;
-      }
-    }
-  }, [
-    location.pathname,
-    projectId,
-    markStepComplete,
-    hasSuccessfulImport,
-    importsLoaded,
-  ]);
-
-  useEffect(() => {
-    if (projectId) markGlobalStepComplete('create-project');
-  }, [projectId, markGlobalStepComplete]);
-
-  // One-shot sync of Import from backend — store helpers no-op when unchanged
-  useEffect(() => {
-    if (!projectId || !importsLoaded) return;
-    if (hasSuccessfulImport) {
-      markStepComplete(projectId, 'import-websites');
-    } else {
-      unmarkStepComplete(projectId, 'import-websites');
-    }
-  }, [
-    projectId,
-    importsLoaded,
-    hasSuccessfulImport,
-    markStepComplete,
-    unmarkStepComplete,
-  ]);
+  }, [api?.steps]);
 
   const execSummary = useExecutionSummary(projectId, 2_000);
   const summary = execSummary.data;
@@ -157,29 +106,13 @@ export function useWorkflow(projectId: string) {
     campaignState === 'Paused' ||
     (campaignState === 'Starting' && (summary?.queued ?? 0) > 0);
 
-  useEffect(() => {
-    if (summary?.executionComplete && campaignState === 'Completed') {
-      markStepComplete(projectId, 'submit-backlinks');
-    }
-  }, [summary?.executionComplete, campaignState, projectId, markStepComplete]);
+  const completedCount = api?.completedCount ?? 0;
+  const totalSteps = api?.totalSteps ?? WORKFLOW_STEPS.length;
 
-  const importGateActive = importsLoaded && !hasSuccessfulImport;
-
-  const completedCount = WORKFLOW_STEPS.filter((s) => {
-    if (s.id === 'submit-backlinks' && jobsOpen) return false;
-    if (s.id === 'import-websites') return hasSuccessfulImport;
-    if (importGateActive && s.id !== 'create-project') return false;
-    return isStepDone(completedSteps, s.id);
-  }).length;
-
-  const importStep = WORKFLOW_STEPS.find((s) => s.id === 'import-websites')!;
-
-  const currentStep = importGateActive
-    ? importStep
-    : jobsOpen
-      ? WORKFLOW_STEPS.find((s) => s.id === 'submit-backlinks')!
-      : WORKFLOW_STEPS.find((s) => !isStepDone(completedSteps, s.id)) ??
-        WORKFLOW_STEPS[WORKFLOW_STEPS.length - 1];
+  const currentStep =
+    WORKFLOW_STEPS.find((s) => s.id === api?.currentStepId) ??
+    WORKFLOW_STEPS.find((s) => s.id === 'import-websites') ??
+    WORKFLOW_STEPS[0];
 
   const activeStep =
     WORKFLOW_STEPS.find((s) => stepMatchesPath(s, location.pathname, projectId)) ?? null;
@@ -188,28 +121,20 @@ export function useWorkflow(projectId: string) {
     location.pathname.endsWith('/home') ||
     location.pathname.replace(/\/$/, '').endsWith(`/projects/${projectId}`);
 
-  const nextUnlockedStep = importGateActive
-    ? importStep
-    : jobsOpen
-      ? WORKFLOW_STEPS.find((s) => s.id === 'submit-backlinks')!
-      : WORKFLOW_STEPS.find((s) => !isStepDone(completedSteps, s.id)) ??
-        WORKFLOW_STEPS[WORKFLOW_STEPS.length - 1];
+  const nextUnlockedStep = currentStep;
+  const nextStep =
+    WORKFLOW_STEPS.find(
+      (s) => !completedSteps.has(s.id) && s.id !== currentStep.id
+    ) ?? currentStep;
 
-  const nextStep = jobsOpen
-    ? currentStep
-    : WORKFLOW_STEPS.find(
-        (s) => !isStepDone(completedSteps, s.id) && s.id !== currentStep.id
-      ) ?? currentStep;
-
-  const allComplete =
-    hasSuccessfulImport && completedCount >= WORKFLOW_STEPS.length && !jobsOpen;
+  const allComplete = Boolean(api?.allComplete);
 
   const progressPercent =
     jobsOpen || campaignState === 'Completed' || campaignState === 'Failed To Start'
-      ? Math.round(summary?.progressPercent ?? 0)
-      : Math.round((completedCount / Math.max(WORKFLOW_STEPS.length, 1)) * 100);
+      ? Math.round(summary?.progressPercent ?? api?.progressPercent ?? 0)
+      : Math.round(api?.progressPercent ?? 0);
 
-  const continueHref = importGateActive
+  const continueHref = !hasSuccessfulImport
     ? `/projects/${projectId}/backlink-builder/import`
     : jobsOpen
       ? `/projects/${projectId}/backlink-builder/assisted-manual`
@@ -217,7 +142,7 @@ export function useWorkflow(projectId: string) {
         ? `/projects/${projectId}/reports/library`
         : getStepHref(nextUnlockedStep, projectId);
 
-  const continueLabel = importGateActive
+  const continueLabel = !hasSuccessfulImport
     ? 'Import websites'
     : jobsOpen
       ? 'Open Assisted Manual'
@@ -225,19 +150,21 @@ export function useWorkflow(projectId: string) {
         ? 'Open Reports'
         : 'Continue';
 
-  /** Always allow going to Import; block advancing past it without real import data */
   const continueEnabled =
     hasSuccessfulImport || continueHref.includes('/backlink-builder/import');
 
-  const aiStatusLine = needsHumanAction && firstAction
-    ? `${firstAction.reason} — ${firstAction.website}`
-    : importGateActive
-      ? 'Import websites to begin AI review'
-      : summary?.aiStatusLine
-        ? summary.aiStatusLine
-        : allComplete
-          ? 'Campaign complete'
-          : `Working on ${currentStep.title}`;
+  const importGateActive = importsLoaded && !hasSuccessfulImport;
+
+  const aiStatusLine =
+    needsHumanAction && firstAction
+      ? `${firstAction.reason} — ${firstAction.website}`
+      : importGateActive
+        ? 'Import websites to begin AI review'
+        : summary?.aiStatusLine
+          ? summary.aiStatusLine
+          : allComplete
+            ? 'Campaign complete'
+            : `Working on ${currentStep.title}`;
 
   const etaLabel =
     jobsOpen && summary?.etaSeconds
@@ -246,11 +173,16 @@ export function useWorkflow(projectId: string) {
         ? `~${currentStep.estimatedMinutes} min`
         : null;
 
+  const isStepComplete = (stepId: string) => {
+    const row = api?.steps.find((s) => s.id === stepId);
+    return row?.state === 'done';
+  };
+
   return {
     steps: WORKFLOW_STEPS,
     completedSteps,
     completedCount,
-    totalSteps: WORKFLOW_STEPS.length,
+    totalSteps,
     currentStep,
     activeStep,
     isOnHome,
@@ -286,12 +218,8 @@ export function useWorkflow(projectId: string) {
     expertMode,
     learningMode,
     allComplete,
-    isStepComplete: (stepId: string) => {
-      if (stepId === 'create-project') return true;
-      if (stepId === 'import-websites') return hasSuccessfulImport;
-      if (importGateActive) return false;
-      return isStepDone(completedSteps, stepId);
-    },
+    workflowProgressApi: api,
+    isStepComplete,
     getStepHref: (step: WorkflowStep) => getStepHref(step, projectId),
   };
 }

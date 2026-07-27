@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useApi } from '@/hooks/use-api';
 import { getApiErrorMessage } from '@/lib/api';
-import { useAppStore } from '@/stores/app-store';
 import { toast } from 'sonner';
 import { PageTransition } from '@/components/demo/page-transition';
 import { AiActivityCard } from '@/components/workflow/ai-activity-card';
@@ -72,7 +71,6 @@ const ACTIVE_STATUSES = new Set(['analyzing', 'generating', 'queued', 'running']
 export function BacklinkImportPage() {
   const { projectId = '' } = useParams();
   const { request } = useApi();
-  const markStepComplete = useAppStore((s) => s.markStepComplete);
   const queryClient = useQueryClient();
   const [sourceType, setSourceType] = useState<string>('url_list');
   const [content, setContent] = useState('');
@@ -139,9 +137,7 @@ export function BacklinkImportPage() {
       queryClient.invalidateQueries({ queryKey: ['backlink-imports', projectId] });
       queryClient.invalidateQueries({ queryKey: ['automation-summary', projectId] });
       queryClient.invalidateQueries({ queryKey: ['manual-submissions', projectId] });
-      if (res.data.stats.valid > 0) {
-        markStepComplete(projectId, 'import-websites');
-      }
+      queryClient.invalidateQueries({ queryKey: ['workflow-progress', projectId] });
       const p = res.data.provisionalLanes;
       toast.success(
         p

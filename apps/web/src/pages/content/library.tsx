@@ -156,6 +156,7 @@ export function ContentLibraryPage() {
     queryClient.invalidateQueries({ queryKey: ['content-generation', projectId] });
     queryClient.invalidateQueries({ queryKey: ['content-packs', projectId] });
     queryClient.invalidateQueries({ queryKey: ['campaign-health', projectId] });
+    queryClient.invalidateQueries({ queryKey: ['workflow-progress', projectId] });
   };
 
   const bulk = useMutation({

@@ -84,6 +84,30 @@ backlinkBuilderRouter.get(
   }
 );
 
+/** Phase 13 — Guided workflow stepper (Create→Reports) from CSM — sole progress selector. */
+backlinkBuilderRouter.get(
+  '/workflow-progress',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const { getWorkflowProgressForWorkspace } = await import(
+        '../../modules/campaigns/workflow-progress.service.js'
+      );
+      const result = await getWorkflowProgressForWorkspace(param(req.params.projectId));
+      res.json({
+        data: {
+          ...result.progress,
+          input: result.input,
+          metricsSource: 'campaign_state',
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 /** Campaign State Manager — shared selectors (additive; does not change existing shapes). */
 backlinkBuilderRouter.get(
   '/campaign-state',
