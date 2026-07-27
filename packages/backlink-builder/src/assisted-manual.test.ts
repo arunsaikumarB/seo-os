@@ -9,6 +9,7 @@ import {
   computeAssistedLaneCounts,
   computeFormFingerprint,
   detectGateFromHtml,
+  detectMultiStepForm,
   evaluateFingerprintStatus,
   extractFormFieldFacts,
   fieldFactSnapshot,
@@ -430,10 +431,59 @@ describe('Phase 7 Assisted Manual', () => {
     expect(recipe.multiStep).toBe(true);
     const pkg = buildAssistedPackage({
       recipe,
-      content: { title: 'x', longDescription: 'y' },
+      content: {
+        title: 'Chefgaa POS',
+        shortDescription: 'Restaurant point of sale',
+        longDescription: 'Chefgaa helps restaurants run checkout.',
+        url: 'https://chefgaa.com',
+        businessName: 'Chefgaa',
+      },
     });
     expect(pkg.bucket).toBe('needs_person');
-    expect(pkg.multiStepLabel).toMatch(/Multi-step/);
+    expect(pkg.multiStepLabel).toMatch(/content prepared/i);
+    // Title is on step 1 — paste-ready holds the unmapped listing copy
+    expect(pkg.fields.some((f) => f.role === 'title')).toBe(true);
+    expect(pkg.pasteReadyContent?.some((c) => c.role === 'long_desc')).toBe(true);
+    expect(pkg.pasteReadyContent?.some((c) => c.role === 'url')).toBe(true);
+  });
+
+  it('detects tagshub-style Step One / Go To Step Two and attaches paste-ready content', () => {
+    const html = `
+      <h1>Step One: Choose a Category</h1>
+      <form>
+        <select name="category" id="cat" required>
+          <option value="">Select</option>
+          <option>Business & Economy</option>
+          <option>Computers & Internet</option>
+        </select>
+        <input type="submit" value="Go To Step Two" />
+      </form>
+    `;
+    expect(detectMultiStepForm(html)).toBe(true);
+    const recipe = buildSiteRecipe({
+      domain: 'tagshub.com',
+      entryUrl: 'https://tagshub.com/submit',
+      html,
+    });
+    expect(recipe.multiStep).toBe(true);
+    const pkg = buildAssistedPackage({
+      recipe,
+      content: {
+        title: 'Chefgaa',
+        longDescription: 'Restaurant POS software',
+        url: 'https://chefgaa.com',
+        categoryHints: ['Business', 'Software', 'POS'],
+      },
+    });
+    expect(pkg.bucket).toBe('needs_person');
+    expect(pkg.multiStepLabel).toBe(
+      "Multi-step form — content prepared, you'll paste it on a later step"
+    );
+    expect(pkg.fields.some((f) => f.role === 'category')).toBe(true);
+    expect(pkg.fields.some((f) => f.role === 'title')).toBe(false);
+    expect(pkg.pasteReadyContent?.map((c) => c.role)).toEqual(
+      expect.arrayContaining(['title', 'long_desc', 'url'])
+    );
   });
 
   it('marks fingerprint change as re-prepare (AT5)', () => {

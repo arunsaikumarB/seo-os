@@ -221,6 +221,15 @@ export type PackageFieldValue = {
   flagReason?: string | null;
 };
 
+export const MULTI_STEP_FORM_LABEL =
+  'Multi-step form — content prepared, you\'ll paste it on a later step';
+
+export type PasteReadyContentItem = {
+  role: 'title' | 'short_desc' | 'long_desc' | 'url' | 'business_name' | 'email' | 'phone';
+  label: string;
+  value: string;
+};
+
 export type AssistedPackagePayload = {
   entryUrl: string;
   /** Original imported URL when different from the resolved form page. */
@@ -245,6 +254,11 @@ export type AssistedPackagePayload = {
     label: string;
     humanStep: string;
   }>;
+  /**
+   * Generated listing content ready to paste on a later wizard step
+   * when step 1 has no title/desc/url fields (or multi-step in general).
+   */
+  pasteReadyContent?: PasteReadyContentItem[];
   honestyNotes: string[];
   failureReason: string | null;
   /**
@@ -575,10 +589,35 @@ export function extractTargetFormFieldFacts(
 export function detectMultiStepForm(html: string): boolean {
   const h = html.toLowerCase();
   if (/\bstep\s*[1-9]\s*(of|\/)\s*[2-9]/i.test(h)) return true;
-  if (/<(button|a|input)[^>]*>\s*(next|continue|proceed)\s*</i.test(html)) return true;
+  // "Step One: Choose a Category" / "Step Two" wording (tagshub-style)
+  if (/\bstep\s+(one|two|three|four|1|2|3|4)\b/i.test(h) && /step\s+(two|three|four|2|3|4)\b/i.test(h)) {
+    return true;
+  }
+  if (/\bstep\s+one\b/i.test(h) && /(go\s+to|next|continue|proceed)/i.test(h)) return true;
+  if (/go\s+to\s+step\s*(two|2|three|3|four|4)/i.test(h)) return true;
+  if (
+    /<(button|a|input)[^>]*(value|aria-label)=["'][^"']*(go\s+to\s+step|next\s+step|continue)[^"']*["']/i.test(
+      html
+    )
+  ) {
+    return true;
+  }
+  if (/<(button|a|input)[^>]*>\s*(next|continue|proceed|go\s+to\s+step)\s*</i.test(html)) {
+    return true;
+  }
   if (/wizard|multi-?step| steppers? /i.test(h)) return true;
   if (/data-step=["'][2-9]/i.test(h)) return true;
   return false;
+}
+
+/** True when step 1 looks like category/nav only — content fields appear later. */
+export function isContentSparseStepOne(fields: Array<{ role: string }>): boolean {
+  const contentRoles = new Set(['title', 'short_desc', 'long_desc', 'url', 'business_name']);
+  const hasContent = fields.some((f) => contentRoles.has(f.role));
+  const hasCategoryOrNav = fields.some(
+    (f) => f.role === 'category' || f.role === 'other' || f.role === 'terms'
+  );
+  return !hasContent && (hasCategoryOrNav || fields.length === 0);
 }
 
 export function detectGateFromHtml(html: string): AssistedGate {
@@ -1253,14 +1292,12 @@ export function buildSiteRecipe(input: {
     dropdownOptions,
     gate: multiStep ? 'multi_step' : gate,
     notes: multiStep
-      ? 'Multi-step form — step 1 prepared, later steps unknown'
+      ? MULTI_STEP_FORM_LABEL
       : [input.existing?.notes, upgradeNote, formNote].filter(Boolean).join(' · ') || '',
     lastVerifiedAt: new Date().toISOString(),
     correctionCount: dropPins ? 0 : (input.existing?.correctionCount ?? 0),
     multiStep,
-    multiStepLabel: multiStep
-      ? 'Multi-step form — step 1 prepared, later steps unknown'
-      : undefined,
+    multiStepLabel: multiStep ? MULTI_STEP_FORM_LABEL : undefined,
     targetFormSelector: target.targetFormSelector,
     targetFormIndex: target.targetFormIndex,
     targetFormAction: target.targetFormAction,
@@ -1765,6 +1802,60 @@ export function findSimilarPackagePairs(
   return hits;
 }
 
+/**
+ * Listing copy the user can paste on a later wizard step when step 1
+ * has no mapped title/desc/url fields (or the form is multi-step).
+ */
+export function buildPasteReadyContent(
+  content: ContentSource,
+  mappedRoles: Set<string>
+): PasteReadyContentItem[] {
+  const candidates: Array<{
+    role: PasteReadyContentItem['role'];
+    label: string;
+    value: string;
+  }> = [
+    { role: 'title', label: 'Title', value: String(content.title ?? '').trim() },
+    {
+      role: 'business_name',
+      label: 'Business name',
+      value: String(content.companyName || content.businessName || '').trim(),
+    },
+    {
+      role: 'short_desc',
+      label: 'Short description',
+      value: String(content.shortDescription || content.metaDescription || '').trim(),
+    },
+    {
+      role: 'long_desc',
+      label: 'Description',
+      value: String(
+        content.longDescription || content.shortDescription || content.metaDescription || ''
+      ).trim(),
+    },
+    { role: 'url', label: 'URL', value: String(content.url ?? '').trim() },
+    { role: 'email', label: 'Email', value: String(content.email ?? '').trim() },
+    { role: 'phone', label: 'Phone', value: String(content.phone ?? '').trim() },
+  ];
+
+  const out: PasteReadyContentItem[] = [];
+  const seenValues = new Set<string>();
+  for (const c of candidates) {
+    if (!c.value) continue;
+    // Skip roles already mapped onto a real step-1 field (user already has a card)
+    if (mappedRoles.has(c.role)) continue;
+    // Avoid duplicate short/long when identical
+    const key = `${c.role}:${c.value}`;
+    if (seenValues.has(c.value) && (c.role === 'short_desc' || c.role === 'long_desc')) {
+      continue;
+    }
+    seenValues.add(c.value);
+    out.push({ role: c.role, label: c.label, value: c.value });
+    void key;
+  }
+  return out;
+}
+
 export function buildAssistedPackage(input: {
   recipe: SiteRecipe;
   content: ContentSource;
@@ -1782,7 +1873,7 @@ export function buildAssistedPackage(input: {
     'Does not submit anything automatically.',
     'Does not solve CAPTCHA / OTP / login.',
     'Does not guarantee the listing goes live (directories moderate independently).',
-    'Does not fully prepare multi-step forms.',
+    'Multi-step forms: content is prepared for later steps — you navigate and paste.',
     'Does not attach images for you.',
   ];
 
@@ -1994,6 +2085,21 @@ export function buildAssistedPackage(input: {
   const checkedFields = selfCheckPackageFields(mappedFields);
   const confSummary = confidenceGateSummary(checkedFields);
 
+  const mappedRoles = new Set(checkedFields.map((f) => f.role));
+  const multiStep =
+    Boolean(input.recipe.multiStep) || input.recipe.gate === 'multi_step';
+  const sparseStepOne = isContentSparseStepOne(input.recipe.fields);
+  // Multi-step wizards (and category-only step 1) still get Title/Description/URL
+  // ready to paste even though those fields aren't on the fetched page.
+  const pasteReadyContent =
+    multiStep || sparseStepOne
+      ? buildPasteReadyContent(input.content, mappedRoles)
+      : [];
+
+  const multiStepLabel = multiStep
+    ? input.recipe.multiStepLabel?.trim() || MULTI_STEP_FORM_LABEL
+    : null;
+
   let bucket = assignAssistedBucket({
     recipe: input.recipe,
     fields: checkedFields,
@@ -2020,8 +2126,8 @@ export function buildAssistedPackage(input: {
     failureReason = 'Form changed — re-prepare';
   } else if (fingerprintStatus === 'stale') {
     failureReason = 'Package expired — re-prepare';
-  } else if (input.recipe.multiStep || input.recipe.gate === 'multi_step') {
-    failureReason = input.recipe.multiStepLabel ?? 'Multi-step form';
+  } else if (multiStep) {
+    failureReason = multiStepLabel ?? MULTI_STEP_FORM_LABEL;
   } else if (gateRequiresPerson(input.recipe.gate)) {
     failureReason = `Gate: ${input.recipe.gate} — needs a person (not paste-and-submit Ready)`;
   } else if (gateIsOtp(input.recipe.gate)) {
@@ -2045,8 +2151,8 @@ export function buildAssistedPackage(input: {
               ? 'Login required — sign in yourself; the app will not bypass auth.'
               : input.recipe.gate === 'registration'
                 ? 'Registration required — create an account yourself; the app will not sign up.'
-                : input.recipe.gate === 'multi_step'
-                  ? honestyNotes[3]
+                : multiStep
+                  ? MULTI_STEP_FORM_LABEL
                   : 'No special gate detected beyond normal form submit.';
   const gateNotes = youMust ? `${gateNotesBase} · ${youMust}` : gateNotesBase;
 
@@ -2065,10 +2171,11 @@ export function buildAssistedPackage(input: {
     status: input.status ?? 'not_started',
     gate: input.recipe.gate,
     gateNotes,
-    multiStep: input.recipe.multiStep,
-    multiStepLabel: input.recipe.multiStepLabel ?? null,
+    multiStep,
+    multiStepLabel,
     fields: checkedFields,
     otherFields: otherFields.length ? otherFields : undefined,
+    pasteReadyContent: pasteReadyContent.length ? pasteReadyContent : undefined,
     honestyNotes,
     failureReason: failureReason ?? confSummary.line,
     formUnavailable: formUnavailable || undefined,

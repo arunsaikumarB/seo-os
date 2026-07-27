@@ -1471,7 +1471,7 @@ export async function listAssistedPackages(workspaceId: string) {
       'Does not submit anything automatically.',
       'Does not solve CAPTCHA / OTP / login — you clear those on the site.',
       'Does not guarantee the listing goes live.',
-      'Does not fully prepare multi-step forms.',
+      'Multi-step forms: content is prepared for later steps — you navigate and paste.',
       'Does not attach images for you.',
     ],
     pilot: {

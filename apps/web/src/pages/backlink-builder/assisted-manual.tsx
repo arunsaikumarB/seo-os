@@ -51,6 +51,12 @@ type PackageField = {
   required?: boolean;
 };
 
+type PasteReadyItem = {
+  role: string;
+  label: string;
+  value: string;
+};
+
 type AssistedPackage = {
   id: string;
   opportunityId: string;
@@ -78,6 +84,8 @@ type AssistedPackage = {
     honestyNotes: string[];
     fields: PackageField[];
     otherFields?: Array<{ selector: string; label: string; humanStep: string }>;
+    pasteReadyContent?: PasteReadyItem[];
+    multiStep?: boolean;
     multiStepLabel: string | null;
     readerVersion?: number;
     classifierVersion?: number;
@@ -570,6 +578,16 @@ export function AssistedManualPage() {
                           </p>
                         ) : null}
 
+                        {pkg.package?.multiStepLabel ? (
+                          <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-sm text-amber-900">
+                            <p className="font-medium">{pkg.package.multiStepLabel}</p>
+                            <p className="text-xs text-amber-800/90 mt-0.5">
+                              Step 1 may only ask for a category — use the paste-ready values below
+                              once you reach the content step.
+                            </p>
+                          </div>
+                        ) : null}
+
                         <div className="space-y-2">
                           {(pkg.package?.fields ?? []).map((f) => (
                             <EditableFieldCard
@@ -582,6 +600,30 @@ export function AssistedManualPage() {
                               }
                             />
                           ))}
+                          {(pkg.package?.pasteReadyContent?.length ?? 0) > 0 ? (
+                            <div className="rounded-lg border border-dashed border-primary/30 bg-primary/5 px-3 py-2 space-y-2">
+                              <p className="text-sm font-medium">
+                                Paste-ready for later steps
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                Not mapped to fields on this page — copy and paste when the form
+                                asks for them.
+                              </p>
+                              {pkg.package!.pasteReadyContent!.map((item) => (
+                                <PasteReadyCard
+                                  key={`${pkg.id}-${item.role}`}
+                                  item={item}
+                                  value={
+                                    fieldEdits[fieldKey(pkg.id, `paste:${item.role}`)] ??
+                                    item.value
+                                  }
+                                  onChange={(v) =>
+                                    setFieldValue(pkg.id, `paste:${item.role}`, v)
+                                  }
+                                />
+                              ))}
+                            </div>
+                          ) : null}
                           {(pkg.package?.otherFields?.length ?? 0) > 0 ? (
                             <div className="rounded-lg border border-dashed px-3 py-2 text-sm space-y-1">
                               <p className="font-medium">
@@ -595,9 +637,6 @@ export function AssistedManualPage() {
                                 ))}
                               </ul>
                             </div>
-                          ) : null}
-                          {pkg.package?.multiStepLabel ? (
-                            <p className="text-sm text-amber-700">{pkg.package.multiStepLabel}</p>
                           ) : null}
                         </div>
                       </div>
@@ -897,6 +936,68 @@ function EditableFieldCard(props: {
       >
         Mark field wrong
       </Button>
+    </div>
+  );
+}
+
+function PasteReadyCard({
+  item,
+  value,
+  onChange,
+}: {
+  item: PasteReadyItem;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const rows = item.role === 'long_desc' ? 4 : item.role === 'short_desc' ? 3 : 2;
+
+  async function copyValue() {
+    if (!value.trim()) {
+      toast.error('Nothing to copy');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      toast.success(`Copied ${item.label}`);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error('Clipboard unavailable');
+    }
+  }
+
+  return (
+    <div className="rounded-md border bg-background px-2.5 py-2 text-sm space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-medium text-xs">
+          {item.label}{' '}
+          <span className="text-muted-foreground font-normal">({item.role})</span>
+        </p>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-7 px-2"
+          onClick={() => void copyValue()}
+          disabled={!value.trim()}
+        >
+          {copied ? (
+            <Check className="h-3.5 w-3.5 text-emerald-600" />
+          ) : (
+            <Copy className="h-3.5 w-3.5" />
+          )}
+          <span className="ml-1 text-xs">{copied ? 'Copied' : 'Copy'}</span>
+        </Button>
+      </div>
+      <textarea
+        className="w-full rounded-md border bg-background px-2.5 py-2 text-sm leading-relaxed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={rows}
+        spellCheck
+        aria-label={`${item.label} paste-ready value`}
+      />
     </div>
   );
 }
