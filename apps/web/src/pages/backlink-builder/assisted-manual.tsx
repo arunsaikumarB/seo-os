@@ -444,7 +444,12 @@ export function AssistedManualPage() {
                       <div className="min-w-0 flex-1 flex items-center gap-2 flex-wrap">
                         <span className="font-medium text-sm truncate">{pkg.domain}</span>
                         <Badge className="text-[10px] shrink-0">{BUCKET_LABEL[pkg.bucket]}</Badge>
-                        {pkg.gate && pkg.gate !== 'none' ? (
+                        {pkg.package?.multiStep || pkg.package?.multiStepLabel ? (
+                          <Badge className="text-[10px] shrink-0 border-amber-500/50 text-amber-800">
+                            Multi-step
+                          </Badge>
+                        ) : null}
+                        {pkg.gate && pkg.gate !== 'none' && pkg.gate !== 'multi_step' ? (
                           <Badge className="text-[10px] shrink-0 opacity-80">{pkg.gate}</Badge>
                         ) : null}
                         {pkg.status === 'done' || pkg.submittedAt ? (

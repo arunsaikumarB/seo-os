@@ -18,6 +18,7 @@ import {
   buildSiteRecipe,
   computeAssistedLaneCounts,
   dedupeContentFields,
+  detectMultiStepForm,
   evaluateFingerprintStatus,
   extractFormFieldFacts,
   extractTargetFormFieldFacts,
@@ -27,6 +28,7 @@ import {
   htmlHasFormElement,
   looksLikeSpaShell,
   normalizeSiteDomain,
+  MULTI_STEP_FORM_LABEL,
   recipeVersionsCurrent,
   refreshCategoryFields,
   gateIsOtp,
@@ -37,6 +39,8 @@ import {
   FORM_DISCOVERY_DEFAULTS,
   pickBestFormPage,
   scoreSubmissionFormPage,
+  discoveryAcceptsFormPage,
+  pageLooksLikeMultiStepWizard,
   type AssistedPackagePayload,
   type FieldRole,
   type FormDiscoverySource,
@@ -250,8 +254,7 @@ async function resolveAssistedFormTarget(params: {
   for (const url of priorityUrls.slice(0, FORM_DISCOVERY_DEFAULTS.maxPages)) {
     const html = await fetchOne(url);
     if (!html) continue;
-    const scored = scoreSubmissionFormPage(html);
-    if (!scored.ignorable && scored.score >= FORM_DISCOVERY_DEFAULTS.minFormScore) {
+    if (discoveryAcceptsFormPage(html)) {
       const source: FormDiscoverySource =
         params.hints.resolvedFormUrl &&
         url.replace(/\/$/, '').toLowerCase() ===
@@ -260,6 +263,17 @@ async function resolveAssistedFormTarget(params: {
           : url.replace(/\/$/, '').toLowerCase() === seed.replace(/\/$/, '').toLowerCase()
             ? 'entry'
             : 'site_intelligence';
+      logger.info(
+        {
+          domain,
+          formUrl: url,
+          source,
+          pagesCrawled: pagesChecked.length,
+          multiStep: pageLooksLikeMultiStepWizard(html),
+          score: scoreSubmissionFormPage(html).score,
+        },
+        'assisted-manual: discovery accepted form page'
+      );
       return {
         importedEntryUrl: seed,
         formUrl: url,
@@ -274,19 +288,27 @@ async function resolveAssistedFormTarget(params: {
 
   // 2) Seed entry URL (if not already tried)
   const seedHtml = await fetchOne(seed);
-  if (seedHtml) {
-    const scored = scoreSubmissionFormPage(seedHtml);
-    if (!scored.ignorable && scored.score >= FORM_DISCOVERY_DEFAULTS.minFormScore) {
-      return {
-        importedEntryUrl: seed,
+  if (seedHtml && discoveryAcceptsFormPage(seedHtml)) {
+    logger.info(
+      {
+        domain,
         formUrl: seed,
-        html: seedHtml,
-        pagesChecked: [...pagesChecked],
-        formFound: true,
         source: 'entry',
-        discoveryFailureReason: null,
-      };
-    }
+        pagesCrawled: pagesChecked.length,
+        multiStep: pageLooksLikeMultiStepWizard(seedHtml),
+        score: scoreSubmissionFormPage(seedHtml).score,
+      },
+      'assisted-manual: discovery accepted seed entry'
+    );
+    return {
+      importedEntryUrl: seed,
+      formUrl: seed,
+      html: seedHtml,
+      pagesChecked: [...pagesChecked],
+      formFound: true,
+      source: 'entry',
+      discoveryFailureReason: null,
+    };
   }
 
   // 2b) Homepage deep seeds when entry is empty/blocked — unlock crawl link graph
@@ -297,8 +319,17 @@ async function resolveAssistedFormTarget(params: {
     if (pagesChecked.length >= FORM_DISCOVERY_DEFAULTS.maxPages) break;
     const homeHtml = await fetchOne(home);
     if (!homeHtml) continue;
-    const scored = scoreSubmissionFormPage(homeHtml);
-    if (!scored.ignorable && scored.score >= FORM_DISCOVERY_DEFAULTS.minFormScore) {
+    if (discoveryAcceptsFormPage(homeHtml)) {
+      logger.info(
+        {
+          domain,
+          formUrl: home,
+          source: 'crawl',
+          pagesCrawled: pagesChecked.length,
+          multiStep: pageLooksLikeMultiStepWizard(homeHtml),
+        },
+        'assisted-manual: discovery accepted homepage'
+      );
       return {
         importedEntryUrl: seed,
         formUrl: home,
@@ -369,6 +400,21 @@ async function resolveAssistedFormTarget(params: {
       fetched.get(best.url.replace(/\/$/, '').toLowerCase()) ??
       withOriginal.find((p) => p.url === best.url)?.html ??
       null;
+    logger.info(
+      {
+        domain,
+        formUrl: best.url,
+        source: 'crawl',
+        pagesCrawled: pagesChecked.length,
+        pagesChecked,
+        score: best.score,
+        fieldCount: best.fieldCount,
+        multiStep: html ? pageLooksLikeMultiStepWizard(html) : false,
+        candidatesQueued: candidateQueue.length,
+        maxDepth: FORM_DISCOVERY_DEFAULTS.maxDepth,
+      },
+      'assisted-manual: deep discovery chose form page'
+    );
     return {
       importedEntryUrl: seed,
       formUrl: best.url,
@@ -388,6 +434,32 @@ async function resolveAssistedFormTarget(params: {
     [...fetched.values()][0] ??
     null;
 
+  // If we fetched a multi-step / category form that scored under the old threshold, still accept it
+  for (const [key, html] of fetched) {
+    if (!discoveryAcceptsFormPage(html)) continue;
+    const match =
+      pagesChecked.find((u) => u.replace(/\/$/, '').toLowerCase() === key) ?? key;
+    logger.info(
+      {
+        domain,
+        formUrl: match,
+        pagesCrawled: pagesChecked.length,
+        pagesChecked,
+        multiStep: pageLooksLikeMultiStepWizard(html),
+      },
+      'assisted-manual: accepting sparse/multi-step form from crawl cache'
+    );
+    return {
+      importedEntryUrl: seed,
+      formUrl: match,
+      html,
+      pagesChecked: [...pagesChecked],
+      formFound: true,
+      source: 'crawl',
+      discoveryFailureReason: null,
+    };
+  }
+
   // Last chance: if discovery produced no HTML at all, force Playwright on seed + homepage
   if (!fallbackHtml) {
     const lastChance = [
@@ -405,8 +477,7 @@ async function resolveAssistedFormTarget(params: {
         pagesChecked.push(url);
         fetched.set(key, html);
         fallbackHtml = html;
-        const scored = scoreSubmissionFormPage(html);
-        if (!scored.ignorable && scored.score >= FORM_DISCOVERY_DEFAULTS.minFormScore) {
+        if (discoveryAcceptsFormPage(html)) {
           return {
             importedEntryUrl: seed,
             formUrl: url,
@@ -421,6 +492,21 @@ async function resolveAssistedFormTarget(params: {
       }
     }
   }
+
+  logger.info(
+    {
+      domain,
+      seed,
+      pagesCrawled: pagesChecked.length,
+      pagesChecked,
+      fetchedPages: fetched.size,
+      candidatesQueued: candidateQueue.length,
+      maxDepth: FORM_DISCOVERY_DEFAULTS.maxDepth,
+      maxPages: FORM_DISCOVERY_DEFAULTS.maxPages,
+      failure,
+    },
+    'assisted-manual: deep discovery found no acceptable form'
+  );
 
   return {
     importedEntryUrl: seed,
@@ -489,37 +575,53 @@ async function loadContentForOpportunity(workspaceId: string, opportunityId: str
     .replace(/\/+$/, '')
     .trim();
 
-  const longDesc = String(p.longDescription ?? p.businessDescription ?? '');
-  const meta = String(p.metaDescription ?? '');
-  // Never derive short from long slice — that creates intra-package duplicates
-  const shortDesc = String(p.shortDescription ?? p.excerpt ?? meta ?? '');
+  const longDescRaw = String(p.longDescription ?? p.businessDescription ?? '').trim();
+  const meta = String(p.metaDescription ?? '').trim();
+  const shortRaw = String(p.shortDescription ?? p.excerpt ?? meta ?? '').trim();
+  // Brand fallbacks so Needs a person packages never ship empty paste cards
+  const brandFallbackLong =
+    String(brand.tagline ?? '').trim() ||
+    (brand.industry
+      ? `${brand.brandName} provides ${brand.industry} solutions.`
+      : `${brand.brandName} — visit https://${projectDomain || 'example.com'}.`);
+  const longDesc = longDescRaw || brandFallbackLong;
+  const shortDesc =
+    shortRaw ||
+    String(brand.tagline ?? '').trim() ||
+    longDesc.slice(0, 160);
   const deduped = dedupeContentFields({
-    title: String(p.seoTitle ?? p.headline ?? p.businessName ?? brand.brandName ?? ''),
+    title: String(
+      p.seoTitle ?? p.headline ?? p.businessName ?? brand.brandName ?? projectDomain ?? ''
+    ),
     shortDescription: shortDesc,
     longDescription: longDesc,
-    metaDescription: meta,
+    metaDescription: meta || shortDesc,
   });
   const businessName = String(
     p.businessName ?? brand.brandName ?? projectDomain ?? ''
   );
-  const title = deduped.title;
+  const title = deduped.title || businessName || projectDomain || 'Listing';
   const images = Array.isArray(p.suggestedImages) ? p.suggestedImages : [];
   const imageFileName =
     typeof images[0] === 'string'
       ? String(images[0]).split('/').pop()
       : `${(businessName || 'listing').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)}-listing.jpg`;
 
+  const listingUrl =
+    resolveProjectListingUrl(p, projectDomain) ||
+    (projectDomain ? `https://${projectDomain}` : '');
+
   return {
     title,
-    shortDescription: fitDescriptionToCap(deduped.shortDescription).value,
-    longDescription: fitDescriptionToCap(deduped.longDescription).value,
-    metaDescription: deduped.metaDescription,
+    shortDescription: fitDescriptionToCap(deduped.shortDescription || shortDesc).value,
+    longDescription: fitDescriptionToCap(deduped.longDescription || longDesc).value,
+    metaDescription: deduped.metaDescription || shortDesc,
     businessName,
     companyName: String(
       brand.companyName || p.businessName || brand.brandName || businessName || ''
     ),
     contactName: String(brand.contactName ?? p.contactName ?? p.authorName ?? ''),
-    url: resolveProjectListingUrl(p, projectDomain),
+    url: listingUrl,
     email: String(brand.contactEmail || p.email || ''),
     phone: String(brand.contactPhone || p.phone || ''),
     address: String(p.address ?? ''),
@@ -992,7 +1094,15 @@ async function prepareOnePackage(
         gateHtml: '',
       };
   const liveFacts = targetRead.fields;
-  const formFound = Boolean(resolved.formFound && targetRead.formFound && liveFacts.length > 0);
+  const multiStepPage = Boolean(html && detectMultiStepForm(html));
+  // Live Form Reader wins: if the page has fillable fields (incl. category-only step 1),
+  // treat as found even when discovery previously under-scored the page.
+  const formFound = Boolean(
+    html &&
+      targetRead.formFound &&
+      liveFacts.length > 0 &&
+      (resolved.formFound || multiStepPage || discoveryAcceptsFormPage(html))
+  );
   const discoveryFailureReason =
     targetRead.failureReason || resolved.discoveryFailureReason;
 
@@ -1002,8 +1112,12 @@ async function prepareOnePackage(
       importedEntryUrl,
       formUrl: entryUrl,
       discoverySource: resolved.source,
-      pagesChecked: resolved.pagesChecked.length,
+      pagesCrawled: resolved.pagesChecked.length,
+      pagesChecked: resolved.pagesChecked,
       formFound,
+      multiStepPage,
+      discoveryFormFound: resolved.formFound,
+      liveFieldCount: liveFacts.length,
       htmlBytes: html?.length ?? 0,
       forceReclassify,
       packageVersionStale,
@@ -1225,18 +1339,42 @@ async function prepareOnePackage(
     payload.classifierVersion =
       keepClass === ASSISTED_FIELD_CLASSIFIER_VERSION && !formFound ? 0 : keepClass;
     if (!formFound) {
-      payload.formUnavailable = true;
-      payload.failureReason = formUnavailableMessage(
-        rereadFailReason ?? discoveryFailureReason ?? payload.failureReason
-      );
-      payload.bucket = 'needs_person';
+      const hasPaste = (payload.pasteReadyContent?.length ?? 0) > 0;
+      const isMulti =
+        Boolean(payload.multiStep) ||
+        multiStepPage ||
+        detectMultiStepForm(html ?? '') ||
+        Boolean(payload.multiStepLabel);
+      if (isMulti || hasPaste || recipe.fields.length > 0) {
+        // Multi-step / sparse / content-ready — never mislabel as JS/login unavailable
+        payload.formUnavailable = false;
+        payload.bucket = 'needs_person';
+        payload.multiStep = payload.multiStep || isMulti;
+        payload.multiStepLabel =
+          payload.multiStepLabel ?? (isMulti ? MULTI_STEP_FORM_LABEL : null);
+        payload.failureReason =
+          payload.multiStepLabel ??
+          (hasPaste
+            ? 'Needs a person — content ready to paste on the site'
+            : rereadFailReason ?? discoveryFailureReason ?? payload.failureReason);
+        payload.gateNotes = payload.multiStepLabel ?? payload.gateNotes;
+      } else {
+        payload.formUnavailable = true;
+        payload.failureReason = formUnavailableMessage(
+          rereadFailReason ?? discoveryFailureReason ?? payload.failureReason
+        );
+        payload.bucket = 'needs_person';
+      }
     }
     if (rereadFailed && priorPayload) {
-      if (!formFound) {
+      if (!formFound && payload.formUnavailable) {
         payload.formUnavailable = true;
         payload.failureReason = formUnavailableMessage(
           rereadFailReason ?? payload.failureReason
         );
+      } else if (!formFound) {
+        // keep multi-step / paste-ready messaging above
+        payload.failureReason = payload.failureReason ?? rereadFailReason;
       } else {
         payload.failureReason = rereadFailReason ?? payload.failureReason;
       }

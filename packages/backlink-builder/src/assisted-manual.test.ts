@@ -422,6 +422,30 @@ describe('Phase 7 Assisted Manual', () => {
     expect(next.fields.find((f) => f.selector === '#website')?.role).toBe('url');
   });
 
+  it('attaches paste-ready content even when form not found (Needs a person)', () => {
+    const recipe = buildSiteRecipe({
+      domain: 'empty.example',
+      entryUrl: 'https://empty.example/',
+      html: '<html><body><p>No form</p></body></html>',
+    });
+    const pkg = buildAssistedPackage({
+      recipe,
+      content: {
+        title: 'Chefgaa POS',
+        shortDescription: 'Restaurant POS',
+        longDescription: 'Chefgaa helps restaurants run checkout.',
+        url: 'https://chefgaa.com',
+        businessName: 'Chefgaa',
+      },
+      formFound: false,
+    });
+    expect(pkg.bucket).toBe('needs_person');
+    expect(pkg.formUnavailable).toBeFalsy();
+    expect(pkg.pasteReadyContent?.map((c) => c.role)).toEqual(
+      expect.arrayContaining(['title', 'long_desc', 'url'])
+    );
+  });
+
   it('routes multi-step to Needs a person (AT4)', () => {
     const recipe = buildSiteRecipe({
       domain: 'wizard.example',
@@ -440,7 +464,7 @@ describe('Phase 7 Assisted Manual', () => {
       },
     });
     expect(pkg.bucket).toBe('needs_person');
-    expect(pkg.multiStepLabel).toMatch(/content prepared/i);
+    expect(pkg.multiStepLabel).toMatch(/content ready|content prepared/i);
     // Title is on step 1 — paste-ready holds the unmapped listing copy
     expect(pkg.fields.some((f) => f.role === 'title')).toBe(true);
     expect(pkg.pasteReadyContent?.some((c) => c.role === 'long_desc')).toBe(true);
@@ -477,7 +501,7 @@ describe('Phase 7 Assisted Manual', () => {
     });
     expect(pkg.bucket).toBe('needs_person');
     expect(pkg.multiStepLabel).toBe(
-      "Multi-step form — content prepared, you'll paste it on a later step"
+      'Multi-step — content ready, paste on the later step'
     );
     expect(pkg.fields.some((f) => f.role === 'category')).toBe(true);
     expect(pkg.fields.some((f) => f.role === 'title')).toBe(false);

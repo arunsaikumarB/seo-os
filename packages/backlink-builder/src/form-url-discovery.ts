@@ -177,7 +177,46 @@ export function isIgnorableFormPage(html: string, fieldCountHint?: number): bool
 /**
  * Score a page for "real submission form" quality.
  * Rewards field count + URL / title / description / email inputs.
+ * Also accepts category-only / multi-step wizard step-1 pages (tagshub-style).
  */
+export function pageLooksLikeMultiStepWizard(html: string): boolean {
+  const h = String(html ?? '').toLowerCase();
+  if (/\bstep\s*[1-9]\s*(of|\/)\s*[2-9]/i.test(h)) return true;
+  if (/\bstep\s+(one|two|three|four)\b/i.test(h) && /(go\s+to|next|continue|proceed)/i.test(h)) {
+    return true;
+  }
+  if (/go\s+to\s+step\s*(two|2|three|3|four|4)/i.test(h)) return true;
+  if (/value=["'][^"']*(go\s+to\s+step|next\s+step|continue|proceed)[^"']*["']/i.test(html)) {
+    return true;
+  }
+  if (/<(button|a|input)[^>]*>\s*(next|continue|proceed|go\s+to\s+step)\s*</i.test(html)) {
+    return true;
+  }
+  if (/wizard|multi-?step/i.test(h)) return true;
+  if (/data-step=["'][2-9]/i.test(h)) return true;
+  return false;
+}
+
+/** True when discovery should treat this HTML as a usable submission page. */
+export function discoveryAcceptsFormPage(
+  html: string,
+  minScore = FORM_DISCOVERY_DEFAULTS.minFormScore
+): boolean {
+  const scored = scoreSubmissionFormPage(html);
+  if (scored.ignorable) return false;
+  if (scored.score >= minScore) return true;
+  // Wizard step 1: category select + Next / Go To Step Two, no title/desc yet
+  if (pageLooksLikeMultiStepWizard(html) && scored.fieldCount >= 1) return true;
+  if (
+    scored.fieldCount >= 1 &&
+    /<select\b/i.test(html) &&
+    /categor|topic|niche|industry/i.test(html)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export function scoreSubmissionFormPage(html: string): FormPageScore {
   const fields = scanFields(html);
   if (fields.length === 0) {
@@ -210,6 +249,7 @@ export function scoreSubmissionFormPage(html: string): FormPageScore {
   let hasTitle = false;
   let hasDesc = false;
   let hasEmail = false;
+  let hasCategory = false;
   for (const f of fields) {
     const b = fieldBlob(f);
     if (f.type === 'url' || /website|url|homepage|link/.test(b)) hasUrl = true;
@@ -218,6 +258,7 @@ export function scoreSubmissionFormPage(html: string): FormPageScore {
       hasDesc = true;
     }
     if (f.type === 'email' || /e-?mail/.test(b)) hasEmail = true;
+    if (f.type === 'select' || /categor|topic|niche|industry/.test(b)) hasCategory = true;
   }
 
   let score = Math.min(fields.length, 8);
@@ -225,7 +266,10 @@ export function scoreSubmissionFormPage(html: string): FormPageScore {
   if (hasTitle) score += 3;
   if (hasDesc) score += 3;
   if (hasEmail) score += 2;
+  if (hasCategory) score += 3;
   if (fields.length >= 3 && (hasUrl || hasTitle)) score += 2;
+  if (pageLooksLikeMultiStepWizard(html)) score += 5;
+  if (/action=["'][^"']*(submit|add|listing)/i.test(html)) score += 2;
 
   return {
     score,
@@ -241,6 +285,8 @@ export function scoreSubmissionFormPage(html: string): FormPageScore {
       hasTitle ? 'title' : null,
       hasDesc ? 'desc' : null,
       hasEmail ? 'email' : null,
+      hasCategory ? 'category' : null,
+      pageLooksLikeMultiStepWizard(html) ? 'multi-step' : null,
     ]
       .filter(Boolean)
       .join('+'),
@@ -273,6 +319,35 @@ export function extractSubmissionCandidateLinks(
       });
     }
   }
+
+  // Also harvest <a> / button-like controls whose visible text is intent but href may be relative path
+  const intentControlRe =
+    /<(?:a|button)\b([^>]*)>([\s\S]*?)<\/(?:a|button)>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = intentControlRe.exec(html))) {
+    const attrs = m[1] ?? '';
+    const text = (m[2] ?? '').replace(/<[^>]+>/g, ' ').trim();
+    const href =
+      /href=["']([^"']+)["']/i.exec(attrs)?.[1] ??
+      /data-(?:href|url|link)=["']([^"']+)["']/i.exec(attrs)?.[1] ??
+      null;
+    if (!href || href.startsWith('#') || /^javascript:/i.test(href)) continue;
+    if (!isSubmissionIntentLink(href, text) && !SUBMISSION_INTENT_RE.test(text)) continue;
+    const abs = absolutizeUrl(href, pageUrl);
+    if (!abs) continue;
+    try {
+      if (!sameDomain(new URL(abs).hostname, domain)) continue;
+    } catch {
+      continue;
+    }
+    const score = Math.max(submissionLinkScore(abs, text), 40);
+    const key = abs.replace(/\/$/, '').toLowerCase();
+    const prev = byUrl.get(key);
+    if (!prev || score > prev.score) {
+      byUrl.set(key, { url: abs, anchorText: text, score, depth: depth + 1 });
+    }
+  }
+
   return [...byUrl.values()].sort((a, b) => b.score - a.score);
 }
 
@@ -297,9 +372,12 @@ export function pickBestFormPage(
   pages: Array<{ url: string; html: string }>,
   minScore = FORM_DISCOVERY_DEFAULTS.minFormScore
 ): RankedFormCandidate | null {
-  const ranked = rankFetchedFormPages(pages).filter(
-    (p) => !p.ignorable && p.score >= minScore
-  );
+  const ranked = rankFetchedFormPages(pages).filter((p) => {
+    if (p.ignorable) return false;
+    if (p.score >= minScore) return true;
+    const html = pages.find((x) => x.url === p.url)?.html ?? '';
+    return discoveryAcceptsFormPage(html, minScore);
+  });
   return ranked[0] ?? null;
 }
 

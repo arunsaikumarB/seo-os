@@ -4,9 +4,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   collectKnownFormUrlHints,
+  discoveryAcceptsFormPage,
   extractSubmissionCandidateLinks,
   formDiscoveryFailureMessage,
   isSubmissionIntentLink,
+  pageLooksLikeMultiStepWizard,
   pickBestFormPage,
   scoreSubmissionFormPage,
   submissionLinkScore,
@@ -75,6 +77,29 @@ describe('form-url-discovery', () => {
     expect(form.hasUrl).toBe(true);
     expect(news.ignorable || news.score < form.score).toBe(true);
     expect(landing.score).toBeLessThan(form.score);
+  });
+
+  it('accepts tagshub-style category-only multi-step step 1', () => {
+    const html = `
+      <h1>Step One: Choose a Category</h1>
+      <form>
+        <select name="category" id="cat" required>
+          <option value="">Select</option>
+          <option>Business & Economy</option>
+        </select>
+        <input type="submit" value="Go To Step Two" />
+      </form>
+    `;
+    const scored = scoreSubmissionFormPage(html);
+    expect(scored.ignorable).toBe(false);
+    expect(scored.score).toBeGreaterThanOrEqual(4);
+    expect(discoveryAcceptsFormPage(html)).toBe(true);
+    expect(pageLooksLikeMultiStepWizard(html)).toBe(true);
+    const best = pickBestFormPage([
+      { url: 'https://tagshub.com/', html: LANDING_HTML },
+      { url: 'https://tagshub.com/submit', html },
+    ]);
+    expect(best?.url).toContain('/submit');
   });
 
   it('picks the form page among fetched candidates', () => {
@@ -174,5 +199,7 @@ describe('form-url-discovery', () => {
     });
     expect(pkg.failureReason).toMatch(/No submission form found after crawling 2 pages/);
     expect(pkg.failureReason).not.toBe('No form found');
+    expect(pkg.formUnavailable).toBeFalsy();
+    expect(pkg.pasteReadyContent?.length).toBeGreaterThan(0);
   });
 });

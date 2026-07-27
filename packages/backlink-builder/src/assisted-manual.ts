@@ -222,7 +222,7 @@ export type PackageFieldValue = {
 };
 
 export const MULTI_STEP_FORM_LABEL =
-  'Multi-step form — content prepared, you\'ll paste it on a later step';
+  'Multi-step — content ready, paste on the later step';
 
 export type PasteReadyContentItem = {
   role: 'title' | 'short_desc' | 'long_desc' | 'url' | 'business_name' | 'email' | 'phone';
@@ -1173,7 +1173,9 @@ export function buildSiteRecipe(input: {
   const facts = target.fields;
   const fingerprint = computeFormFingerprint(facts);
   const gateSource = target.gateHtml || input.html;
-  const multiStep = detectMultiStepForm(gateSource);
+  // Detect on form fragment AND full page (step headings often sit outside <form>)
+  const multiStep =
+    detectMultiStepForm(gateSource) || detectMultiStepForm(input.html);
   // Cloudflare can be page-level; other gates come from the target form only
   const pageGate = detectGateFromHtml(input.html);
   const formGate = detectGateFromHtml(gateSource);
@@ -2139,12 +2141,9 @@ export function buildAssistedPackage(input: {
   const multiStep =
     Boolean(input.recipe.multiStep) || input.recipe.gate === 'multi_step';
   const sparseStepOne = isContentSparseStepOne(input.recipe.fields);
-  // Multi-step wizards (and category-only step 1) still get Title/Description/URL
-  // ready to paste even though those fields aren't on the fetched page.
-  const pasteReadyContent =
-    multiStep || sparseStepOne
-      ? buildPasteReadyContent(input.content, mappedRoles)
-      : [];
+  // Always attach generated listing copy when we have it — especially Needs a person /
+  // multi-step / form-not-found, so the user never gets an empty card.
+  const pasteReadyContent = buildPasteReadyContent(input.content, mappedRoles);
 
   const multiStepLabel = multiStep
     ? input.recipe.multiStepLabel?.trim() || MULTI_STEP_FORM_LABEL
@@ -2163,12 +2162,24 @@ export function buildAssistedPackage(input: {
   let failureReason: string | null = null;
   let formUnavailable = false;
   if (!formFound) {
-    formUnavailable = true;
-    failureReason = formUnavailableMessage(
-      input.discoveryFailureReason?.trim() ||
-        input.recipe.formFailureReason?.trim() ||
-        null
-    );
+    // Still ship paste-ready content for multi-step / sparse / any generated copy.
+    // Only mark formUnavailable when we truly have nothing useful for the user.
+    if (multiStep || sparseStepOne || pasteReadyContent.length > 0) {
+      formUnavailable = false;
+      failureReason = multiStep
+        ? multiStepLabel ?? MULTI_STEP_FORM_LABEL
+        : input.discoveryFailureReason?.trim() ||
+          (pasteReadyContent.length
+            ? 'Needs a person — content ready to paste on the site'
+            : null);
+    } else {
+      formUnavailable = true;
+      failureReason = formUnavailableMessage(
+        input.discoveryFailureReason?.trim() ||
+          input.recipe.formFailureReason?.trim() ||
+          null
+      );
+    }
   } else if (input.content.contentTooSimilar) {
     failureReason =
       'content_too_similar — description too close to another package after 3 regenerations';
