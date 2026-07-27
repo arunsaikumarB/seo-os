@@ -1865,8 +1865,9 @@ export function buildAssistedPackage(input: {
     confidenceSummary: confSummary.line,
     humanSteps: input.recipe.humanSteps ?? [],
     targetFormSelector: input.recipe.targetFormSelector ?? null,
-    readerVersion: input.recipe.readerVersion ?? ASSISTED_FORM_READER_VERSION,
-    classifierVersion: input.recipe.classifierVersion ?? ASSISTED_FIELD_CLASSIFIER_VERSION,
+    // Never default to CURRENT — that fake-stamps failed prepares and skips the next re-read.
+    readerVersion: Number(input.recipe.readerVersion) || 0,
+    classifierVersion: Number(input.recipe.classifierVersion) || 0,
   };
 }
 

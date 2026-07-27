@@ -60,7 +60,7 @@ function admin() {
 
 const PILOT_BATCH = 'assisted-content-ready';
 /** Cap Playwright fallbacks per form-discovery run (HTTP is preferred). */
-const MAX_BROWSER_HTML_FETCHES = 4;
+const MAX_BROWSER_HTML_FETCHES = 6;
 
 /** True when HTML looks like a real page we can crawl / read forms from. */
 function isUsablePageHtml(html: string): boolean {
@@ -104,28 +104,43 @@ async function fetchHtmlHttp(url: string): Promise<string | null> {
 }
 
 /**
- * HTTP first; Playwright render when blocked / empty shell.
- * `browserBudget` limits Chromium launches per discovery run.
+ * HTTP first; Playwright whenever HTTP is missing, empty, or unusable
+ * (not only challenge-page heuristics). Budget caps Chromium launches per discovery.
  */
 async function fetchHtml(
   url: string,
   browserBudget?: { used: number; max: number }
 ): Promise<string | null> {
   const http = await fetchHtmlHttp(url);
-  if (http && isUsablePageHtml(http)) return http;
+  if (http && isUsablePageHtml(http)) {
+    return http;
+  }
+
+  const httpFailed = !http || !http.trim();
+  logger.info(
+    {
+      url,
+      httpBytes: http?.length ?? 0,
+      httpFailed,
+      usable: Boolean(http && isUsablePageHtml(http)),
+      budgetUsed: browserBudget?.used ?? null,
+    },
+    'assisted-manual: invoking Playwright HTML fallback'
+  );
 
   if (browserBudget && browserBudget.used >= browserBudget.max) {
-    logger.info(
-      { url, used: browserBudget.used },
-      'assisted-manual: skip browser fetch — budget exhausted'
+    logger.warn(
+      { url, used: browserBudget.used, max: browserBudget.max },
+      'assisted-manual: browser fetch budget exhausted — returning null'
     );
-    return http && http.length > 400 ? http : null;
+    // Do not return weak HTTP shells as "success" — forces honest No HTML / retry
+    return null;
   }
 
   try {
     const { fetchRenderedHtml } = await import('./browser-runtime.service.js');
     if (browserBudget) browserBudget.used += 1;
-    const rendered = await fetchRenderedHtml(url, { timeoutMs: 35_000 });
+    const rendered = await fetchRenderedHtml(url, { timeoutMs: 45_000 });
     if (rendered && isUsablePageHtml(rendered)) {
       logger.info(
         { url, httpBytes: http?.length ?? 0, browserBytes: rendered.length },
@@ -133,12 +148,20 @@ async function fetchHtml(
       );
       return rendered;
     }
-    // Prefer whatever is longer if both are weak
-    if ((rendered?.length ?? 0) > (http?.length ?? 0)) return rendered;
+    logger.warn(
+      {
+        url,
+        browserBytes: rendered?.length ?? 0,
+        usable: Boolean(rendered && isUsablePageHtml(rendered)),
+      },
+      'assisted-manual: browser HTML fallback returned unusable page'
+    );
+    // Prefer rendered over nothing even if soft-unusable (Form Reader may still find a form)
+    if (rendered && rendered.trim().length > 200) return rendered;
   } catch (err) {
     logger.warn({ err, url }, 'assisted-manual: browser HTML fallback failed');
   }
-  return http && http.length > 400 ? http : null;
+  return null;
 }
 
 type FormResolveResult = {
@@ -346,10 +369,46 @@ async function resolveAssistedFormTarget(params: {
 
   const failure = formDiscoveryFailureMessage(pagesChecked);
   // Prefer any usable HTML we did fetch (homepage / seed) over null
-  const fallbackHtml =
+  let fallbackHtml =
     seedHtml ??
     [...fetched.values()].find((h) => isUsablePageHtml(h)) ??
+    [...fetched.values()][0] ??
     null;
+
+  // Last chance: if discovery produced no HTML at all, force Playwright on seed + homepage
+  if (!fallbackHtml) {
+    const lastChance = [
+      seed,
+      `https://${domain}/`,
+      `https://www.${domain}/`,
+    ];
+    for (const url of lastChance) {
+      if (browserBudget.used >= browserBudget.max) break;
+      const key = url.replace(/\/$/, '').toLowerCase();
+      if (fetched.has(key)) continue;
+      logger.warn({ url, domain }, 'assisted-manual: last-chance Playwright fetch (no HTML yet)');
+      const html = await fetchHtml(url, browserBudget);
+      if (html) {
+        pagesChecked.push(url);
+        fetched.set(key, html);
+        fallbackHtml = html;
+        const scored = scoreSubmissionFormPage(html);
+        if (!scored.ignorable && scored.score >= FORM_DISCOVERY_DEFAULTS.minFormScore) {
+          return {
+            importedEntryUrl: seed,
+            formUrl: url,
+            html,
+            pagesChecked: [...pagesChecked],
+            formFound: true,
+            source: 'crawl',
+            discoveryFailureReason: null,
+          };
+        }
+        break;
+      }
+    }
+  }
+
   return {
     importedEntryUrl: seed,
     formUrl: seed,
@@ -526,13 +585,40 @@ export async function prepareAssistedPackages(
 
   targetIds = targetIds.slice(0, ASSISTED_PREPARE_BATCH_MAX);
 
+  // Load existing packages — force re-read when reader/classifier behind OR prior No HTML
+  const { data: existingRows } = await admin()
+    .from('assisted_packages')
+    .select('id, opportunity_id, payload, failure_reason')
+    .eq('workspace_id', workspaceId)
+    .in('opportunity_id', targetIds.length ? targetIds : ['00000000-0000-0000-0000-000000000000']);
+  const byOpp = new Map(
+    (existingRows ?? []).map((r) => [String(r.opportunity_id), r] as const)
+  );
+
   const prepared: unknown[] = [];
   const errors: Array<{ opportunityId: string; error: string }> = [];
 
   for (const opportunityId of targetIds) {
     try {
+      const existing = byOpp.get(opportunityId);
+      const payload = (existing?.payload as AssistedPackagePayload | null) ?? null;
+      const readerV = Number(payload?.readerVersion);
+      const classV = Number(payload?.classifierVersion);
+      const versionBehind =
+        !payload ||
+        !Number.isFinite(readerV) ||
+        !Number.isFinite(classV) ||
+        readerV !== ASSISTED_FORM_READER_VERSION ||
+        classV !== ASSISTED_FIELD_CLASSIFIER_VERSION;
+      const noHtmlPrior = /no html fetched/i.test(
+        String(existing?.failure_reason ?? payload?.failureReason ?? '')
+      );
+      const forceReread = versionBehind || noHtmlPrior || !existing;
+
       const pkg = await prepareOnePackage(workspaceId, opportunityId, {
         entryUrlOverride: opts.entryUrlOverrides?.[opportunityId],
+        forceReread,
+        packageId: existing?.id ? String(existing.id) : undefined,
       });
       prepared.push(pkg);
     } catch (err) {
@@ -776,6 +862,16 @@ async function prepareOnePackage(
       .eq('id', opts.packageId)
       .maybeSingle();
     priorPackage = data;
+  } else {
+    const { data } = await admin()
+      .from('assisted_packages')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .eq('opportunity_id', opportunityId)
+      .order('prepared_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    priorPackage = data;
   }
   const priorPayload = (priorPackage?.payload as AssistedPackagePayload | undefined) ?? null;
   const priorFieldCount =
@@ -789,8 +885,20 @@ async function prepareOnePackage(
     : opts.forceReread
       ? recipePinsOnly(existingRecipe)
       : existingRecipe;
-  const versionStale = !recipeVersionsCurrent(existingForBuild);
-  const forceReclassify = Boolean(opts.forceReread) || versionStale || Boolean(opts.clearPins);
+
+  const packageVersionStale =
+    !priorPayload ||
+    Number(priorPayload.readerVersion) !== ASSISTED_FORM_READER_VERSION ||
+    Number(priorPayload.classifierVersion) !== ASSISTED_FIELD_CLASSIFIER_VERSION ||
+    !Number(priorPayload.readerVersion) ||
+    !Number(priorPayload.classifierVersion);
+  const noHtmlPrior = /no html fetched/i.test(
+    String(priorPackage?.failure_reason ?? priorPayload?.failureReason ?? '')
+  );
+  const versionStale =
+    !recipeVersionsCurrent(existingForBuild) || packageVersionStale || noHtmlPrior;
+  const forceReclassify =
+    Boolean(opts.forceReread) || versionStale || Boolean(opts.clearPins);
 
   const strategy = (profile?.strategy ?? {}) as Record<string, unknown>;
   const learning = (profile?.learning ?? {}) as Record<string, unknown>;
@@ -873,6 +981,10 @@ async function prepareOnePackage(
       discoverySource: resolved.source,
       pagesChecked: resolved.pagesChecked.length,
       formFound,
+      htmlBytes: html?.length ?? 0,
+      forceReclassify,
+      packageVersionStale,
+      noHtmlPrior,
     },
     'assisted-manual form URL resolved'
   );
@@ -906,34 +1018,28 @@ async function prepareOnePackage(
       forceReclassify: true,
       dropHumanPins: Boolean(opts.clearPins),
     });
-  } else if (existingRecipe && !opts.forceReread) {
-    recipe = recipeVersionsCurrent(existingRecipe)
-      ? existingRecipe
-      : {
-          ...existingRecipe,
-          readerVersion: ASSISTED_FORM_READER_VERSION,
-          classifierVersion: ASSISTED_FIELD_CLASSIFIER_VERSION,
-          notes: [existingRecipe.notes, 'Fetch failed — re-read when online']
-            .filter(Boolean)
-            .join(' · '),
-        };
+  } else if (existingRecipe && !forceReclassify && recipeVersionsCurrent(existingRecipe)) {
+    // Only reuse a cached recipe when versions are current AND we were not asked to refresh
+    recipe = existingRecipe;
   } else {
-    // Force re-read (or first prepare) with no usable form HTML
-    rereadFailed = Boolean(opts.forceReread) || priorFieldCount > 0;
+    // Force re-read / version bump / first prepare with no usable form HTML
+    rereadFailed = Boolean(opts.forceReread) || forceReclassify || priorFieldCount > 0;
     rereadFailReason = !html
       ? discoveryFailureReason ??
-        'Re-read failed — could not fetch form HTML; previous fields kept'
+        'No HTML fetched — HTTP blocked and browser fallback returned empty'
       : discoveryFailureReason ??
         'Re-read failed — no form fields found in page HTML; previous fields kept';
 
     if (existingRecipe && existingRecipe.fields.length > 0) {
-      // Guard: never wipe a populated recipe with an empty read
+      // Guard: never wipe a populated recipe with an empty read.
+      // Keep PRIOR version stamps so prepare-all still sees "behind" and retries.
       recipe = {
         ...existingRecipe,
         notes: [existingRecipe.notes, rereadFailReason].filter(Boolean).join(' · '),
         lastVerifiedAt: new Date().toISOString(),
         formDiscoveryPagesChecked: resolved.pagesChecked,
         formDiscoverySource: resolved.source,
+        // Do NOT bump reader/classifier here — only successful live reads stamp current.
       };
     } else if (priorPayload?.fields?.length) {
       recipe = {
@@ -959,8 +1065,8 @@ async function prepareOnePackage(
         lastVerifiedAt: new Date().toISOString(),
         correctionCount: Number(priorPackage?.correction_count ?? 0),
         multiStep: Boolean(priorPayload.multiStep),
-        readerVersion: priorPayload.readerVersion,
-        classifierVersion: priorPayload.classifierVersion,
+        readerVersion: Number(priorPayload.readerVersion) || 0,
+        classifierVersion: Number(priorPayload.classifierVersion) || 0,
       };
     } else {
       recipe = {
@@ -978,10 +1084,13 @@ async function prepareOnePackage(
           discoveryFailureReason ??
           (opts.forceReread
             ? 'Force re-read failed — no form HTML fetched'
-            : 'No form HTML fetched'),
+            : 'No HTML fetched'),
         lastVerifiedAt: new Date().toISOString(),
         correctionCount: 0,
         multiStep: false,
+        // Explicit 0 — never leave undefined (buildAssistedPackage must not default to current)
+        readerVersion: 0,
+        classifierVersion: 0,
       };
     }
   }
@@ -1035,10 +1144,23 @@ async function prepareOnePackage(
         lastVerifiedAt: new Date().toISOString(),
         correctionCount: Number(priorPackage?.correction_count ?? 0),
         multiStep: Boolean(priorPayload.multiStep),
-        readerVersion: priorPayload.readerVersion,
-        classifierVersion: priorPayload.classifierVersion,
+        readerVersion: Number(priorPayload.readerVersion) || 0,
+        classifierVersion: Number(priorPayload.classifierVersion) || 0,
       };
     }
+  }
+
+  // Failed live read must never look "current" (fake stamps skipped the next prepare)
+  if (!(html && formFound && !rereadFailed)) {
+    const rv = Number(recipe.readerVersion) || 0;
+    const cv = Number(recipe.classifierVersion) || 0;
+    recipe = {
+      ...recipe,
+      readerVersion:
+        rv === ASSISTED_FORM_READER_VERSION && !formFound ? 0 : rv,
+      classifierVersion:
+        cv === ASSISTED_FIELD_CLASSIFIER_VERSION && !formFound ? 0 : cv,
+    };
   }
 
   await upsertRecipeOnProfile(workspaceId, domain, recipe);
@@ -1070,27 +1192,44 @@ async function prepareOnePackage(
   if (html && formFound && !rereadFailed) {
     payload.readerVersion = ASSISTED_FORM_READER_VERSION;
     payload.classifierVersion = ASSISTED_FIELD_CLASSIFIER_VERSION;
-  } else if (rereadFailed && priorPayload) {
-    // Keep prior version stamps (don't pretend the classifier refreshed)
-    payload.readerVersion = priorPayload.readerVersion;
-    payload.classifierVersion = priorPayload.classifierVersion;
-    payload.failureReason = rereadFailReason;
-    payload.bucket = 'needs_person';
-    // Prefer prior field values if rebuild emptied them — never resurrect cleared pins
-    if (!payload.fields.length && priorPayload.fields?.length) {
-      const kept = opts.clearPins
-        ? priorPayload.fields.map((f) =>
-            f.source === 'human_corrected' || f.source === 'known_bad'
-              ? { ...f, source: 'name_guess' as const, confidence: 'low' as const }
-              : f
-          )
-        : priorPayload.fields;
-      payload = {
-        ...payload,
-        fields: kept,
-        bucket: 'needs_person',
-        failureReason: rereadFailReason,
-      };
+  } else {
+    // Failed / empty read — never pretend we are on current reader/classifier
+    const keepReader = Number(priorPayload?.readerVersion) || Number(recipe.readerVersion) || 0;
+    const keepClass =
+      Number(priorPayload?.classifierVersion) || Number(recipe.classifierVersion) || 0;
+    payload.readerVersion =
+      keepReader === ASSISTED_FORM_READER_VERSION && !formFound ? 0 : keepReader;
+    payload.classifierVersion =
+      keepClass === ASSISTED_FIELD_CLASSIFIER_VERSION && !formFound ? 0 : keepClass;
+    if (!formFound) {
+      payload.failureReason =
+        rereadFailReason ??
+        discoveryFailureReason ??
+        payload.failureReason ??
+        'No HTML fetched';
+      payload.bucket = 'needs_person';
+    }
+    if (rereadFailed && priorPayload) {
+      payload.failureReason = rereadFailReason ?? payload.failureReason;
+      payload.bucket = 'needs_person';
+      // Prefer prior field values if rebuild emptied them — never resurrect cleared pins
+      if (!payload.fields.length && priorPayload.fields?.length) {
+        const kept = opts.clearPins
+          ? priorPayload.fields.map((f) =>
+              f.source === 'human_corrected' || f.source === 'known_bad'
+                ? { ...f, source: 'name_guess' as const, confidence: 'low' as const }
+                : f
+            )
+          : priorPayload.fields;
+        payload = {
+          ...payload,
+          fields: kept,
+          bucket: 'needs_person',
+          failureReason: rereadFailReason,
+          readerVersion: payload.readerVersion,
+          classifierVersion: payload.classifierVersion,
+        };
+      }
     }
   }
 

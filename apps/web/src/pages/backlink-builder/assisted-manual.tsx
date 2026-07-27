@@ -454,11 +454,9 @@ export function AssistedManualPage() {
                     ) : null}
                     {pkg.classifierOutdated ? (
                       <p className="text-xs text-amber-700 flex items-center gap-1 mt-2">
-                        <AlertTriangle className="h-3.5 w-3.5" /> Classifier updated — Re-read form
-                        to refresh field roles
-                        {pkg.classifierVersion != null || pkg.currentClassifierVersion != null
-                          ? ` (package v${pkg.classifierVersion ?? '?'} / current v${pkg.currentClassifierVersion ?? '?'})`
-                          : ''}
+                        <AlertTriangle className="h-3.5 w-3.5" /> Form Reader / classifier updated —
+                        Re-read or Prepare again to refresh
+                        {` (reader v${pkg.readerVersion ?? '?'}→${pkg.currentReaderVersion ?? '?'} · classifier v${pkg.classifierVersion ?? '?'}→${pkg.currentClassifierVersion ?? '?'})`}
                       </p>
                     ) : null}
                     <p className="text-xs text-muted-foreground mt-1">{pkg.package?.gateNotes}</p>
