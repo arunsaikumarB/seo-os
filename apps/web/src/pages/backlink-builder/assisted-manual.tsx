@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ClipboardList, Copy, Check, Download, RefreshCw, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
@@ -54,6 +54,7 @@ type AssistedPackage = {
     gateNotes: string;
     honestyNotes: string[];
     fields: PackageField[];
+    otherFields?: Array<{ selector: string; label: string; humanStep: string }>;
     multiStepLabel: string | null;
     readerVersion?: number;
     classifierVersion?: number;
@@ -102,13 +103,12 @@ export function AssistedManualPage() {
           honesty: string[];
           pilot: { max: number; used: number; canAdd: boolean };
           counts: {
-            automatable: number;
             assisted: number;
-            manual: number;
             ready: number;
             checkFields: number;
             needsPerson: number;
-            conservationOk: boolean;
+            assistedOk?: boolean;
+            conservationOk?: boolean;
           };
           packages: AssistedPackage[];
         };
@@ -309,9 +309,8 @@ export function AssistedManualPage() {
             <ClipboardList className="h-6 w-6" /> Assisted Manual
           </h1>
           <p className="text-muted-foreground mt-1 max-w-2xl">
-            With auto-publish off, every content-ready site — including Automable — gets a prepared
-            package here. Open each link, paste the fields, clear login/CAPTCHA yourself, and
-            submit. Done marks Submitted; use Done & Verified when there is no email/OTP step.
+            Open each prepared package, paste the fields, clear any login/CAPTCHA yourself, and
+            submit on the site. Every content-ready site lands here — one manual lane.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -321,9 +320,6 @@ export function AssistedManualPage() {
           </Button>
           <Button size="sm" variant="outline" onClick={() => void downloadExcel()}>
             <Download className="h-3.5 w-3.5 mr-1" /> Excel
-          </Button>
-          <Button size="sm" variant="ghost" asChild>
-            <Link to={`/projects/${projectId}/backlink-builder/execution`}>Submit queue</Link>
           </Button>
         </div>
       </div>
@@ -342,20 +338,14 @@ export function AssistedManualPage() {
       </Card>
 
       <div className="grid gap-3 sm:grid-cols-4 text-sm">
-        <Stat label="Automatable" value={d?.counts.automatable} />
-        <Stat label="Assisted Manual" value={d?.counts.assisted} />
-        <Stat label="Manual (offline)" value={d?.counts.manual} />
-        <Stat
-          label="Conservation"
-          value={d?.counts.conservationOk ? 'OK' : 'Check'}
-          warn={d != null && !d.counts.conservationOk}
-        />
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-3 text-sm">
         <Stat label="Ready" value={d?.counts.ready} />
         <Stat label="Check these fields" value={d?.counts.checkFields} />
         <Stat label="Needs a person" value={d?.counts.needsPerson} />
+        <Stat
+          label="Conservation"
+          value={d?.counts.conservationOk === false ? 'FAIL' : 'ok'}
+          warn={d?.counts.conservationOk === false}
+        />
       </div>
 
       {metrics.data?.data ? (
@@ -636,6 +626,20 @@ export function AssistedManualPage() {
                             }
                           />
                         ))}
+                        {(pkg.package?.otherFields?.length ?? 0) > 0 ? (
+                          <div className="rounded-lg border border-dashed px-3 py-2 text-sm space-y-1">
+                            <p className="font-medium">
+                              Other fields on this form (fill yourself)
+                            </p>
+                            <ul className="text-muted-foreground space-y-1">
+                              {pkg.package!.otherFields!.map((o) => (
+                                <li key={o.selector}>
+                                  {o.label} — {o.humanStep}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
                         {pkg.package?.multiStepLabel ? (
                           <p className="text-sm text-amber-700">{pkg.package.multiStepLabel}</p>
                         ) : null}
@@ -747,7 +751,14 @@ function EditableFieldCard(props: {
           ? ` · Category: [${f.recommendedOption}] ← recommended · ${(f.options?.length ?? 1) - 1} other options`
           : ''}
       </p>
-      {f.humanStep ? <p className="text-xs mt-1">{f.humanStep}</p> : null}
+      {f.humanStep ? (
+        <p className="text-xs mt-1 text-amber-800 font-medium">{f.humanStep}</p>
+      ) : null}
+      {!value.trim() && f.humanStep?.toLowerCase().includes('you fill') ? (
+        <p className="text-[11px] text-muted-foreground mt-0.5">
+          Empty on purpose — supply this value on the site.
+        </p>
+      ) : null}
       <Button
         size="sm"
         variant="ghost"

@@ -69,11 +69,11 @@ export function TrackResultsPage() {
       {ac ? (
         <Card className="border-border/40 shadow-sm rounded-2xl">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Lane mix (Import · Submit · Assisted)</CardTitle>
+            <CardTitle className="text-base">Assisted Manual</CardTitle>
             <CardDescription>
-              Automatable {ac.automatable} · Assisted {ac.assisted} (Ready {ac.ready} · Check{' '}
-              {ac.checkFields} · Needs person {ac.needsPerson}) · Manual offline {ac.manual}
-              {ac.conservationOk ? ' · conservation OK' : ' · conservation check'}
+              Ready {ac.ready} · Check these fields {ac.checkFields} · Needs a person{' '}
+              {ac.needsPerson}
+              {ac.assisted != null ? ` · ${ac.assisted} packages` : ''}
             </CardDescription>
           </CardHeader>
           <CardContent>

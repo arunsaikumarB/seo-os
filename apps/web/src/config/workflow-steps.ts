@@ -14,7 +14,7 @@ export interface WorkflowStep {
 
 /**
  * Guided backlink pipeline — 7 steps (Approve removed; Submit = Assisted Manual).
- * Browser auto-submit lives under Advanced Tools.
+ * Single manual lane end-to-end; browser auto-submit is not in the product flow.
  */
 export const WORKFLOW_STEPS: WorkflowStep[] = [
   {
@@ -68,7 +68,7 @@ export const WORKFLOW_STEPS: WorkflowStep[] = [
     title: 'Submit Backlinks',
     purpose:
       'Open each prepared package, paste fields, clear login/CAPTCHA yourself, and submit on the site.',
-    aiTip: 'Assisted Manual — the app never auto-submits unless you opt in under Advanced.',
+    aiTip: 'Assisted Manual — open, paste, clear gates yourself. The app never auto-submits.',
     route: 'backlink-builder/assisted-manual',
     estimatedMinutes: 15,
     difficulty: 'Easy',

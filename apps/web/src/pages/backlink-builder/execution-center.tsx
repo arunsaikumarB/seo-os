@@ -637,9 +637,16 @@ export function BrowserExecutionCenterPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Submit Backlinks</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Submit Backlinks (legacy)</h1>
         <p className="text-muted-foreground">
-          AI submits automatically. When a site needs you, SEO OS hands you one task at a time.
+          Browser auto-submit is retired. Use{' '}
+          <a
+            className="underline underline-offset-2"
+            href={`/projects/${projectId}/backlink-builder/assisted-manual`}
+          >
+            Assisted Manual
+          </a>{' '}
+          — open each package, paste fields, clear login/CAPTCHA, submit on the site.
         </p>
       </div>
 
@@ -842,10 +849,6 @@ export function BrowserExecutionCenterPage() {
                     ['auto_skip_login', 'Automatically Skip Login Sites'],
                     ['auto_skip_captcha', 'Automatically Skip CAPTCHA Sites'],
                     ['never_ask_login', 'Never Ask Again for Login Sites'],
-                    [
-                      'auto_publish_automatable',
-                      'Auto-publish automatable links (off by default — prefer Assisted Manual)',
-                    ],
                   ] as const
                 ).map(([key, label]) => {
                   const checked = Boolean(

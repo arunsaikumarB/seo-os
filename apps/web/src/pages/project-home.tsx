@@ -161,16 +161,15 @@ export function ProjectHomePage() {
               </>
             ) : jobsOpen ? (
               <p>
-                AI is submitting backlinks
+                Packages are ready in Assisted Manual
                 {execSummary.data?.etaSeconds
-                  ? ` · ETA ${formatEta(execSummary.data.etaSeconds)}`
+                  ? ` · ~${formatEta(execSummary.data.etaSeconds)} remaining`
                   : ''}
-                .
+                . Open each site, paste fields, and submit.
               </p>
             ) : actionItems.length > 0 ? (
               <p>
-                I need a quick hand on {actionItems[0].website} — {actionItems[0].reason}. Then I
-                continue automatically.
+                I need a quick hand on {actionItems[0].website} — {actionItems[0].reason}.
               </p>
             ) : (
               <p>

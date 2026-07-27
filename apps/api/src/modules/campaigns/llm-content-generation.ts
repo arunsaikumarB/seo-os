@@ -7,6 +7,9 @@ import {
   isGenerationMockEnabled,
   scanPackForPlaceholders,
   scoreContentPackQuality,
+  dedupeContentFields,
+  fitDescriptionToCap,
+  fitMetaDescription,
   type BrandContext,
   type OpportunityAiContext,
 } from '@seo-os/backlink-builder';
@@ -37,11 +40,24 @@ function buildPrompt(params: {
   storageType: string;
   classificationLabel?: string | null;
   reason?: string | null;
+  /** Prior package texts to avoid repeating (cross-site uniqueness). */
+  avoidTexts?: string[];
+  uniquenessAttempt?: number;
 }): string {
   const site = params.opp.website_name || params.opp.domain || 'the target site';
   const brandUrl =
     params.brand.projectUrl ||
     (params.brand.projectDomain ? `https://${params.brand.projectDomain}` : '');
+  const avoidBlock =
+    params.avoidTexts && params.avoidTexts.length > 0
+      ? `
+UNIQUENESS (attempt ${params.uniquenessAttempt ?? 1}): These descriptions were already used for OTHER sites in this campaign — write a DIFFERENT angle/opening/emphasis. Do not paraphrase them closely:
+${params.avoidTexts
+  .slice(0, 5)
+  .map((t, i) => `${i + 1}. ${t.slice(0, 280)}`)
+  .join('\n')}
+`
+      : '';
   return `You are writing backlink submission content for a real marketing campaign.
 
 PROJECT / BRAND (use these exact names — never invent "Our Brand"):
@@ -66,30 +82,32 @@ TARGET SITE:
 - Backlink / storage type: ${params.storageType}
 - Classification: ${params.classificationLabel ?? params.storageType}
 - Analysis reason: ${params.reason ?? 'n/a'}
-
+${avoidBlock}
 Write ORIGINAL content tailored to this site type (directory blurb, forum reply, guest post, profile, Q&A, etc.).
+This package is for THIS site only — never reuse copy from another listing.
 
 Return ONLY a JSON object with:
 {
   "seoTitle": string (45-60 chars, must include brand or product naturally),
-  "metaDescription": string (120-155 chars),
+  "metaDescription": string (120-155 chars, HARD MAX 160),
   "h1": string,
   "h2": string[3-5],
-  "body": string (markdown, 350-900 words for guest_post; shorter for directory/forum/profile),
-  "shortDescription": string (1-2 sentences),
-  "longDescription": string,
-  "businessDescription": string,
+  "body": string (markdown; guest_post 350-900 words; directory/forum/profile shorter),
+  "shortDescription": string (ONE sentence, 180-195 chars, HARD MAX 200 — never longer),
+  "longDescription": string (distinct from shortDescription, 180-195 chars, HARD MAX 200 — never longer),
+  "businessDescription": string (≤200 chars, same rules),
   "businessName": string (exact brand name),
   "faq": [{"question": string, "answer": string}],
   "suggestedLinks": [{"anchor": string, "url": string}],
   "internalLinks": [{"anchor": string, "url": string}],
   "authorBio": string,
-  "excerpt": string
+  "excerpt": string (≤200 chars)
 }
 
 Rules:
 - Mention ${params.brand.brandName} and ${params.brand.projectDomain ?? brandUrl} naturally.
 - Base claims ONLY on the grounded website facts above. If features are empty, write a cautious, general description — NEVER invent third-party integrations (QuickBooks, Shopify, etc.) that are not listed.
+- shortDescription, longDescription, metaDescription, and excerpt must each be UNIQUE — title ≠ short ≠ long ≠ meta. Do not paste the same paragraph into multiple fields.
 - Never use placeholders: "Our Brand", "Insight 1", "example.com", "{{", "Key Takeaways" scaffold lists.
 - Links must use https://${params.brand.projectDomain ?? 'the brand domain'} — never example.com.
 - Tone matches the site type (${params.storageType}).`;
@@ -132,6 +150,8 @@ export async function generateLiveContentPack(params: {
   classificationId?: string | null;
   classificationLabel?: string | null;
   reason?: string | null;
+  avoidTexts?: string[];
+  uniquenessAttempt?: number;
 }): Promise<Record<string, unknown>> {
   if (isGenerationMockEnabled()) {
     logger.warn(
@@ -158,6 +178,8 @@ export async function generateLiveContentPack(params: {
     storageType: params.storageType,
     classificationLabel: params.classificationLabel,
     reason: params.reason,
+    avoidTexts: params.avoidTexts,
+    uniquenessAttempt: params.uniquenessAttempt,
   });
 
   const messages = [
@@ -191,9 +213,18 @@ export async function generateLiveContentPack(params: {
         .slice(0, 60);
 
       const body = String(llm.body ?? '');
-      const pack: Record<string, unknown> = {
-        seoTitle: String(llm.seoTitle ?? ''),
+      const longFromLlm = String(llm.longDescription ?? '').trim();
+      const shortFromLlm = String(llm.shortDescription ?? '').trim();
+      const deduped = dedupeContentFields({
+        title: String(llm.seoTitle ?? ''),
+        shortDescription: shortFromLlm,
+        longDescription:
+          longFromLlm || fitDescriptionToCap(body).value || shortFromLlm,
         metaDescription: String(llm.metaDescription ?? ''),
+      });
+      const pack: Record<string, unknown> = {
+        seoTitle: deduped.title,
+        metaDescription: deduped.metaDescription || fitMetaDescription(deduped.shortDescription),
         h1: String(llm.h1 ?? llm.seoTitle ?? ''),
         h2: Array.isArray(llm.h2) ? llm.h2.map(String) : [],
         slug,
@@ -202,9 +233,9 @@ export async function generateLiveContentPack(params: {
         schemaJsonLd: {
           '@context': 'https://schema.org',
           '@type': 'Article',
-          headline: String(llm.seoTitle ?? ''),
+          headline: deduped.title,
           author: { '@type': 'Organization', name: brandName },
-          description: String(llm.metaDescription ?? ''),
+          description: deduped.metaDescription,
         },
         suggestedLinks: Array.isArray(llm.suggestedLinks)
           ? llm.suggestedLinks
@@ -212,12 +243,14 @@ export async function generateLiveContentPack(params: {
         suggestedImages: [],
         bodyOutline: body,
         body,
-        shortDescription: String(llm.shortDescription ?? ''),
-        longDescription: String(llm.longDescription ?? body.slice(0, 1200)),
-        businessDescription: String(llm.businessDescription ?? ''),
+        shortDescription: deduped.shortDescription,
+        longDescription: deduped.longDescription,
+        businessDescription: fitDescriptionToCap(
+          String(llm.businessDescription ?? deduped.longDescription)
+        ).value,
         businessName: String(llm.businessName ?? brandName),
         authorBio: String(llm.authorBio ?? ''),
-        excerpt: String(llm.excerpt ?? ''),
+        excerpt: fitDescriptionToCap(String(llm.excerpt ?? deduped.shortDescription)).value,
         internalLinks: Array.isArray(llm.internalLinks)
           ? llm.internalLinks
           : [{ anchor: brandName, url: `https://${domain}` }],
@@ -233,6 +266,7 @@ export async function generateLiveContentPack(params: {
         provider: result.provider,
         providerChain: result.chainSummary,
         failoverUsed: result.failoverUsed,
+        contentFlags: deduped.flagged,
       };
 
       const scan = scanPackForPlaceholders(pack);

@@ -358,21 +358,67 @@ export async function createContentPack(
   const { generateLiveContentPack } = await import(
     '../campaigns/llm-content-generation.js'
   );
-  const pack = (await generateLiveContentPack({
-    workspaceId,
-    storageType,
-    opp: {
-      title: String(opp.title),
-      domain: opp.domain as string | null,
-      opportunity_type: storageType,
-      score: Number(opp.score ?? 0),
-      website_name: opp.website_name as string | null,
-    },
-    brand,
-    classificationId: plan.detectedType,
-    classificationLabel: plan.detectedTypeLabel,
-    reason: plan.reason,
-  })) as ReturnType<typeof generateContentPack> & Record<string, unknown>;
+  const {
+    textSimilarity,
+    CONTENT_SIMILARITY_THRESHOLD,
+    CONTENT_SIMILARITY_MAX_ATTEMPTS,
+  } = await import('@seo-os/backlink-builder');
+
+  // Sibling descriptions — force unique copy per site
+  const { data: siblingPacks } = await getSupabaseAdmin()
+    .from('content_packs')
+    .select('opportunity_id, pack')
+    .eq('workspace_id', workspaceId)
+    .neq('opportunity_id', opportunityId)
+    .limit(80);
+  const avoidTexts = (siblingPacks ?? [])
+    .map((row) => {
+      const p = (row.pack as Record<string, unknown> | null) ?? {};
+      return String(p.longDescription ?? p.shortDescription ?? p.metaDescription ?? '').trim();
+    })
+    .filter((t) => t.length >= 40);
+
+  let pack: ReturnType<typeof generateContentPack> & Record<string, unknown> = null as never;
+  let contentTooSimilar = false;
+  for (let attempt = 1; attempt <= CONTENT_SIMILARITY_MAX_ATTEMPTS; attempt++) {
+    pack = (await generateLiveContentPack({
+      workspaceId,
+      storageType,
+      opp: {
+        title: String(opp.title),
+        domain: opp.domain as string | null,
+        opportunity_type: storageType,
+        score: Number(opp.score ?? 0),
+        website_name: opp.website_name as string | null,
+      },
+      brand,
+      classificationId: plan.detectedType,
+      classificationLabel: plan.detectedTypeLabel,
+      reason: plan.reason,
+      avoidTexts,
+      uniquenessAttempt: attempt,
+    })) as ReturnType<typeof generateContentPack> & Record<string, unknown>;
+
+    const candidate = String(
+      pack.longDescription ?? pack.shortDescription ?? pack.metaDescription ?? ''
+    );
+    const tooClose = avoidTexts.some(
+      (prev) => textSimilarity(candidate, prev) >= CONTENT_SIMILARITY_THRESHOLD
+    );
+    if (!tooClose) {
+      contentTooSimilar = false;
+      break;
+    }
+    contentTooSimilar = true;
+    avoidTexts.unshift(candidate);
+  }
+  if (contentTooSimilar) {
+    pack.contentTooSimilar = true;
+    pack.contentFlags = [
+      ...((pack.contentFlags as string[]) ?? []),
+      'content_too_similar',
+    ];
+  }
 
   // Align estimates from live intelligence
   pack.estimatedApprovalProbability = intelligence.estimatedApprovalProbability;

@@ -7,6 +7,7 @@ import {
   formatYouMustSteps,
   selectTargetForm,
 } from './target-form.js';
+import { fitDescriptionToCap, textsAreRepetitive } from './content-limits.js';
 
 /**
  * Phase 7 — Assisted Manual packages (human submits; app never auto-publishes).
@@ -226,6 +227,12 @@ export type AssistedPackagePayload = {
   multiStep: boolean;
   multiStepLabel: string | null;
   fields: PackageFieldValue[];
+  /** Unknown-role fields — fill yourself; not shown as forgotten blanks */
+  otherFields?: Array<{
+    selector: string;
+    label: string;
+    humanStep: string;
+  }>;
   honestyNotes: string[];
   failureReason: string | null;
   /** Phase 8 — e.g. "3 confident · 2 need a check" */
@@ -1425,6 +1432,7 @@ export type ContentSource = {
   title?: string | null;
   shortDescription?: string | null;
   longDescription?: string | null;
+  metaDescription?: string | null;
   businessName?: string | null;
   /** Company / trading name for business_name fields */
   companyName?: string | null;
@@ -1436,6 +1444,8 @@ export type ContentSource = {
   address?: string | null;
   categoryHints?: string[];
   imageFileName?: string | null;
+  /** Cross-package uniqueness failed after max attempts */
+  contentTooSimilar?: boolean;
 };
 
 /**
@@ -1448,8 +1458,8 @@ export function valueForRole(role: FieldRole, content: ContentSource): string {
       return String(content.title ?? '').trim();
     case 'business_name':
       return String(content.companyName || content.businessName || '').trim();
-    case 'short_desc':
-      return String(content.shortDescription ?? '').trim();
+  case 'short_desc':
+      return String(content.shortDescription || content.metaDescription || '').trim();
     case 'long_desc':
       return String(content.longDescription ?? '').trim();
     case 'url':
@@ -1592,7 +1602,13 @@ export function buildAssistedPackage(input: {
     input.recipe.resolvedFormUrl?.trim() ||
     input.recipe.entryUrl;
 
-  const fields: PackageFieldValue[] = input.recipe.fields.map((rf) => {
+  const PROFILE_ROLES = new Set(['url', 'email', 'phone', 'name', 'business_name', 'address']);
+  const CONTENT_ROLES = new Set(['title', 'short_desc', 'long_desc']);
+  const usedValues = new Set<string>();
+  const otherFields: NonNullable<AssistedPackagePayload['otherFields']> = [];
+
+  const mappedFields: PackageFieldValue[] = [];
+  for (const rf of input.recipe.fields) {
     if (rf.role === 'attachment') {
       const fileName = input.content.imageFileName ?? 'listing-image.jpg';
       const constraints = [
@@ -1601,7 +1617,7 @@ export function buildAssistedPackage(input: {
       ]
         .filter(Boolean)
         .join(', ');
-      return {
+      mappedFields.push({
         selector: rf.selector,
         role: rf.role,
         label: rf.label ?? 'Upload',
@@ -1617,7 +1633,8 @@ export function buildAssistedPackage(input: {
         humanStep: `Attach \`${fileName}\` to the ${rf.label ?? 'upload'} field${
           constraints ? ` (${constraints})` : ''
         }.`,
-      };
+      });
+      continue;
     }
     if (rf.role === 'category' && rf.options?.length) {
       const cleanedOptions = rf.options.map((o) => sanitizeOptionLabel(o)).filter(Boolean);
@@ -1631,7 +1648,7 @@ export function buildAssistedPackage(input: {
           'Services',
         ]
       );
-      return {
+      mappedFields.push({
         selector: rf.selector,
         role: rf.role,
         label: rf.label ?? 'Category',
@@ -1655,13 +1672,55 @@ export function buildAssistedPackage(input: {
           : 'No confident category match — pick from the list',
         humanStep: recommended
           ? `Category: [${recommended}] ← recommended · ${cleanedOptions.length - 1} other options available`
-          : 'Pick a category from the real list — none auto-selected.',
-      };
+          : 'you fill this — pick from the real option list',
+      });
+      continue;
     }
 
-    // Phase 9 — unknown / other / low-confidence roles get EMPTY, never a guessed paragraph
-    if (rf.role === 'other' || rf.confidence === 'low' || rf.source === 'known_bad') {
-      return {
+    // Unknown / other → list under "other fields", not as blank content slots
+    if (rf.role === 'other' || rf.source === 'known_bad') {
+      otherFields.push({
+        selector: rf.selector,
+        label: rf.label ?? rf.role,
+        humanStep: 'you fill this — unknown field role (app will not invent a value)',
+      });
+      continue;
+    }
+
+    let raw = valueForRole(rf.role, input.content);
+    // Description caps: ≤200 or smaller form maxlength
+    if (rf.role === 'short_desc' || rf.role === 'long_desc') {
+      const capped = fitDescriptionToCap(raw, rf.maxlength);
+      raw = capped.value;
+    } else if (rf.maxlength != null && rf.maxlength > 0) {
+      const fitted = fitValueToLimit(raw, rf.maxlength);
+      raw = fitted.value;
+    }
+
+    // Intra-package: never repeat the same paragraph across fields
+    const norm = raw.replace(/\s+/g, ' ').trim().toLowerCase();
+    if (raw && CONTENT_ROLES.has(rf.role)) {
+      let repeat = false;
+      for (const prev of usedValues) {
+        if (textsAreRepetitive(raw, prev)) {
+          repeat = true;
+          break;
+        }
+      }
+      if (repeat) {
+        raw = '';
+      } else if (norm) {
+        usedValues.add(raw);
+      }
+    }
+
+    const fitted = fitValueToLimit(raw, rf.maxlength);
+    const empty = !fitted.value.trim();
+    const isProfile = PROFILE_ROLES.has(rf.role);
+    const isContent = CONTENT_ROLES.has(rf.role);
+
+    if (isProfile && empty) {
+      mappedFields.push({
         selector: rf.selector,
         role: rf.role,
         label: rf.label ?? rf.role,
@@ -1673,24 +1732,41 @@ export function buildAssistedPackage(input: {
         source: rf.source,
         overLimit: false,
         flagged: true,
-        flagReason:
-          rf.role === 'other'
-            ? 'Unknown field role — left empty (will not guess)'
-            : 'Low-confidence mapping — left empty until confirmed',
-        humanStep: 'Fill this field yourself — the app will not invent a value.',
-      };
+        flagReason: `No project ${rf.role} on file — add it in Settings`,
+        humanStep: 'you fill this',
+      });
+      continue;
     }
 
-    const raw = valueForRole(rf.role, input.content);
-    const fitted = fitValueToLimit(raw, rf.maxlength);
-    const emptyBound =
-      !fitted.value &&
-      (rf.role === 'url' ||
-        rf.role === 'email' ||
-        rf.role === 'phone' ||
-        rf.role === 'name' ||
-        rf.role === 'business_name');
-    return {
+    if (isContent && empty) {
+      mappedFields.push({
+        selector: rf.selector,
+        role: rf.role,
+        label: rf.label ?? rf.role,
+        value: '',
+        charCount: 0,
+        maxlength: rf.maxlength,
+        required: rf.required,
+        confidence: 'low',
+        source: rf.source,
+        overLimit: false,
+        flagged: true,
+        flagReason: 'Content field empty — regenerate package (defect)',
+        humanStep: 'Content missing — re-prepare or edit',
+      });
+      continue;
+    }
+
+    if (rf.confidence === 'low' && !isProfile && !isContent && empty) {
+      otherFields.push({
+        selector: rf.selector,
+        label: rf.label ?? rf.role,
+        humanStep: 'you fill this — low-confidence mapping',
+      });
+      continue;
+    }
+
+    mappedFields.push({
       selector: rf.selector,
       role: rf.role,
       label: rf.label ?? rf.role,
@@ -1702,23 +1778,24 @@ export function buildAssistedPackage(input: {
       source: rf.source,
       overLimit: fitted.overLimit,
       truncatedAtSentence: fitted.truncatedAtSentence,
-      flagged: emptyBound || undefined,
-      flagReason: emptyBound
-        ? `No project ${rf.role} on file — add it in Settings`
-        : null,
-    };
-  });
+      flagged: fitted.overLimit || undefined,
+      flagReason: fitted.overLimit ? 'Truncated to field limit at a sentence/word boundary' : null,
+    });
+  }
 
   // Phase 8 — self-check + confidence gate before bucket / ship
-  const checkedFields = selfCheckPackageFields(fields);
+  const checkedFields = selfCheckPackageFields(mappedFields);
   const confSummary = confidenceGateSummary(checkedFields);
 
-  const bucket = assignAssistedBucket({
+  let bucket = assignAssistedBucket({
     recipe: input.recipe,
     fields: checkedFields,
     fingerprintStatus,
     formFound,
   });
+  if (input.content.contentTooSimilar) {
+    bucket = 'needs_person';
+  }
 
   let failureReason: string | null = null;
   if (!formFound) {
@@ -1726,6 +1803,9 @@ export function buildAssistedPackage(input: {
       input.discoveryFailureReason?.trim() ||
       input.recipe.formFailureReason?.trim() ||
       'No submission form found after crawling — try Re-read form or Report bad package';
+  } else if (input.content.contentTooSimilar) {
+    failureReason =
+      'content_too_similar — description too close to another package after 3 regenerations';
   } else if (fingerprintStatus === 'changed') {
     failureReason = 'Form changed — re-prepare';
   } else if (fingerprintStatus === 'stale') {
@@ -1778,6 +1858,7 @@ export function buildAssistedPackage(input: {
     multiStep: input.recipe.multiStep,
     multiStepLabel: input.recipe.multiStepLabel ?? null,
     fields: checkedFields,
+    otherFields: otherFields.length ? otherFields : undefined,
     honestyNotes,
     failureReason: failureReason ?? confSummary.line,
     confidenceSummary: confSummary.line,
@@ -1801,6 +1882,7 @@ export function verifyMappingAgainstDom(
   const bySelector = new Map(live.map((f) => [f.selector, f]));
   const mismatches: string[] = [];
   for (const rf of recipe.fields) {
+    if (rf.role === 'other' || rf.role === 'captcha' || rf.role === 'terms') continue;
     const fact = bySelector.get(rf.selector);
     if (!fact) {
       mismatches.push(rf.selector);

@@ -311,7 +311,7 @@ export async function resumeInterruptedSubmissions(workspaceId?: string): Promis
             lease_expires_at: null,
             error_code: 'AUTO_PUBLISH_OFF',
             error_message:
-              'Browser auto-submit is off — use Assisted Manual. Opt in under Advanced → Browser Auto-Submit.',
+        'Browser auto-submit is off — use Assisted Manual.',
             finished_at: nowIso,
             updated_at: nowIso,
           })
@@ -510,7 +510,7 @@ export async function cancelQueuedJobsWhenAutoPublishOff(
 ): Promise<number> {
   const now = new Date().toISOString();
   const msg =
-    'Browser auto-submit is off — use Assisted Manual. Opt in under Advanced → Browser Auto-Submit.';
+    'Browser auto-submit is off — use Assisted Manual.';
   const patch = {
     status: 'skipped',
     disposition: 'skipped',

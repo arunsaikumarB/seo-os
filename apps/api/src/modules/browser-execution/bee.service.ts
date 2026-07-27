@@ -282,7 +282,7 @@ export async function createExecution(params: {
   if (!params.force && policy.auto_publish_automatable !== true) {
     throw Object.assign(
       new Error(
-        'Browser auto-submit is off — use Assisted Manual, or enable auto-publish / Start from Advanced → Browser Auto-Submit.'
+        'Browser auto-submit is off — use Assisted Manual.'
       ),
       { status: 409, code: 'AUTO_PUBLISH_OFF' }
     );

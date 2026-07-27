@@ -298,8 +298,7 @@ export function CampaignHealthPage() {
 
       {ac ? (
         <div className="flex flex-wrap gap-3 border border-sky-700/40 p-2">
-          <span className="font-semibold">Assisted Manual (Phase 7)</span>
-          <span>automatable={ac.automatable}</span>
+          <span className="font-semibold">Assisted Manual</span>
           <span>assisted={ac.assisted}</span>
           <span>ready={ac.ready}</span>
           <span>checkFields={ac.checkFields}</span>

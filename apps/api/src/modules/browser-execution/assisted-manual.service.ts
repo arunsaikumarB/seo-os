@@ -16,11 +16,13 @@ import {
   buildAssistedPackage,
   buildSiteRecipe,
   computeAssistedLaneCounts,
+  dedupeContentFields,
   evaluateFingerprintStatus,
   extractFormFieldFacts,
   extractTargetFormFieldFacts,
   findSimilarPackagePairs,
   fieldFactSnapshot,
+  fitDescriptionToCap,
   normalizeSiteDomain,
   recipeVersionsCurrent,
   gateIsOtp,
@@ -331,16 +333,20 @@ async function loadContentForOpportunity(workspaceId: string, opportunityId: str
     .replace(/\/+$/, '')
     .trim();
 
-  const longDesc = String(
-    p.longDescription ?? p.body ?? p.businessDescription ?? ''
-  );
-  const shortDesc = String(p.shortDescription ?? p.excerpt ?? longDesc.slice(0, 160));
+  const longDesc = String(p.longDescription ?? p.businessDescription ?? '');
+  const meta = String(p.metaDescription ?? '');
+  // Never derive short from long slice — that creates intra-package duplicates
+  const shortDesc = String(p.shortDescription ?? p.excerpt ?? meta ?? '');
+  const deduped = dedupeContentFields({
+    title: String(p.seoTitle ?? p.headline ?? p.businessName ?? brand.brandName ?? ''),
+    shortDescription: shortDesc,
+    longDescription: longDesc,
+    metaDescription: meta,
+  });
   const businessName = String(
     p.businessName ?? brand.brandName ?? projectDomain ?? ''
   );
-  const title = String(
-    p.seoTitle ?? p.headline ?? p.businessName ?? brand.brandName ?? ''
-  );
+  const title = deduped.title;
   const images = Array.isArray(p.suggestedImages) ? p.suggestedImages : [];
   const imageFileName =
     typeof images[0] === 'string'
@@ -349,8 +355,9 @@ async function loadContentForOpportunity(workspaceId: string, opportunityId: str
 
   return {
     title,
-    shortDescription: shortDesc,
-    longDescription: longDesc,
+    shortDescription: fitDescriptionToCap(deduped.shortDescription).value,
+    longDescription: fitDescriptionToCap(deduped.longDescription).value,
+    metaDescription: deduped.metaDescription,
     businessName,
     companyName: String(
       brand.companyName || p.businessName || brand.brandName || businessName || ''
@@ -370,6 +377,7 @@ async function loadContentForOpportunity(workspaceId: string, opportunityId: str
           String(p.backlinkType ?? ''),
         ].filter(Boolean),
     imageFileName,
+    contentTooSimilar: Boolean(p.contentTooSimilar),
   };
 }
 
@@ -1191,7 +1199,7 @@ export async function listAssistedPackages(workspaceId: string) {
       batchId: PILOT_BATCH,
       canAdd: true,
       note:
-        'Auto-publish is off — every content-ready site (including Automable) gets an Assisted Manual package. Browser does not auto-submit.',
+        'Every content-ready site gets an Assisted Manual package. Browser auto-submit is retired from the product flow.',
     },
     counts: assistedCounts,
     laneConservation: board.conservation,

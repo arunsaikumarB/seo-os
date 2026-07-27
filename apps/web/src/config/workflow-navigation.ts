@@ -17,7 +17,6 @@ import {
   GraduationCap,
   FolderPlus,
   ClipboardList,
-  Bot,
 } from 'lucide-react';
 import type { NavItem } from './navigation';
 
@@ -39,7 +38,7 @@ export interface WorkflowNavItem extends NavItem {
   dividerBefore?: boolean;
 }
 
-/** Guided IA — 7-step primary pipeline + Advanced (browser auto-submit lives here) */
+/** Guided IA — 7-step primary pipeline + Advanced tools */
 export const workflowNavSections: WorkflowNavSection[] = [
   {
     id: 'primary',
@@ -107,12 +106,6 @@ export const workflowNavSections: WorkflowNavSection[] = [
     label: 'Advanced Tools',
     advanced: true,
     items: [
-      {
-        label: 'Browser Auto-Submit',
-        href: 'backlink-builder/execution',
-        icon: Bot,
-        featureFlag: 'bee_enabled',
-      },
       { label: 'Campaigns', href: 'campaigns', icon: Target, featureFlag: 'backlink_builder' },
       { label: 'Relationship Hub', href: 'relationships', icon: Handshake },
       {
