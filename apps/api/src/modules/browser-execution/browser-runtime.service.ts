@@ -227,7 +227,7 @@ export class BrowserExecutionService {
     if (!this.page) throw new Error('No page — call launch() first');
     const startedAt = Date.now();
     try {
-      // Phase 6.3.5 — never networkidle (hangs on analytics/long-poll); settle after DOM ready
+      // Phase 6.3.5 — never networkidle by default (hangs on analytics/long-poll); settle after DOM ready
       await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
       await this.page.waitForLoadState('load', { timeout: 5_000 }).catch(() => undefined);
       await new Promise((r) => setTimeout(r, 750));
@@ -248,6 +248,32 @@ export class BrowserExecutionService {
       );
     }
     return this.capture('navigated');
+  }
+
+  /**
+   * Extra settle for SPA shells: wait for a <form> (or network quiet) so
+   * client-rendered submit UIs can appear before Form Reader runs.
+   */
+  async settleForSpaForms(opts?: { timeoutMs?: number }): Promise<void> {
+    if (!this.page || this.page.isClosed()) return;
+    const timeoutMs = opts?.timeoutMs ?? 12_000;
+    try {
+      await this.page
+        .waitForSelector('form', { timeout: Math.min(timeoutMs, 10_000), state: 'attached' })
+        .catch(() => undefined);
+      await this.page
+        .waitForLoadState('networkidle', { timeout: Math.min(timeoutMs, 8_000) })
+        .catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 1_250));
+    } catch {
+      /* settle best-effort */
+    }
+  }
+
+  /** Full page HTML for Form Reader / assisted discovery (not the truncated capture snippet). */
+  async getPageHtml(): Promise<string> {
+    if (!this.page || this.page.isClosed()) throw new Error('No page');
+    return this.page.content();
   }
 
   hasLivePage(): boolean {
@@ -293,12 +319,6 @@ export class BrowserExecutionService {
       interventionExplanation: signals.explanation,
       interventionEvidence: signals.evidence,
     };
-  }
-
-  /** Full page HTML for Form Reader / assisted discovery (not the truncated capture snippet). */
-  async getPageHtml(): Promise<string> {
-    if (!this.page || this.page.isClosed()) throw new Error('No page');
-    return this.page.content();
   }
 
   /** Lightweight frame for interactive remote control (no HTML scrape). */
@@ -681,17 +701,25 @@ export class BrowserExecutionService {
  * One-shot Playwright HTML fetch for Assisted Manual Form Reader.
  * Used when plain HTTP is bot-blocked / returns an empty challenge shell.
  * Does not solve CAPTCHA — only renders the page Chromium can load.
+ * When the first paint has no <form> but looks like an SPA, waits for settle.
  */
 export async function fetchRenderedHtml(
   url: string,
-  opts?: { timeoutMs?: number }
+  opts?: { timeoutMs?: number; settleSpa?: boolean }
 ): Promise<string | null> {
   const timeoutMs = opts?.timeoutMs ?? 30_000;
+  const settleSpa = opts?.settleSpa !== false;
   const runtime = new BrowserExecutionService();
   try {
     await runtime.launch({ mode: 'headless', timeoutMs: Math.min(timeoutMs, 25_000) });
     await runtime.navigate(url, timeoutMs);
-    const html = await runtime.getPageHtml();
+    let html = await runtime.getPageHtml();
+    const { htmlHasFormElement, looksLikeSpaShell } = await import('@seo-os/backlink-builder');
+    if (settleSpa && html && !htmlHasFormElement(html) && looksLikeSpaShell(html)) {
+      logger.info({ url }, 'fetchRenderedHtml: SPA shell without form — settling for client render');
+      await runtime.settleForSpaForms({ timeoutMs: 12_000 });
+      html = await runtime.getPageHtml();
+    }
     const sliced = html.slice(0, 500_000);
     return sliced.trim() ? sliced : null;
   } catch (err) {

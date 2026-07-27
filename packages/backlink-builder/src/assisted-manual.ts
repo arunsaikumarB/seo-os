@@ -8,6 +8,9 @@ import {
   selectTargetForm,
 } from './target-form.js';
 import { fitDescriptionToCap, textsAreRepetitive } from './content-limits.js';
+import {
+  formUnavailableMessage,
+} from './form-unavailable.js';
 
 /**
  * Phase 7 — Assisted Manual packages (human submits; app never auto-publishes).
@@ -105,7 +108,7 @@ export function gateBlocksReady(gate: AssistedGate | string | null | undefined):
 }
 
 export type AssistedBucket = 'ready' | 'check_fields' | 'needs_person';
-export type PackageStatus = 'not_started' | 'in_progress' | 'done' | 'failed';
+export type PackageStatus = 'not_started' | 'in_progress' | 'done' | 'failed' | 'skipped';
 export type FingerprintStatus = 'fresh' | 'stale' | 'changed';
 
 /** DOM facts extracted during crawl — evidence first, LLM only to disambiguate. */
@@ -236,6 +239,11 @@ export type AssistedPackagePayload = {
   }>;
   honestyNotes: string[];
   failureReason: string | null;
+  /**
+   * Form cannot be prepared in-app (SPA with no form after settle, or login-walled / no HTML).
+   * Needs a person — Skip or open the site manually; Re-read will not help.
+   */
+  formUnavailable?: boolean;
   /** Phase 8 — e.g. "3 confident · 2 need a check" */
   confidenceSummary?: string | null;
   /** Captcha / agreement — "you must: …" */
@@ -1799,11 +1807,14 @@ export function buildAssistedPackage(input: {
   }
 
   let failureReason: string | null = null;
+  let formUnavailable = false;
   if (!formFound) {
-    failureReason =
+    formUnavailable = true;
+    failureReason = formUnavailableMessage(
       input.discoveryFailureReason?.trim() ||
-      input.recipe.formFailureReason?.trim() ||
-      'No submission form found after crawling — try Re-read form or Report bad package';
+        input.recipe.formFailureReason?.trim() ||
+        null
+    );
   } else if (input.content.contentTooSimilar) {
     failureReason =
       'content_too_similar — description too close to another package after 3 regenerations';
@@ -1862,6 +1873,7 @@ export function buildAssistedPackage(input: {
     otherFields: otherFields.length ? otherFields : undefined,
     honestyNotes,
     failureReason: failureReason ?? confSummary.line,
+    formUnavailable: formUnavailable || undefined,
     confidenceSummary: confSummary.line,
     humanSteps: input.recipe.humanSteps ?? [],
     targetFormSelector: input.recipe.targetFormSelector ?? null,

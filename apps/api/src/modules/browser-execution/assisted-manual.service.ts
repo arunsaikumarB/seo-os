@@ -23,6 +23,9 @@ import {
   findSimilarPackagePairs,
   fieldFactSnapshot,
   fitDescriptionToCap,
+  formUnavailableMessage,
+  htmlHasFormElement,
+  looksLikeSpaShell,
   normalizeSiteDomain,
   recipeVersionsCurrent,
   gateIsOtp,
@@ -112,16 +115,24 @@ async function fetchHtml(
   browserBudget?: { used: number; max: number }
 ): Promise<string | null> {
   const http = await fetchHtmlHttp(url);
-  if (http && isUsablePageHtml(http)) {
+  // Usable HTTP with a real <form> — done. Formless SPA shells still need Playwright settle.
+  if (http && isUsablePageHtml(http) && htmlHasFormElement(http)) {
+    return http;
+  }
+  const spaNeedsBrowser =
+    Boolean(http && looksLikeSpaShell(http) && !htmlHasFormElement(http));
+  const httpFailed = !http || !http.trim() || !isUsablePageHtml(http);
+
+  if (!httpFailed && !spaNeedsBrowser) {
     return http;
   }
 
-  const httpFailed = !http || !http.trim();
   logger.info(
     {
       url,
       httpBytes: http?.length ?? 0,
       httpFailed,
+      spaNeedsBrowser,
       usable: Boolean(http && isUsablePageHtml(http)),
       budgetUsed: browserBudget?.used ?? null,
     },
@@ -133,15 +144,17 @@ async function fetchHtml(
       { url, used: browserBudget.used, max: browserBudget.max },
       'assisted-manual: browser fetch budget exhausted — returning null'
     );
-    // Do not return weak HTTP shells as "success" — forces honest No HTML / retry
     return null;
   }
 
   try {
     const { fetchRenderedHtml } = await import('./browser-runtime.service.js');
     if (browserBudget) browserBudget.used += 1;
-    const rendered = await fetchRenderedHtml(url, { timeoutMs: 45_000 });
-    if (rendered && isUsablePageHtml(rendered)) {
+    const rendered = await fetchRenderedHtml(url, {
+      timeoutMs: 45_000,
+      settleSpa: true,
+    });
+    if (rendered && (isUsablePageHtml(rendered) || htmlHasFormElement(rendered))) {
       logger.info(
         { url, httpBytes: http?.length ?? 0, browserBytes: rendered.length },
         'assisted-manual: browser HTML fallback succeeded'
@@ -152,11 +165,10 @@ async function fetchHtml(
       {
         url,
         browserBytes: rendered?.length ?? 0,
-        usable: Boolean(rendered && isUsablePageHtml(rendered)),
+        hasForm: Boolean(rendered && htmlHasFormElement(rendered)),
       },
       'assisted-manual: browser HTML fallback returned unusable page'
     );
-    // Prefer rendered over nothing even if soft-unusable (Form Reader may still find a form)
     if (rendered && rendered.trim().length > 200) return rendered;
   } catch (err) {
     logger.warn({ err, url }, 'assisted-manual: browser HTML fallback failed');
@@ -604,6 +616,11 @@ export async function prepareAssistedPackages(
       const payload = (existing?.payload as AssistedPackagePayload | null) ?? null;
       const readerV = Number(payload?.readerVersion);
       const classV = Number(payload?.classifierVersion);
+      const formUnavailable = Boolean(
+        (payload as { formUnavailable?: boolean } | null)?.formUnavailable
+      ) || /javascript-rendered|behind login|form_unavailable/i.test(
+        String(existing?.failure_reason ?? payload?.failureReason ?? '')
+      );
       const versionBehind =
         !payload ||
         !Number.isFinite(readerV) ||
@@ -613,7 +630,9 @@ export async function prepareAssistedPackages(
       const noHtmlPrior = /no html fetched/i.test(
         String(existing?.failure_reason ?? payload?.failureReason ?? '')
       );
-      const forceReread = versionBehind || noHtmlPrior || !existing;
+      // form_unavailable: another Prepare will not help — don't burn Playwright budget again
+      const forceReread =
+        !formUnavailable && (versionBehind || noHtmlPrior || !existing);
 
       const pkg = await prepareOnePackage(workspaceId, opportunityId, {
         entryUrlOverride: opts.entryUrlOverrides?.[opportunityId],
@@ -1202,15 +1221,21 @@ async function prepareOnePackage(
     payload.classifierVersion =
       keepClass === ASSISTED_FIELD_CLASSIFIER_VERSION && !formFound ? 0 : keepClass;
     if (!formFound) {
-      payload.failureReason =
-        rereadFailReason ??
-        discoveryFailureReason ??
-        payload.failureReason ??
-        'No HTML fetched';
+      payload.formUnavailable = true;
+      payload.failureReason = formUnavailableMessage(
+        rereadFailReason ?? discoveryFailureReason ?? payload.failureReason
+      );
       payload.bucket = 'needs_person';
     }
     if (rereadFailed && priorPayload) {
-      payload.failureReason = rereadFailReason ?? payload.failureReason;
+      if (!formFound) {
+        payload.formUnavailable = true;
+        payload.failureReason = formUnavailableMessage(
+          rereadFailReason ?? payload.failureReason
+        );
+      } else {
+        payload.failureReason = rereadFailReason ?? payload.failureReason;
+      }
       payload.bucket = 'needs_person';
       // Prefer prior field values if rebuild emptied them — never resurrect cleared pins
       if (!payload.fields.length && priorPayload.fields?.length) {
@@ -1225,7 +1250,8 @@ async function prepareOnePackage(
           ...payload,
           fields: kept,
           bucket: 'needs_person',
-          failureReason: rereadFailReason,
+          failureReason: payload.failureReason,
+          formUnavailable: payload.formUnavailable,
           readerVersion: payload.readerVersion,
           classifierVersion: payload.classifierVersion,
         };
@@ -1363,7 +1389,8 @@ export async function listAssistedPackages(workspaceId: string) {
 
   const packages = [];
   for (const row of rows ?? []) {
-    // List: TTL-only freshness (network re-check on open/export)
+    // Skipped packages stay in DB but leave the Assisted Manual worklist
+    if (String(row.status) === 'skipped') continue;
     const preparedAt = String(row.prepared_at);
     const status = evaluateFingerprintStatus({
       preparedAt,
@@ -1497,11 +1524,13 @@ function formatPackageRow(row: Record<string, unknown>) {
   // Coerce — JSONB can occasionally surface numeric strings; compare the same keys we stamp
   const readerVersion = Number(payload.readerVersion);
   const classifierVersion = Number(payload.classifierVersion);
+  const formUnavailable = Boolean(payload.formUnavailable);
   const classifierOutdated =
-    !Number.isFinite(classifierVersion) ||
-    !Number.isFinite(readerVersion) ||
-    classifierVersion !== ASSISTED_FIELD_CLASSIFIER_VERSION ||
-    readerVersion !== ASSISTED_FORM_READER_VERSION;
+    !formUnavailable &&
+    (!Number.isFinite(classifierVersion) ||
+      !Number.isFinite(readerVersion) ||
+      classifierVersion !== ASSISTED_FIELD_CLASSIFIER_VERSION ||
+      readerVersion !== ASSISTED_FORM_READER_VERSION);
   return {
     id: row.id,
     opportunityId: row.opportunity_id,
@@ -1521,6 +1550,7 @@ function formatPackageRow(row: Record<string, unknown>) {
     userVerified: Boolean(row.user_verified),
     failureReason: row.failure_reason,
     pilotBatchId: row.pilot_batch_id,
+    formUnavailable,
     classifierOutdated,
     readerVersion: Number.isFinite(readerVersion) ? readerVersion : null,
     classifierVersion: Number.isFinite(classifierVersion) ? classifierVersion : null,

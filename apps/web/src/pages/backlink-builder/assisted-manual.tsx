@@ -46,6 +46,7 @@ type AssistedPackage = {
   verifiedAt?: string | null;
   userVerified?: boolean;
   classifierOutdated?: boolean;
+  formUnavailable?: boolean;
   readerVersion?: number | null;
   classifierVersion?: number | null;
   currentReaderVersion?: number;
@@ -170,11 +171,13 @@ export function AssistedManualPage() {
           ? 'Marked Submitted & Verified'
           : vars.status === 'done'
             ? 'Marked Submitted'
-            : vars.userVerified
-              ? 'Marked Verified'
-              : vars.userVerified === false
-                ? 'Verification cleared'
-                : 'Updated'
+            : vars.status === 'skipped'
+              ? 'Skipped — removed from worklist'
+              : vars.userVerified
+                ? 'Marked Verified'
+                : vars.userVerified === false
+                  ? 'Verification cleared'
+                  : 'Updated'
       );
       void qc.invalidateQueries({ queryKey: ['assisted-manual', projectId] });
       void qc.invalidateQueries({ queryKey: ['assisted-manual-metrics', projectId] });
@@ -452,7 +455,7 @@ export function AssistedManualPage() {
                         <AlertTriangle className="h-3.5 w-3.5" /> {pkg.failureReason}
                       </p>
                     ) : null}
-                    {pkg.classifierOutdated ? (
+                    {pkg.classifierOutdated && !pkg.formUnavailable ? (
                       <p className="text-xs text-amber-700 flex items-center gap-1 mt-2">
                         <AlertTriangle className="h-3.5 w-3.5" /> Form Reader / classifier updated —
                         Re-read or Prepare again to refresh
@@ -476,30 +479,54 @@ export function AssistedManualPage() {
                       <Button size="sm" variant="secondary" onClick={() => setOpenId(open ? null : pkg.id)}>
                         {open ? 'Hide fields' : 'Open package'}
                       </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={reread.isPending}
-                        onClick={() => reread.mutate(pkg.id)}
-                        title="Fetch the live form again and re-classify. Confirmed role replacements are kept; known-bad fields re-infer."
-                      >
-                        <RefreshCw
-                          className={cn(
-                            'h-3.5 w-3.5 mr-1',
-                            reread.isPending && reread.variables === pkg.id && 'animate-spin'
-                          )}
-                        />
-                        Re-read form (ignore cache)
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={clearCorrections.isPending}
-                        onClick={() => clearCorrections.mutate(pkg.id)}
-                        title="Remove all pinned human corrections for this site and re-read the form"
-                      >
-                        Clear corrections for this site
-                      </Button>
+                      {!pkg.formUnavailable ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={reread.isPending}
+                          onClick={() => reread.mutate(pkg.id)}
+                          title="Fetch the live form again and re-classify. Confirmed role replacements are kept; known-bad fields re-infer."
+                        >
+                          <RefreshCw
+                            className={cn(
+                              'h-3.5 w-3.5 mr-1',
+                              reread.isPending && reread.variables === pkg.id && 'animate-spin'
+                            )}
+                          />
+                          Re-read form (ignore cache)
+                        </Button>
+                      ) : null}
+                      {pkg.bucket === 'needs_person' ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={patchStatus.isPending}
+                          onClick={() => {
+                            if (
+                              !window.confirm(
+                                `Skip ${pkg.domain}? It leaves the Assisted Manual worklist. You can still open the site manually.`
+                              )
+                            ) {
+                              return;
+                            }
+                            patchStatus.mutate({ packageId: pkg.id, status: 'skipped' });
+                          }}
+                          title="Remove from worklist — form unavailable or not worth assisting"
+                        >
+                          Skip
+                        </Button>
+                      ) : null}
+                      {!pkg.formUnavailable ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={clearCorrections.isPending}
+                          onClick={() => clearCorrections.mutate(pkg.id)}
+                          title="Remove all pinned human corrections for this site and re-read the form"
+                        >
+                          Clear corrections for this site
+                        </Button>
+                      ) : null}
                       <Button
                         size="sm"
                         variant="outline"

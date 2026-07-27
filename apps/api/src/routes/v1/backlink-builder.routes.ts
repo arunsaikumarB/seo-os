@@ -251,7 +251,7 @@ backlinkBuilderRouter.patch(
     try {
       const body = z
         .object({
-          status: z.enum(['not_started', 'in_progress', 'done', 'failed']).optional(),
+          status: z.enum(['not_started', 'in_progress', 'done', 'failed', 'skipped']).optional(),
           minutesSpent: z.number().min(0).max(240).optional(),
           rejectedAtSubmit: z.boolean().optional(),
           userVerified: z.boolean().optional(),
