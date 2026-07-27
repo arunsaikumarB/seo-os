@@ -27,8 +27,9 @@ export const ASSISTED_PREPARE_BATCH_MAX = 500;
  * Mismatched recipes re-read HTML and rebuild fields on prepare even if fingerprint matches.
  * v3: resolve submission page (SI strategy / bounded crawl) before reading.
  * v4: select ONE target <form> — never merge login/search widgets with the submit form.
+ * v5: Playwright HTML fallback when HTTP is bot-blocked + homepage deep-seed for crawl.
  */
-export const ASSISTED_FORM_READER_VERSION = 4;
+export const ASSISTED_FORM_READER_VERSION = 5;
 /**
  * Bump when field-role / confidence rules change.
  * Mismatched recipes re-classify even when form fingerprint is unchanged.

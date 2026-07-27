@@ -59,8 +59,26 @@ function admin() {
 }
 
 const PILOT_BATCH = 'assisted-content-ready';
+/** Cap Playwright fallbacks per form-discovery run (HTTP is preferred). */
+const MAX_BROWSER_HTML_FETCHES = 4;
 
-async function fetchHtml(url: string): Promise<string | null> {
+/** True when HTML looks like a real page we can crawl / read forms from. */
+function isUsablePageHtml(html: string): boolean {
+  const t = String(html ?? '').trim();
+  if (t.length < 400) return false;
+  const head = t.slice(0, 12_000).toLowerCase();
+  const hasForm = /<form[\s>]/i.test(t);
+  const challenge =
+    /cf-browser-verification|cdn-cgi\/challenge|just a moment|enable javascript and cookies|access denied|attention required|bot.?detect|checking your browser|ddos-guard/i.test(
+      head
+    );
+  if (challenge && !hasForm) return false;
+  // Soft empty shells: almost no links and no form
+  if (!hasForm && !/<a\s/i.test(t) && t.length < 2_000) return false;
+  return true;
+}
+
+async function fetchHtmlHttp(url: string): Promise<string | null> {
   try {
     const res = await fetch(url, {
       redirect: 'follow',
@@ -83,6 +101,44 @@ async function fetchHtml(url: string): Promise<string | null> {
     logger.warn({ err, url }, 'assisted-manual: fetch html failed');
     return null;
   }
+}
+
+/**
+ * HTTP first; Playwright render when blocked / empty shell.
+ * `browserBudget` limits Chromium launches per discovery run.
+ */
+async function fetchHtml(
+  url: string,
+  browserBudget?: { used: number; max: number }
+): Promise<string | null> {
+  const http = await fetchHtmlHttp(url);
+  if (http && isUsablePageHtml(http)) return http;
+
+  if (browserBudget && browserBudget.used >= browserBudget.max) {
+    logger.info(
+      { url, used: browserBudget.used },
+      'assisted-manual: skip browser fetch — budget exhausted'
+    );
+    return http && http.length > 400 ? http : null;
+  }
+
+  try {
+    const { fetchRenderedHtml } = await import('./browser-runtime.service.js');
+    if (browserBudget) browserBudget.used += 1;
+    const rendered = await fetchRenderedHtml(url, { timeoutMs: 35_000 });
+    if (rendered && isUsablePageHtml(rendered)) {
+      logger.info(
+        { url, httpBytes: http?.length ?? 0, browserBytes: rendered.length },
+        'assisted-manual: browser HTML fallback succeeded'
+      );
+      return rendered;
+    }
+    // Prefer whatever is longer if both are weak
+    if ((rendered?.length ?? 0) > (http?.length ?? 0)) return rendered;
+  } catch (err) {
+    logger.warn({ err, url }, 'assisted-manual: browser HTML fallback failed');
+  }
+  return http && http.length > 400 ? http : null;
 }
 
 type FormResolveResult = {
@@ -110,6 +166,7 @@ async function resolveAssistedFormTarget(params: {
   const fetched = new Map<string, string>();
   const domain = params.domain;
   const seed = params.importedEntryUrl;
+  const browserBudget = { used: 0, max: MAX_BROWSER_HTML_FETCHES };
 
   let robotsDisallow: string[] = [];
   try {
@@ -135,7 +192,7 @@ async function resolveAssistedFormTarget(params: {
       logger.info({ url }, 'assisted-manual: skip robots-disallowed URL');
       return null;
     }
-    const html = await fetchHtml(url);
+    const html = await fetchHtml(url, browserBudget);
     pagesChecked.push(url);
     if (html) fetched.set(key, html);
     return html;
@@ -191,6 +248,28 @@ async function resolveAssistedFormTarget(params: {
         pagesChecked: [...pagesChecked],
         formFound: true,
         source: 'entry',
+        discoveryFailureReason: null,
+      };
+    }
+  }
+
+  // 2b) Homepage deep seeds when entry is empty/blocked — unlock crawl link graph
+  const homepageSeeds = [`https://${domain}/`, `https://www.${domain}/`].filter(
+    (u) => u.replace(/\/$/, '').toLowerCase() !== seed.replace(/\/$/, '').toLowerCase()
+  );
+  for (const home of homepageSeeds) {
+    if (pagesChecked.length >= FORM_DISCOVERY_DEFAULTS.maxPages) break;
+    const homeHtml = await fetchOne(home);
+    if (!homeHtml) continue;
+    const scored = scoreSubmissionFormPage(homeHtml);
+    if (!scored.ignorable && scored.score >= FORM_DISCOVERY_DEFAULTS.minFormScore) {
+      return {
+        importedEntryUrl: seed,
+        formUrl: home,
+        html: homeHtml,
+        pagesChecked: [...pagesChecked],
+        formFound: true,
+        source: 'crawl',
         discoveryFailureReason: null,
       };
     }
@@ -266,10 +345,15 @@ async function resolveAssistedFormTarget(params: {
   }
 
   const failure = formDiscoveryFailureMessage(pagesChecked);
+  // Prefer any usable HTML we did fetch (homepage / seed) over null
+  const fallbackHtml =
+    seedHtml ??
+    [...fetched.values()].find((h) => isUsablePageHtml(h)) ??
+    null;
   return {
     importedEntryUrl: seed,
     formUrl: seed,
-    html: seedHtml,
+    html: fallbackHtml,
     pagesChecked: [...pagesChecked],
     formFound: false,
     source: 'none',
@@ -766,7 +850,9 @@ async function prepareOnePackage(
     : {
         fields: [] as ReturnType<typeof extractFormFieldFacts>,
         formFound: false,
-        failureReason: 'No HTML fetched',
+        failureReason:
+          resolved.discoveryFailureReason ||
+          'No HTML fetched — HTTP blocked and browser fallback returned empty',
         targetFormSelector: null,
         targetFormIndex: null,
         targetFormAction: null,

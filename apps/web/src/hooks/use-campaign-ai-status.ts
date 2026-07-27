@@ -93,18 +93,9 @@ export function useCampaignAiStatus(projectId: string) {
   const genLive = Boolean(progress?.active) && consumerAlive && !generationInterrupted;
   const genActive = genLive || generationInterrupted;
 
-  const campaignState = s?.campaignState ?? 'Idle';
-  // Same activity rules as execution page (live jobs / waiting human — not Ready CSM as "queued")
-  const beeRunning = Boolean(
-    (s?.running ?? 0) > 0 ||
-      (s?.waitingHuman ?? 0) > 0 ||
-      campaignState === 'Running' ||
-      campaignState === 'Paused' ||
-      campaignState === 'Waiting Human' ||
-      (campaignState === 'Starting' && (s?.queued ?? 0) > 0)
-  );
-
-  const aiActive = genActive || beeRunning;
+  // Phase 11 — browser auto-submit is retired; shell AI Status only covers content generation.
+  const beeRunning = false;
+  const aiActive = genActive;
 
   let currentLabel = '';
   let currentWebsite: string | null = null;
@@ -135,28 +126,6 @@ export function useCampaignAiStatus(projectId: string) {
     remaining = progress.queued + progress.generating;
     percent = Math.round(progress.percent);
     eta = board?.eta ?? null;
-  } else if (beeRunning && s) {
-    currentActivity =
-      campaignState === 'Waiting Human'
-        ? 'Waiting for you'
-        : campaignState === 'Paused'
-          ? 'Paused'
-          : s.currentStep || 'Submitting';
-    currentWebsite = s.currentWebsite;
-    currentStep = s.currentStep;
-    currentLabel =
-      s.currentWebsite && s.currentStep
-        ? `${s.currentWebsite} — ${s.currentStep}`
-        : s.aiStatusLine || 'Submitting Backlinks';
-    completed = s.completed;
-    remaining = s.remaining;
-    percent = Math.round(s.progressPercent);
-    eta =
-      s.etaSeconds > 0
-        ? s.etaSeconds < 60
-          ? `${s.etaSeconds} sec`
-          : `${Math.ceil(s.etaSeconds / 60)}m`
-        : null;
   }
 
   const needsReview = progress?.needsReview ?? 0;

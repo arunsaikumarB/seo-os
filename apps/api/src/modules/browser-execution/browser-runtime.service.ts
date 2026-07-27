@@ -295,6 +295,12 @@ export class BrowserExecutionService {
     };
   }
 
+  /** Full page HTML for Form Reader / assisted discovery (not the truncated capture snippet). */
+  async getPageHtml(): Promise<string> {
+    if (!this.page || this.page.isClosed()) throw new Error('No page');
+    return this.page.content();
+  }
+
   /** Lightweight frame for interactive remote control (no HTML scrape). */
   async captureFrame(quality = 55): Promise<{
     screenshotBase64: string;
@@ -668,6 +674,31 @@ export class BrowserExecutionService {
     } else {
       this.browser = null;
     }
+  }
+}
+
+/**
+ * One-shot Playwright HTML fetch for Assisted Manual Form Reader.
+ * Used when plain HTTP is bot-blocked / returns an empty challenge shell.
+ * Does not solve CAPTCHA — only renders the page Chromium can load.
+ */
+export async function fetchRenderedHtml(
+  url: string,
+  opts?: { timeoutMs?: number }
+): Promise<string | null> {
+  const timeoutMs = opts?.timeoutMs ?? 30_000;
+  const runtime = new BrowserExecutionService();
+  try {
+    await runtime.launch({ mode: 'headless', timeoutMs: Math.min(timeoutMs, 25_000) });
+    await runtime.navigate(url, timeoutMs);
+    const html = await runtime.getPageHtml();
+    const sliced = html.slice(0, 500_000);
+    return sliced.trim() ? sliced : null;
+  } catch (err) {
+    logger.warn({ err, url }, 'fetchRenderedHtml failed');
+    return null;
+  } finally {
+    await runtime.close().catch(() => undefined);
   }
 }
 

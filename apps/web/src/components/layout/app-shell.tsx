@@ -32,6 +32,8 @@ export function AppShell({ projectId }: AppShellProps) {
     location.pathname.endsWith('/home') ||
     location.pathname.replace(/\/$/, '') === `/projects/${projectId}`;
   const onGeneratePage = location.pathname.includes('/content/library');
+  /** Phase 11 — Assisted Manual has no auto-submit queue; never show Submitting status. */
+  const onAssistedManual = location.pathname.includes('/assisted-manual');
 
   useAutoInterventionWindows(projectId);
   useStageNotificationDelivery();
@@ -65,8 +67,10 @@ export function AppShell({ projectId }: AppShellProps) {
         <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto p-4 pb-20 md:p-6 md:pb-6">
           <WorkflowProgressHeader projectId={projectId} />
           <WorkflowCelebration projectId={projectId} />
-          {!onGeneratePage ? <CampaignAiStatus projectId={projectId} /> : null}
-          {!isHome ? (
+          {!onGeneratePage && !onAssistedManual ? (
+            <CampaignAiStatus projectId={projectId} />
+          ) : null}
+          {!isHome && !onAssistedManual ? (
             <div className="mb-6 max-w-xl">
               <NextActionPanel projectId={projectId} />
             </div>
