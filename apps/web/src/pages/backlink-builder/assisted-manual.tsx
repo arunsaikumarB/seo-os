@@ -88,6 +88,9 @@ type AssistedPackage = {
     categoryNote?: string | null;
     multiStep?: boolean;
     multiStepLabel: string | null;
+    wizardReachedForm?: boolean;
+    wizardSteps?: string[];
+    wizardWalkStatus?: string | null;
     readerVersion?: number;
     classifierVersion?: number;
     confidenceSummary?: string | null;
@@ -587,10 +590,23 @@ export function AssistedManualPage() {
                         {pkg.package?.multiStepLabel ? (
                           <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-sm text-amber-900">
                             <p className="font-medium">{pkg.package.multiStepLabel}</p>
-                            <p className="text-xs text-amber-800/90 mt-0.5">
-                              Step 1 may only ask for a category — use the paste-ready values below
-                              once you reach the content step.
-                            </p>
+                            {pkg.package.wizardReachedForm ? (
+                              <p className="text-xs text-amber-800/90 mt-0.5">
+                                Form reached via wizard walk
+                                {pkg.package.wizardSteps?.length
+                                  ? ` (${pkg.package.wizardSteps.join(' → ')})`
+                                  : ''}
+                                . Review fields below, then submit on the site.
+                              </p>
+                            ) : (
+                              <p className="text-xs text-amber-800/90 mt-0.5">
+                                Step 1 may only ask for a category — use the paste-ready values below
+                                once you reach the content step
+                                {pkg.package.wizardSteps?.length
+                                  ? ` (${pkg.package.wizardSteps.join(' → ')})`
+                                  : ''}.
+                              </p>
+                            )}
                           </div>
                         ) : null}
 

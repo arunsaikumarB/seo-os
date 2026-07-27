@@ -28,6 +28,8 @@ import {
   looksLikeSpaShell,
   normalizeSiteDomain,
   MULTI_STEP_FORM_LABEL,
+  WIZARD_COULD_NOT_REACH_LABEL,
+  WIZARD_PAID_ONLY_LABEL,
   recipeVersionsCurrent,
   stripCategoryFromAssistedPayload,
   gateIsOtp,
@@ -40,6 +42,9 @@ import {
   scoreSubmissionFormPage,
   discoveryAcceptsFormPage,
   pageLooksLikeMultiStepWizard,
+  isIntermediateWizardStep,
+  htmlHasCoreContentFields,
+  formatWizardStepSequence,
   type AssistedPackagePayload,
   type FieldRole,
   type FormDiscoverySource,
@@ -48,6 +53,7 @@ import {
   type SiteRecipe,
 } from '@seo-os/backlink-builder';
 import { AppError } from '@seo-os/shared';
+import { walkSubmissionWizard } from './wizard-walk.service.js';
 import {
   fetchRobotsTxt,
   isPathAllowed,
@@ -1064,7 +1070,61 @@ async function prepareOnePackage(
   });
 
   const entryUrl = resolved.formUrl;
-  const html = resolved.html;
+  let html = resolved.html;
+  let pagesChecked = [...resolved.pagesChecked];
+  let discoverySource = resolved.source;
+
+  // Phase 14 — walk multi-step wizards to the real content form (Playwright, max 4 steps)
+  let wizardReachedForm = false;
+  let wizardSteps: string[] | undefined;
+  let wizardWalkStatus: SiteRecipe['wizardWalkStatus'] = null;
+  let wizardLabel: string | null = null;
+
+  const step1NeedsWalk =
+    Boolean(html) &&
+    !htmlHasCoreContentFields(html!) &&
+    (isIntermediateWizardStep(html!) ||
+      pageLooksLikeMultiStepWizard(html!) ||
+      detectMultiStepForm(html!));
+
+  if (step1NeedsWalk && entryUrl) {
+    logger.info(
+      { domain, entryUrl },
+      'assisted-manual Phase 14 wizard walk starting'
+    );
+    const walk = await walkSubmissionWizard({ entryUrl });
+    wizardWalkStatus = walk.status;
+    wizardSteps = walk.stepsTaken.length ? walk.stepsTaken : undefined;
+    wizardLabel = walk.label;
+    pagesChecked = [...pagesChecked, ...walk.pagesCrawled];
+    logger.info(
+      {
+        domain,
+        entryUrl,
+        status: walk.status,
+        stepsWalked: walk.stepsWalked,
+        stepsTaken: walk.stepsTaken,
+        stepLog: walk.stepLog,
+        pagesCrawled: walk.pagesCrawled,
+        finalUrl: walk.finalUrl,
+      },
+      'assisted-manual Phase 14 wizard walk finished'
+    );
+
+    if (walk.status === 'reached_form' && walk.html && htmlHasCoreContentFields(walk.html)) {
+      html = walk.html;
+      wizardReachedForm = true;
+      if (walk.finalUrl) {
+        // Prefer deepest URL if the wizard changed location
+        // (often still the same entry URL for SPA wizards)
+      }
+    } else if (walk.status === 'paid_only') {
+      wizardLabel = walk.label ?? WIZARD_PAID_ONLY_LABEL;
+    } else if (walk.status === 'could_not_reach' || walk.status === 'error') {
+      wizardLabel = walk.label ?? WIZARD_COULD_NOT_REACH_LABEL;
+    }
+  }
+
   const targetRead = html
     ? extractTargetFormFieldFacts(html)
     : {
@@ -1084,25 +1144,32 @@ async function prepareOnePackage(
   const multiStepPage = Boolean(html && detectMultiStepForm(html));
   // Live Form Reader wins: if the page has fillable fields (incl. category-only step 1),
   // treat as found even when discovery previously under-scored the page.
+  // After a successful wizard walk, content fields count as a real form.
   const formFound = Boolean(
     html &&
-      targetRead.formFound &&
-      liveFacts.length > 0 &&
-      (resolved.formFound || multiStepPage || discoveryAcceptsFormPage(html))
+      ((wizardReachedForm && liveFacts.length > 0) ||
+        (targetRead.formFound &&
+          liveFacts.length > 0 &&
+          (resolved.formFound || multiStepPage || discoveryAcceptsFormPage(html))))
   );
   const discoveryFailureReason =
-    targetRead.failureReason || resolved.discoveryFailureReason;
+    wizardLabel && !wizardReachedForm
+      ? wizardLabel
+      : targetRead.failureReason || resolved.discoveryFailureReason;
 
   logger.info(
     {
       domain,
       importedEntryUrl,
       formUrl: entryUrl,
-      discoverySource: resolved.source,
-      pagesCrawled: resolved.pagesChecked.length,
-      pagesChecked: resolved.pagesChecked,
+      discoverySource,
+      pagesCrawled: pagesChecked.length,
+      pagesChecked,
       formFound,
       multiStepPage,
+      wizardReachedForm,
+      wizardWalkStatus,
+      wizardSteps,
       discoveryFormFound: resolved.formFound,
       liveFieldCount: liveFacts.length,
       htmlBytes: html?.length ?? 0,
@@ -1135,12 +1202,18 @@ async function prepareOnePackage(
       domain,
       entryUrl: importedEntryUrl,
       resolvedFormUrl: entryUrl,
-      formDiscoveryPagesChecked: resolved.pagesChecked,
-      formDiscoverySource: resolved.source,
+      formDiscoveryPagesChecked: pagesChecked,
+      formDiscoverySource: discoverySource,
       html,
       existing: existingForBuild,
       forceReclassify: true,
       dropHumanPins: Boolean(opts.clearPins),
+      wizardReachedForm,
+      wizardSteps,
+      wizardWalkStatus,
+      multiStepLabelOverride: wizardReachedForm
+        ? formatWizardStepSequence(wizardSteps ?? []) || wizardLabel
+        : wizardLabel,
     });
   } else if (existingRecipe && !forceReclassify && recipeVersionsCurrent(existingRecipe)) {
     // Only reuse a cached recipe when versions are current AND we were not asked to refresh
@@ -1161,8 +1234,13 @@ async function prepareOnePackage(
         ...existingRecipe,
         notes: [existingRecipe.notes, rereadFailReason].filter(Boolean).join(' · '),
         lastVerifiedAt: new Date().toISOString(),
-        formDiscoveryPagesChecked: resolved.pagesChecked,
-        formDiscoverySource: resolved.source,
+        formDiscoveryPagesChecked: pagesChecked,
+        formDiscoverySource: discoverySource,
+        multiStep: true,
+        multiStepLabel: wizardLabel ?? existingRecipe.multiStepLabel ?? MULTI_STEP_FORM_LABEL,
+        wizardReachedForm: false,
+        wizardSteps,
+        wizardWalkStatus,
         // Do NOT bump reader/classifier here — only successful live reads stamp current.
       };
     } else if (priorPayload?.fields?.length) {
@@ -1170,8 +1248,8 @@ async function prepareOnePackage(
         domain,
         entryUrl: importedEntryUrl,
         resolvedFormUrl: priorPayload.resolvedFormUrl ?? entryUrl,
-        formDiscoveryPagesChecked: resolved.pagesChecked,
-        formDiscoverySource: resolved.source,
+        formDiscoveryPagesChecked: pagesChecked,
+        formDiscoverySource: discoverySource,
         formFingerprint: String(priorPackage?.form_fingerprint ?? 'fp_prior'),
         fields: priorPayload.fields.map((f) => ({
           selector: f.selector,
@@ -1188,7 +1266,11 @@ async function prepareOnePackage(
         notes: rereadFailReason,
         lastVerifiedAt: new Date().toISOString(),
         correctionCount: Number(priorPackage?.correction_count ?? 0),
-        multiStep: Boolean(priorPayload.multiStep),
+        multiStep: Boolean(priorPayload.multiStep) || Boolean(wizardLabel),
+        multiStepLabel: wizardLabel ?? priorPayload.multiStepLabel ?? undefined,
+        wizardReachedForm: false,
+        wizardSteps,
+        wizardWalkStatus,
         readerVersion: Number(priorPayload.readerVersion) || 0,
         classifierVersion: Number(priorPayload.classifierVersion) || 0,
       };
@@ -1197,13 +1279,14 @@ async function prepareOnePackage(
         domain,
         entryUrl: importedEntryUrl,
         resolvedFormUrl: entryUrl,
-        formDiscoveryPagesChecked: resolved.pagesChecked,
-        formDiscoverySource: resolved.source,
+        formDiscoveryPagesChecked: pagesChecked,
+        formDiscoverySource: discoverySource,
         formFingerprint: 'fp_missing',
         fields: [],
         dropdownOptions: {},
-        gate: 'none',
+        gate: wizardWalkStatus === 'paid_only' ? 'manual_review' : 'multi_step',
         notes:
+          wizardLabel ??
           rereadFailReason ??
           discoveryFailureReason ??
           (opts.forceReread
@@ -1211,7 +1294,11 @@ async function prepareOnePackage(
             : 'No HTML fetched'),
         lastVerifiedAt: new Date().toISOString(),
         correctionCount: 0,
-        multiStep: false,
+        multiStep: true,
+        multiStepLabel: wizardLabel ?? MULTI_STEP_FORM_LABEL,
+        wizardReachedForm: false,
+        wizardSteps,
+        wizardWalkStatus,
         // Explicit 0 — never leave undefined (buildAssistedPackage must not default to current)
         readerVersion: 0,
         classifierVersion: 0,
@@ -1240,8 +1327,8 @@ async function prepareOnePackage(
         ...existingRecipe,
         notes: [existingRecipe.notes, rereadFailReason].filter(Boolean).join(' · '),
         lastVerifiedAt: new Date().toISOString(),
-        formDiscoveryPagesChecked: resolved.pagesChecked,
-        formDiscoverySource: resolved.source,
+        formDiscoveryPagesChecked: pagesChecked,
+        formDiscoverySource: discoverySource,
       };
     } else if (priorPayload?.fields?.length) {
       // Reconstruct minimal recipe from prior package fields
@@ -1249,8 +1336,8 @@ async function prepareOnePackage(
         domain,
         entryUrl: importedEntryUrl,
         resolvedFormUrl: priorPayload.resolvedFormUrl ?? entryUrl,
-        formDiscoveryPagesChecked: resolved.pagesChecked,
-        formDiscoverySource: resolved.source,
+        formDiscoveryPagesChecked: pagesChecked,
+        formDiscoverySource: discoverySource,
         formFingerprint: String(priorPackage?.form_fingerprint ?? 'fp_prior'),
         fields: priorPayload.fields.map((f) => ({
           selector: f.selector,
@@ -1310,8 +1397,11 @@ async function prepareOnePackage(
   payload.importedEntryUrl =
     importedEntryUrl !== payload.entryUrl ? importedEntryUrl : null;
   payload.resolvedFormUrl = recipe.resolvedFormUrl ?? entryUrl;
-  payload.formDiscoveryPagesChecked = resolved.pagesChecked;
-  payload.formDiscoverySource = resolved.source;
+  payload.formDiscoveryPagesChecked = pagesChecked;
+  payload.formDiscoverySource = discoverySource;
+  payload.wizardReachedForm = recipe.wizardReachedForm;
+  payload.wizardSteps = recipe.wizardSteps;
+  payload.wizardWalkStatus = recipe.wizardWalkStatus ?? null;
 
   if (html && formFound && !rereadFailed) {
     payload.readerVersion = ASSISTED_FORM_READER_VERSION;
@@ -1332,13 +1422,19 @@ async function prepareOnePackage(
         multiStepPage ||
         detectMultiStepForm(html ?? '') ||
         Boolean(payload.multiStepLabel);
-      if (isMulti || hasPaste || recipe.fields.length > 0) {
+      if (wizardReachedForm && payload.fields.length > 0) {
+        // Walk succeeded but formFound flag flipped later — keep populated package
+        payload.formUnavailable = false;
+        payload.wizardReachedForm = true;
+      } else if (isMulti || hasPaste || recipe.fields.length > 0) {
         // Multi-step / sparse / content-ready — never mislabel as JS/login unavailable
         payload.formUnavailable = false;
         payload.bucket = 'needs_person';
         payload.multiStep = payload.multiStep || isMulti;
         payload.multiStepLabel =
-          payload.multiStepLabel ?? (isMulti ? MULTI_STEP_FORM_LABEL : null);
+          payload.multiStepLabel ??
+          wizardLabel ??
+          (isMulti ? MULTI_STEP_FORM_LABEL : null);
         payload.failureReason =
           payload.multiStepLabel ??
           (hasPaste

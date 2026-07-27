@@ -276,6 +276,19 @@ export class BrowserExecutionService {
     return this.page.content();
   }
 
+  async getPageUrl(): Promise<string> {
+    if (!this.page || this.page.isClosed()) throw new Error('No page');
+    return this.page.url();
+  }
+
+  /**
+   * Run a browser-side script (string IIFE or function). Used by wizard walker.
+   */
+  async evaluateOnPage<T>(script: string | ((...args: unknown[]) => T | Promise<T>)): Promise<T> {
+    if (!this.page || this.page.isClosed()) throw new Error('No page');
+    return this.page.evaluate(script as never) as Promise<T>;
+  }
+
   hasLivePage(): boolean {
     return Boolean(this.page && !this.page.isClosed());
   }

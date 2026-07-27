@@ -568,6 +568,21 @@ describe('Phase 7 Assisted Manual', () => {
       ).toBe('needs_person');
     }
 
+    // Phase 14 — walked to the real form: multiStep is informational, not a blocker
+    expect(
+      assignAssistedBucket({
+        recipe: {
+          ...baseRecipe,
+          gate: 'none',
+          multiStep: true,
+          wizardReachedForm: true,
+        },
+        fields: highFields.filter((f) => f.role !== 'category' && f.role !== 'attachment'),
+        fingerprintStatus: 'fresh',
+        formFound: true,
+      })
+    ).not.toBe('needs_person');
+
     for (const gate of ['otp_email', 'otp_phone'] as const) {
       expect(
         assignAssistedBucket({

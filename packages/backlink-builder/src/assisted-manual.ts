@@ -17,6 +17,7 @@ import {
 import {
   formUnavailableMessage,
 } from './form-unavailable.js';
+import { htmlHasCoreContentFields } from './wizard-walk.js';
 
 /**
  * Phase 7 — Assisted Manual packages (human submits; app never auto-publishes).
@@ -103,13 +104,14 @@ export function gateIsOtp(gate: AssistedGate | string | null | undefined): boole
 export function gateRequiresPerson(gate: AssistedGate | string | null | undefined): boolean {
   const g = String(gate ?? 'none');
   if (g === 'none' || g === '' || gateIsOtp(g)) return false;
+  // multi_step is handled via recipe.multiStep && !wizardReachedForm (Phase 14)
+  if (g === 'multi_step') return false;
   return (
     g === 'login' ||
     g === 'captcha' ||
     g === 'cloudflare' ||
     g === 'registration' ||
-    g === 'manual_review' ||
-    g === 'multi_step'
+    g === 'manual_review'
   );
 }
 
@@ -180,6 +182,20 @@ export type SiteRecipe = {
   correctionCount: number;
   multiStep: boolean;
   multiStepLabel?: string;
+  /**
+   * Phase 14 — Playwright walk reached the real content form.
+   * When true, multiStep is informational (step route) and must NOT force Needs a person.
+   */
+  wizardReachedForm?: boolean;
+  /** Human-readable step sequence taken (or to take) during the walk. */
+  wizardSteps?: string[];
+  wizardWalkStatus?:
+    | 'reached_form'
+    | 'paid_only'
+    | 'could_not_reach'
+    | 'not_a_wizard'
+    | 'error'
+    | null;
   /** Locked target <form> — re-reads prefer this form. */
   targetFormSelector?: string | null;
   targetFormIndex?: number | null;
@@ -228,6 +244,12 @@ export type PackageFieldValue = {
 export const MULTI_STEP_FORM_LABEL =
   'Multi-step — content ready, paste on the later step';
 
+export {
+  WIZARD_COULD_NOT_REACH_LABEL,
+  WIZARD_PAID_ONLY_LABEL,
+  WIZARD_MAX_STEPS,
+} from './wizard-walk.js';
+
 /** Shown when the live form has a category select — never auto-filled in packages. */
 export const CATEGORY_PICK_YOURSELF_NOTE = 'Pick the category yourself on the site';
 
@@ -254,6 +276,10 @@ export type AssistedPackagePayload = {
   gateNotes: string;
   multiStep: boolean;
   multiStepLabel: string | null;
+  /** Phase 14 — walk reached real form; bucket can be Ready/Check-these. */
+  wizardReachedForm?: boolean;
+  wizardSteps?: string[];
+  wizardWalkStatus?: string | null;
   fields: PackageFieldValue[];
   /** Unknown-role fields — fill yourself; not shown as forgotten blanks */
   otherFields?: Array<{
@@ -635,7 +661,10 @@ export function isContentSparseStepOne(fields: Array<{ role: string }>): boolean
 
 export function detectGateFromHtml(html: string): AssistedGate {
   const h = html.toLowerCase();
-  if (detectMultiStepForm(html)) return 'multi_step';
+  // Wizard intermediate only — final step with Title/URL/Description is a normal form
+  if (detectMultiStepForm(html) && !htmlHasCoreContentFields(html)) {
+    return 'multi_step';
+  }
   if (/cloudflare|cf-challenge|cf-turnstile|attention required|checking your browser/i.test(h)) {
     return 'cloudflare';
   }
@@ -1326,6 +1355,11 @@ export function buildSiteRecipe(input: {
   forceReclassify?: boolean;
   /** When true, ignore all human_corrected / known_bad pins (Clear corrections). */
   dropHumanPins?: boolean;
+  /** Phase 14 — Playwright walk reached the content form. */
+  wizardReachedForm?: boolean;
+  wizardSteps?: string[];
+  wizardWalkStatus?: SiteRecipe['wizardWalkStatus'];
+  multiStepLabelOverride?: string | null;
 }): SiteRecipe {
   const target = extractTargetFormFieldFacts(input.html, {
     lockedSelector: input.existing?.targetFormSelector,
@@ -1335,13 +1369,20 @@ export function buildSiteRecipe(input: {
   const fingerprint = computeFormFingerprint(facts);
   const gateSource = target.gateHtml || input.html;
   // Detect on form fragment AND full page (step headings often sit outside <form>)
-  const multiStep =
+  const looksLikeWizard =
     detectMultiStepForm(gateSource) || detectMultiStepForm(input.html);
+  const contentOnPage = htmlHasCoreContentFields(input.html) || htmlHasCoreContentFields(gateSource);
+  const wizardReachedForm =
+    Boolean(input.wizardReachedForm) || (looksLikeWizard && contentOnPage);
+  const multiStep =
+    looksLikeWizard ||
+    Boolean(input.wizardSteps?.length) ||
+    Boolean(input.existing?.multiStep && !wizardReachedForm);
   // Cloudflare can be page-level; other gates come from the target form only
   const pageGate = detectGateFromHtml(input.html);
   const formGate = detectGateFromHtml(gateSource);
   // When no submission form qualifies, do not inherit login gate from a sibling widget
-  const gate =
+  const baseGate =
     !target.formFound
       ? 'none'
       : pageGate === 'cloudflare'
@@ -1351,6 +1392,13 @@ export function buildSiteRecipe(input: {
           : pageGate === 'captcha'
             ? 'captcha'
             : 'none';
+  // Intermediate wizard only — never force multi_step once content form is reached
+  const gate: AssistedGate =
+    multiStep && !wizardReachedForm
+      ? 'multi_step'
+      : baseGate === 'multi_step' && wizardReachedForm
+        ? 'none'
+        : baseGate;
   const humanSteps = [
     ...(target.humanSteps ?? []),
     ...detectFormHumanSteps(gateSource),
@@ -1464,14 +1512,39 @@ export function buildSiteRecipe(input: {
     formFingerprint: fingerprint,
     fields,
     dropdownOptions,
-    gate: multiStep ? 'multi_step' : gate,
-    notes: multiStep
-      ? MULTI_STEP_FORM_LABEL
-      : [input.existing?.notes, upgradeNote, formNote].filter(Boolean).join(' · ') || '',
+    gate,
+    notes: (() => {
+      const walkNote =
+        input.multiStepLabelOverride?.trim() ||
+        (input.wizardSteps?.length
+          ? `Wizard path: ${input.wizardSteps.join(' → ')}`
+          : null);
+      if (wizardReachedForm) {
+        return [walkNote, upgradeNote, formNote].filter(Boolean).join(' · ') || '';
+      }
+      if (multiStep) {
+        return (
+          input.multiStepLabelOverride?.trim() ||
+          MULTI_STEP_FORM_LABEL
+        );
+      }
+      return [input.existing?.notes, upgradeNote, formNote].filter(Boolean).join(' · ') || '';
+    })(),
     lastVerifiedAt: new Date().toISOString(),
     correctionCount: dropPins ? 0 : (input.existing?.correctionCount ?? 0),
-    multiStep,
-    multiStepLabel: multiStep ? MULTI_STEP_FORM_LABEL : undefined,
+    multiStep: multiStep || wizardReachedForm,
+    multiStepLabel:
+      input.multiStepLabelOverride?.trim() ||
+      (wizardReachedForm && input.wizardSteps?.length
+        ? `Wizard: ${input.wizardSteps.join(' → ')}`
+        : multiStep && !wizardReachedForm
+          ? MULTI_STEP_FORM_LABEL
+          : undefined),
+    wizardReachedForm: wizardReachedForm || undefined,
+    wizardSteps: input.wizardSteps?.length ? input.wizardSteps : input.existing?.wizardSteps,
+    wizardWalkStatus:
+      input.wizardWalkStatus ??
+      (wizardReachedForm ? 'reached_form' : input.existing?.wizardWalkStatus ?? null),
     targetFormSelector: target.targetFormSelector,
     targetFormIndex: target.targetFormIndex,
     targetFormAction: target.targetFormAction,
@@ -1758,8 +1831,12 @@ export function assignAssistedBucket(input: {
   if (input.fingerprintStatus === 'changed' || input.fingerprintStatus === 'stale') {
     return 'needs_person';
   }
-  // Hard gates (login/captcha/cloudflare/registration/multi_step) → Needs a person
-  if (gateRequiresPerson(input.recipe.gate) || input.recipe.multiStep) {
+  // Hard gates (login/captcha/cloudflare/registration) → Needs a person
+  // Multi-step only blocks when we did NOT reach the real form (Phase 14).
+  if (gateRequiresPerson(input.recipe.gate)) {
+    return 'needs_person';
+  }
+  if (input.recipe.multiStep && !input.recipe.wizardReachedForm) {
     return 'needs_person';
   }
   if (input.fields.some((f) => f.overLimit)) return 'needs_person';
@@ -2112,13 +2189,17 @@ export function buildAssistedPackage(input: {
   const mappedRoles = new Set(checkedFields.map((f) => f.role));
   const multiStep =
     Boolean(input.recipe.multiStep) || input.recipe.gate === 'multi_step';
+  const wizardReachedForm = Boolean(input.recipe.wizardReachedForm);
   const sparseStepOne = isContentSparseStepOne(input.recipe.fields);
   // Always attach generated listing copy when we have it — especially Needs a person /
   // multi-step / form-not-found, so the user never gets an empty card.
   const pasteReadyContent = buildPasteReadyContent(input.content, mappedRoles);
 
   const multiStepLabel = multiStep
-    ? input.recipe.multiStepLabel?.trim() || MULTI_STEP_FORM_LABEL
+    ? input.recipe.multiStepLabel?.trim() ||
+      (wizardReachedForm && input.recipe.wizardSteps?.length
+        ? `Wizard: ${input.recipe.wizardSteps.join(' → ')}`
+        : MULTI_STEP_FORM_LABEL)
     : null;
 
   let bucket = assignAssistedBucket({
@@ -2159,7 +2240,7 @@ export function buildAssistedPackage(input: {
     failureReason = 'Form changed — re-prepare';
   } else if (fingerprintStatus === 'stale') {
     failureReason = 'Package expired — re-prepare';
-  } else if (multiStep) {
+  } else if (multiStep && !wizardReachedForm) {
     failureReason = multiStepLabel ?? MULTI_STEP_FORM_LABEL;
   } else if (gateRequiresPerson(input.recipe.gate)) {
     failureReason = `Gate: ${input.recipe.gate} — needs a person (not paste-and-submit Ready)`;
@@ -2184,9 +2265,12 @@ export function buildAssistedPackage(input: {
               ? 'Login required — sign in yourself; the app will not bypass auth.'
               : input.recipe.gate === 'registration'
                 ? 'Registration required — create an account yourself; the app will not sign up.'
-                : multiStep
-                  ? MULTI_STEP_FORM_LABEL
-                  : 'No special gate detected beyond normal form submit.';
+                : multiStep && wizardReachedForm
+                  ? multiStepLabel ??
+                    'Multi-step wizard — form reached; pick category on the site if needed.'
+                  : multiStep
+                    ? MULTI_STEP_FORM_LABEL
+                    : 'No special gate detected beyond normal form submit.';
   const gateNotes = youMust ? `${gateNotesBase} · ${youMust}` : gateNotesBase;
 
   return {
@@ -2206,6 +2290,9 @@ export function buildAssistedPackage(input: {
     gateNotes,
     multiStep,
     multiStepLabel,
+    wizardReachedForm: wizardReachedForm || undefined,
+    wizardSteps: input.recipe.wizardSteps,
+    wizardWalkStatus: input.recipe.wizardWalkStatus ?? null,
     fields: checkedFields,
     otherFields: otherFields.length ? otherFields : undefined,
     pasteReadyContent: pasteReadyContent.length ? pasteReadyContent : undefined,
