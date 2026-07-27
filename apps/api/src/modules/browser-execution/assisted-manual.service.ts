@@ -518,26 +518,117 @@ async function listContentReadyOpportunityIds(workspaceId: string): Promise<stri
 
   const { data: opps } = await admin()
     .from('opportunities')
-    .select('id, campaign_lifecycle, generation_status')
+    .select('id, campaign_lifecycle, generation_status, automation_status')
     .eq('workspace_id', workspaceId)
     .neq('campaign_lifecycle', 'Deleted')
     .not('automation_status', 'in', '("deleted","ignored")')
     .limit(ASSISTED_PREPARE_BATCH_MAX);
 
+  const terminalLife = new Set([
+    'Deleted',
+    'Rejected',
+    'Ignored',
+    'Failed',
+    'Submitted',
+    'Verified',
+    'Completed',
+  ]);
+
   for (const o of opps ?? []) {
     const life = String(o.campaign_lifecycle ?? '');
     const gen = String(o.generation_status ?? '');
+    if (terminalLife.has(life)) continue;
     if (
       life === 'Package Generated' ||
       life === 'Ready' ||
+      life === 'Approved' ||
+      life === 'Waiting Human' ||
+      life === 'Submitting' ||
       gen === 'Completed' ||
-      gen === 'Needs Review'
+      gen === 'Needs Review' ||
+      gen === 'Generated'
     ) {
       ids.add(String(o.id));
     }
   }
 
+  // Drop content-pack IDs that are already past Assisted (Submitted/Verified/…)
+  if (ids.size > 0) {
+    const { data: lifeRows } = await admin()
+      .from('opportunities')
+      .select('id, campaign_lifecycle, automation_status')
+      .eq('workspace_id', workspaceId)
+      .in('id', [...ids]);
+    for (const row of lifeRows ?? []) {
+      const life = String(row.campaign_lifecycle ?? '');
+      const auto = String(row.automation_status ?? '').toLowerCase();
+      if (terminalLife.has(life) || auto === 'deleted' || auto === 'ignored') {
+        ids.delete(String(row.id));
+      }
+    }
+  }
+
   return [...ids].slice(0, ASSISTED_PREPARE_BATCH_MAX);
+}
+
+/**
+ * When auto-publish is OFF, every content-ready site (including Automable lane)
+ * must have an Assisted Manual package — browser won't submit them.
+ */
+async function healMissingAssistedPackages(workspaceId: string): Promise<{
+  prepared: number;
+  missing: number;
+  errors: Array<{ opportunityId: string; error: string }>;
+}> {
+  const { getOrCreatePolicy } = await import('./bee.service.js');
+  const policy = await getOrCreatePolicy(workspaceId);
+  if (policy.auto_publish_automatable === true) {
+    return { prepared: 0, missing: 0, errors: [] };
+  }
+
+  const readyIds = await listContentReadyOpportunityIds(workspaceId);
+  if (!readyIds.length) return { prepared: 0, missing: 0, errors: [] };
+
+  const { data: existing } = await admin()
+    .from('assisted_packages')
+    .select('opportunity_id')
+    .eq('workspace_id', workspaceId)
+    .in('opportunity_id', readyIds);
+  const have = new Set((existing ?? []).map((r) => String(r.opportunity_id)));
+  const missing = readyIds.filter((id) => !have.has(id));
+  if (!missing.length) return { prepared: 0, missing: 0, errors: [] };
+
+  logger.info(
+    { workspaceId, missing: missing.length, autoPublish: false },
+    'assisted-manual heal: preparing packages for content-ready sites without packages (incl. automatable)'
+  );
+
+  const errors: Array<{ opportunityId: string; error: string }> = [];
+  let prepared = 0;
+  // Bound list-heal work so page load stays responsive
+  for (const opportunityId of missing.slice(0, 40)) {
+    try {
+      await prepareOnePackage(workspaceId, opportunityId);
+      prepared += 1;
+    } catch (err) {
+      errors.push({
+        opportunityId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      logger.warn(
+        { err, workspaceId, opportunityId },
+        'assisted-manual heal prepare failed'
+      );
+    }
+  }
+
+  if (prepared > 0) {
+    await enforceSimilarity(workspaceId).catch((err) =>
+      logger.warn({ err, workspaceId }, 'assisted similarity check failed after heal')
+    );
+  }
+
+  return { prepared, missing: missing.length, errors };
 }
 
 async function prepareOnePackage(
@@ -1019,6 +1110,10 @@ async function enforceSimilarity(workspaceId: string) {
 }
 
 export async function listAssistedPackages(workspaceId: string) {
+  // When auto-publish is OFF, Automable content-ready sites must appear in Assisted Manual
+  await healMissingAssistedPackages(workspaceId).catch((err) =>
+    logger.warn({ err, workspaceId }, 'assisted heal-missing on list failed')
+  );
   // Heal legacy Done packages that never wrote CSM Submitted / export rows
   await healAssistedDoneSubmissions(workspaceId).catch((err) =>
     logger.warn({ err, workspaceId }, 'assisted heal Done→Submitted failed')
@@ -1095,7 +1190,8 @@ export async function listAssistedPackages(workspaceId: string) {
       used: packages.length,
       batchId: PILOT_BATCH,
       canAdd: true,
-      note: 'Every content-ready site gets a package after generation. Auto-publish stays off.',
+      note:
+        'Auto-publish is off — every content-ready site (including Automable) gets an Assisted Manual package. Browser does not auto-submit.',
     },
     counts: assistedCounts,
     laneConservation: board.conservation,

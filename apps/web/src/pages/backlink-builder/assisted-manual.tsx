@@ -164,12 +164,17 @@ export function AssistedManualPage() {
         }),
       }),
     onSuccess: (_data, vars) => {
+      const doneAndVerified = vars.status === 'done' && vars.userVerified === true;
       toast.success(
-        vars.status === 'done'
-          ? 'Marked Submitted'
-          : vars.userVerified
-            ? 'Marked Verified'
-            : 'Updated'
+        doneAndVerified
+          ? 'Marked Submitted & Verified'
+          : vars.status === 'done'
+            ? 'Marked Submitted'
+            : vars.userVerified
+              ? 'Marked Verified'
+              : vars.userVerified === false
+                ? 'Verification cleared'
+                : 'Updated'
       );
       void qc.invalidateQueries({ queryKey: ['assisted-manual', projectId] });
       void qc.invalidateQueries({ queryKey: ['assisted-manual-metrics', projectId] });
@@ -304,8 +309,9 @@ export function AssistedManualPage() {
             <ClipboardList className="h-6 w-6" /> Assisted Manual
           </h1>
           <p className="text-muted-foreground mt-1 max-w-2xl">
-            Every site with generated content gets a prepared package. Open each link, paste the
-            fields, clear login/CAPTCHA yourself, and submit. Auto-publish stays off.
+            With auto-publish off, every content-ready site — including Automable — gets a prepared
+            package here. Open each link, paste the fields, clear login/CAPTCHA yourself, and
+            submit. Done marks Submitted; use Done & Verified when there is no email/OTP step.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -537,6 +543,7 @@ export function AssistedManualPage() {
                       </Button>
                       <Button
                         size="sm"
+                        disabled={patchStatus.isPending || pkg.status === 'done'}
                         onClick={() => {
                           const mins = Number(minutesDraft);
                           patchStatus.mutate({
@@ -545,24 +552,55 @@ export function AssistedManualPage() {
                             minutesSpent: Number.isFinite(mins) && mins > 0 ? mins : undefined,
                           });
                         }}
+                        title="Mark as Submitted — flows to Track Results / Reports"
                       >
                         <Check className="h-3.5 w-3.5 mr-1" /> Done
                       </Button>
-                      {pkg.status === 'done' || pkg.submittedAt ? (
+                      {/* gate=none: nothing left to confirm — optional one-click Submitted+Verified */}
+                      {(pkg.gate === 'none' || !pkg.gate) &&
+                      pkg.status !== 'done' &&
+                      !pkg.userVerified ? (
                         <Button
                           size="sm"
-                          variant={pkg.userVerified ? 'secondary' : 'outline'}
+                          variant="secondary"
                           disabled={patchStatus.isPending}
-                          onClick={() =>
+                          onClick={() => {
+                            const mins = Number(minutesDraft);
                             patchStatus.mutate({
                               packageId: pkg.id,
-                              userVerified: !pkg.userVerified,
-                            })
-                          }
-                          title="Tick after email confirmation / listing goes live"
+                              status: 'done',
+                              userVerified: true,
+                              minutesSpent: Number.isFinite(mins) && mins > 0 ? mins : undefined,
+                            });
+                          }}
+                          title="No email/OTP step — mark Submitted and Verified together"
                         >
-                          {pkg.userVerified ? 'Verified ✓' : 'Mark Verified'}
+                          <Check className="h-3.5 w-3.5 mr-1" /> Done & Verified
                         </Button>
+                      ) : null}
+                      {pkg.status === 'done' || pkg.submittedAt ? (
+                        <>
+                          {String(pkg.gate ?? '').startsWith('otp_') && !pkg.userVerified ? (
+                            <p className="text-xs text-amber-800 w-full basis-full">
+                              Submitted — confirm via{' '}
+                              {pkg.gate === 'otp_phone' ? 'SMS' : 'email'}, then Mark Verified.
+                            </p>
+                          ) : null}
+                          <Button
+                            size="sm"
+                            variant={pkg.userVerified ? 'secondary' : 'outline'}
+                            disabled={patchStatus.isPending}
+                            onClick={() =>
+                              patchStatus.mutate({
+                                packageId: pkg.id,
+                                userVerified: !pkg.userVerified,
+                              })
+                            }
+                            title="Confirm after email/OTP / listing goes live"
+                          >
+                            {pkg.userVerified ? 'Verified ✓' : 'Mark Verified'}
+                          </Button>
+                        </>
                       ) : null}
                       <Button
                         size="sm"
