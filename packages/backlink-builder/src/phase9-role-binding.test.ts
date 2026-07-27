@@ -112,25 +112,23 @@ describe('Phase 9 role-value binding', () => {
 </form>`,
     });
     const pkg = buildAssistedPackage({ recipe, content: CONTENT, formFound: true });
-    const byRole = Object.fromEntries(pkg.fields.map((f) => [f.role + ':' + f.label, f]));
     const url = pkg.fields.find((f) => f.role === 'url');
     const owner = pkg.fields.find((f) => f.role === 'name');
     const oem = pkg.fields.find((f) => f.role === 'email');
     const desc = pkg.fields.find((f) => f.role === 'long_desc');
-    const other = pkg.fields.find((f) => f.role === 'other');
+    const otherListed = (pkg.otherFields ?? []).some((o) => /mystery/i.test(o.label));
 
     expect(url?.value).toBe('https://go.chefgaa.com');
     expect(owner?.value).toBe('Arun Kumar');
     expect(oem?.value).toBe('hello@chefgaa.com');
     expect(desc?.value).toContain('bakery operations');
-    expect(other?.value ?? '').toBe('');
-    expect(other?.flagged).toBe(true);
+    expect(otherListed).toBe(true);
+    expect(pkg.fields.every((f) => f.role !== 'other' || !f.value)).toBe(true);
 
     // Description must not appear in url/name/email
     for (const f of [url, owner, oem]) {
       expect(f?.value).not.toContain('bakery operations');
     }
-    void byRole;
   });
 
   it('self-check clears prose from email and long prose from name', () => {
@@ -154,6 +152,63 @@ describe('Phase 9 role-value binding', () => {
     expect(cleared[0]!.flagged).toBe(true);
     expect(cleared[1]!.value).toBe('');
     expect(cleared[1]!.flagged).toBe(true);
+  });
+
+  it('fills optional auto-fetch Description (long_desc) even when title prefixes the description', () => {
+    const content: ContentSource = {
+      title: 'ChefGaa kitchen ops for restaurants',
+      businessName: 'ChefGaa',
+      companyName: 'ChefGaa',
+      shortDescription:
+        'ChefGaa helps restaurants run prep lists and ticket flow during busy service hours.',
+      longDescription:
+        'ChefGaa kitchen ops for restaurants — prep lists, ticket flow, and staff coordination in one shared board.',
+      metaDescription:
+        'ChefGaa kitchen ops — prep lists and ticket flow for restaurant teams.',
+      url: 'https://go.chefgaa.com',
+      email: 'hello@chefgaa.com',
+    };
+    // long only from short when long missing
+    expect(valueForRole('long_desc', { ...content, longDescription: '' })).toContain('ChefGaa');
+
+    const recipe = buildSiteRecipe({
+      domain: 'viesearch.com',
+      entryUrl: 'https://viesearch.com/submit',
+      html: `
+<form>
+  <label for="title">Title (Optional) Leave blank to auto-fetch from website</label>
+  <input id="title" name="title" type="text" />
+  <label for="website">Website URL</label>
+  <input id="website" name="website" type="url" required />
+  <label for="description">Description (Optional) Leave blank to auto-fetch from website</label>
+  <textarea id="description" name="description" maxlength="500"></textarea>
+  <label for="email">Email</label>
+  <input id="email" name="email" type="email" />
+</form>`,
+    });
+    expect(inferFieldRole({
+      label: 'Description (Optional) Leave blank to auto-fetch from website',
+      name: 'description',
+      id: 'description',
+      placeholder: null,
+      ariaLabel: null,
+      type: 'textarea',
+      required: false,
+      maxlength: 500,
+      options: [],
+      surroundingText: '',
+      accept: null,
+      sizeHint: null,
+      selector: '#description',
+    }).role).toBe('long_desc');
+
+    const pkg = buildAssistedPackage({ recipe, content, formFound: true });
+    const title = pkg.fields.find((f) => f.role === 'title');
+    const desc = pkg.fields.find((f) => f.role === 'long_desc');
+    expect(title?.value.trim().length).toBeGreaterThan(0);
+    expect(desc?.value.trim().length).toBeGreaterThan(0);
+    expect(desc?.value.length).toBeLessThanOrEqual(200);
+    expect(String(desc?.flagReason ?? '')).not.toMatch(/content missing|Content field empty/i);
   });
 });
 

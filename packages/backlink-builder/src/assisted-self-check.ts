@@ -116,12 +116,7 @@ export function valueMatchesRole(role: string, value: string): RoleValueCheck {
       if (EMAIL_RE.test(v)) {
         return { ok: false, reason: 'description must not be an email' };
       }
-      if (v.length > 0 && v.length < MIN_LONG_DESC_CHARS) {
-        return {
-          ok: false,
-          reason: `description under ${MIN_LONG_DESC_CHARS} chars — likely truncated or wrong role`,
-        };
-      }
+      // Short blurbs are OK — never clear generated content for being under a soft floor
       return { ok: true };
 
     case 'email':

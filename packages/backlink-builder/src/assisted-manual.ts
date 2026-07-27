@@ -1460,6 +1460,8 @@ export type ContentSource = {
 /**
  * Phase 9 hard rule: a field only gets a value that matches its type.
  * Missing profile data → empty (never fall back to the description paragraph).
+ * Content fields (title / short_desc / long_desc) always bind generated copy when present —
+ * optional / "leave blank to auto-fetch" labels must NOT leave them empty.
  */
 export function valueForRole(role: FieldRole, content: ContentSource): string {
   switch (role) {
@@ -1467,10 +1469,20 @@ export function valueForRole(role: FieldRole, content: ContentSource): string {
       return String(content.title ?? '').trim();
     case 'business_name':
       return String(content.companyName || content.businessName || '').trim();
-  case 'short_desc':
-      return String(content.shortDescription || content.metaDescription || '').trim();
+    case 'short_desc':
+      return String(
+        content.shortDescription ||
+          content.metaDescription ||
+          content.longDescription ||
+          ''
+      ).trim();
     case 'long_desc':
-      return String(content.longDescription ?? '').trim();
+      return String(
+        content.longDescription ||
+          content.shortDescription ||
+          content.metaDescription ||
+          ''
+      ).trim();
     case 'url':
       return String(content.url ?? '').trim();
     case 'email':
@@ -1613,7 +1625,8 @@ export function buildAssistedPackage(input: {
 
   const PROFILE_ROLES = new Set(['url', 'email', 'phone', 'name', 'business_name', 'address']);
   const CONTENT_ROLES = new Set(['title', 'short_desc', 'long_desc']);
-  const usedValues = new Set<string>();
+  const usedTitles = new Set<string>();
+  const usedDescs = new Set<string>();
   const otherFields: NonNullable<AssistedPackagePayload['otherFields']> = [];
 
   const mappedFields: PackageFieldValue[] = [];
@@ -1706,21 +1719,45 @@ export function buildAssistedPackage(input: {
       raw = fitted.value;
     }
 
-    // Intra-package: never repeat the same paragraph across fields
+    // Intra-package: avoid desc↔desc repeats. Never blank a description because it shares
+    // a brand/title prefix — and never leave optional / auto-fetch labeled fields empty.
     const norm = raw.replace(/\s+/g, ' ').trim().toLowerCase();
-    if (raw && CONTENT_ROLES.has(rf.role)) {
-      let repeat = false;
-      for (const prev of usedValues) {
-        if (textsAreRepetitive(raw, prev)) {
-          repeat = true;
+    if (rf.role === 'title' && norm) {
+      if (usedTitles.has(norm)) {
+        raw = '';
+      } else {
+        usedTitles.add(norm);
+      }
+    } else if ((rf.role === 'short_desc' || rf.role === 'long_desc') && raw) {
+      let clashes = false;
+      for (const prev of usedDescs) {
+        if (norm === prev || textsAreRepetitive(raw, prev)) {
+          clashes = true;
           break;
         }
       }
-      if (repeat) {
-        raw = '';
-      } else if (norm) {
-        usedValues.add(raw);
+      if (clashes) {
+        const altRaw =
+          rf.role === 'long_desc'
+            ? String(
+                input.content.shortDescription || input.content.metaDescription || ''
+              ).trim()
+            : String(
+                input.content.longDescription || input.content.metaDescription || ''
+              ).trim();
+        const alt = fitDescriptionToCap(altRaw, rf.maxlength).value;
+        const altNorm = alt.replace(/\s+/g, ' ').trim().toLowerCase();
+        if (
+          alt &&
+          altNorm !== norm &&
+          ![...usedDescs].some((p) => textsAreRepetitive(alt, p))
+        ) {
+          raw = alt;
+        }
+        // else keep raw — empty content is a defect; mild overlap is better
       }
+      const keepNorm = raw.replace(/\s+/g, ' ').trim().toLowerCase();
+      if (keepNorm) usedDescs.add(keepNorm);
     }
 
     const fitted = fitValueToLimit(raw, rf.maxlength);
