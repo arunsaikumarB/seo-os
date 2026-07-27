@@ -15,6 +15,7 @@ import { useCurrentOpportunity } from '@/hooks/use-current-opportunity';
 import {
   ImageGenerationReadinessPanel,
   useImageGenerationReadiness,
+  useProjectMediaNeeds,
 } from '@/components/images/image-generation-readiness';
 
 type ImageAsset = {
@@ -73,6 +74,8 @@ export function ImageIntelligencePanel({ embedded = false }: { embedded?: boolea
 
   const readiness = useImageGenerationReadiness(projectId, selectedOpp?.id);
   const ready = readiness.data?.data;
+  const mediaNeeds = useProjectMediaNeeds(projectId);
+  const imagesNeeded = mediaNeeds.data?.data?.images === true;
 
   const generate = useMutation({
     mutationFn: () => {
@@ -139,6 +142,27 @@ export function ImageIntelligencePanel({ embedded = false }: { embedded?: boolea
         </div>
       )}
 
+      {mediaNeeds.isLoading ? (
+        <Skeleton className="h-24 w-full" />
+      ) : !imagesNeeded ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Not needed for this project</CardTitle>
+            <CardDescription>
+              {mediaNeeds.data?.data?.reason ??
+                'No target forms have an image upload field — Image Studio stays hidden.'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button variant="outline" asChild>
+              <Link to={`/projects/${projectId}/backlink-builder/assisted-manual`}>
+                Go to Assisted Manual
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
       <CurrentOpportunityBanner projectId={projectId} />
 
       <ImageGenerationReadinessPanel projectId={projectId} opportunityId={selectedOpp?.id} />
@@ -276,6 +300,8 @@ export function ImageIntelligencePanel({ embedded = false }: { embedded?: boolea
           )}
         </CardContent>
       </Card>
+        </>
+      )}
     </div>
   );
 }

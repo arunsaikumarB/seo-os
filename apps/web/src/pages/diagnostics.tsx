@@ -258,6 +258,11 @@ export function DiagnosticsPage() {
           <CardContent className="space-y-4">
             {imageDiag.isLoading ? (
               <Skeleton className="h-32 w-full" />
+            ) : img?.overallStatus === 'NOT NEEDED' || img?.generationStatus === 'not_needed' ? (
+              <p className="text-sm text-muted-foreground">
+                Image Studio is hidden for this project — no target forms have an image/file upload
+                field.
+              </p>
             ) : img ? (
               <>
                 <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4 text-sm">

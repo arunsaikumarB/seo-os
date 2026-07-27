@@ -16,6 +16,7 @@ import { useCurrentOpportunity } from '@/hooks/use-current-opportunity';
 import {
   ImageGenerationReadinessPanel,
   useImageGenerationReadiness,
+  useProjectMediaNeeds,
 } from '@/components/images/image-generation-readiness';
 
 const IMAGE_TYPES = [
@@ -38,6 +39,12 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
 
   const readiness = useImageGenerationReadiness(projectId, selectedOpp?.id);
   const ready = readiness.data?.data;
+  const mediaNeeds = useProjectMediaNeeds(projectId);
+  const studioNeeded =
+    kind === 'image'
+      ? mediaNeeds.data?.data?.images === true
+      : mediaNeeds.data?.data?.videos === true;
+  const studioGateLoading = mediaNeeds.isLoading;
 
   // When selection changes, refresh readiness + related resources immediately (no page reload)
   useEffect(() => {
@@ -47,6 +54,7 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
     void qc.invalidateQueries({ queryKey: ['content-packs', projectId] });
     void qc.invalidateQueries({ queryKey: ['iie-images', projectId] });
     void qc.invalidateQueries({ queryKey: ['image-jobs', projectId] });
+    void qc.invalidateQueries({ queryKey: ['project-media-needs', projectId] });
   }, [selectedOpp?.id, projectId, kind, qc]);
 
   const list = useQuery({
@@ -214,8 +222,9 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
     );
   }, [contentPacks.data?.data, selectedOpp]);
 
-  // Auto-queue image brief once when opportunity is active and no brief exists
+  // Auto-queue image brief only when forms actually need uploads
   useEffect(() => {
+    if (!studioNeeded) return;
     if (kind !== 'image') return;
     if (!selectedOpp?.id || list.isLoading || create.isPending) return;
     if (briefExists) {
@@ -225,7 +234,7 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
     if (autoBriefRef.current === selectedOpp.id) return;
     autoBriefRef.current = selectedOpp.id;
     create.mutate();
-  }, [kind, selectedOpp?.id, briefExists, list.isLoading, create.isPending]);
+  }, [kind, selectedOpp?.id, briefExists, list.isLoading, create.isPending, studioNeeded]);
 
   const relatedAssets = useMemo(() => {
     const rows = assets.data?.data ?? [];
@@ -259,6 +268,27 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
         </p>
       </div>
 
+      {studioGateLoading ? (
+        <Skeleton className="h-32 w-full" />
+      ) : !studioNeeded ? (
+        <Card className="rounded-2xl border-border/40 shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-base">Not needed for this project</CardTitle>
+            <CardDescription>
+              {mediaNeeds.data?.data?.reason ??
+                'No target forms have an image/file upload field. Image generation stays off for text-only directory submissions.'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button variant="outline" asChild>
+              <Link to={`/projects/${projectId}/backlink-builder/assisted-manual`}>
+                Go to Assisted Manual
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
       <CurrentOpportunityBanner projectId={projectId} />
 
       <Card className="rounded-2xl border-border/40 shadow-sm">
@@ -569,6 +599,8 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
           </p>
         )}
       </div>
+        </>
+      )}
     </PageTransition>
   );
 }

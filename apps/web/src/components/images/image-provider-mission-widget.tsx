@@ -24,6 +24,11 @@ export function ImageProviderMissionWidget({
   const readiness = useImageGenerationReadiness(projectId);
   const data = readiness.data?.data;
 
+  // Text-only projects — hide Image Provider widget entirely
+  if (data?.formRequiresImages === false || data?.overallStatus === 'NOT NEEDED') {
+    return null;
+  }
+
   if (readiness.isLoading && !summary) return <Skeleton className="h-24 w-full" />;
 
   const provider =

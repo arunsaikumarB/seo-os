@@ -4,6 +4,7 @@ import { ChevronDown } from 'lucide-react';
 import { APP_NAME, APP_TAGLINE } from '@seo-os/shared';
 import { workflowNavSections } from '@/config/workflow-navigation';
 import { useFeatureFlags } from '@/hooks/use-feature-flags';
+import { useProjectMediaNeeds } from '@/components/images/image-generation-readiness';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import type { NavItem } from '@/config/navigation';
@@ -33,10 +34,17 @@ export function Sidebar({ projectId, className }: SidebarProps) {
   const base = `/projects/${projectId}`;
   const location = useLocation();
   const { isEnabled } = useFeatureFlags();
+  const mediaNeeds = useProjectMediaNeeds(projectId);
+  // Until loaded, hide studios (text-only default for manual directory workflow)
+  const showImageStudio = mediaNeeds.isSuccess && Boolean(mediaNeeds.data?.data?.images);
+  const showVideoStudio = mediaNeeds.isSuccess && Boolean(mediaNeeds.data?.data?.videos);
 
   const isItemVisible = (item: WorkflowNavItem | NavItem) => {
     if (!item.featureFlag) return true;
-    return isEnabled(item.featureFlag);
+    if (!isEnabled(item.featureFlag)) return false;
+    if (item.href === 'backlink-builder/image-studio') return showImageStudio;
+    if (item.href === 'backlink-builder/video-studio') return showVideoStudio;
+    return true;
   };
 
   const visibleSections = useMemo(
@@ -48,7 +56,7 @@ export function Sidebar({ projectId, className }: SidebarProps) {
         }))
         .filter((section) => section.items.length > 0),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isEnabled]
+    [isEnabled, showImageStudio, showVideoStudio]
   );
 
   const advancedActive = useMemo(() => {

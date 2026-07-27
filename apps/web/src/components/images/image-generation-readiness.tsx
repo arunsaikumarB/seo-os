@@ -15,9 +15,18 @@ export type ReadinessCheck = {
   fixHref?: string;
 };
 
+export type ProjectMediaNeeds = {
+  images: boolean;
+  videos: boolean;
+  reason: string;
+  sitesWithImageUpload: number;
+};
+
 export type ImageReadiness = {
+  formRequiresImages?: boolean;
+  mediaNeeds?: ProjectMediaNeeds;
   imageGenerationReady: boolean;
-  overallStatus: 'READY' | 'NOT READY';
+  overallStatus: 'READY' | 'NOT READY' | 'NOT NEEDED';
   readinessScore: number;
   checks: ReadinessCheck[];
   primaryBlocker: ReadinessCheck | null;
@@ -36,6 +45,17 @@ export type ImageReadiness = {
   generationStatus: string;
 };
 
+export function useProjectMediaNeeds(projectId: string) {
+  const { request } = useApi();
+  return useQuery({
+    queryKey: ['project-media-needs', projectId],
+    queryFn: () =>
+      request<{ data: ProjectMediaNeeds }>(`/v1/projects/${projectId}/images/media-needs`),
+    enabled: !!projectId,
+    staleTime: 60_000,
+  });
+}
+
 export function useImageGenerationReadiness(projectId: string, opportunityId?: string | null) {
   const { request } = useApi();
   const qs = opportunityId ? `?opportunityId=${encodeURIComponent(opportunityId)}` : '';
@@ -44,7 +64,8 @@ export function useImageGenerationReadiness(projectId: string, opportunityId?: s
     queryFn: () =>
       request<{ data: ImageReadiness }>(`/v1/projects/${projectId}/images/readiness${qs}`),
     enabled: !!projectId,
-    refetchInterval: 8_000,
+    refetchInterval: (q) =>
+      q.state.data?.data?.formRequiresImages === false ? false : 8_000,
   });
 }
 
@@ -75,6 +96,11 @@ export function ImageGenerationReadinessPanel({
         Could not load image generation readiness.
       </p>
     );
+  }
+
+  // Text-only projects — hide Flux readiness entirely
+  if (data.formRequiresImages === false || data.overallStatus === 'NOT NEEDED') {
+    return null;
   }
 
   return (

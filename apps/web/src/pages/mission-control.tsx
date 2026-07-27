@@ -30,6 +30,7 @@ import { PageTransition, StaggerGrid, StaggerItem } from '@/components/demo/page
 import type { BacklinkSummary, AutomationSummary } from '@/components/backlink-builder/types';
 import type { LucideIcon } from 'lucide-react';
 import { ImageProviderMissionWidget } from '@/components/images/image-provider-mission-widget';
+import { useProjectMediaNeeds } from '@/components/images/image-generation-readiness';
 
 type MissionSummary = {
   backlinkBuilder?: BacklinkSummary;
@@ -177,6 +178,8 @@ function KpiCard({
 
 export function MissionControlPage() {
   const { projectId = '' } = useParams();
+  const mediaNeeds = useProjectMediaNeeds(projectId);
+  const showImageProvider = mediaNeeds.data?.data?.images === true;
   const { request } = useApi();
 
   const summary = useQuery({
@@ -472,6 +475,7 @@ export function MissionControlPage() {
         </CardContent>
       </Card>
 
+      {showImageProvider ? (
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base flex items-center gap-2">
@@ -485,6 +489,7 @@ export function MissionControlPage() {
           <ImageProviderMissionWidget projectId={projectId} summary={data?.imageIntelligence} />
         </CardContent>
       </Card>
+      ) : null}
 
       <Card>
         <CardHeader className="pb-2">

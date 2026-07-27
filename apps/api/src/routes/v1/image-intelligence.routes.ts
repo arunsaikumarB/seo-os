@@ -9,6 +9,7 @@ import {
   enqueueImageTransform,
   getImageGenerationDiagnostics,
   getImageGenerationReadiness,
+  getProjectMediaNeeds,
   getImageStatistics,
   getOrCreateStyleProfile,
   listImageJobs,
@@ -272,6 +273,22 @@ imageIntelligenceRouter.get(
           workspaceId: param(req.params.projectId),
           opportunityId,
         }),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/** Whether Image/Video Studio should appear for this project (form has upload field). */
+imageIntelligenceRouter.get(
+  '/images/media-needs',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      res.json({
+        data: await getProjectMediaNeeds(param(req.params.projectId)),
       });
     } catch (err) {
       next(err);

@@ -15,6 +15,82 @@ import { enqueueJob, QUEUES } from '../../jobs/boss.js';
 
 const registry = createImageProviderRegistry('flux');
 
+/**
+ * Phase 12 — Image/Video Studio only when a target form actually has an upload field.
+ * Manual directory workflows are text-only; never surface Flux UI otherwise.
+ */
+export async function getProjectMediaNeeds(workspaceId: string): Promise<{
+  images: boolean;
+  videos: boolean;
+  reason: string;
+  sitesWithImageUpload: number;
+}> {
+  let sitesWithImageUpload = 0;
+
+  const { data: profiles } = await getSupabaseAdmin()
+    .from('site_profiles')
+    .select('domain, recipe')
+    .eq('workspace_id', workspaceId)
+    .limit(300);
+  for (const row of profiles ?? []) {
+    const recipe = row.recipe as { fields?: Array<{ role?: string }> } | null;
+    if (recipe?.fields?.some((f) => f.role === 'attachment')) {
+      sitesWithImageUpload++;
+    }
+  }
+
+  if (sitesWithImageUpload === 0) {
+    const { data: pkgs } = await getSupabaseAdmin()
+      .from('assisted_packages')
+      .select('payload')
+      .eq('workspace_id', workspaceId)
+      .limit(300);
+    const seen = new Set<string>();
+    for (const row of pkgs ?? []) {
+      const p = row.payload as {
+        domain?: string;
+        fields?: Array<{ role?: string }>;
+      } | null;
+      if (!p?.fields?.some((f) => f.role === 'attachment')) continue;
+      const key = String(p.domain ?? '');
+      if (key && seen.has(key)) continue;
+      if (key) seen.add(key);
+      sitesWithImageUpload++;
+    }
+  }
+
+  const { data: typed } = await getSupabaseAdmin()
+    .from('opportunities')
+    .select('id, opportunity_type')
+    .eq('workspace_id', workspaceId)
+    .in('opportunity_type', [
+      'image_submission',
+      'infographic',
+      'infographic_submission',
+      'video',
+      'video_submission',
+    ])
+    .limit(20);
+  const hasImageType = (typed ?? []).some((o) =>
+    /image|infographic/i.test(String(o.opportunity_type ?? ''))
+  );
+  const hasVideoType = (typed ?? []).some((o) =>
+    /video/i.test(String(o.opportunity_type ?? ''))
+  );
+
+  const images = sitesWithImageUpload > 0 || hasImageType;
+  const videos = hasVideoType;
+
+  return {
+    images,
+    videos,
+    sitesWithImageUpload,
+    reason: images
+      ? `${sitesWithImageUpload || 1} site(s) require image/file upload`
+      : 'No target forms with image/file upload — Image Studio hidden for text-only submissions',
+  };
+}
+
 function requireIie() {
   if (!DEFAULT_FEATURE_FLAGS.v13_image_generation) {
     throw Object.assign(
@@ -298,6 +374,25 @@ export async function getImageGenerationReadiness(params: {
   const workspaceId = params.workspaceId;
   const opportunityId = params.opportunityId;
 
+  const mediaNeeds = await getProjectMediaNeeds(workspaceId);
+  if (!mediaNeeds.images) {
+    return {
+      formRequiresImages: false as const,
+      mediaNeeds,
+      imageGenerationReady: false,
+      overallStatus: 'NOT NEEDED' as const,
+      readinessScore: 0,
+      checks: [] as ReadinessCheck[],
+      primaryBlocker: null,
+      providers: [],
+      defaultProviderKey: null as string | null,
+      briefId: null as string | null,
+      opportunityId: opportunityId ?? null,
+      activeJobs: 0,
+      generationStatus: 'not_needed',
+    };
+  }
+
   const { data: project } = await getSupabaseAdmin()
     .from('workspaces')
     .select('id, name, domain')
@@ -540,6 +635,8 @@ export async function getImageGenerationReadiness(params: {
   );
 
   return {
+    formRequiresImages: true as const,
+    mediaNeeds,
     imageGenerationReady,
     overallStatus: imageGenerationReady ? ('READY' as const) : ('NOT READY' as const),
     readinessScore,
