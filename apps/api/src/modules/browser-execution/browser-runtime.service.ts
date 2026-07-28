@@ -181,7 +181,10 @@ export class BrowserExecutionService {
     this.consoleLogs = [];
     try {
       process.env.PLAYWRIGHT_CHROMIUM_USE_HEADLESS_SHELL ??= '0';
+      const { startPerfSpan } = await import('../../lib/perf-trace.js');
+      const span = startPerfSpan('browser_startup', { mode: opts.mode, pooled: true });
       this.browser = await acquirePooledBrowser(opts.mode, opts.timeoutMs ?? 20_000);
+      span.end(true, { connected: this.browser.isConnected() });
       this.pooled = true;
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err);
@@ -756,6 +759,27 @@ export function getBrowserPoolStats(): {
     headedConnected: Boolean(browserPool.get('headed')?.isConnected()),
     activeSessions: countAllocatedBrowserSlots(),
   };
+}
+
+/** P1 — pre-launch Chromium into the pool (no context/page). */
+export async function warmBrowserPool(
+  mode: BrowserMode = 'headless'
+): Promise<{ warmed: boolean; ms: number; alreadyConnected: boolean }> {
+  const { startPerfSpan } = await import('../../lib/perf-trace.js');
+  const span = startPerfSpan('browser_startup', { warm: true, mode });
+  const existing = browserPool.get(mode);
+  if (existing?.isConnected()) {
+    const ms = span.end(true, { alreadyConnected: true });
+    return { warmed: true, ms, alreadyConnected: true };
+  }
+  try {
+    await acquirePooledBrowser(mode, 20_000);
+    const ms = span.end(true, { alreadyConnected: false });
+    return { warmed: true, ms, alreadyConnected: false };
+  } catch (err) {
+    span.end(false, { error: err instanceof Error ? err.message : String(err) });
+    throw err;
+  }
 }
 
 /** Live Playwright contexts (excludes empty getSessionRuntime stubs). */

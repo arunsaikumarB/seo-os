@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { fingerprintSite } from '../src/site-fingerprint.js';
 import {
   buildPrioritizedFrontier,
+  isCrawlStopIntent,
   linkPriority,
   SIE_CRAWL_DEFAULTS,
 } from '../src/site-crawl.js';
@@ -222,5 +223,15 @@ describe('Phase 5 guidelines mismatch + learning', () => {
     const s = selectSubmissionStrategy(pages);
     expect(s.chosen).toBe('Direct Submission Form');
     expect(s.fallbacks.some((f) => f.strategy === 'Contact Form')).toBe(true);
+  });
+
+  it('P1 crawl budget is 6 pages / 30s with early-stop intents', () => {
+    expect(SIE_CRAWL_DEFAULTS.maxPages).toBe(6);
+    expect(SIE_CRAWL_DEFAULTS.timeBudgetMs).toBe(30_000);
+    expect(isCrawlStopIntent('Write For Us', 0.9)).toBe(true);
+    expect(isCrawlStopIntent('Submission Form', 0.8)).toBe(true);
+    expect(isCrawlStopIntent('Contact', 0.7)).toBe(true);
+    expect(isCrawlStopIntent('Article', 0.9)).toBe(false);
+    expect(isCrawlStopIntent('Write For Us', 0.2)).toBe(false);
   });
 });

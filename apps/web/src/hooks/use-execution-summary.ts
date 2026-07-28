@@ -4,6 +4,7 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { useApi } from '@/hooks/use-api';
+import { useDocumentVisible } from '@/hooks/use-adaptive-refetch';
 
 export type ExecutionSummary = {
   queued: number;
@@ -106,6 +107,14 @@ function normalize(d: StatsPayload): ExecutionSummary {
 /** Sole hook for execution counts / progress / live current — all pages use this. */
 export function useExecutionSummary(projectId: string, refetchInterval = 1_500) {
   const { request } = useApi();
+  const visible = useDocumentVisible();
+  const interval =
+    typeof refetchInterval === 'number'
+      ? visible
+        ? refetchInterval
+        : Math.max(refetchInterval * 4, 8_000)
+      : refetchInterval;
+
   return useQuery({
     queryKey: ['execution-summary', projectId],
     queryFn: async (): Promise<ExecutionSummary> => {
@@ -115,7 +124,8 @@ export function useExecutionSummary(projectId: string, refetchInterval = 1_500) 
       return normalize(res.data ?? {});
     },
     enabled: !!projectId,
-    refetchInterval,
+    refetchInterval: interval,
+    staleTime: 1_000,
     retry: 1,
     // Never placeholder zeros — that made Track Results look "loaded" with empty counters
     // while Campaign Health / Reports already had live CSM-backed numbers.

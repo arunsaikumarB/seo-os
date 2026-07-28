@@ -152,7 +152,10 @@ export function BeeOpsPanel({ projectId, selectedJobId, onSelectJob: _onSelectJo
         `/v1/projects/${projectId}/browser/health`
       ),
     enabled: !!projectId,
-    refetchInterval: 5_000,
+    refetchInterval: () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return 15_000;
+      return 5_000;
+    },
   });
 
   const queue = useQuery({
@@ -160,7 +163,11 @@ export function BeeOpsPanel({ projectId, selectedJobId, onSelectJob: _onSelectJo
     queryFn: () =>
       request<{ data: QueueMonitor }>(`/v1/projects/${projectId}/browser/queue-monitor`),
     enabled: !!projectId,
-    refetchInterval: 1_000,
+    refetchInterval: (q) => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return 10_000;
+      const running = Number(q.state.data?.data?.running ?? 0);
+      return running > 0 ? 1_000 : 3_000;
+    },
   });
 
   const details = useQuery({
@@ -170,7 +177,8 @@ export function BeeOpsPanel({ projectId, selectedJobId, onSelectJob: _onSelectJo
         `/v1/projects/${projectId}/browser/jobs/${selectedJobId}/details`
       ),
     enabled: !!projectId && !!selectedJobId,
-    refetchInterval: 1_000,
+    refetchInterval: () =>
+      typeof document !== 'undefined' && document.visibilityState === 'hidden' ? 8_000 : 2_000,
   });
 
   const liveLogs = useQuery({
@@ -180,7 +188,8 @@ export function BeeOpsPanel({ projectId, selectedJobId, onSelectJob: _onSelectJo
         data: Array<{ id: string; level: string; message: string; created_at: string }>;
       }>(`/v1/projects/${projectId}/browser/logs?jobId=${selectedJobId}`),
     enabled: !!projectId && !!selectedJobId,
-    refetchInterval: 1_000,
+    refetchInterval: () =>
+      typeof document !== 'undefined' && document.visibilityState === 'hidden' ? 8_000 : 2_000,
   });
 
   const bulkRetry = useMutation({

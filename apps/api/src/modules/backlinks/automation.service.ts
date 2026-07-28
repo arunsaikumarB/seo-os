@@ -445,7 +445,10 @@ export async function runAutomationPipeline(
     }> = [];
     const learning = await loadClassificationLearning(workspaceId);
 
-    const CONCURRENCY = 5;
+      const CONCURRENCY = Math.min(
+        16,
+        Math.max(1, Number(process.env.IMPORT_VALIDATE_CONCURRENCY ?? 8))
+      );
     for (let i = 0; i < validRows.length; i += CONCURRENCY) {
       const batch = validRows.slice(i, i + CONCURRENCY);
       await Promise.all(

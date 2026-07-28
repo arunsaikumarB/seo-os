@@ -3,6 +3,7 @@ import { getEnv } from '../config/env.js';
 import { getSupabaseAdmin } from '../lib/supabase.js';
 import { getBoss, QUEUES, getQueueOpsSnapshot, areQueuesInitialized } from '../jobs/boss.js';
 import { getMetricsSnapshot } from '../lib/metrics.js';
+import { getPerformanceSnapshot } from '../lib/perf-trace.js';
 import { getAIRuntime } from '../modules/ai/runtime.js';
 import { listCircuits } from '../lib/circuit-breaker.js';
 import { getProviderManager } from '@seo-os/providers';
@@ -247,6 +248,31 @@ export async function opsHealthHandler(_req: Request, res: Response): Promise<vo
   };
 
   res.status(200).json({ data: payload });
+}
+
+/** P1 — Pipeline stage timings for Performance Dashboard */
+export async function opsPerformanceHandler(_req: Request, res: Response): Promise<void> {
+  let browserPool: {
+    headlessConnected: boolean;
+    headedConnected: boolean;
+    activeSessions: number;
+  } | null = null;
+  try {
+    const { getBrowserPoolStats } = await import(
+      '../modules/browser-execution/browser-runtime.service.js'
+    );
+    browserPool = getBrowserPoolStats();
+  } catch {
+    browserPool = null;
+  }
+  res.status(200).json({
+    data: {
+      ...getPerformanceSnapshot(),
+      metrics: getMetricsSnapshot(),
+      browserPool,
+      version: '1.2.7-queue-init',
+    },
+  });
 }
 
 /** Queue + worker diagnostics for ops */

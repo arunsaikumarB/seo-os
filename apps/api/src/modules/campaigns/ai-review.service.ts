@@ -71,9 +71,12 @@ function toReviewItem(i: CampaignItemRow): AiReviewItem {
 }
 
 export async function getAiReviewBoard(workspaceId: string) {
+  const { startPerfSpan } = await import('../../lib/perf-trace.js');
+  const span = startPerfSpan('ai_review', { board: true });
   const items = await listCampaignItems(workspaceId, { includeDeleted: false });
 
   // Heal rows stuck with terminal status/decision but stale needs_classification tier
+  const healFns: Array<() => Promise<unknown>> = [];
   for (const item of items) {
     const terminalStatus =
       item.currentStatus === 'Rejected' ||
@@ -102,15 +105,24 @@ export async function getAiReviewBoard(workspaceId: string) {
             : item.currentStatus === 'Skipped'
               ? 'Duplicate'
               : 'Unsupported';
-      await updateCampaignItem(workspaceId, item.id, {
-        reviewDecision: nextDecision,
-        reviewTier: null,
-        force: true,
-      }).catch(() => undefined);
+      healFns.push(() =>
+        updateCampaignItem(workspaceId, item.id, {
+          reviewDecision: nextDecision,
+          reviewTier: null,
+          force: true,
+        }).catch(() => undefined)
+      );
     }
   }
+  // P1 — parallel heal (was sequential)
+  for (let i = 0; i < healFns.length; i += 8) {
+    await Promise.all(healFns.slice(i, i + 8).map((fn) => fn()));
+  }
 
-  const fresh = await listCampaignItems(workspaceId, { includeDeleted: false });
+  const fresh =
+    healFns.length > 0
+      ? await listCampaignItems(workspaceId, { includeDeleted: false })
+      : items;
   const summary = computeAiReviewSummary(fresh);
   const rows = fresh.map(toReviewItem);
 
@@ -152,6 +164,7 @@ export async function getAiReviewBoard(workspaceId: string) {
     (r) => r.reviewDecision === 'Approved' && r.approvedBy === 'user'
   );
 
+  span.end(true, { items: rows.length, heals: healFns.length });
   return {
     summary,
     tiers: {

@@ -280,8 +280,13 @@ async function enqueueItemJob(
   );
 }
 
-export async function getContentGenerationBoard(workspaceId: string) {
-  const items = await listCampaignItems(workspaceId, { includeDeleted: false });
+export async function getContentGenerationBoard(
+  workspaceId: string,
+  opts?: { preloadedItems?: Awaited<ReturnType<typeof listCampaignItems>> }
+) {
+  const items =
+    opts?.preloadedItems ??
+    (await listCampaignItems(workspaceId, { includeDeleted: false }));
   const progress = computeGenerationProgress(items);
   const stats = await getStats(workspaceId);
   const concurrency = contentGenConcurrency();
@@ -1445,15 +1450,25 @@ async function maybeNotifyContentGenerationBatch(workspaceId: string) {
 export async function handleContentGenerateJobs(
   jobs: Array<{ id: string; data: Record<string, unknown> }>
 ) {
+  const { startPerfSpan } = await import('../../lib/perf-trace.js');
   for (const job of jobs) {
     if (String(job.data.type ?? '') !== 'content_generate') continue;
     touchContentGenHeartbeat();
-    await processContentGenerationJob({
-      workspaceId: String(job.data.workspaceId),
-      opportunityId: String(job.data.opportunityId),
-      stage: (job.data.stage as ContentGenStage) ?? 'all',
-      manualRetry: Boolean(job.data.manualRetry),
-      interrupted: Boolean(job.data.interrupted),
+    const span = startPerfSpan('content_generation', {
+      opportunityId: String(job.data.opportunityId ?? ''),
     });
+    try {
+      await processContentGenerationJob({
+        workspaceId: String(job.data.workspaceId),
+        opportunityId: String(job.data.opportunityId),
+        stage: (job.data.stage as ContentGenStage) ?? 'all',
+        manualRetry: Boolean(job.data.manualRetry),
+        interrupted: Boolean(job.data.interrupted),
+      });
+      span.end(true);
+    } catch (err) {
+      span.end(false, { error: err instanceof Error ? err.message : String(err) });
+      throw err;
+    }
   }
 }

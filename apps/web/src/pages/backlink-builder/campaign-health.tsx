@@ -2,11 +2,12 @@
  * Campaign Health — internal audit table (plain HTML-ish UI).
  * Route is not linked from main nav; open directly for sync debugging.
  */
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useApi } from '@/hooks/use-api';
 import { useExecutionSummary } from '@/hooks/use-execution-summary';
+import { useCampaignEvents } from '@/hooks/use-campaign-events';
 
 type HealthRow = {
   website: string;
@@ -210,6 +211,10 @@ export function CampaignHealthPage() {
   const { request } = useApi();
   const execSummary = useExecutionSummary(projectId, 2_000);
   const sum = execSummary.data;
+  const busy =
+    (sum?.running ?? 0) > 0 ||
+    (sum?.queued ?? 0) > 0 ||
+    (sum?.waitingHuman ?? 0) > 0;
 
   const health = useQuery({
     queryKey: ['campaign-health', projectId],
@@ -218,7 +223,13 @@ export function CampaignHealthPage() {
         `/v1/projects/${projectId}/backlink-builder/campaign-health`
       ),
     enabled: !!projectId,
-    refetchInterval: 5_000,
+    staleTime: 2_000,
+    refetchInterval: (q) => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return 20_000;
+      const d = q.state.data?.data;
+      const genActive = Boolean(d?.generationProgress?.active);
+      return busy || genActive ? 5_000 : 15_000;
+    },
   });
 
   const assisted = useQuery({
@@ -246,6 +257,15 @@ export function CampaignHealthPage() {
   const audit = data?.generationAudit;
   const orphans = data?.orphans;
   const ac = assisted.data?.data.counts;
+
+  useCampaignEvents(projectId, !!projectId);
+
+  const visibleItems = useMemo(() => {
+    const all = data?.items ?? [];
+    // P1 — cap DOM rows for large campaigns (same columns; full data still in payload)
+    return all.length > 150 ? all.slice(0, 150) : all;
+  }, [data?.items]);
+  const hiddenItemCount = Math.max(0, (data?.items?.length ?? 0) - visibleItems.length);
 
   // Phase 6.1 — Track Results ≡ Campaign Health Execution Summary ≡ CSM waiting / cohort
   useEffect(() => {
@@ -740,7 +760,7 @@ export function CampaignHealthPage() {
             </tr>
           </thead>
           <tbody>
-            {(data?.items ?? []).map((row) => (
+            {visibleItems.map((row) => (
               <tr key={`${row.website}-${row.updatedAt}`} className="border-b">
                 <td className="px-2 py-1 max-w-[180px] truncate">{row.website}</td>
                 <td className="px-2 py-1">{row.imported ? 'Y' : ''}</td>
@@ -768,6 +788,12 @@ export function CampaignHealthPage() {
             ))}
           </tbody>
         </table>
+        {hiddenItemCount > 0 ? (
+          <p className="text-xs text-muted-foreground mt-2 px-1">
+            Showing 150 of {(data?.items?.length ?? 0).toLocaleString()} rows for render
+            performance ({hiddenItemCount.toLocaleString()} more in API payload).
+          </p>
+        ) : null}
       </div>
     </div>
   );

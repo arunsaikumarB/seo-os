@@ -57,15 +57,25 @@ export async function startJobInfrastructure(): Promise<void> {
 
   await registerJobHandler(QUEUES.CRAWL, async (jobs) => {
     const all = jobs.map((j) => ({ id: j.id, data: j.data as Record<string, unknown> }));
+    const profileJobs = all.filter((j) => String(j.data.type ?? '') === 'bee_profile');
     const backlinkJobs = all.filter((j) =>
       String(j.data.type ?? '').startsWith('backlink_')
     );
-    const scanJobs = all.filter((j) => !String(j.data.type ?? '').startsWith('backlink_'));
+    const scanJobs = all.filter(
+      (j) =>
+        String(j.data.type ?? '') !== 'bee_profile' &&
+        !String(j.data.type ?? '').startsWith('backlink_')
+    );
+    if (profileJobs.length) {
+      const { handlePlaywrightJobs } = await import('./handlers/playwright.js');
+      await handlePlaywrightJobs(profileJobs);
+    }
     if (backlinkJobs.length) await handleBacklinkJobs(backlinkJobs);
     if (scanJobs.length) await handleIntelligenceScanJobs(scanJobs);
-  });
+  }, { concurrency: 2, batchSize: 2, pollingIntervalSeconds: 1 });
 
-  // Parallel browser executes — concurrency matches BEE_MAX_SESSIONS (default 4)
+  // Parallel browser executes — concurrency matches BEE_MAX_SESSIONS (default 1)
+  // bee_profile is enqueued on CRAWL to avoid starving fill/submit; keep handler for legacy jobs.
   const beeConcurrency = Math.min(16, Math.max(1, BEE_RELIABILITY.MAX_BROWSER_SESSIONS));
   await registerJobHandler(
     QUEUES.PLAYWRIGHT,
@@ -127,6 +137,9 @@ export async function startJobInfrastructure(): Promise<void> {
     const contentGenJobs = jobs.filter(
       (j) => (j.data as Record<string, unknown>)?.type === 'content_generate'
     );
+    const healthReconcileJobs = jobs.filter(
+      (j) => (j.data as Record<string, unknown>)?.type === 'campaign_health_reconcile'
+    );
     const otherJobs = jobs.filter((j) => {
       const d = j.data as Record<string, unknown>;
       return (
@@ -142,6 +155,7 @@ export async function startJobInfrastructure(): Promise<void> {
         d?.type !== 'bee_session_health' &&
         d?.type !== 'automation_recover_stuck' &&
         d?.type !== 'content_generate' &&
+        d?.type !== 'campaign_health_reconcile' &&
         !String(d?.type ?? '').startsWith('image_') &&
         !String(d?.type ?? '').startsWith('provider_')
       );
@@ -227,6 +241,20 @@ export async function startJobInfrastructure(): Promise<void> {
       );
       await Promise.all(workers);
     }
+    if (healthReconcileJobs.length) {
+      const { runCampaignHealthReconcile } = await import(
+        '../modules/campaigns/campaign-health-reconcile.service.js'
+      );
+      for (const job of healthReconcileJobs) {
+        const ws = String((job.data as Record<string, unknown>).workspaceId ?? '');
+        if (!ws) continue;
+        try {
+          await runCampaignHealthReconcile(ws);
+        } catch (err) {
+          logger.warn({ err, workspaceId: ws }, 'campaign_health_reconcile failed');
+        }
+      }
+    }
     for (const job of otherJobs) {
       logger.debug({ jobId: job.id }, 'Low-priority job received');
     }
@@ -298,6 +326,17 @@ export async function startJobInfrastructure(): Promise<void> {
     await enqueueJob(QUEUES.LOW, 'automation_recover_stuck', {
       type: 'automation_recover_stuck',
     }, { singletonKey: 'automation-recover-stuck', startAfter: 60 });
+  }
+
+  // P1 — warm headless Chromium so first job startup is <300ms when pool is hot
+  try {
+    const { warmBrowserPool } = await import(
+      '../modules/browser-execution/browser-runtime.service.js'
+    );
+    const warm = await warmBrowserPool('headless');
+    logger.info(warm, 'BEE browser pool warm complete');
+  } catch (err) {
+    logger.warn({ err }, 'BEE browser pool warm failed (will launch on first job)');
   }
 
   logger.info(

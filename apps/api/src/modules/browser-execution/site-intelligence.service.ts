@@ -5,8 +5,11 @@
 import { randomUUID } from 'node:crypto';
 import {
   analyzeFetchedSite,
+  classifyPageIntent,
   detectGuidelinesMismatch,
+  directoryLearningAllowsSkipRediscovery,
   emptyLearning,
+  isCrawlStopIntent,
   isProfileStale,
   normalizeSiteDomain,
   planCrawlFrontier,
@@ -22,6 +25,13 @@ import {
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { enqueueJob, QUEUES } from '../../jobs/boss.js';
 import { logger } from '../../lib/logger.js';
+import {
+  recordCacheHit,
+  recordCacheMiss,
+  recordSkipRediscovery,
+  recordEarlyCrawlStop,
+  startPerfSpan,
+} from '../../lib/perf-trace.js';
 
 export type SiteProfileRow = {
   id: string;
@@ -182,7 +192,30 @@ export async function ensureSiteIntelligence(params: {
     Boolean((profile.strategy as { entryUrl?: string } | null)?.entryUrl);
 
   if (reusable) {
+    recordCacheHit();
     // Lightweight path: mark opportunities linked; entry_url verification happens at execute
+    if (params.opportunityId) {
+      await linkOpportunityToProfile(
+        params.workspaceId,
+        params.opportunityId,
+        profile.id,
+        profile.profile_status
+      );
+    }
+    return { profile, enqueued: false, reused: true };
+  }
+
+  recordCacheMiss();
+
+  // Directory learning skip — no full crawl enqueue when known free path remembered
+  const dirLearn = (profile.learning as SiteLearning | null)?.directory;
+  if (
+    !params.forceReprofile &&
+    profile.profile_status === 'complete' &&
+    !isProfileStale(profile.expires_at) &&
+    directoryLearningAllowsSkipRediscovery(dirLearn)
+  ) {
+    recordSkipRediscovery();
     if (params.opportunityId) {
       await linkOpportunityToProfile(
         params.workspaceId,
@@ -216,7 +249,7 @@ export async function ensureSiteIntelligence(params: {
     status: 'queued',
   });
 
-  await enqueueJob(QUEUES.PLAYWRIGHT, 'bee_profile', {
+  await enqueueJob(QUEUES.CRAWL, 'bee_profile', {
     type: 'bee_profile',
     workspaceId: params.workspaceId,
     profileId: profile.id,
@@ -797,7 +830,6 @@ export async function runBoundedCrawl(domain: string): Promise<SiteIntelligenceR
 
   const home = await fetchPageHtml(homepageUrl);
   if (!home.ok) {
-    // try www-less already; record failure
     pages.push({
       url: homepageUrl,
       html: home.html,
@@ -821,9 +853,30 @@ export async function runBoundedCrawl(domain: string): Promise<SiteIntelligenceR
     depth: 0,
   });
 
+  // Early-stop if homepage itself is a submission surface
+  const homeIntent = classifyPageIntent({
+    html: home.html,
+    url: homepageUrl,
+    title: home.title,
+  });
+  if (isCrawlStopIntent(homeIntent.intent, homeIntent.confidence)) {
+    recordEarlyCrawlStop();
+    return analyzeFetchedSite({
+      homepageUrl,
+      pages,
+      elapsedMs: Date.now() - started,
+      truncated: true,
+      maxPages: SIE_CRAWL_DEFAULTS.maxPages,
+      timeBudgetMs: SIE_CRAWL_DEFAULTS.timeBudgetMs,
+    });
+  }
+
   const frontier = planCrawlFrontier(homepageUrl, home.html);
   let truncated = false;
-  for (const link of frontier) {
+  const concurrency = Math.max(1, SIE_CRAWL_DEFAULTS.fetchConcurrency ?? 1);
+  let cursor = 0;
+
+  while (cursor < frontier.length) {
     if (Date.now() - started > SIE_CRAWL_DEFAULTS.timeBudgetMs) {
       truncated = true;
       break;
@@ -832,20 +885,61 @@ export async function runBoundedCrawl(domain: string): Promise<SiteIntelligenceR
       truncated = true;
       break;
     }
-    await new Promise((r) => setTimeout(r, SIE_CRAWL_DEFAULTS.fetchDelayMs));
-    let fetched = await fetchPageHtml(link.url);
-    if (!fetched.ok) {
-      await new Promise((r) => setTimeout(r, 500));
-      fetched = await fetchPageHtml(link.url); // 1 retry
+
+    const batchSize = Math.min(
+      concurrency,
+      SIE_CRAWL_DEFAULTS.maxPages - pages.length,
+      frontier.length - cursor
+    );
+    const batch = frontier.slice(cursor, cursor + batchSize);
+    cursor += batchSize;
+
+    if (pages.length > 1) {
+      await new Promise((r) => setTimeout(r, SIE_CRAWL_DEFAULTS.fetchDelayMs));
     }
-    pages.push({
-      url: link.url,
-      html: fetched.html,
-      title: fetched.title,
-      status: fetched.ok ? 'fetched' : 'failed',
-      error: fetched.ok ? null : fetched.error || 'fetch failed',
-      depth: link.depth,
-    });
+
+    const fetchedBatch = await Promise.all(
+      batch.map(async (link) => {
+        let fetched = await fetchPageHtml(link.url);
+        if (!fetched.ok) {
+          await new Promise((r) => setTimeout(r, 400));
+          fetched = await fetchPageHtml(link.url);
+        }
+        return { link, fetched };
+      })
+    );
+
+    let stop = false;
+    for (const { link, fetched } of fetchedBatch) {
+      pages.push({
+        url: link.url,
+        html: fetched.html,
+        title: fetched.title,
+        status: fetched.ok ? 'fetched' : 'failed',
+        error: fetched.ok ? null : fetched.error || 'fetch failed',
+        depth: link.depth,
+      });
+      if (fetched.ok) {
+        const intent = classifyPageIntent({
+          html: fetched.html,
+          url: link.url,
+          title: fetched.title,
+        });
+        if (isCrawlStopIntent(intent.intent, intent.confidence)) {
+          stop = true;
+          truncated = true;
+        }
+      }
+      if (pages.length >= SIE_CRAWL_DEFAULTS.maxPages) {
+        truncated = true;
+        stop = true;
+        break;
+      }
+    }
+    if (stop) {
+      recordEarlyCrawlStop();
+      break;
+    }
   }
 
   return analyzeFetchedSite({
@@ -853,6 +947,8 @@ export async function runBoundedCrawl(domain: string): Promise<SiteIntelligenceR
     pages,
     elapsedMs: Date.now() - started,
     truncated,
+    maxPages: SIE_CRAWL_DEFAULTS.maxPages,
+    timeBudgetMs: SIE_CRAWL_DEFAULTS.timeBudgetMs,
   });
 }
 
@@ -927,6 +1023,7 @@ export async function runSiteProfileJob(params: {
                 c.intent === 'Contact')
           );
         if (stillValid) {
+          recordSkipRediscovery();
           const merged = {
             ...quick,
             strategy: {
@@ -958,7 +1055,64 @@ export async function runSiteProfileJob(params: {
       }
     }
 
+    // Directory learning skip-rediscovery: verify known submission URL only
+    const dirLearn = learning.directory;
+    if (
+      existing &&
+      !isProfileStale(existing.expires_at) &&
+      directoryLearningAllowsSkipRediscovery(dirLearn) &&
+      dirLearn?.submissionUrl
+    ) {
+      const verify = await fetchPageHtml(dirLearn.submissionUrl);
+      if (verify.ok) {
+        recordSkipRediscovery();
+        const quick = analyzeFetchedSite({
+          homepageUrl: `https://${params.domain}/`,
+          pages: [
+            {
+              url: `https://${params.domain}/`,
+              html: '<html></html>',
+              status: 'fetched',
+              depth: 0,
+            },
+            {
+              url: dirLearn.submissionUrl,
+              html: verify.html,
+              title: verify.title,
+              status: 'fetched',
+              depth: 1,
+            },
+          ],
+          elapsedMs: 0,
+        });
+        const merged = {
+          ...quick,
+          strategy: {
+            ...quick.strategy,
+            chosen: (dirLearn.knownStrategy as typeof quick.strategy.chosen) ?? quick.strategy.chosen,
+            directoryStrategy: dirLearn.knownStrategy ?? quick.strategy.directoryStrategy,
+            entryUrl: dirLearn.submissionUrl,
+            reasoning: `Skipped rediscovery via directory learning: ${dirLearn.submissionUrl}`,
+          },
+          profileStatus: 'complete' as const,
+        };
+        await saveIntelligenceResult(params.workspaceId, params.profileId, merged, learning);
+        await admin()
+          .from('site_profile_jobs')
+          .update({
+            status: 'complete',
+            finished_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', params.profileJobId);
+        await resumeJobsWaitingForProfile(params.workspaceId, params.domain);
+        return merged;
+      }
+    }
+
+    const span = startPerfSpan('site_intelligence', { domain: params.domain });
     const result = await runBoundedCrawl(params.domain);
+    span.end(true, { strategy: result.strategy.chosen, pages: result.crawlStats.pagesFetched });
     await saveIntelligenceResult(params.workspaceId, params.profileId, result, learning);
     await admin()
       .from('site_profile_jobs')

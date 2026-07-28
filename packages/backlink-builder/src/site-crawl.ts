@@ -3,14 +3,35 @@
  * Never becomes a spider: max pages, depth, prioritized frontier, same-domain only.
  */
 
+/** P1 — tighter crawl budget: 6 pages or 30s, early-stop on submission intents. */
 export const SIE_CRAWL_DEFAULTS = {
-  maxPages: 15,
+  maxPages: 6,
   maxDepth: 3,
-  timeBudgetMs: 90_000,
-  fetchDelayMs: 1_500,
+  timeBudgetMs: 30_000,
+  fetchDelayMs: 800,
   maxRetries: 1,
   respectRobots: true,
+  /** Parallel HTTP fetches within the crawl budget (1 = sequential). */
+  fetchConcurrency: 2,
 } as const;
+
+/** Intents that mean we found a usable submission surface — stop crawling. */
+export const CRAWL_STOP_INTENTS = [
+  'Write For Us',
+  'Submission Form',
+  'Guest Post Guidelines',
+  'Comment Form',
+  'Dashboard',
+  'Contact',
+  'Directory',
+  'Google Form',
+  'Typeform',
+] as const;
+
+export function isCrawlStopIntent(intent: string, confidence = 0): boolean {
+  if (confidence > 0 && confidence < 0.55) return false;
+  return (CRAWL_STOP_INTENTS as readonly string[]).includes(intent);
+}
 
 export type CrawlLink = {
   url: string;

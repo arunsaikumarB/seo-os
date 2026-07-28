@@ -424,145 +424,245 @@ backlinkBuilderRouter.get(
   requireRole('viewer'),
   async (req, res, next) => {
     try {
+      const { startPerfSpan } = await import('../../lib/perf-trace.js');
+      const span = startPerfSpan('campaign_health');
       const {
-        getCampaignCounts,
         listCampaignItems,
       } = await import('../../modules/campaigns/campaign-state.service.js');
+      const { computeCampaignCounts } = await import('@seo-os/backlink-builder');
       const { getContentGenerationBoard } = await import(
         '../../modules/campaigns/content-generation.service.js'
       );
       const workspaceId = param(req.params.projectId);
-      const items = await listCampaignItems(workspaceId, { includeDeleted: true });
-      const counts = await getCampaignCounts(workspaceId);
-      const { sweepOrphanAssets } = await import(
-        '../../modules/campaigns/content-generation.service.js'
-      );
-      const orphanSweep = await sweepOrphanAssets(workspaceId).catch(() => ({
-        deleted: 0,
-        remaining: -1,
-        byTable: {} as Record<string, number>,
-      }));
-      const gen = await getContentGenerationBoard(workspaceId);
-      const { getExecutionAudit } = await import(
-        '../../modules/browser-execution/bee-reconcile.service.js'
-      );
-      const executionAudit = await getExecutionAudit(workspaceId);
-      const { getTruthAudit } = await import(
-        '../../modules/browser-execution/bee-evidence.service.js'
-      );
-      const truthAudit = await getTruthAudit(workspaceId);
-      const { getSiteProfileAudit } = await import(
-        '../../modules/browser-execution/site-intelligence.service.js'
-      );
-      let siteIntelligenceAudit = null;
-      try {
-        siteIntelligenceAudit = await getSiteProfileAudit(workspaceId);
-      } catch {
-        siteIntelligenceAudit = { total: 0, error: 'unavailable' };
+      const forceReconcile = req.query.reconcile === '1';
+
+      // P1 — short in-memory response cache (dedupe overlapping 5s polls)
+      const cacheKey = `ch:${workspaceId}`;
+      const cached = campaignHealthCache.get(cacheKey);
+      if (cached && Date.now() - cached.at < 2_500 && !forceReconcile) {
+        span.end(true, { cache: 'hit' });
+        res.json({ data: cached.data });
+        return;
       }
-      res.json({
-        data: {
-          totals: counts,
-          generationAudit: gen.generationAudit,
-          orphans: gen.orphans,
-          orphanSweep,
-          generationProgress: gen.progress,
-          executionAudit,
-          truthAudit,
-          siteIntelligenceAudit,
-          handoffAudit: await (async () => {
-            try {
-              const { getHandoffAudit, reconcileGenerationHandoff } = await import(
-                '../../modules/campaigns/generation-handoff.service.js'
-              );
-              await reconcileGenerationHandoff(workspaceId);
-              return await getHandoffAudit(workspaceId);
-            } catch (err) {
-              return {
-                ok: false,
-                error: err instanceof Error ? err.message : String(err),
-                generatedPackages: 0,
-                submissionReady: 0,
-                blocked: 0,
-                violations: [],
-              };
-            }
-          })(),
-          executionDiagnostics: await (async () => {
-            try {
-              const { ensureExecutionJobsForReady } = await import(
-                '../../modules/browser-execution/execution-pipeline.service.js'
-              );
-              const ensured = await ensureExecutionJobsForReady({
-                workspaceId,
-                // Phase 6: health poll must NOT start browsers — only ensure jobs exist (idempotent).
-                startImmediately: false,
-              });
-              if (ensured.skippedAutoPublishOff) {
-                return {
-                  ...ensured.diagnostics,
-                  pipelineBroken: false,
-                  rootCause: null,
-                  autoPublishOff: true,
-                };
-              }
-              return ensured.diagnostics;
-            } catch (err) {
-              try {
-                const { getExecutionDiagnostics } = await import(
-                  '../../modules/browser-execution/execution-pipeline.service.js'
-                );
-                const base = await getExecutionDiagnostics(workspaceId);
-                return {
-                  ...base,
-                  pipelineBroken: true,
-                  rootCause: err instanceof Error ? err.message : String(err),
-                  error: err instanceof Error ? err.message : String(err),
-                };
-              } catch {
-                return {
-                  readyItems: 0,
-                  executionJobsCreated: 0,
-                  jobsQueued: 0,
-                  jobsRunning: 0,
-                  jobsWaitingHuman: 0,
-                  jobsFailed: 0,
-                  jobsCompleted: 0,
-                  jobsSkipped: 0,
-                  missingExecutionJobs: 0,
-                  pipelineBroken: true,
-                  rootCause: err instanceof Error ? err.message : String(err),
-                  items: [],
-                  error: err instanceof Error ? err.message : String(err),
-                };
-              }
-            }
-          })(),
-          items: items.map((i) => ({
-            website: i.websiteUrl ?? i.domain ?? i.id,
-            imported: true,
-            analyzed: ['Analyzed', 'Classified', 'Approved', 'Package Generated', 'Ready', 'Submitting', 'Waiting Human', 'Retrying', 'Submitted', 'Verified', 'Completed', 'Failed', 'Ignored'].includes(i.currentStatus),
-            approved: ['Approved', 'Package Generated', 'Ready', 'Submitting', 'Waiting Human', 'Retrying', 'Submitted', 'Verified', 'Completed'].includes(i.currentStatus),
-            package: i.packageStatus,
-            images: i.imageStatus,
-            metadata: i.metadataStatus,
-            videoMeta: i.videoMetadataStatus,
-            schema: i.schemaStatus,
-            generationStatus: i.generationStatus,
-            qualityScore: i.qualityScore,
-            retryCount: i.retryCount,
-            packageApprovedBy: i.packageApprovedBy,
-            submission: i.submissionStatus,
-            verification: i.verificationStatus,
-            currentStatus: i.currentStatus,
-            confidence: i.confidenceScore,
-            tier: i.reviewTier,
-            reviewDecision: i.reviewDecision,
-            approvedBy: i.approvedBy,
-            lastError: i.lastError,
-            updatedAt: i.updatedAt,
-          })),
-        },
+
+      const items = await listCampaignItems(workspaceId, { includeDeleted: true });
+      const counts = computeCampaignCounts(items);
+      const activeItems = items.filter((i) => i.currentStatus !== 'Deleted');
+
+      const [
+        gen,
+        executionAudit,
+        truthAudit,
+        siteIntelligenceAudit,
+        handoffAudit,
+        executionDiagnostics,
+      ] = await Promise.all([
+        getContentGenerationBoard(workspaceId, { preloadedItems: activeItems }),
+        (async () => {
+          const { getExecutionAudit } = await import(
+            '../../modules/browser-execution/bee-reconcile.service.js'
+          );
+          return getExecutionAudit(workspaceId);
+        })(),
+        (async () => {
+          const { getTruthAudit } = await import(
+            '../../modules/browser-execution/bee-evidence.service.js'
+          );
+          return getTruthAudit(workspaceId);
+        })(),
+        (async () => {
+          try {
+            const { getSiteProfileAudit } = await import(
+              '../../modules/browser-execution/site-intelligence.service.js'
+            );
+            return await getSiteProfileAudit(workspaceId);
+          } catch {
+            return { total: 0, error: 'unavailable' };
+          }
+        })(),
+        (async () => {
+          try {
+            const { getHandoffAudit } = await import(
+              '../../modules/campaigns/generation-handoff.service.js'
+            );
+            return await getHandoffAudit(workspaceId);
+          } catch (err) {
+            return {
+              ok: false,
+              error: err instanceof Error ? err.message : String(err),
+              generatedPackages: 0,
+              submissionReady: 0,
+              blocked: 0,
+              violations: [],
+            };
+          }
+        })(),
+        (async () => {
+          try {
+            const { getExecutionDiagnostics } = await import(
+              '../../modules/browser-execution/execution-pipeline.service.js'
+            );
+            return await getExecutionDiagnostics(workspaceId);
+          } catch (err) {
+            return {
+              readyItems: 0,
+              executionJobsCreated: 0,
+              jobsQueued: 0,
+              jobsRunning: 0,
+              jobsWaitingHuman: 0,
+              jobsFailed: 0,
+              jobsCompleted: 0,
+              jobsSkipped: 0,
+              missingExecutionJobs: 0,
+              pipelineBroken: true,
+              rootCause: err instanceof Error ? err.message : String(err),
+              items: [],
+              error: err instanceof Error ? err.message : String(err),
+            };
+          }
+        })(),
+      ]);
+
+      // Writes moved off the poll path — enqueue background reconcile (or run when ?reconcile=1)
+      const { enqueueJob, QUEUES } = await import('../../jobs/boss.js');
+      const { runCampaignHealthReconcile } = await import(
+        '../../modules/campaigns/campaign-health-reconcile.service.js'
+      );
+      if (forceReconcile) {
+        await runCampaignHealthReconcile(workspaceId);
+      } else {
+        void enqueueJob(
+          QUEUES.LOW,
+          'campaign_health_reconcile',
+          { type: 'campaign_health_reconcile', workspaceId },
+          { singletonKey: `ch-reconcile-${workspaceId}`, startAfter: 2 }
+        ).catch(() => undefined);
+      }
+
+      const payload = {
+        totals: counts,
+        generationAudit: gen.generationAudit,
+        orphans: gen.orphans,
+        orphanSweep: { deleted: 0, remaining: -1, byTable: {} as Record<string, number>, deferred: true },
+        generationProgress: gen.progress,
+        executionAudit,
+        truthAudit,
+        siteIntelligenceAudit,
+        handoffAudit,
+        executionDiagnostics,
+        items: items.map((i) => ({
+          website: i.websiteUrl ?? i.domain ?? i.id,
+          imported: true,
+          analyzed: [
+            'Analyzed',
+            'Classified',
+            'Approved',
+            'Package Generated',
+            'Ready',
+            'Submitting',
+            'Waiting Human',
+            'Retrying',
+            'Submitted',
+            'Verified',
+            'Completed',
+            'Failed',
+            'Ignored',
+          ].includes(i.currentStatus),
+          approved: [
+            'Approved',
+            'Package Generated',
+            'Ready',
+            'Submitting',
+            'Waiting Human',
+            'Retrying',
+            'Submitted',
+            'Verified',
+            'Completed',
+          ].includes(i.currentStatus),
+          package: i.packageStatus,
+          images: i.imageStatus,
+          metadata: i.metadataStatus,
+          videoMeta: i.videoMetadataStatus,
+          schema: i.schemaStatus,
+          generationStatus: i.generationStatus,
+          qualityScore: i.qualityScore,
+          retryCount: i.retryCount,
+          packageApprovedBy: i.packageApprovedBy,
+          submission: i.submissionStatus,
+          verification: i.verificationStatus,
+          currentStatus: i.currentStatus,
+          confidence: i.confidenceScore,
+          tier: i.reviewTier,
+          reviewDecision: i.reviewDecision,
+          approvedBy: i.approvedBy,
+          lastError: i.lastError,
+          updatedAt: i.updatedAt,
+        })),
+      };
+
+      campaignHealthCache.set(cacheKey, { at: Date.now(), data: payload });
+      if (campaignHealthCache.size > 40) {
+        const oldest = [...campaignHealthCache.entries()].sort((a, b) => a[1].at - b[1].at)[0];
+        if (oldest) campaignHealthCache.delete(oldest[0]);
+      }
+
+      span.end(true, { cache: 'miss', items: items.length });
+      res.json({ data: payload });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+const campaignHealthCache = new Map<string, { at: number; data: unknown }>();
+
+/** P1 — thin SSE progress channel (polling fallback remains). */
+backlinkBuilderRouter.get(
+  '/events',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const workspaceId = param(req.params.projectId);
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders?.();
+
+      const send = (event: string, data: unknown) => {
+        res.write(`event: ${event}\n`);
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+      };
+
+      send('connected', { workspaceId, at: new Date().toISOString() });
+
+      const tick = async () => {
+        try {
+          const { getCampaignCounts } = await import(
+            '../../modules/campaigns/campaign-state.service.js'
+          );
+          const counts = await getCampaignCounts(workspaceId);
+          send('campaign', {
+            at: new Date().toISOString(),
+            ready: counts.ready ?? 0,
+            submitting: counts.submitting ?? 0,
+            waiting: counts.waiting ?? 0,
+            submitted: counts.submitted ?? 0,
+            failed: counts.failed ?? 0,
+            total: counts.total ?? 0,
+          });
+        } catch (err) {
+          send('error', { message: err instanceof Error ? err.message : String(err) });
+        }
+      };
+
+      await tick();
+      const iv = setInterval(() => {
+        void tick();
+      }, 4_000);
+
+      req.on('close', () => {
+        clearInterval(iv);
       });
     } catch (err) {
       next(err);

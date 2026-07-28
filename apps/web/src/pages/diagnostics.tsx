@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Server,
   Shield,
+  Gauge,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -37,6 +38,31 @@ type OpsHealth = {
   providerFramework?: { healthy: number; offline: number; warning: number };
   environment?: { nodeEnv: string; workersEnabled: boolean; providerMode: string };
   version?: string;
+};
+
+type PerfSnapshot = {
+  stages: Array<{
+    stage: string;
+    label: string;
+    count: number;
+    avgMs: number;
+    p50Ms: number;
+    p95Ms: number;
+    maxMs: number;
+    lastMs: number | null;
+  }>;
+  cache: {
+    hits: number;
+    misses: number;
+    hitRate: number;
+    skipRediscovery: number;
+    earlyCrawlStop: number;
+  };
+  browserPool?: {
+    headlessConnected: boolean;
+    headedConnected: boolean;
+    activeSessions: number;
+  } | null;
 };
 
 function statusTone(status?: string) {
@@ -94,8 +120,21 @@ export function DiagnosticsPage() {
     refetchInterval: 10_000,
   });
 
+  const perf = useQuery({
+    queryKey: ['ops-performance'],
+    queryFn: async () => {
+      const base = import.meta.env.VITE_API_URL?.replace(/\/$/, '') ?? '';
+      const res = await fetch(`${base}/ops/performance`);
+      if (!res.ok) throw new Error(`Ops performance HTTP ${res.status}`);
+      const json = (await res.json()) as { data: PerfSnapshot };
+      return json.data;
+    },
+    refetchInterval: 15_000,
+  });
+
   const d = ops.data;
   const img = imageDiag.data?.data;
+  const p = perf.data;
 
   return (
     <div className="space-y-6">
@@ -117,6 +156,59 @@ export function DiagnosticsPage() {
           <RefreshCw className="h-3.5 w-3.5 mr-1" /> Refresh
         </Button>
       </div>
+
+      {/* P1 Performance Dashboard — stage timings */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Gauge className="h-4 w-4" /> Performance
+          </CardTitle>
+          <CardDescription>
+            Pipeline stage timings (p50 / last). Cache hit rate{' '}
+            {p?.cache?.hitRate ?? 0}% · skip rediscovery {p?.cache?.skipRediscovery ?? 0} · early
+            crawl stop {p?.cache?.earlyCrawlStop ?? 0}
+            {p?.browserPool
+              ? ` · browser pool ${p.browserPool.headlessConnected ? 'warm' : 'cold'} (${p.browserPool.activeSessions} sessions)`
+              : ''}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {perf.isLoading ? (
+            <Skeleton className="h-16 w-full" />
+          ) : (
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              {(p?.stages ?? [])
+                .filter((s) =>
+                  [
+                    'import',
+                    'ai_review',
+                    'content_generation',
+                    'site_intelligence',
+                    'browser_startup',
+                    'form_detection',
+                    'submission',
+                    'campaign_health',
+                  ].includes(s.stage)
+                )
+                .map((s) => (
+                  <div key={s.stage} className="rounded-md border px-3 py-2 text-sm">
+                    <p className="text-xs text-muted-foreground">{s.label}</p>
+                    <p className="tabular-nums font-medium">
+                      {s.count === 0
+                        ? '—'
+                        : s.lastMs != null
+                          ? `${s.lastMs}ms`
+                          : `${s.p50Ms}ms`}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      p50 {s.p50Ms}ms · p95 {s.p95Ms}ms · n={s.count}
+                    </p>
+                  </div>
+                ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {ops.isLoading ? (
         <Skeleton className="h-40 w-full" />
