@@ -300,3 +300,38 @@
 .soc-muted {
   color: #64748b;
 }
+
+.soc-error-title {
+  font-weight: 700;
+  color: #b91c1c;
+  margin: 0 0 4px;
+}
+
+.soc-diag {
+  border: 1px solid #99f6e4;
+  border-radius: 12px;
+  padding: 10px;
+  background: #fff;
+  display: grid;
+  gap: 4px;
+}
+
+.soc-diag-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.soc-diag-yes {
+  color: #0f766e;
+}
+
+.soc-diag-no {
+  color: #b91c1c;
+}
+
+.soc-diag code {
+  font-size: 10px;
+  word-break: break-all;
+}

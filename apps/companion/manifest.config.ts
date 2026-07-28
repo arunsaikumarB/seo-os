@@ -3,9 +3,9 @@ import { defineManifest } from '@crxjs/vite-plugin';
 export default defineManifest({
   manifest_version: 3,
   name: 'SEO OS Companion',
-  version: '0.2.1',
+  version: '0.2.2',
   description:
-    'Phase 2 — opportunity-aware form fill. Fetches packages from SEO OS. Never stores business profiles. Never submits.',
+    'Phase 2 — opportunity-aware form fill with handshake diagnostics. Never stores business profiles. Never submits.',
   icons: {
     '16': 'public/icons/icon-16.png',
     '32': 'public/icons/icon-32.png',

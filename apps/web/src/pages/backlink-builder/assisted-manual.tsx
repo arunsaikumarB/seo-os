@@ -122,15 +122,49 @@ export function AssistedManualPage() {
   const { request } = useApi();
 
   const openPackageInCompanion = async (pkg: { id: string; entryUrl: string; domain: string }) => {
+    const log = (
+      stage: string,
+      payload: Record<string, unknown> = {},
+      level: 'info' | 'warn' | 'error' = 'info'
+    ) => {
+      const entry = { scope: 'seo-os-web-handoff', stage, ts: new Date().toISOString(), ...payload };
+      const line = `[SEO OS Handoff] ${stage}`;
+      if (level === 'error') console.error(line, entry);
+      else if (level === 'warn') console.warn(line, entry);
+      else console.info(line, entry);
+    };
+
+    const redact = (token: string) => ({
+      present: true,
+      length: token.length,
+      fingerprint: `${token.slice(0, 8)}…${token.slice(-4)}`,
+    });
+
     try {
+      log('handoff.request_start', {
+        packageId: pkg.id,
+        domain: pkg.domain,
+        projectId,
+        entryUrl: pkg.entryUrl,
+      });
+
       const res = await request<{
         data: { token: string; entryUrl: string; domain: string; opportunityId: string };
       }>(`/v1/projects/${projectId}/extension/handoff`, {
         method: 'POST',
         body: JSON.stringify({ packageId: pkg.id }),
       });
+
       const token = res.data.token;
       const apiBase = getApiUrl();
+      log('handoff.token_received', {
+        token: redact(token),
+        opportunityId: res.data.opportunityId,
+        domain: res.data.domain || pkg.domain,
+        entryUrl: res.data.entryUrl || pkg.entryUrl,
+        apiBase,
+      });
+
       // Deliver handoff to Companion on this tab (shared storage → directory tab too)
       window.postMessage(
         {
@@ -143,13 +177,37 @@ export function AssistedManualPage() {
         },
         '*'
       );
+      log('handoff.postMessage_sent', {
+        token: redact(token),
+        opportunityId: res.data.opportunityId,
+      });
+
       const entry = res.data.entryUrl || pkg.entryUrl;
       const url = new URL(entry);
       url.hash = `seo-os-handoff=${encodeURIComponent(token)}`;
+      log('handoff.open_directory_tab', {
+        url: url.toString().replace(/seo-os-handoff=[^&#]+/, 'seo-os-handoff=[redacted]'),
+        domain: res.data.domain || pkg.domain,
+      });
       window.open(url.toString(), '_blank', 'noopener,noreferrer');
       toast.success(`Companion connected · opened ${res.data.domain || pkg.domain}`);
+      log('handoff.complete', { opportunityId: res.data.opportunityId });
     } catch (err) {
+      log(
+        'handoff.request_failed',
+        { error: getApiErrorMessage(err, 'handoff failed'), packageId: pkg.id },
+        'error'
+      );
       toast.error(getApiErrorMessage(err, 'Could not create Companion handoff — opening URL only'));
+      window.postMessage(
+        {
+          source: 'seo-os-web',
+          type: 'companion.handoff_error',
+          error: getApiErrorMessage(err, 'Handoff API failed'),
+          packageId: pkg.id,
+        },
+        '*'
+      );
       window.open(pkg.entryUrl, '_blank', 'noopener,noreferrer');
     }
   };

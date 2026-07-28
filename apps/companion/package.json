@@ -1,6 +1,6 @@
 {
   "name": "@seo-os/companion",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "description": "SEO OS Companion — Manifest V3 delivery layer for opportunity packages",

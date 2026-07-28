@@ -7,6 +7,14 @@ import { fetchCurrentOpportunity } from '../core/api/opportunity';
 import { captureHandoffFromPage, getHandoffToken } from '../core/session/handoff';
 import { onHandoffReceived } from '../core/session/web-bridge';
 import {
+  type ConnectionDiagnostics,
+  companionLog,
+  getDiagnostics,
+  loadDiagnosticsFromStorage,
+  onDiagnosticsChange,
+  patchDiagnostics,
+} from '../core/diagnostics/connection';
+import {
   disableInspector,
   enableInspector,
   isInspectorEnabled,
@@ -16,6 +24,16 @@ import { scrollToElement } from '../core/overlay/highlights';
 import { getMissingTargets } from '../core/overlay/missing-nav';
 import { isFillConfident } from '../core/match/classifier';
 import { startWizardWatcher, stopWizardWatcher } from '../core/wizard/watcher';
+
+function DiagRow({ label, value }: { label: string; value: string }) {
+  const ok = value === 'Yes' || (label === 'Current Opportunity ID' && value !== '—');
+  return (
+    <div className="soc-diag-row">
+      <span>{label}</span>
+      <strong className={ok ? 'soc-diag-yes' : 'soc-diag-no'}>{value}</strong>
+    </div>
+  );
+}
 
 export function Widget() {
   const [expanded, setExpanded] = useState(false);
@@ -28,27 +46,60 @@ export function Widget() {
   const [debug, setDebug] = useState(false);
   const [missingIndex, setMissingIndex] = useState(0);
   const [preview, setPreview] = useState({ detected: 0, fillable: 0, formReason: '' });
+  const [diag, setDiag] = useState<ConnectionDiagnostics>(getDiagnostics());
 
   const refreshOpportunity = useCallback(async () => {
+    companionLog('ui.refresh_start', {});
     captureHandoffFromPage();
     setStatus('loading');
     setError(null);
+    patchDiagnostics({ lastStage: 'ui.refresh_start', lastError: null });
+
     const token = await getHandoffToken();
     if (!token) {
       setOpp(null);
       setStatus('disconnected');
-      setError('Open a package from SEO OS Assisted Manual');
+      const msg =
+        'No handoff token found. Click Open package in Assisted Manual — that creates the handshake.';
+      setError(msg);
+      companionLog('ui.disconnected_no_token', {}, 'warn');
+      patchDiagnostics({
+        tokenPresent: 'No',
+        packageLoaded: 'No',
+        lastError: msg,
+        lastStage: 'ui.disconnected_no_token',
+      });
       return null;
     }
+
     const result = await fetchCurrentOpportunity({ force: true });
     if (!result.ok) {
       setOpp(null);
       setStatus('disconnected');
       setError(result.error);
+      companionLog('ui.disconnected_fetch_failed', { error: result.error }, 'error');
+      patchDiagnostics({
+        packageLoaded: 'No',
+        lastError: result.error,
+        lastStage: 'ui.disconnected_fetch_failed',
+      });
       return null;
     }
+
     setOpp(result.data);
     setStatus('connected');
+    companionLog('ui.connected', {
+      opportunityId: result.data.opportunityId,
+      domain: result.data.domain,
+    });
+    patchDiagnostics({
+      packageLoaded: 'Yes',
+      authenticated: 'Yes',
+      apiReachable: 'Yes',
+      opportunityId: result.data.opportunityId,
+      lastError: null,
+      lastStage: 'ui.connected',
+    });
     return result.data;
   }, []);
 
@@ -68,11 +119,15 @@ export function Widget() {
   }, [inspect]);
 
   useEffect(() => {
+    void loadDiagnosticsFromStorage().then(setDiag);
+    const offDiag = onDiagnosticsChange(setDiag);
     void refreshOpportunity();
     const unsub = onHandoffReceived(() => {
+      companionLog('ui.handoff_event', {});
       void refreshOpportunity();
     });
     return () => {
+      offDiag();
       unsub();
       stopWizardWatcher();
     };
@@ -97,7 +152,6 @@ export function Widget() {
     if (!opp || busy) return;
     setBusy(true);
     try {
-      // Always re-fetch package so we never reuse another opportunity's content
       void fetchCurrentOpportunity({ force: true }).then((result) => {
         const pkg = result.ok ? result.data.package : opp.package;
         if (result.ok) setOpp(result.data);
@@ -150,7 +204,11 @@ export function Widget() {
         <div>
           <div className="soc-brand">SEO OS Companion</div>
           <div className="soc-sub">
-            {status === 'connected' ? 'Connected' : status === 'loading' ? 'Connecting…' : 'Not connected'}
+            {status === 'connected'
+              ? 'Connected'
+              : status === 'loading'
+                ? 'Connecting…'
+                : 'Not connected'}
           </div>
         </div>
         <button
@@ -178,27 +236,41 @@ export function Widget() {
               <strong>{preview.fillable}</strong>
             </p>
 
-            <button
-              type="button"
-              className="soc-primary"
-              disabled={busy}
-              onClick={onFill}
-            >
+            <button type="button" className="soc-primary" disabled={busy} onClick={onFill}>
               {busy ? 'Filling…' : 'Fill Current Step'}
             </button>
           </>
         ) : (
           <div className="soc-warn">
-            <p>{error || 'Not connected to SEO OS'}</p>
-            <p className="soc-muted">
-              Click <strong>Open package</strong> on this opportunity. Companion connects
-              immediately and opens the directory site for filling.
-            </p>
+            <p className="soc-error-title">Connection failed</p>
+            <p>{error || 'Unknown connection error — check Diagnostics below'}</p>
+            {diag.lastStage && (
+              <p className="soc-muted">
+                Last stage: <code>{diag.lastStage}</code>
+                {diag.lastHttpStatus != null ? ` · HTTP ${diag.lastHttpStatus}` : ''}
+              </p>
+            )}
             <button type="button" className="soc-secondary" onClick={() => void refreshOpportunity()}>
               Retry connect
             </button>
           </div>
         )}
+
+        <div className="soc-diag">
+          <div className="soc-summary-title">Diagnostics</div>
+          <DiagRow label="Handoff Created" value={diag.handoffCreated} />
+          <DiagRow label="Token Present" value={diag.tokenPresent} />
+          <DiagRow label="API Reachable" value={diag.apiReachable} />
+          <DiagRow label="Authenticated" value={diag.authenticated} />
+          <DiagRow label="Package Loaded" value={diag.packageLoaded} />
+          <DiagRow
+            label="Current Opportunity ID"
+            value={diag.opportunityId || opp?.opportunityId || '—'}
+          />
+          {diag.tokenSource && diag.tokenSource !== 'none' && (
+            <p className="soc-muted">Token source: {diag.tokenSource}</p>
+          )}
+        </div>
 
         <div className="soc-row">
           <label className="soc-toggle">
@@ -231,7 +303,7 @@ export function Widget() {
         <ul className="soc-rules">
           <li>SEO OS is the source of truth</li>
           <li>Fills submission form only · never Submit / CAPTCHA</li>
-          <li>Wizard steps auto-fill after you click Continue</li>
+          <li>Open DevTools console for structured handshake logs</li>
         </ul>
 
         {summary && (
