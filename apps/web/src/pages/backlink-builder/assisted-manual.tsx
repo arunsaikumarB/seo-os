@@ -129,11 +129,25 @@ export function AssistedManualPage() {
         method: 'POST',
         body: JSON.stringify({ packageId: pkg.id }),
       });
+      const token = res.data.token;
+      const apiBase = getApiUrl();
+      // Deliver handoff to Companion on this tab (shared storage → directory tab too)
+      window.postMessage(
+        {
+          source: 'seo-os-web',
+          type: 'companion.handoff',
+          token,
+          apiBase,
+          domain: res.data.domain || pkg.domain,
+          opportunityId: res.data.opportunityId,
+        },
+        '*'
+      );
       const entry = res.data.entryUrl || pkg.entryUrl;
       const url = new URL(entry);
-      url.hash = `seo-os-handoff=${encodeURIComponent(res.data.token)}`;
+      url.hash = `seo-os-handoff=${encodeURIComponent(token)}`;
       window.open(url.toString(), '_blank', 'noopener,noreferrer');
-      toast.success(`Opened ${res.data.domain || pkg.domain} for Companion fill`);
+      toast.success(`Companion connected · opened ${res.data.domain || pkg.domain}`);
     } catch (err) {
       toast.error(getApiErrorMessage(err, 'Could not create Companion handoff — opening URL only'));
       window.open(pkg.entryUrl, '_blank', 'noopener,noreferrer');

@@ -5,49 +5,70 @@ export type FetchResult =
   | { ok: true; data: CurrentOpportunity }
   | { ok: false; error: string };
 
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('timeout')), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      }
+    );
+  });
+}
+
 /**
  * Always fetch from SEO OS — never trust a permanent local business profile.
- * Session cache is optional UX only; callers revalidate via this API.
  */
-export async function fetchCurrentOpportunity(opts?: {
+export async function fetchCurrentOpportunity(_opts?: {
   force?: boolean;
 }): Promise<FetchResult> {
   const token = await getHandoffToken();
   if (!token) {
     return {
       ok: false,
-      error: 'Not connected — open a package from SEO OS Assisted Manual',
+      error: 'Not connected — click Open package in Assisted Manual',
     };
   }
 
   const apiBase = await getApiBase();
 
-  // Prefer background fetch (avoids page CORS)
+  // Background fetch (no page CORS). Hard timeout — SW can hang and leave UI on Connecting…
   try {
-    const viaBg = await chrome.runtime.sendMessage({
-      type: 'companion.fetchCurrentOpportunity',
-      token,
-      apiBase,
-      force: opts?.force ?? true,
-    });
+    const viaBg = await withTimeout(
+      chrome.runtime.sendMessage({
+        type: 'companion.fetchCurrentOpportunity',
+        token,
+        apiBase,
+      }) as Promise<{ ok?: boolean; data?: CurrentOpportunity; error?: string } | undefined>,
+      8000
+    );
     if (viaBg?.ok && viaBg.data) {
-      await cacheCurrentOpportunity(viaBg.data as CurrentOpportunity);
-      return { ok: true, data: viaBg.data as CurrentOpportunity };
+      await cacheCurrentOpportunity(viaBg.data);
+      return { ok: true, data: viaBg.data };
     }
     if (viaBg && viaBg.ok === false && viaBg.error) {
-      return { ok: false, error: String(viaBg.error) };
+      // Still try direct fetch below for better diagnostics on SEO OS origin
+      console.warn('[SEO OS Companion] background fetch failed', viaBg.error);
     }
   } catch {
-    // fall through to direct fetch
+    /* timeout or no SW — fall through */
   }
 
   try {
-    const res = await fetch(`${apiBase}/v1/extension/opportunity/current`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/json',
-      },
-    });
+    const res = await withTimeout(
+      fetch(`${apiBase}/v1/extension/opportunity/current`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+        },
+      }),
+      15000
+    );
     const body = (await res.json().catch(() => ({}))) as {
       data?: CurrentOpportunity;
       detail?: string;
@@ -65,7 +86,12 @@ export async function fetchCurrentOpportunity(opts?: {
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : 'Failed to reach SEO OS API',
+      error:
+        err instanceof Error && err.message === 'timeout'
+          ? 'SEO OS API timed out — retry after Open package'
+          : err instanceof Error
+            ? err.message
+            : 'Failed to reach SEO OS API',
     };
   }
 }

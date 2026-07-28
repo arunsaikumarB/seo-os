@@ -5,6 +5,7 @@ import { fillMatchedFields, previewClassifications, roleLabel } from '../core/fi
 import { noopDomainLearning } from '../core/hooks';
 import { fetchCurrentOpportunity } from '../core/api/opportunity';
 import { captureHandoffFromPage, getHandoffToken } from '../core/session/handoff';
+import { onHandoffReceived } from '../core/session/web-bridge';
 import {
   disableInspector,
   enableInspector,
@@ -68,7 +69,13 @@ export function Widget() {
 
   useEffect(() => {
     void refreshOpportunity();
-    return () => stopWizardWatcher();
+    const unsub = onHandoffReceived(() => {
+      void refreshOpportunity();
+    });
+    return () => {
+      unsub();
+      stopWizardWatcher();
+    };
   }, [refreshOpportunity]);
 
   useEffect(() => {
@@ -157,7 +164,9 @@ export function Widget() {
       </header>
 
       <div className="soc-body">
-        {status === 'connected' && opp ? (
+        {status === 'loading' ? (
+          <p className="soc-meta">Connecting to SEO OS…</p>
+        ) : status === 'connected' && opp ? (
           <>
             <div className="soc-opp">
               <div className="soc-opp-label">Current Opportunity</div>
@@ -182,8 +191,8 @@ export function Widget() {
           <div className="soc-warn">
             <p>{error || 'Not connected to SEO OS'}</p>
             <p className="soc-muted">
-              In SEO OS → Assisted Manual → open a package. Companion loads that opportunity’s
-              generated content only — no local business profile.
+              Click <strong>Open package</strong> on this opportunity. Companion connects
+              immediately and opens the directory site for filling.
             </p>
             <button type="button" className="soc-secondary" onClick={() => void refreshOpportunity()}>
               Retry connect

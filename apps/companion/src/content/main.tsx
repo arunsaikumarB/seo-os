@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client';
 import { Widget } from '../components/Widget';
+import { installWebHandoffBridge } from '../core/session/web-bridge';
 import widgetCss from './widget.css?inline';
 
 const HOST_ID = 'seo-os-companion-root';
@@ -7,6 +8,8 @@ const HOST_ID = 'seo-os-companion-root';
 function mount(): void {
   if (document.getElementById(HOST_ID)) return;
   if (!document.documentElement) return;
+
+  installWebHandoffBridge();
 
   const host = document.createElement('div');
   host.id = HOST_ID;
