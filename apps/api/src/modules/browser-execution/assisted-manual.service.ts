@@ -34,6 +34,8 @@ import {
   stripCategoryFromAssistedPayload,
   gateIsOtp,
   gateRequiresPerson,
+  isAssistedSubmitted,
+  resolveAssistedVisualStatus,
   collectKnownFormUrlHints,
   extractSubmissionCandidateLinks,
   formDiscoveryFailureMessage,
@@ -1663,6 +1665,11 @@ export async function listAssistedPackages(workspaceId: string) {
   for (const row of rows ?? []) {
     // Skipped packages stay in DB but leave the Assisted Manual worklist
     if (String(row.status) === 'skipped') continue;
+    // Terminal Done/Submitted packages keep their submission state — never re-bucket to stale Ban
+    if (isAssistedSubmitted({ status: String(row.status), submitted_at: row.submitted_at as string | null })) {
+      packages.push(formatPackageRow(row));
+      continue;
+    }
     const preparedAt = String(row.prepared_at);
     const status = evaluateFingerprintStatus({
       preparedAt,
@@ -1803,24 +1810,24 @@ function formatPackageRow(row: Record<string, unknown>) {
       !Number.isFinite(readerVersion) ||
       classifierVersion !== ASSISTED_FIELD_CLASSIFIER_VERSION ||
       readerVersion !== ASSISTED_FORM_READER_VERSION);
-  return {
+  const base = {
     id: row.id,
     opportunityId: row.opportunity_id,
     domain: row.domain,
     entryUrl: row.entry_url,
-    bucket: row.bucket,
-    status: row.status,
-    gate: row.gate,
-    fingerprintStatus: row.fingerprint_status,
+    bucket: row.bucket != null ? String(row.bucket) : null,
+    status: row.status != null ? String(row.status) : null,
+    gate: row.gate != null ? String(row.gate) : null,
+    fingerprintStatus: row.fingerprint_status != null ? String(row.fingerprint_status) : null,
     preparedAt: row.prepared_at,
     expiresAt: row.expires_at,
     correctionCount: row.correction_count,
     minutesSpent: row.minutes_spent,
     rejectedAtSubmit: row.rejected_at_submit,
-    submittedAt: row.submitted_at ?? null,
-    verifiedAt: row.verified_at ?? null,
+    submittedAt: row.submitted_at != null ? String(row.submitted_at) : null,
+    verifiedAt: row.verified_at != null ? String(row.verified_at) : null,
     userVerified: Boolean(row.user_verified),
-    failureReason: row.failure_reason,
+    failureReason: row.failure_reason != null ? String(row.failure_reason) : null,
     pilotBatchId: row.pilot_batch_id,
     formUnavailable,
     classifierOutdated,
@@ -1829,6 +1836,37 @@ function formatPackageRow(row: Record<string, unknown>) {
     currentReaderVersion: ASSISTED_FORM_READER_VERSION,
     currentClassifierVersion: ASSISTED_FIELD_CLASSIFIER_VERSION,
     package: payload,
+  };
+
+  const fingerprintBlocked =
+    String(row.fingerprint_status ?? '') === 'changed' ||
+    String(row.fingerprint_status ?? '') === 'stale';
+  const visual = resolveAssistedVisualStatus({
+    status: base.status,
+    submittedAt: base.submittedAt,
+    verifiedAt: base.verifiedAt,
+    userVerified: base.userVerified,
+    failureReason: base.failureReason,
+    bucket: base.bucket,
+    gate: base.gate,
+    formUnavailable,
+    blocked: fingerprintBlocked && !isAssistedSubmitted(base),
+    hasFieldIssues: false,
+  });
+
+  return {
+    ...base,
+    // Canonical row state — icon + badge must both read these
+    visualStatus: visual.visualStatus,
+    visualTone: visual.tone,
+    badgeLabel: visual.badgeLabel,
+    blocked: visual.blocked,
+    needsHumanReview: visual.needsHumanReview,
+    skipBrowserExecution: false,
+    completedAt: visual.completedAt,
+    blockReason: visual.blocked
+      ? String(row.failure_reason ?? payload.failureReason ?? 'Re-prepare required')
+      : null,
   };
 }
 
@@ -1841,18 +1879,7 @@ export async function getAssistedPackage(workspaceId: string, packageId: string)
     .maybeSingle();
   if (!row) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Package not found');
   const refreshed = await refreshPackageFreshness(row);
-  // Block stale/changed from use
-  if (
-    refreshed.fingerprint_status === 'changed' ||
-    refreshed.fingerprint_status === 'stale'
-  ) {
-    return {
-      ...formatPackageRow(refreshed),
-      blocked: true,
-      blockReason: String(refreshed.failure_reason ?? 'Re-prepare required'),
-    };
-  }
-  return { ...formatPackageRow(refreshed), blocked: false };
+  return formatPackageRow(refreshed);
 }
 
 /**
@@ -1913,6 +1940,16 @@ export async function updateAssistedPackageStatus(
   // Done is authoritative submission — stamp submitted_at on first Done
   if (body.status === 'done' && !existing.submitted_at) {
     patch.submitted_at = new Date().toISOString();
+  }
+  // Clear stale block metadata so list/icon stay green after refresh
+  if (body.status === 'done') {
+    patch.failure_reason = null;
+    const payload = {
+      ...((existing.payload as AssistedPackagePayload) ?? ({} as AssistedPackagePayload)),
+      failureReason: null,
+      formUnavailable: false,
+    };
+    patch.payload = payload;
   }
 
   const { data, error } = await admin()

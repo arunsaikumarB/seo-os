@@ -125,6 +125,128 @@ export type AssistedBucket = 'ready' | 'check_fields' | 'needs_person';
 export type PackageStatus = 'not_started' | 'in_progress' | 'done' | 'failed' | 'skipped';
 export type FingerprintStatus = 'fresh' | 'stale' | 'changed';
 
+/**
+ * Canonical visual status for Assisted Manual row icon + badge.
+ * Submitted/verified always win over stale blocked/gate/failureReason metadata.
+ */
+export type AssistedVisualStatus =
+  | 'verified'
+  | 'submitted'
+  | 'blocked'
+  | 'warning'
+  | 'ready'
+  | 'check_fields'
+  | 'needs_person';
+
+export type AssistedVisualTone = 'ok' | 'warn' | 'block';
+
+export function isAssistedSubmitted(pkg: {
+  status?: string | null;
+  submittedAt?: string | null;
+  submitted_at?: string | null;
+}): boolean {
+  return (
+    String(pkg.status ?? '') === 'done' ||
+    Boolean(pkg.submittedAt ?? pkg.submitted_at)
+  );
+}
+
+export function resolveAssistedVisualStatus(pkg: {
+  status?: string | null;
+  submittedAt?: string | null;
+  submitted_at?: string | null;
+  verifiedAt?: string | null;
+  verified_at?: string | null;
+  userVerified?: boolean | null;
+  user_verified?: boolean | null;
+  blocked?: boolean | null;
+  formUnavailable?: boolean | null;
+  failureReason?: string | null;
+  failure_reason?: string | null;
+  bucket?: string | null;
+  gate?: string | null;
+  hasFieldIssues?: boolean;
+}): {
+  visualStatus: AssistedVisualStatus;
+  tone: AssistedVisualTone;
+  badgeLabel: 'Verified' | 'Submitted' | null;
+  blocked: boolean;
+  needsHumanReview: boolean;
+  completedAt: string | null;
+} {
+  const submitted = isAssistedSubmitted(pkg);
+  const verified = Boolean(
+    pkg.userVerified ?? pkg.user_verified ?? pkg.verifiedAt ?? pkg.verified_at
+  );
+  const completedAt = String(
+    pkg.verifiedAt ?? pkg.verified_at ?? pkg.submittedAt ?? pkg.submitted_at ?? ''
+  ) || null;
+  const failure = String(pkg.failureReason ?? pkg.failure_reason ?? '');
+  const gate = String(pkg.gate ?? 'none');
+  const bucket = String(pkg.bucket ?? '');
+
+  // Terminal submission is authoritative — never show Ban after Done.
+  if (verified || submitted) {
+    const needsHumanReview = submitted && !verified && gateIsOtp(gate);
+    return {
+      visualStatus: verified ? 'verified' : 'submitted',
+      tone: 'ok',
+      badgeLabel: verified ? 'Verified' : 'Submitted',
+      blocked: false,
+      needsHumanReview,
+      completedAt,
+    };
+  }
+
+  const blocked =
+    Boolean(pkg.blocked) ||
+    Boolean(pkg.formUnavailable) ||
+    /cloudflare|login|captcha|registration|form_unavailable|noform/i.test(failure) ||
+    (bucket === 'needs_person' && gateRequiresPerson(gate));
+
+  if (blocked) {
+    return {
+      visualStatus: 'blocked',
+      tone: 'block',
+      badgeLabel: null,
+      blocked: true,
+      needsHumanReview: true,
+      completedAt: null,
+    };
+  }
+
+  if (bucket === 'check_fields' || pkg.hasFieldIssues || (bucket === 'needs_person' && !blocked)) {
+    return {
+      visualStatus: bucket === 'needs_person' ? 'needs_person' : 'check_fields',
+      tone: 'warn',
+      badgeLabel: null,
+      blocked: false,
+      needsHumanReview: bucket === 'needs_person',
+      completedAt: null,
+    };
+  }
+
+  if (bucket === 'ready') {
+    return {
+      visualStatus: 'ready',
+      tone: 'ok',
+      badgeLabel: null,
+      blocked: false,
+      needsHumanReview: false,
+      completedAt: null,
+    };
+  }
+
+  return {
+    visualStatus: 'warning',
+    tone: pkg.hasFieldIssues ? 'warn' : 'ok',
+    badgeLabel: null,
+    blocked: false,
+    needsHumanReview: false,
+    completedAt: null,
+  };
+}
+
 /** DOM facts extracted during crawl — evidence first, LLM only to disambiguate. */
 export type FormFieldFacts = {
   label: string | null;

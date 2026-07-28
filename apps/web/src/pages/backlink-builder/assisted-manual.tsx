@@ -79,6 +79,13 @@ type AssistedPackage = {
   classifierVersion?: number | null;
   currentReaderVersion?: number;
   currentClassifierVersion?: number;
+  /** Canonical visual status from API — icon + badge both use this. */
+  visualStatus?: string;
+  visualTone?: 'ok' | 'warn' | 'block';
+  badgeLabel?: 'Verified' | 'Submitted' | null;
+  needsHumanReview?: boolean;
+  completedAt?: string | null;
+  skipBrowserExecution?: boolean;
   package: {
     gateNotes: string;
     honestyNotes: string[];
@@ -198,6 +205,49 @@ export function AssistedManualPage() {
           userVerified: body.userVerified,
         }),
       }),
+    onMutate: async (vars) => {
+      await qc.cancelQueries({ queryKey: ['assisted-manual', projectId] });
+      const prev = qc.getQueryData<{ data: { packages: AssistedPackage[] } }>([
+        'assisted-manual',
+        projectId,
+      ]);
+      if (prev?.data?.packages && (vars.status === 'done' || vars.userVerified != null)) {
+        const now = new Date().toISOString();
+        qc.setQueryData(['assisted-manual', projectId], {
+          ...prev,
+          data: {
+            ...prev.data,
+            packages: prev.data.packages.map((p) => {
+              if (p.id !== vars.packageId) return p;
+              const submitted =
+                vars.status === 'done' || p.status === 'done' || Boolean(p.submittedAt);
+              const verified =
+                vars.userVerified === true ||
+                (vars.userVerified !== false && Boolean(p.userVerified));
+              return {
+                ...p,
+                status: vars.status === 'done' ? 'done' : p.status,
+                submittedAt: vars.status === 'done' ? p.submittedAt ?? now : p.submittedAt,
+                completedAt: vars.status === 'done' ? p.completedAt ?? now : p.completedAt,
+                userVerified: verified,
+                verifiedAt: verified ? p.verifiedAt ?? now : vars.userVerified === false ? null : p.verifiedAt,
+                blocked: false,
+                needsHumanReview: false,
+                failureReason: vars.status === 'done' ? null : p.failureReason,
+                visualStatus: verified ? 'verified' : submitted ? 'submitted' : p.visualStatus,
+                visualTone: submitted || verified ? 'ok' : p.visualTone,
+                badgeLabel: verified ? 'Verified' : submitted ? 'Submitted' : p.badgeLabel,
+              };
+            }),
+          },
+        });
+      }
+      return { prev };
+    },
+    onError: (e, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(['assisted-manual', projectId], ctx.prev);
+      toast.error(getApiErrorMessage(e, 'Update failed'));
+    },
     onSuccess: (_data, vars) => {
       const doneAndVerified = vars.status === 'done' && vars.userVerified === true;
       toast.success(
@@ -216,8 +266,9 @@ export function AssistedManualPage() {
       void qc.invalidateQueries({ queryKey: ['assisted-manual', projectId] });
       void qc.invalidateQueries({ queryKey: ['assisted-manual-metrics', projectId] });
       void qc.invalidateQueries({ queryKey: ['execution-summary', projectId] });
+      void qc.invalidateQueries({ queryKey: ['campaign-health', projectId] });
+      void qc.invalidateQueries({ queryKey: ['approved-opportunities', projectId] });
     },
-    onError: (e) => toast.error(getApiErrorMessage(e, 'Update failed')),
   });
 
   const correct = useMutation({
@@ -440,11 +491,16 @@ export function AssistedManualPage() {
               {byBucket[bucket].map((pkg) => {
                 const open = openId === pkg.id;
                 const issues = collectPackageIssues(pkg);
-                const tone = statusTone(pkg, issues);
+                const visual = resolveRowVisual(pkg, issues);
                 return (
                   <li key={pkg.id} className="bg-card">
                     <div className="flex items-center gap-2 px-3 py-2.5 min-h-11">
-                      <IssueStatusIcon tone={tone} issues={issues} domain={pkg.domain} />
+                      <IssueStatusIcon
+                        tone={visual.tone}
+                        issues={visual.tone === 'ok' && visual.badgeLabel ? [] : issues}
+                        domain={pkg.domain}
+                        successLabel={visual.badgeLabel}
+                      />
                       <div className="min-w-0 flex-1 flex items-center gap-2 flex-wrap">
                         <span className="font-medium text-sm truncate">{pkg.domain}</span>
                         <Badge className="text-[10px] shrink-0">{BUCKET_LABEL[pkg.bucket]}</Badge>
@@ -453,12 +509,12 @@ export function AssistedManualPage() {
                             Multi-step
                           </Badge>
                         ) : null}
-                        {pkg.gate && pkg.gate !== 'none' && pkg.gate !== 'multi_step' ? (
+                        {pkg.gate && pkg.gate !== 'none' && pkg.gate !== 'multi_step' && !visual.badgeLabel ? (
                           <Badge className="text-[10px] shrink-0 opacity-80">{pkg.gate}</Badge>
                         ) : null}
-                        {pkg.status === 'done' || pkg.submittedAt ? (
+                        {visual.badgeLabel ? (
                           <Badge className="text-[10px] shrink-0 border-emerald-500/40 text-emerald-700">
-                            {pkg.userVerified ? 'Verified' : 'Submitted'}
+                            {visual.badgeLabel}
                           </Badge>
                         ) : null}
                       </div>
@@ -688,6 +744,7 @@ export function AssistedManualPage() {
 }
 
 function collectPackageIssues(pkg: AssistedPackage): string[] {
+  if (pkg.status === 'done' || pkg.submittedAt || pkg.badgeLabel) return [];
   const issues: string[] = [];
   if (pkg.failureReason) issues.push(pkg.failureReason);
   if (pkg.formUnavailable) issues.push('Form unavailable or not found');
@@ -710,36 +767,49 @@ function collectPackageIssues(pkg: AssistedPackage): string[] {
   return [...new Set(issues)];
 }
 
-function statusTone(
+/** Single source for row icon + Submitted/Verified badge — never disagree. */
+function resolveRowVisual(
   pkg: AssistedPackage,
   issues: string[]
-): 'ok' | 'warn' | 'block' {
+): { tone: 'ok' | 'warn' | 'block'; badgeLabel: 'Verified' | 'Submitted' | null } {
+  if (pkg.visualTone && (pkg.badgeLabel !== undefined || pkg.visualStatus)) {
+    return { tone: pkg.visualTone, badgeLabel: pkg.badgeLabel ?? null };
+  }
+  const submitted = pkg.status === 'done' || Boolean(pkg.submittedAt);
+  const verified = Boolean(pkg.userVerified || pkg.verifiedAt);
+  if (verified) return { tone: 'ok', badgeLabel: 'Verified' };
+  if (submitted) return { tone: 'ok', badgeLabel: 'Submitted' };
   if (
     pkg.formUnavailable ||
     pkg.blocked ||
-    /cloudflare|login|captcha|registration|form_unavailable|no form/i.test(
+    /cloudflare|login|captcha|registration|form_unavailable|noform/i.test(
       String(pkg.failureReason ?? '')
     ) ||
     (pkg.bucket === 'needs_person' &&
       (pkg.gate === 'cloudflare' || pkg.gate === 'login' || pkg.gate === 'captcha'))
   ) {
-    return 'block';
+    return { tone: 'block', badgeLabel: null };
   }
-  if (pkg.status === 'done' || pkg.bucket === 'ready') return 'ok';
+  if (pkg.bucket === 'ready') return { tone: 'ok', badgeLabel: null };
   if (pkg.bucket === 'check_fields' || issues.length > 0 || pkg.bucket === 'needs_person') {
-    return pkg.bucket === 'needs_person' && issues.length === 0 ? 'block' : 'warn';
+    return {
+      tone: pkg.bucket === 'needs_person' && issues.length === 0 ? 'block' : 'warn',
+      badgeLabel: null,
+    };
   }
-  return issues.length ? 'warn' : 'ok';
+  return { tone: issues.length ? 'warn' : 'ok', badgeLabel: null };
 }
 
 function IssueStatusIcon({
   tone,
   issues,
   domain,
+  successLabel,
 }: {
   tone: 'ok' | 'warn' | 'block';
   issues: string[];
   domain: string;
+  successLabel?: 'Verified' | 'Submitted' | null;
 }) {
   const Icon =
     tone === 'ok' ? CheckCircle2 : tone === 'block' ? Ban : AlertTriangle;
@@ -758,7 +828,13 @@ function IssueStatusIcon({
             'shrink-0 rounded-md p-0.5 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
             color
           )}
-          title={issues.length ? `${issues.length} issue(s)` : 'No issues'}
+          title={
+            successLabel
+              ? successLabel
+              : issues.length
+                ? `${issues.length} issue(s)`
+                : 'No issues'
+          }
           aria-label={`Status for ${domain}`}
         >
           <Icon className="h-4.5 w-4.5 h-[18px] w-[18px]" />
@@ -769,7 +845,11 @@ function IssueStatusIcon({
           {domain}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        {issues.length === 0 ? (
+        {successLabel ? (
+          <DropdownMenuItem disabled className="text-sm opacity-100">
+            {successLabel}
+          </DropdownMenuItem>
+        ) : issues.length === 0 ? (
           <DropdownMenuItem disabled className="text-sm opacity-100">
             No issues flagged
           </DropdownMenuItem>
