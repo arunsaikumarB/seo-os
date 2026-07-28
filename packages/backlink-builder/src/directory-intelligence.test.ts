@@ -14,6 +14,10 @@ import {
   buildDirectoryKnowledge,
   classifyDirectoryPageIntent,
   summarizeDirectoryHealth,
+  evaluateDirectoryReviewGate,
+  recordDirectoryLearning,
+  emptyDirectoryLearning,
+  directoryLearningAllowsSkipRediscovery,
 } from '../src/directory-intelligence.js';
 import { analyzeFetchedSite } from '../src/site-intelligence.js';
 import { classifyPageIntent } from '../src/page-intent-detectors.js';
@@ -220,7 +224,82 @@ describe('Directory strategies', () => {
     });
     expect(s.directoryStrategy).toBe('Premium Listing');
     expect(s.payloadHints.needsReview).toBe(true);
+    expect(s.payloadHints.reviewReason).toBe('Paid Directory');
+    expect(s.payloadHints.skipBrowserExecution).toBe(true);
     expect(s.payloadHints.skip).toContain('payment');
+  });
+
+  it('Phase 15: detects free vs paid plans and prefers Regular/free', () => {
+    const html = `
+      <h1>Choose a Link Type</h1>
+      <form>
+        <label><input type="radio" name="LINK_TYPE" /> Featured - $49</label>
+        <label><input type="radio" name="LINK_TYPE" /> Premium - $99</label>
+        <label><input type="radio" name="LINK_TYPE" /> Regular - free</label>
+      </form>`;
+    const pricing = detectDirectoryPricing(html, 'https://dir.test/submit');
+    expect(pricing.freeListing).toBe(true);
+    expect(pricing.paidListing).toBe(true);
+    expect(pricing.preferredFreePlan?.name).toMatch(/regular|free/i);
+    expect(pricing.preferredFreePlan?.kind).toBe('free');
+    expect(pricing.listingPlans.some((p) => /featured|premium/i.test(p.name) && p.kind === 'paid')).toBe(
+      true
+    );
+  });
+
+  it('Phase 15: reciprocal required without campaign settings → Needs Review', () => {
+    const html = `
+      <h1>Add Listing</h1>
+      <p>Free listing. Reciprocal link is required.</p>
+      <form>
+        <input name="TITLE" />
+        <input name="URL" />
+        <input name="RECPR_URL" required />
+        <input name="RECPR_TEXT" />
+      </form>`;
+    const knowledge = buildDirectoryKnowledge({
+      homepageUrl: 'https://recpr.test/',
+      pages: [
+        {
+          url: 'https://recpr.test/',
+          html: '<html><body><h1>Business Directory</h1><a href="/add-listing">Add Listing</a></body></html>',
+          status: 'fetched',
+        },
+        { url: 'https://recpr.test/add-listing', html, status: 'fetched' },
+      ],
+    })!;
+    expect(knowledge.requiresReciprocal || knowledge.reciprocal.detected).toBe(true);
+    const gate = evaluateDirectoryReviewGate({
+      pricing: knowledge.pricing,
+      reciprocal: { ...knowledge.reciprocal, required: true, detected: true },
+    });
+    expect(gate.needsReview).toBe(true);
+    expect(gate.reason).toBe('Reciprocal Link Required');
+    expect(gate.suggestedAction).toMatch(/configure reciprocal/i);
+
+    const cleared = evaluateDirectoryReviewGate({
+      pricing: knowledge.pricing,
+      reciprocal: { ...knowledge.reciprocal, required: true, detected: true },
+      reciprocalUrl: 'https://chefgaa.com/resources/partners',
+      reciprocalAnchor: 'Chefgaa Restaurant POS',
+    });
+    expect(cleared.needsReview).toBe(false);
+  });
+
+  it('Phase 15: learning remembers free + reciprocal profile for skip rediscovery', () => {
+    const learning = recordDirectoryLearning(emptyDirectoryLearning(), {
+      platform: 'PHP Link Directory',
+      submissionUrl: 'https://dir.test/submit',
+      knownStrategy: 'Direct Submission',
+      supportsFree: true,
+      supportsPaid: true,
+      requiresReciprocal: true,
+      preferredFreePlan: 'Regular - free',
+      listingTypes: ['Regular - free', 'Featured - $49'],
+      categoryStrategy: 'manual',
+    });
+    expect(learning.skipRediscovery).toBe(true);
+    expect(directoryLearningAllowsSkipRediscovery(learning)).toBe(true);
   });
 
   it('analyzeFetchedSite wires entry_url + category suggestion', () => {

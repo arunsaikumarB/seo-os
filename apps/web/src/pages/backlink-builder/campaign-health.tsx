@@ -115,17 +115,22 @@ type HealthData = {
       unsupported: number;
       successRate: number | null;
     };
-    directoryHealth?: {
-      detected: number;
-      supported: number;
-      free: number;
-      paid: number;
-      dashboard: number;
-      email: number;
-      contactForm: number;
-      unsupported: number;
-      successRate: number | null;
-    };
+            directoryHealth?: {
+              detected: number;
+              supported: number;
+              free: number;
+              paid: number;
+              dashboard: number;
+              email: number;
+              contactForm: number;
+              unsupported: number;
+              successRate: number | null;
+              withReciprocal?: number;
+              requiringPayment?: number;
+              usingFreePlan?: number;
+              automaticallyCompleted?: number;
+              requiringConfiguration?: number;
+            };
     contactFormHealth?: {
       detected: number;
       supported: number;
@@ -630,13 +635,22 @@ export function CampaignHealthPage() {
               ) : null}
               {data.siteIntelligenceAudit.directoryHealth ? (
                 <div className="border border-dashed p-2 space-y-1">
-                  <p className="font-semibold">Directory Health (Capability 2)</p>
+                  <p className="font-semibold">Directory Health (Phase 15)</p>
                   <p>
                     Detected {data.siteIntelligenceAudit.directoryHealth.detected} · Supported{' '}
-                    {data.siteIntelligenceAudit.directoryHealth.supported} · Free{' '}
-                    {data.siteIntelligenceAudit.directoryHealth.free} · Paid{' '}
-                    {data.siteIntelligenceAudit.directoryHealth.paid} · Dashboard{' '}
-                    {data.siteIntelligenceAudit.directoryHealth.dashboard} · Email{' '}
+                    {data.siteIntelligenceAudit.directoryHealth.supported} · Free plan{' '}
+                    {data.siteIntelligenceAudit.directoryHealth.usingFreePlan ??
+                      data.siteIntelligenceAudit.directoryHealth.free}{' '}
+                    · Payment required{' '}
+                    {data.siteIntelligenceAudit.directoryHealth.requiringPayment ??
+                      data.siteIntelligenceAudit.directoryHealth.paid}{' '}
+                    · Reciprocal{' '}
+                    {data.siteIntelligenceAudit.directoryHealth.withReciprocal ?? 0} · Needs config{' '}
+                    {data.siteIntelligenceAudit.directoryHealth.requiringConfiguration ?? 0} · Auto-ready{' '}
+                    {data.siteIntelligenceAudit.directoryHealth.automaticallyCompleted ?? 0}
+                  </p>
+                  <p className="text-muted-foreground">
+                    Dashboard {data.siteIntelligenceAudit.directoryHealth.dashboard} · Email{' '}
                     {data.siteIntelligenceAudit.directoryHealth.email} · Contact{' '}
                     {data.siteIntelligenceAudit.directoryHealth.contactForm} · Unsupported{' '}
                     {data.siteIntelligenceAudit.directoryHealth.unsupported} · Success Rate{' '}

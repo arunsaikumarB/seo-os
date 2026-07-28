@@ -38,8 +38,45 @@ export type DirectoryPricing = {
   featured: boolean;
   trial: boolean;
   pricingPageUrl: string | null;
+  /** Detected listing plans (Free / Regular / Premium / …). */
+  listingPlans: DirectoryListingPlan[];
+  /** Best free plan to select — never a paid tier. */
+  preferredFreePlan: DirectoryListingPlan | null;
+  /** Coarse cost hint when paid plans are present (e.g. "$49"). */
+  estimatedCost: string | null;
   signals: DetectorSignal[];
 };
+
+/** A concrete listing / link-type plan detected on the directory. */
+export type DirectoryListingPlan = {
+  name: string;
+  kind: 'free' | 'paid' | 'unknown';
+  estimatedCost: string | null;
+  isPreferredFree: boolean;
+};
+
+export type DirectoryReciprocal = {
+  detected: boolean;
+  /** Reciprocal backlink is mandatory to submit. */
+  required: boolean;
+  /** Reciprocal field present but optional. */
+  optional: boolean;
+  fieldNames: string[];
+  signals: DetectorSignal[];
+};
+
+export type DirectoryReviewGate = {
+  needsReview: boolean;
+  reason: 'Paid Directory' | 'Reciprocal Link Required' | null;
+  suggestedAction: string | null;
+  /** Do not continue browser / wizard execution. */
+  skipBrowserExecution: boolean;
+  detectedPlans: string[];
+  estimatedCost: string | null;
+  preferredFreePlan: string | null;
+};
+
+export type DirectoryCategoryStrategy = 'manual' | 'suggest' | 'none';
 
 export type DirectoryApproval = {
   immediate: boolean;
@@ -70,6 +107,8 @@ export type DirectoryFieldMap = {
   gallery: boolean;
   socialLinks: boolean;
   businessHours: boolean;
+  reciprocalUrl: boolean;
+  reciprocalText: boolean;
   rawFields: string[];
 };
 
@@ -100,6 +139,17 @@ export type DirectoryKnowledge = {
   fieldMap: DirectoryFieldMap | null;
   pricing: DirectoryPricing;
   approval: DirectoryApproval;
+  reciprocal: DirectoryReciprocal;
+  /** Phase 15 directory profile surface */
+  supportsFree: boolean;
+  supportsPaid: boolean;
+  requiresReciprocal: boolean;
+  reciprocalOptional: boolean;
+  listingTypes: string[];
+  wizardSteps: string[] | null;
+  preferredEntry: string | null;
+  categoryStrategy: DirectoryCategoryStrategy;
+  reviewGate: DirectoryReviewGate | null;
   workflow:
     | 'direct_submission'
     | 'dashboard'
@@ -122,6 +172,19 @@ export type DirectoryLearning = {
   successRate: number | null;
   failures: Array<{ at: string; reason: string }>;
   knownStrategy: string | null;
+  /** Phase 15 — remembered directory profile for skip-rediscovery */
+  supportsFree: boolean | null;
+  supportsPaid: boolean | null;
+  requiresReciprocal: boolean | null;
+  reciprocalOptional: boolean | null;
+  listingTypes: string[];
+  preferredFreePlan: string | null;
+  estimatedCost: string | null;
+  preferredEntry: string | null;
+  wizardSteps: string[] | null;
+  categoryStrategy: DirectoryCategoryStrategy | null;
+  /** When true, future prepares may reuse learning without a full SI re-crawl. */
+  skipRediscovery: boolean;
 };
 
 export type DirectoryStrategyName =
@@ -264,29 +327,256 @@ export function detectDirectoryPlatform(html: string, url: string): {
   };
 }
 
+const FREE_PLAN_NAME_RE =
+  /\b(free|regular|basic|normal|standard|nofollow\s*free|free\s*listing|complimentary)\b/i;
+const PAID_PLAN_NAME_RE =
+  /\b(premium|featured|paid|sponsored|gold|silver|platinum|business\s*pro|pro\s*listing|express|priority)\b/i;
+const COST_RE = /(\$\s*\d+(?:\.\d+)?|\€\s*\d+|£\s*\d+|\d+\s*(?:usd|eur|gbp)(?:\s*\/\s*(?:mo|month|yr|year))?)/i;
+
+/**
+ * Extract concrete listing / link-type plans from page HTML (radios, options, labels).
+ * Always prefers Free / Regular / Basic over Premium / Featured / Paid.
+ */
+export function detectListingPlans(html: string): DirectoryListingPlan[] {
+  const labels = new Set<string>();
+  const push = (raw: string) => {
+    const t = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!t || t.length < 2 || t.length > 80) return;
+    if (/^(select|choose|pick|--+)$/i.test(t)) return;
+    labels.add(t);
+  };
+
+  for (const m of html.matchAll(/<option[^>]*>([\s\S]*?)<\/option>/gi)) {
+    push(m[1] ?? '');
+  }
+  for (const m of html.matchAll(/<label[^>]*>([\s\S]*?)<\/label>/gi)) {
+    push(m[1] ?? '');
+  }
+  // Radio value + nearby text patterns
+  for (const m of html.matchAll(
+    /(?:link\s*type|listing\s*type|plan|package|pricing)[^<]{0,120}/gi
+  )) {
+    push(m[0] ?? '');
+  }
+  // Explicit plan words in body
+  for (const name of [
+    'Free',
+    'Regular',
+    'Basic',
+    'Normal',
+    'Standard',
+    'Premium',
+    'Featured',
+    'Paid',
+    'Sponsored',
+    'Business Pro',
+  ]) {
+    if (new RegExp(`\\b${name.replace(/\s+/g, '\\s+')}\\b`, 'i').test(html)) {
+      // Prefer richer label if we already captured one containing this name
+      const richer = [...labels].find((l) => new RegExp(name, 'i').test(l));
+      if (!richer) labels.add(name);
+    }
+  }
+
+  const plans: DirectoryListingPlan[] = [];
+  const seen = new Set<string>();
+  for (const name of labels) {
+    const isFree = FREE_PLAN_NAME_RE.test(name) && !COST_RE.test(name);
+    const isPaid =
+      (PAID_PLAN_NAME_RE.test(name) || COST_RE.test(name)) && !FREE_PLAN_NAME_RE.test(name);
+    // Hybrid labels like "Regular - free" count as free
+    const kind: DirectoryListingPlan['kind'] = FREE_PLAN_NAME_RE.test(name)
+      ? 'free'
+      : isPaid
+        ? 'paid'
+        : FREE_PLAN_NAME_RE.test(name) || isFree
+          ? 'free'
+          : 'unknown';
+    if (kind === 'unknown' && !PAID_PLAN_NAME_RE.test(name) && !FREE_PLAN_NAME_RE.test(name)) {
+      continue;
+    }
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const cost = COST_RE.exec(name)?.[1]?.replace(/\s+/g, '') ?? null;
+    plans.push({
+      name,
+      kind: FREE_PLAN_NAME_RE.test(name) ? 'free' : kind === 'unknown' && PAID_PLAN_NAME_RE.test(name) ? 'paid' : kind,
+      estimatedCost: cost,
+      isPreferredFree: false,
+    });
+  }
+
+  // Mark preferred free: Regular > Free > Basic > Normal > Standard > first free
+  const freeRank = (n: string) => {
+    const x = n.toLowerCase();
+    if (/regular/.test(x)) return 100;
+    if (/^free\b|\bfree\s*listing/.test(x)) return 90;
+    if (/basic/.test(x)) return 80;
+    if (/normal|standard/.test(x)) return 70;
+    return 50;
+  };
+  const freePlans = plans.filter((p) => p.kind === 'free').sort((a, b) => freeRank(b.name) - freeRank(a.name));
+  if (freePlans[0]) {
+    freePlans[0].isPreferredFree = true;
+  }
+  return plans;
+}
+
+export function detectDirectoryReciprocal(html: string): DirectoryReciprocal {
+  const signals: DetectorSignal[] = [];
+  const fieldNames: string[] = [];
+  const RECIP_FIELD_RE =
+    /name=["']([^"']*(?:recpr|reciprocal|link[_\s-]?back|partner[_\s-]?url|backlink[_\s-]?url|exchange[_\s-]?url|link[_\s-]?exchange|reciprocal[_\s-]?(?:url|link|website|text|anchor))[^"']*)["']/gi;
+  let m: RegExpExecArray | null;
+  while ((m = RECIP_FIELD_RE.exec(html))) {
+    const n = m[1]!;
+    if (!fieldNames.includes(n)) fieldNames.push(n);
+  }
+  // Labels / copy
+  const copyHit =
+    /reciprocal\s*(url|link|website|backlink)?|link\s*back|partner\s*url|backlink\s*url|link\s*exchange|exchange\s*url|recpr[_\s-]?(url|text)/i.test(
+      html
+    );
+  if (fieldNames.length || copyHit) {
+    signals.push(sig('reciprocal', 'text', 'Reciprocal / link-exchange field'));
+  }
+  const required =
+    /reciprocal.{0,40}(required|mandatory|must)|must.{0,40}reciprocal|required.{0,40}reciprocal|link\s*back.{0,20}required/i.test(
+      html
+    ) ||
+    (fieldNames.length > 0 &&
+      /required[^>]*(recpr|reciprocal)|name=["'][^"']*(recpr|reciprocal)[^"']*["'][^>]*required/i.test(
+        html
+      ));
+  const detected = fieldNames.length > 0 || copyHit;
+  return {
+    detected,
+    required: detected && required,
+    optional: detected && !required,
+    fieldNames,
+    signals,
+  };
+}
+
+/** Infer wizard step labels from multi-step directory submit pages. */
+export function detectDirectoryWizardSteps(html: string): string[] | null {
+  const steps: string[] = [];
+  if (/\bstep\s+one\b|\bstep\s*1\b/i.test(html)) steps.push('Step 1');
+  if (/\bstep\s+two\b|\bstep\s*2\b|go\s+to\s+step\s*(two|2)/i.test(html)) steps.push('Step 2');
+  if (/\bstep\s+three\b|\bstep\s*3\b|go\s+to\s+step\s*(three|3)/i.test(html)) steps.push('Step 3');
+  if (/\bstep\s+four\b|\bstep\s*4\b/i.test(html)) steps.push('Step 4');
+  if (steps.length >= 2) return steps;
+  if (/wizard|multi-?step/i.test(html) && /(next|continue|proceed)/i.test(html)) {
+    return ['Wizard (multi-step)'];
+  }
+  return null;
+}
+
+/**
+ * Decide Needs Review before any wizard / browser walk.
+ * Paid-only → Paid Directory. Reciprocal required without campaign config → Reciprocal Link Required.
+ */
+export function evaluateDirectoryReviewGate(params: {
+  pricing: DirectoryPricing;
+  reciprocal: DirectoryReciprocal;
+  reciprocalUrl?: string | null;
+  reciprocalAnchor?: string | null;
+}): DirectoryReviewGate {
+  const plans = params.pricing.listingPlans ?? [];
+  const detectedPlans = plans.map((p) => p.name);
+  const preferred = params.pricing.preferredFreePlan;
+  const hasFree =
+    params.pricing.freeListing ||
+    Boolean(preferred) ||
+    plans.some((p) => p.kind === 'free');
+  const hasPaid =
+    params.pricing.paidListing ||
+    plans.some((p) => p.kind === 'paid') ||
+    params.pricing.featured ||
+    params.pricing.sponsored;
+
+  if (hasPaid && !hasFree) {
+    return {
+      needsReview: true,
+      reason: 'Paid Directory',
+      suggestedAction: 'Skip or submit manually — no free listing path',
+      skipBrowserExecution: true,
+      detectedPlans,
+      estimatedCost: params.pricing.estimatedCost,
+      preferredFreePlan: null,
+    };
+  }
+
+  const recipConfigured = Boolean(
+    String(params.reciprocalUrl ?? '').trim() || String(params.reciprocalAnchor ?? '').trim()
+  );
+  if (params.reciprocal.required && !recipConfigured) {
+    return {
+      needsReview: true,
+      reason: 'Reciprocal Link Required',
+      suggestedAction: 'Configure reciprocal page',
+      skipBrowserExecution: true,
+      detectedPlans,
+      estimatedCost: params.pricing.estimatedCost,
+      preferredFreePlan: preferred?.name ?? null,
+    };
+  }
+
+  return {
+    needsReview: false,
+    reason: null,
+    suggestedAction: null,
+    skipBrowserExecution: false,
+    detectedPlans,
+    estimatedCost: params.pricing.estimatedCost,
+    preferredFreePlan: preferred?.name ?? null,
+  };
+}
+
 export function detectDirectoryPricing(html: string, url: string): DirectoryPricing {
   const blob = `${html}\n${url}`;
   const signals: DetectorSignal[] = [];
-  const freeListing = /free\s+listing|submit\s+for\s+free|no\s+cost|complimentary\s+listing/i.test(
-    blob
-  );
+  const listingPlans = detectListingPlans(html);
+  const preferredFreePlan = listingPlans.find((p) => p.isPreferredFree) ?? null;
+  const freeListing =
+    Boolean(preferredFreePlan) ||
+    /free\s+listing|submit\s+for\s+free|no\s+cost|complimentary\s+listing|\bregular\s*[-–—]?\s*free\b/i.test(
+      blob
+    ) ||
+    listingPlans.some((p) => p.kind === 'free');
   const paidListing =
     /paid\s+listing|premium\s+listing|\$\d+|price\s*:\s*\$|membership\s+fee|pay\s+to\s+(list|submit)/i.test(
       blob
-    );
-  const sponsored = /sponsored\s+listing/i.test(blob);
-  const featured = /featured\s+listing|feature\s+your\s+business/i.test(blob);
+    ) || listingPlans.some((p) => p.kind === 'paid');
+  const sponsored =
+    /sponsored\s+listing/i.test(blob) || listingPlans.some((p) => /sponsored/i.test(p.name));
+  const featured =
+    /featured\s+listing|feature\s+your\s+business/i.test(blob) ||
+    listingPlans.some((p) => /featured/i.test(p.name));
   const trial = /free\s+trial|trial\s+listing/i.test(blob);
   if (freeListing) signals.push(sig('free', 'text', 'Free listing'));
   if (paidListing) signals.push(sig('paid', 'text', 'Paid listing'));
   if (sponsored) signals.push(sig('sponsored', 'text', 'Sponsored'));
   if (featured) signals.push(sig('featured', 'text', 'Featured'));
   if (trial) signals.push(sig('trial', 'text', 'Trial'));
+  if (preferredFreePlan) {
+    signals.push(sig('preferred_free', 'text', `Preferred free: ${preferredFreePlan.name}`));
+  }
   let pricingPageUrl: string | null = null;
   const priceLink = html.match(
     /href=["']([^"']*(pricing|plans|packages|premium)[^"']*)["']/i
   );
   if (priceLink) pricingPageUrl = priceLink[1]!;
+
+  const paidCosts = listingPlans
+    .filter((p) => p.kind === 'paid' && p.estimatedCost)
+    .map((p) => p.estimatedCost!);
+  const estimatedCost =
+    paidCosts[0] ??
+    COST_RE.exec(blob)?.[1]?.replace(/\s+/g, '') ??
+    null;
+
   return {
     freeListing,
     paidListing,
@@ -294,6 +584,9 @@ export function detectDirectoryPricing(html: string, url: string): DirectoryPric
     featured,
     trial,
     pricingPageUrl,
+    listingPlans,
+    preferredFreePlan,
+    estimatedCost,
     signals,
   };
 }
@@ -347,6 +640,14 @@ const FIELD_PATTERNS: Array<{ key: keyof Omit<DirectoryFieldMap, 'rawFields'>; r
   { key: 'gallery', re: /name=["'][^"']*(gallery|photos|images)[^"']*["']/i },
   { key: 'socialLinks', re: /name=["'][^"']*(facebook|twitter|linkedin|instagram|social)[^"']*["']/i },
   { key: 'businessHours', re: /name=["'][^"']*(hours|opening|schedule)[^"']*["']/i },
+  {
+    key: 'reciprocalUrl',
+    re: /name=["'][^"']*(recpr[_\s-]?url|reciprocal[_\s-]?(url|link|website)|link[_\s-]?back|partner[_\s-]?url|backlink[_\s-]?url|exchange[_\s-]?url|link[_\s-]?exchange)[^"']*["']/i,
+  },
+  {
+    key: 'reciprocalText',
+    re: /name=["'][^"']*(recpr[_\s-]?text|reciprocal[_\s-]?(text|anchor)|anchor[_\s-]?text|link[_\s-]?text)[^"']*["']/i,
+  },
 ];
 
 export function extractDirectoryFieldMap(html: string): DirectoryFieldMap {
@@ -369,6 +670,8 @@ export function extractDirectoryFieldMap(html: string): DirectoryFieldMap {
     gallery: false,
     socialLinks: false,
     businessHours: false,
+    reciprocalUrl: false,
+    reciprocalText: false,
     rawFields: [],
   };
   for (const f of FIELD_PATTERNS) {
@@ -598,6 +901,14 @@ export function selectDirectoryStrategy(params: {
   payloadHints: {
     needsReview?: boolean;
     paidListing?: boolean;
+    reviewReason?: string | null;
+    suggestedAction?: string | null;
+    skipBrowserExecution?: boolean;
+    detectedPlans?: string[];
+    estimatedCost?: string | null;
+    preferredFreePlan?: string | null;
+    requiresReciprocal?: boolean;
+    reciprocalOptional?: boolean;
     categorySuggestion?: DirectoryCategorySuggestion | null;
     fieldMap?: DirectoryFieldMap | null;
     approval?: DirectoryApproval;
@@ -614,8 +925,15 @@ export function selectDirectoryStrategy(params: {
       .sort((a, b) => b.confidence - a.confidence)[0];
   };
 
-  // Paid / premium — never attempt payment
-  if (knowledge.pricing.paidListing && !knowledge.pricing.freeListing) {
+  const gate =
+    knowledge.reviewGate ??
+    evaluateDirectoryReviewGate({
+      pricing: knowledge.pricing,
+      reciprocal: knowledge.reciprocal,
+    });
+
+  // Paid / premium — never attempt payment / wizard
+  if (gate.reason === 'Paid Directory' || (knowledge.pricing.paidListing && !knowledge.pricing.freeListing)) {
     const entry =
       find('Submission Form') ??
       ({
@@ -627,7 +945,7 @@ export function selectDirectoryStrategy(params: {
       });
     return {
       chosen: 'Unsupported',
-      reasoning: 'Paid / premium directory — needs human review; never auto-pay',
+      reasoning: 'Paid Directory — needs review; never auto-pay',
       entryUrl: entry.url,
       expectedInterventions: [],
       fallbacks: [],
@@ -635,10 +953,54 @@ export function selectDirectoryStrategy(params: {
       payloadHints: {
         needsReview: true,
         paidListing: true,
+        reviewReason: 'Paid Directory',
+        suggestedAction: gate.suggestedAction ?? 'Skip or submit manually — no free listing path',
+        skipBrowserExecution: true,
+        detectedPlans: gate.detectedPlans,
+        estimatedCost: gate.estimatedCost,
+        preferredFreePlan: null,
+        requiresReciprocal: knowledge.requiresReciprocal,
+        reciprocalOptional: knowledge.reciprocalOptional,
         categorySuggestion: knowledge.suggestedCategory,
         fieldMap: knowledge.fieldMap,
         approval: knowledge.approval,
         skip: ['payment', 'browser_automation'],
+      },
+    };
+  }
+
+  // Reciprocal required without config — stop before browser
+  if (gate.reason === 'Reciprocal Link Required') {
+    const entry =
+      find('Submission Form') ??
+      ({
+        url: knowledge.entryUrl ?? pages[0]?.url ?? '',
+        intent: 'Submission Form' as PageIntent,
+        confidence: 0.7,
+        detectorId: 'page_submission_form' as const,
+        signals: [],
+      });
+    return {
+      chosen: 'Unsupported',
+      reasoning: 'Reciprocal Link Required — configure reciprocal page before submitting',
+      entryUrl: entry.url,
+      expectedInterventions: [],
+      fallbacks: [],
+      directoryStrategy: 'Unsupported',
+      payloadHints: {
+        needsReview: true,
+        reviewReason: 'Reciprocal Link Required',
+        suggestedAction: 'Configure reciprocal page',
+        skipBrowserExecution: true,
+        detectedPlans: gate.detectedPlans,
+        estimatedCost: gate.estimatedCost,
+        preferredFreePlan: gate.preferredFreePlan,
+        requiresReciprocal: true,
+        reciprocalOptional: false,
+        categorySuggestion: knowledge.suggestedCategory,
+        fieldMap: knowledge.fieldMap,
+        approval: knowledge.approval,
+        skip: ['browser_automation'],
       },
     };
   }
@@ -666,7 +1028,11 @@ export function selectDirectoryStrategy(params: {
       strategy: 'Direct Submission',
       page,
       expected: knowledge.approval.emailVerification ? [] : [],
-      reason: `Directory listing form at ${page.url}`,
+      reason: `Directory listing form at ${page.url}${
+        knowledge.pricing.preferredFreePlan
+          ? ` — prefer free plan "${knowledge.pricing.preferredFreePlan.name}"`
+          : ''
+      }`,
       hints: {
         categorySuggestion: knowledge.suggestedCategory,
         fieldMap: knowledge.fieldMap,
@@ -721,7 +1087,7 @@ export function selectDirectoryStrategy(params: {
     });
   }
 
-  // Free+paid hybrid: free path preferred
+  // Free+paid hybrid: free path preferred — never enter paid workflow
   const order: DirectoryStrategyName[] = [
     'Direct Submission',
     'Dashboard Submission',
@@ -743,16 +1109,27 @@ export function selectDirectoryStrategy(params: {
         categorySuggestion: knowledge.suggestedCategory,
         fieldMap: knowledge.fieldMap,
         approval: knowledge.approval,
+        preferredFreePlan: knowledge.pricing.preferredFreePlan?.name ?? null,
+        detectedPlans: knowledge.listingTypes,
+        requiresReciprocal: knowledge.requiresReciprocal,
+        reciprocalOptional: knowledge.reciprocalOptional,
       },
     };
   }
 
   const [primary, ...rest] = candidates;
-  // Mixed free/paid with free available — still allow direct but flag pricing awareness
   const hints = {
     ...primary!.hints,
     paidListing: knowledge.pricing.paidListing,
-    needsReview: Boolean(knowledge.pricing.paidListing && knowledge.pricing.freeListing === false),
+    needsReview: false,
+    reviewReason: null as string | null,
+    suggestedAction: null as string | null,
+    skipBrowserExecution: false,
+    detectedPlans: knowledge.listingTypes,
+    estimatedCost: knowledge.pricing.estimatedCost,
+    preferredFreePlan: knowledge.pricing.preferredFreePlan?.name ?? null,
+    requiresReciprocal: knowledge.requiresReciprocal,
+    reciprocalOptional: knowledge.reciprocalOptional,
     categorySuggestion: knowledge.suggestedCategory,
     fieldMap: knowledge.fieldMap,
     approval: knowledge.approval,
@@ -808,15 +1185,35 @@ export function buildDirectoryKnowledge(params: {
   const fieldMap = entryUrl ? extractDirectoryFieldMap(entryHtml) : null;
   const pricing = detectDirectoryPricing(combined, params.homepageUrl);
   const approval = detectDirectoryApproval(combined);
+  const reciprocal = detectDirectoryReciprocal(entryHtml || combined);
+  if (fieldMap?.reciprocalUrl || fieldMap?.reciprocalText) {
+    reciprocal.detected = true;
+    if (!reciprocal.fieldNames.length) {
+      if (fieldMap.reciprocalUrl) reciprocal.fieldNames.push('reciprocalUrl');
+      if (fieldMap.reciprocalText) reciprocal.fieldNames.push('reciprocalText');
+    }
+  }
+  const wizardSteps = detectDirectoryWizardSteps(entryHtml || combined);
   const suggestedCategory = matchDirectoryCategory({
     businessText: params.businessText ?? '',
     categories,
+  });
+  const supportsFree = Boolean(pricing.freeListing || pricing.preferredFreePlan);
+  const supportsPaid = Boolean(
+    pricing.paidListing || pricing.featured || pricing.sponsored || pricing.listingPlans.some((p) => p.kind === 'paid')
+  );
+  const listingTypes = pricing.listingPlans.map((p) => p.name);
+  const categoryStrategy: DirectoryCategoryStrategy =
+    categories.length > 0 ? 'manual' : suggestedCategory ? 'suggest' : 'none';
+  const reviewGate = evaluateDirectoryReviewGate({
+    pricing,
+    reciprocal,
   });
 
   return {
     detected: true,
     confidence: Math.max(bestConf, platform.confidence * 0.5),
-    signals: bestSignals,
+    signals: [...bestSignals, ...reciprocal.signals],
     platform: platform.platform,
     platformConfidence: platform.confidence,
     platformVersion: platform.version,
@@ -826,6 +1223,16 @@ export function buildDirectoryKnowledge(params: {
     fieldMap,
     pricing,
     approval,
+    reciprocal,
+    supportsFree,
+    supportsPaid,
+    requiresReciprocal: reciprocal.required,
+    reciprocalOptional: reciprocal.detected && !reciprocal.required,
+    listingTypes,
+    wizardSteps,
+    preferredEntry: entryUrl,
+    categoryStrategy,
+    reviewGate,
     workflow: null,
   };
 }
@@ -839,6 +1246,9 @@ export function enrichWithDirectoryIntelligence(params: {
   businessText?: string | null;
   /** When WordPress already claimed the profile, still attach directory if BDP/GeoDir etc. */
   allowAlongsideWordPress?: boolean;
+  /** Campaign / brand reciprocal settings — clears Reciprocal Link Required when set. */
+  reciprocalUrl?: string | null;
+  reciprocalAnchor?: string | null;
 }): {
   fingerprint: SiteFingerprint;
   pageClassifications: ClassifiedPage[];
@@ -859,6 +1269,16 @@ export function enrichWithDirectoryIntelligence(params: {
       directory: null,
     };
   }
+
+  // Re-evaluate review gate with campaign reciprocal settings
+  knowledge.reviewGate = evaluateDirectoryReviewGate({
+    pricing: knowledge.pricing,
+    reciprocal: knowledge.reciprocal,
+    reciprocalUrl: params.reciprocalUrl,
+    reciprocalAnchor: params.reciprocalAnchor,
+  });
+  knowledge.requiresReciprocal = knowledge.reciprocal.required;
+  knowledge.reciprocalOptional = knowledge.reciprocal.detected && !knowledge.reciprocal.required;
 
   // Prefer not to override pure WP comment/guest-post unless directory platform is explicit
   const wp = params.fingerprint.platform === 'WordPress';
@@ -970,7 +1390,31 @@ export function emptyDirectoryLearning(): DirectoryLearning {
     successRate: null,
     failures: [],
     knownStrategy: null,
+    supportsFree: null,
+    supportsPaid: null,
+    requiresReciprocal: null,
+    reciprocalOptional: null,
+    listingTypes: [],
+    preferredFreePlan: null,
+    estimatedCost: null,
+    preferredEntry: null,
+    wizardSteps: null,
+    categoryStrategy: null,
+    skipRediscovery: false,
   };
+}
+
+/**
+ * True when learning already remembers free path + entry + strategy —
+ * future submissions can skip full rediscovery.
+ */
+export function directoryLearningAllowsSkipRediscovery(
+  learning: DirectoryLearning | null | undefined
+): boolean {
+  if (!learning?.skipRediscovery) return false;
+  if (!learning.submissionUrl || !learning.knownStrategy) return false;
+  if (learning.supportsPaid && learning.supportsFree === false) return false;
+  return true;
 }
 
 export function recordDirectoryLearning(
@@ -985,6 +1429,16 @@ export function recordDirectoryLearning(
       ...base.failures,
     ].slice(0, 20);
   }
+  // Auto-mark skipRediscovery when profile is complete enough
+  if (
+    next.submissionUrl &&
+    next.knownStrategy &&
+    next.supportsFree !== false &&
+    next.knownStrategy !== 'Premium Listing' &&
+    next.knownStrategy !== 'Unsupported'
+  ) {
+    next.skipRediscovery = true;
+  }
   delete (next as { failureReason?: string }).failureReason;
   return next;
 }
@@ -995,9 +1449,15 @@ export function summarizeDirectoryHealth(
     strategy?: {
       directoryStrategy?: string;
       chosen?: string;
-      payloadHints?: { paidListing?: boolean; needsReview?: boolean };
+      payloadHints?: {
+        paidListing?: boolean;
+        needsReview?: boolean;
+        reviewReason?: string | null;
+        requiresReciprocal?: boolean;
+      };
     };
     learning?: { directory?: DirectoryLearning };
+    profile_status?: string;
   }>
 ) {
   const dirs = profiles.filter((p) => {
@@ -1011,13 +1471,51 @@ export function summarizeDirectoryHealth(
   let contact = 0;
   let unsupported = 0;
   let supported = 0;
+  let withReciprocal = 0;
+  let requiringPayment = 0;
+  let usingFreePlan = 0;
+  let automaticallyCompleted = 0;
+  let requiringConfiguration = 0;
   let successSum = 0;
   let successN = 0;
   for (const p of dirs) {
     const d = p.fingerprint!.directory as DirectoryKnowledge;
     const strat = p.strategy?.directoryStrategy ?? p.strategy?.chosen;
-    if (d.pricing?.paidListing && !d.pricing?.freeListing) paid++;
-    else if (d.pricing?.freeListing || strat === 'Direct Submission') free++;
+    const hints = p.strategy?.payloadHints;
+    const learning = p.learning?.directory;
+
+    if (d.requiresReciprocal || d.reciprocal?.detected || hints?.requiresReciprocal) {
+      withReciprocal++;
+    }
+    if (
+      (d.pricing?.paidListing && !d.pricing?.freeListing) ||
+      hints?.reviewReason === 'Paid Directory' ||
+      strat === 'Premium Listing'
+    ) {
+      requiringPayment++;
+      paid++;
+    } else if (d.supportsFree || d.pricing?.freeListing || strat === 'Direct Submission') {
+      usingFreePlan++;
+      free++;
+    }
+
+    if (
+      hints?.needsReview ||
+      hints?.reviewReason === 'Reciprocal Link Required' ||
+      hints?.reviewReason === 'Paid Directory' ||
+      (d.requiresReciprocal && !learning?.skipRediscovery)
+    ) {
+      requiringConfiguration++;
+    }
+
+    if (
+      p.profile_status === 'complete' &&
+      learning?.skipRediscovery &&
+      !hints?.needsReview
+    ) {
+      automaticallyCompleted++;
+    }
+
     if (strat === 'Dashboard Submission' || d.workflow === 'dashboard') dashboard++;
     if (strat === 'Email Submission' || strat === 'Email Outreach' || d.workflow === 'email')
       email++;
@@ -1025,7 +1523,7 @@ export function summarizeDirectoryHealth(
     if (strat === 'Unsupported' || d.workflow === 'unsupported' || d.workflow === 'premium')
       unsupported++;
     else supported++;
-    const rate = p.learning?.directory?.successRate;
+    const rate = learning?.successRate;
     if (rate != null) {
       successSum += rate;
       successN++;
@@ -1041,5 +1539,11 @@ export function summarizeDirectoryHealth(
     contactForm: contact,
     unsupported,
     successRate: successN > 0 ? Math.round((successSum / successN) * 10) / 10 : null,
+    /** Phase 15 campaign health */
+    withReciprocal,
+    requiringPayment,
+    usingFreePlan,
+    automaticallyCompleted,
+    requiringConfiguration,
   };
 }

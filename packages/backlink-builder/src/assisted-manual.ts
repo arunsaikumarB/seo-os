@@ -1762,6 +1762,8 @@ export type ContentSource = {
   categoryHints?: string[];
   /** Short reciprocal / backlink anchor phrase; falls back to title / business name. */
   anchorText?: string | null;
+  /** Campaign reciprocal URL for RECPR / link-exchange fields (Phase 15). */
+  reciprocalUrl?: string | null;
   imageFileName?: string | null;
   /** Cross-package uniqueness failed after max attempts */
   contentTooSimilar?: boolean;
@@ -2059,6 +2061,20 @@ export function buildAssistedPackage(input: {
     }
 
     let raw = valueForRole(rf.role, input.content);
+    // Phase 15 — reciprocal URL fields use campaign reciprocal setting when present
+    if (
+      rf.role === 'url' &&
+      /recpr|reciprocal|link[_\s-]?back|partner[_\s-]?url|backlink|exchange[_\s-]?url|link[_\s-]?exchange/i.test(
+        `${rf.label ?? ''} ${rf.selector}`
+      )
+    ) {
+      const recip = String(input.content.reciprocalUrl ?? '').trim();
+      if (recip) raw = recip;
+    }
+    if (rf.role === 'anchor') {
+      const phrase = String(input.content.anchorText ?? '').trim();
+      if (phrase) raw = phrase;
+    }
     // Description caps: ≤200 or smaller form maxlength
     if (rf.role === 'short_desc' || rf.role === 'long_desc') {
       const capped = fitDescriptionToCap(raw, rf.maxlength);

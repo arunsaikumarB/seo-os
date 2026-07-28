@@ -575,6 +575,22 @@ async function loadContentForOpportunity(workspaceId: string, opportunityId: str
 
   const p = (pack?.pack as Record<string, unknown> | null) ?? {};
   const brand = await getBrandContextForBee(workspaceId);
+  // Phase 15 — campaign reciprocal settings live on brand_profile (not Generation)
+  const { data: wsRow } = await admin()
+    .from('workspaces')
+    .select('brand_profile')
+    .eq('id', workspaceId)
+    .maybeSingle();
+  const brandProfile =
+    wsRow?.brand_profile && typeof wsRow.brand_profile === 'object'
+      ? (wsRow.brand_profile as Record<string, unknown>)
+      : {};
+  const reciprocalUrl = String(
+    brandProfile.reciprocalUrl ?? brandProfile.reciprocal_url ?? ''
+  ).trim();
+  const reciprocalAnchor = String(
+    brandProfile.reciprocalAnchor ?? brandProfile.reciprocal_anchor ?? ''
+  ).trim();
   const projectDomain = String(brand.projectDomain ?? '')
     .replace(/^https?:\/\//i, '')
     .replace(/\/+$/, '')
@@ -630,6 +646,8 @@ async function loadContentForOpportunity(workspaceId: string, opportunityId: str
     email: String(brand.contactEmail || p.email || ''),
     phone: String(brand.contactPhone || p.phone || ''),
     address: String(p.address ?? ''),
+    reciprocalUrl: reciprocalUrl || undefined,
+    anchorText: reciprocalAnchor || undefined,
     imageFileName,
     contentTooSimilar: Boolean(p.contentTooSimilar),
   };

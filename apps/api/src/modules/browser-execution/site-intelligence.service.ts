@@ -142,16 +142,25 @@ export function isOutreachOnlyProfile(profile: SiteProfileRow | null): boolean {
   );
 }
 
-/** Capability 2 — paid / premium directory requires human review (never payment). */
+/** Capability 2 / Phase 15 — paid directory or reciprocal-required without config. */
 export function isPaidDirectoryNeedsReview(profile: SiteProfileRow | null): boolean {
   if (!profile || profile.profile_status !== 'complete') return false;
   const strategy = profile.strategy as {
     directoryStrategy?: string;
-    payloadHints?: { needsReview?: boolean; paidListing?: boolean };
+    payloadHints?: {
+      needsReview?: boolean;
+      paidListing?: boolean;
+      reviewReason?: string | null;
+      skipBrowserExecution?: boolean;
+    };
   } | null;
+  const reason = strategy?.payloadHints?.reviewReason;
   return Boolean(
     strategy?.payloadHints?.needsReview ||
       strategy?.payloadHints?.paidListing ||
+      strategy?.payloadHints?.skipBrowserExecution ||
+      reason === 'Paid Directory' ||
+      reason === 'Reciprocal Link Required' ||
       strategy?.directoryStrategy === 'Premium Listing'
   );
 }
@@ -309,6 +318,7 @@ export async function saveIntelligenceResult(
         platform?: string | null;
         categories?: Array<{ name: string }>;
         entryUrl?: string | null;
+        preferredEntry?: string | null;
         fieldMap?: Record<string, unknown> | null;
         approval?: { expectedTimeline?: string | null } | null;
         pricing?: {
@@ -316,6 +326,21 @@ export async function saveIntelligenceResult(
           paidListing?: boolean;
           sponsored?: boolean;
           featured?: boolean;
+          preferredFreePlan?: { name?: string } | null;
+          estimatedCost?: string | null;
+          listingPlans?: Array<{ name: string }>;
+        } | null;
+        supportsFree?: boolean;
+        supportsPaid?: boolean;
+        requiresReciprocal?: boolean;
+        reciprocalOptional?: boolean;
+        listingTypes?: string[];
+        wizardSteps?: string[] | null;
+        categoryStrategy?: string | null;
+        reviewGate?: {
+          needsReview?: boolean;
+          reason?: string | null;
+          suggestedAction?: string | null;
         } | null;
       };
       const requiredFields = d.fieldMap
@@ -333,6 +358,9 @@ export async function saveIntelligenceResult(
             .filter(Boolean)
             .join('+') || null
         : null;
+      const knownStrategy =
+        (result.strategy as { directoryStrategy?: string }).directoryStrategy ??
+        result.strategy.chosen;
       nextLearning = {
         ...nextLearning,
         directory: recordDirectoryLearning(
@@ -340,13 +368,21 @@ export async function saveIntelligenceResult(
           {
             platform: d.platform ?? null,
             categories: (d.categories ?? []).map((c) => c.name),
-            submissionUrl: d.entryUrl ?? null,
+            submissionUrl: d.preferredEntry ?? d.entryUrl ?? null,
             requiredFields,
             approvalFlow: d.approval?.expectedTimeline ?? null,
             pricing: pricingLabel,
-            knownStrategy:
-              (result.strategy as { directoryStrategy?: string }).directoryStrategy ??
-              result.strategy.chosen,
+            knownStrategy,
+            supportsFree: d.supportsFree ?? d.pricing?.freeListing ?? null,
+            supportsPaid: d.supportsPaid ?? d.pricing?.paidListing ?? null,
+            requiresReciprocal: d.requiresReciprocal ?? null,
+            reciprocalOptional: d.reciprocalOptional ?? null,
+            listingTypes: d.listingTypes ?? d.pricing?.listingPlans?.map((p) => p.name) ?? [],
+            preferredFreePlan: d.pricing?.preferredFreePlan?.name ?? null,
+            estimatedCost: d.pricing?.estimatedCost ?? null,
+            preferredEntry: d.preferredEntry ?? d.entryUrl ?? null,
+            wizardSteps: d.wizardSteps ?? null,
+            categoryStrategy: (d.categoryStrategy as 'manual' | 'suggest' | 'none' | null) ?? null,
           }
         ),
       };
@@ -409,6 +445,13 @@ export async function saveIntelligenceResult(
       emailSubject?: string | null;
       needsReview?: boolean;
       paidListing?: boolean;
+      reviewReason?: string | null;
+      suggestedAction?: string | null;
+      skipBrowserExecution?: boolean;
+      detectedPlans?: string[];
+      estimatedCost?: string | null;
+      preferredFreePlan?: string | null;
+      requiresReciprocal?: boolean;
       categorySuggestion?: unknown;
       contactFormOutreach?: boolean;
       messageTemplate?: { subject?: string; bodyOutline?: string } | null;
@@ -479,11 +522,19 @@ export async function saveIntelligenceResult(
       }
     }
 
-    // Capability 2 Step 8 — paid listing → Needs Review (additive flags; never payment)
+    // Capability 2 / Phase 15 — Paid Directory or Reciprocal Link Required → Needs Review
+    const reviewReason =
+      hints?.reviewReason ??
+      (hints?.needsReview || hints?.paidListing
+        ? 'Paid Directory'
+        : null);
     if (
       hints?.needsReview ||
       hints?.paidListing ||
-      (result.strategy as { directoryStrategy?: string }).directoryStrategy === 'Premium Listing'
+      hints?.skipBrowserExecution ||
+      (result.strategy as { directoryStrategy?: string }).directoryStrategy === 'Premium Listing' ||
+      reviewReason === 'Paid Directory' ||
+      reviewReason === 'Reciprocal Link Required'
     ) {
       try {
         const { data: opp } = await admin()
@@ -492,14 +543,25 @@ export async function saveIntelligenceResult(
           .eq('id', oppId)
           .maybeSingle();
         const meta = (opp?.metadata as Record<string, unknown> | null) ?? {};
+        const reason =
+          String(hints?.reviewReason ?? reviewReason ?? 'Paid Directory');
         await admin()
           .from('opportunities')
           .update({
             metadata: {
               ...meta,
-              directory_paid_listing: true,
+              directory_paid_listing: reason === 'Paid Directory',
+              directory_reciprocal_required: reason === 'Reciprocal Link Required',
               needs_human_review: true,
-              needs_review_reason: 'Paid / premium directory — never auto-pay',
+              needs_review_reason: reason,
+              needs_review_suggested_action:
+                hints?.suggestedAction ??
+                (reason === 'Reciprocal Link Required'
+                  ? 'Configure reciprocal page'
+                  : 'Skip or submit manually — no free listing path'),
+              directory_detected_plans: hints?.detectedPlans ?? null,
+              directory_estimated_cost: hints?.estimatedCost ?? null,
+              directory_preferred_free_plan: hints?.preferredFreePlan ?? null,
               directory_category_suggestion: hints?.categorySuggestion ?? null,
               skip_browser_automation: true,
             },
@@ -623,9 +685,15 @@ export async function getSiteProfileAudit(workspaceId: string) {
         strategy: p.strategy as {
           directoryStrategy?: string;
           chosen?: string;
-          payloadHints?: { paidListing?: boolean; needsReview?: boolean };
+          payloadHints?: {
+            paidListing?: boolean;
+            needsReview?: boolean;
+            reviewReason?: string | null;
+            requiresReciprocal?: boolean;
+          };
         },
         learning: p.learning as SiteLearning,
+        profile_status: p.profile_status,
       }))
     ),
     contactFormHealth: summarizeContactFormHealth(
