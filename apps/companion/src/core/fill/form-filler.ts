@@ -1,4 +1,5 @@
 import { fieldDisplayLabel, scanDomFields } from '../detect/dom-scanner';
+import { resolveScanRoot } from '../detect/submission-form';
 import {
   classifyFields,
   debugLogClassifications,
@@ -6,22 +7,22 @@ import {
   isFillConfident,
 } from '../match/classifier';
 import { ROLE_LABELS } from '../match/aliases';
-import { profileValueForRole } from '../profile/defaults';
+import { packageValueForRole } from '../package/values';
 import {
   applyFillHighlights,
   clearFillHighlights,
 } from '../overlay/highlights';
 import { setMissingTargets } from '../overlay/missing-nav';
 import type {
-  BusinessProfile,
   DomainLearningHook,
   FieldClassification,
   FillDetail,
   FillResult,
   FillSummary,
+  FillableRole,
+  OpportunityPackageFields,
 } from '../types';
 import { CONFIDENCE_FILL_THRESHOLD, FILLABLE_ROLES } from '../types';
-import type { FillableRole } from '../types';
 
 function setNativeValue(el: HTMLElement, value: string): boolean {
   if (el instanceof HTMLSelectElement) {
@@ -36,8 +37,7 @@ function setNativeValue(el: HTMLElement, value: string): boolean {
           o.text.toLowerCase().includes(needle) || o.value.toLowerCase().includes(needle)
       );
     if (!hit) return false;
-    const proto = HTMLSelectElement.prototype;
-    const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+    const desc = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
     desc?.set?.call(el, hit.value);
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -46,33 +46,15 @@ function setNativeValue(el: HTMLElement, value: string): boolean {
 
   if (el instanceof HTMLInputElement) {
     if (el.type === 'checkbox' || el.type === 'radio') {
-      // Never auto-check payment; for category checkboxes try match value/label
       const needle = value.trim().toLowerCase();
-      const label = fieldDisplayLabel({
-        uid: '',
-        element: el,
-        kind: el.type === 'radio' ? 'radio' : 'checkbox',
-        inputType: el.type,
-        name: el.name,
-        id: el.id,
-        placeholder: '',
-        ariaLabel: el.getAttribute('aria-label') ?? '',
-        label: '',
-        nearbyText: '',
-        sectionHeading: '',
-        required: false,
-        autocomplete: '',
-        valueAttr: el.value,
-      });
-      const blob = `${el.value} ${label}`.toLowerCase();
+      const blob = `${el.value} ${el.getAttribute('aria-label') ?? ''}`.toLowerCase();
       if (!needle || !blob.includes(needle)) return false;
       el.checked = true;
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
       return true;
     }
-    const proto = HTMLInputElement.prototype;
-    const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+    const desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
     desc?.set?.call(el, value);
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -80,8 +62,7 @@ function setNativeValue(el: HTMLElement, value: string): boolean {
   }
 
   if (el instanceof HTMLTextAreaElement) {
-    const proto = HTMLTextAreaElement.prototype;
-    const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+    const desc = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
     desc?.set?.call(el, value);
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -98,22 +79,47 @@ function setNativeValue(el: HTMLElement, value: string): boolean {
   return false;
 }
 
+const SKIP_ROLES = new Set([
+  'captcha',
+  'payment',
+  'submit',
+  'login',
+  'search',
+  'newsletter',
+]);
+
 export interface FillFormOptions {
-  profile: BusinessProfile;
+  package: OpportunityPackageFields;
   root?: ParentNode;
   domainLearning?: DomainLearningHook;
   threshold?: number;
   debug?: boolean;
+  /** Only fill currently visible fields (wizard step) */
+  visibleOnly?: boolean;
+}
+
+function isVisible(el: HTMLElement): boolean {
+  const style = window.getComputedStyle(el);
+  if (style.display === 'none' || style.visibility === 'hidden') return false;
+  const rect = el.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
 }
 
 /**
- * Detect → classify per-field → fill confident business fields.
- * Never clicks Submit. Never solves CAPTCHA. Never fills payment/login/search.
- * Pricing on the page does NOT block filling other fields.
+ * Fill current step of the submission form from the SEO OS opportunity package.
+ * Never clicks Submit. Never solves CAPTCHA. Never uses a local business profile.
  */
 export function fillMatchedFields(options: FillFormOptions): FillResult {
   const threshold = options.threshold ?? CONFIDENCE_FILL_THRESHOLD;
-  const fields = scanDomFields(options.root ?? document);
+  const { root } = options.root
+    ? { root: options.root }
+    : resolveScanRoot(document);
+
+  let fields = scanDomFields(root);
+  if (options.visibleOnly !== false) {
+    fields = fields.filter((f) => isVisible(f.element));
+  }
+
   const classifications = classifyFields(fields, {
     domainLearning: options.domainLearning,
   });
@@ -149,13 +155,13 @@ export function fillMatchedFields(options: FillFormOptions): FillResult {
       continue;
     }
 
-    if (c.role === 'payment' || c.role === 'submit' || c.role === 'login' || c.role === 'search') {
+    if (SKIP_ROLES.has(c.role)) {
       skipped += 1;
       highlightSkipped.push(c.field.element);
       details.push({
         ...base,
         action: 'skipped',
-        reason: `${c.role} — skipped (field-level)`,
+        reason: `${c.role} — skipped`,
       });
       continue;
     }
@@ -184,19 +190,34 @@ export function fillMatchedFields(options: FillFormOptions): FillResult {
       continue;
     }
 
-    // Confident fillable role
-    const value = profileValueForRole(options.profile, c.role as FillableRole);
+    const value = packageValueForRole(options.package, c.role as FillableRole);
     if (!value) {
       skipped += 1;
       if (c.field.required) {
         missing += 1;
         highlightMissing.push(c.field.element);
-        details.push({ ...base, action: 'missing', reason: 'Empty profile value' });
+        details.push({ ...base, action: 'missing', reason: 'Empty in opportunity package' });
       } else {
         highlightSkipped.push(c.field.element);
-        details.push({ ...base, action: 'empty_profile', reason: 'Empty profile value' });
+        details.push({ ...base, action: 'empty_package', reason: 'Empty in opportunity package' });
       }
       continue;
+    }
+
+    // Skip already filled (wizard re-entry)
+    if (!isEmptyValue(c.field.element)) {
+      const current =
+        c.field.element instanceof HTMLInputElement ||
+        c.field.element instanceof HTMLTextAreaElement
+          ? c.field.element.value.trim()
+          : (c.field.element.textContent ?? '').trim();
+      if (current && current.toLowerCase() === value.toLowerCase()) {
+        filled += 1;
+        filledUids.add(c.field.uid);
+        highlightFilled.push(c.field.element);
+        details.push({ ...base, action: 'filled', reason: 'Already filled' });
+        continue;
+      }
     }
 
     try {
@@ -222,19 +243,6 @@ export function fillMatchedFields(options: FillFormOptions): FillResult {
     }
   }
 
-  // Required fillable roles that were confident but somehow still empty
-  for (const c of classifications) {
-    if (!FILLABLE_ROLES.includes(c.role as FillableRole)) continue;
-    if (!isFillConfident(c, threshold)) continue;
-    if (filledUids.has(c.field.uid)) continue;
-    if (c.field.required && isEmptyValue(c.field.element)) {
-      if (!details.some((d) => d.uid === c.field.uid && d.action === 'missing')) {
-        missing += 1;
-        highlightMissing.push(c.field.element);
-      }
-    }
-  }
-
   clearFillHighlights();
   applyFillHighlights({
     filled: highlightFilled,
@@ -243,8 +251,6 @@ export function fillMatchedFields(options: FillFormOptions): FillResult {
   });
   setMissingTargets(highlightMissing);
 
-  const missingRequired = details.filter((d) => d.action === 'missing');
-
   const summary: FillSummary = {
     detected: fields.length,
     filled,
@@ -252,32 +258,36 @@ export function fillMatchedFields(options: FillFormOptions): FillResult {
     missing,
     captcha,
     details,
-    missingRequired,
+    missingRequired: details.filter((d) => d.action === 'missing'),
   };
 
   if (options.debug) {
     debugLogClassifications(classifications, filledUids);
   }
 
-  // Hard guarantee: this module never clicks submit
   return { summary, classifications };
 }
 
 export function previewClassifications(options: {
   root?: ParentNode;
   domainLearning?: DomainLearningHook;
-}): { fields: ReturnType<typeof scanDomFields>; classifications: FieldClassification[] } {
-  const fields = scanDomFields(options.root ?? document);
+}): {
+  fields: ReturnType<typeof scanDomFields>;
+  classifications: FieldClassification[];
+  formReason: string;
+} {
+  const scoped = options.root
+    ? { root: options.root, reason: 'custom' }
+    : resolveScanRoot(document);
+  const fields = scanDomFields(scoped.root).filter((f) => isVisible(f.element));
   const classifications = classifyFields(fields, {
     domainLearning: options.domainLearning,
   });
-  return { fields, classifications };
-}
-
-export function listMissingRequired(summary: FillSummary | null): FillDetail[] {
-  return summary?.missingRequired ?? [];
+  return { fields, classifications, formReason: scoped.reason };
 }
 
 export function roleLabel(role: string): string {
   return ROLE_LABELS[role as keyof typeof ROLE_LABELS] ?? role;
 }
+
+export { FILLABLE_ROLES };

@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
-import type { BusinessProfile, FillSummary } from '../core/types';
+import { useCallback, useEffect, useState } from 'react';
+import type { CurrentOpportunity, FillSummary } from '../core/types';
 import { CONFIDENCE_FILL_THRESHOLD } from '../core/types';
 import { fillMatchedFields, previewClassifications, roleLabel } from '../core/fill/form-filler';
 import { noopDomainLearning } from '../core/hooks';
-import { loadProfile, onProfileChanged } from '../core/profile/storage';
+import { fetchCurrentOpportunity } from '../core/api/opportunity';
+import { captureHandoffFromPage, getHandoffToken } from '../core/session/handoff';
 import {
   disableInspector,
   enableInspector,
@@ -13,28 +14,49 @@ import {
 import { scrollToElement } from '../core/overlay/highlights';
 import { getMissingTargets } from '../core/overlay/missing-nav';
 import { isFillConfident } from '../core/match/classifier';
+import { startWizardWatcher, stopWizardWatcher } from '../core/wizard/watcher';
 
 export function Widget() {
   const [expanded, setExpanded] = useState(false);
-  const [profile, setProfile] = useState<BusinessProfile | null>(null);
+  const [opp, setOpp] = useState<CurrentOpportunity | null>(null);
+  const [status, setStatus] = useState<'loading' | 'connected' | 'disconnected'>('loading');
+  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [summary, setSummary] = useState<FillSummary | null>(null);
   const [inspect, setInspect] = useState(false);
   const [debug, setDebug] = useState(false);
   const [missingIndex, setMissingIndex] = useState(0);
-  const [preview, setPreview] = useState({ detected: 0, fillable: 0 });
+  const [preview, setPreview] = useState({ detected: 0, fillable: 0, formReason: '' });
 
-  useEffect(() => {
-    void loadProfile().then(setProfile);
-    return onProfileChanged(setProfile);
+  const refreshOpportunity = useCallback(async () => {
+    captureHandoffFromPage();
+    setStatus('loading');
+    setError(null);
+    const token = await getHandoffToken();
+    if (!token) {
+      setOpp(null);
+      setStatus('disconnected');
+      setError('Open a package from SEO OS Assisted Manual');
+      return null;
+    }
+    const result = await fetchCurrentOpportunity({ force: true });
+    if (!result.ok) {
+      setOpp(null);
+      setStatus('disconnected');
+      setError(result.error);
+      return null;
+    }
+    setOpp(result.data);
+    setStatus('connected');
+    return result.data;
   }, []);
 
-  const refreshPreview = () => {
-    const { fields, classifications } = previewClassifications({
+  const refreshPreview = useCallback(() => {
+    const { fields, classifications, formReason } = previewClassifications({
       domainLearning: noopDomainLearning,
     });
     const fillable = classifications.filter((c) => isFillConfident(c)).length;
-    setPreview({ detected: fields.length, fillable });
+    setPreview({ detected: fields.length, fillable, formReason });
     for (const c of classifications) {
       c.field.element.setAttribute('data-soc-uid', c.field.uid);
     }
@@ -42,12 +64,17 @@ export function Widget() {
       setInspectorClassifications(classifications);
     }
     return classifications;
-  };
+  }, [inspect]);
+
+  useEffect(() => {
+    void refreshOpportunity();
+    return () => stopWizardWatcher();
+  }, [refreshOpportunity]);
 
   useEffect(() => {
     if (!expanded) return;
     refreshPreview();
-  }, [expanded, profile]);
+  }, [expanded, opp, refreshPreview]);
 
   useEffect(() => {
     if (!inspect) {
@@ -57,23 +84,31 @@ export function Widget() {
     const classifications = refreshPreview();
     enableInspector(classifications);
     return () => disableInspector();
-  }, [inspect]);
+  }, [inspect, refreshPreview]);
 
   const onFill = () => {
-    if (!profile || busy) return;
+    if (!opp || busy) return;
     setBusy(true);
     try {
-      const result = fillMatchedFields({
-        profile,
-        domainLearning: noopDomainLearning,
-        threshold: CONFIDENCE_FILL_THRESHOLD,
-        debug,
+      // Always re-fetch package so we never reuse another opportunity's content
+      void fetchCurrentOpportunity({ force: true }).then((result) => {
+        const pkg = result.ok ? result.data.package : opp.package;
+        if (result.ok) setOpp(result.data);
+        const fillResult = fillMatchedFields({
+          package: pkg,
+          domainLearning: noopDomainLearning,
+          threshold: CONFIDENCE_FILL_THRESHOLD,
+          debug,
+          visibleOnly: true,
+        });
+        setSummary(fillResult.summary);
+        setMissingIndex(0);
+        if (inspect) setInspectorClassifications(fillResult.classifications);
+        startWizardWatcher(pkg);
+        refreshPreview();
+        setBusy(false);
       });
-      setSummary(result.summary);
-      setMissingIndex(0);
-      if (inspect) setInspectorClassifications(result.classifications);
-      refreshPreview();
-    } finally {
+    } catch {
       setBusy(false);
     }
   };
@@ -107,7 +142,9 @@ export function Widget() {
       <header className="soc-header">
         <div>
           <div className="soc-brand">SEO OS Companion</div>
-          <div className="soc-sub">Phase 1.1 · Form Intelligence</div>
+          <div className="soc-sub">
+            {status === 'connected' ? 'Connected' : status === 'loading' ? 'Connecting…' : 'Not connected'}
+          </div>
         </div>
         <button
           type="button"
@@ -120,19 +157,39 @@ export function Widget() {
       </header>
 
       <div className="soc-body">
-        <p className="soc-meta">
-          Detected <strong>{preview.detected}</strong> · Fillable ≥{CONFIDENCE_FILL_THRESHOLD}%{' '}
-          <strong>{preview.fillable}</strong>
-        </p>
+        {status === 'connected' && opp ? (
+          <>
+            <div className="soc-opp">
+              <div className="soc-opp-label">Current Opportunity</div>
+              <div className="soc-opp-domain">{opp.domain}</div>
+            </div>
 
-        <button
-          type="button"
-          className="soc-primary"
-          disabled={busy || !profile}
-          onClick={onFill}
-        >
-          {busy ? 'Filling…' : 'Fill Form'}
-        </button>
+            <p className="soc-meta">
+              Detected <strong>{preview.detected}</strong> fields · Ready{' '}
+              <strong>{preview.fillable}</strong>
+            </p>
+
+            <button
+              type="button"
+              className="soc-primary"
+              disabled={busy}
+              onClick={onFill}
+            >
+              {busy ? 'Filling…' : 'Fill Current Step'}
+            </button>
+          </>
+        ) : (
+          <div className="soc-warn">
+            <p>{error || 'Not connected to SEO OS'}</p>
+            <p className="soc-muted">
+              In SEO OS → Assisted Manual → open a package. Companion loads that opportunity’s
+              generated content only — no local business profile.
+            </p>
+            <button type="button" className="soc-secondary" onClick={() => void refreshOpportunity()}>
+              Retry connect
+            </button>
+          </div>
+        )}
 
         <div className="soc-row">
           <label className="soc-toggle">
@@ -163,9 +220,9 @@ export function Widget() {
         </button>
 
         <ul className="soc-rules">
-          <li>Fill when confidence ≥ {CONFIDENCE_FILL_THRESHOLD}%</li>
-          <li>Skip unknown · never Submit / CAPTCHA</li>
-          <li>Pricing on page does not block fill</li>
+          <li>SEO OS is the source of truth</li>
+          <li>Fills submission form only · never Submit / CAPTCHA</li>
+          <li>Wizard steps auto-fill after you click Continue</li>
         </ul>
 
         {summary && (

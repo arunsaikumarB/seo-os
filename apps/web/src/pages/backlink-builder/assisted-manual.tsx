@@ -120,6 +120,25 @@ const BUCKET_LABEL: Record<string, string> = {
 export function AssistedManualPage() {
   const { projectId = '' } = useParams();
   const { request } = useApi();
+
+  const openPackageInCompanion = async (pkg: { id: string; entryUrl: string; domain: string }) => {
+    try {
+      const res = await request<{
+        data: { token: string; entryUrl: string; domain: string; opportunityId: string };
+      }>(`/v1/projects/${projectId}/extension/handoff`, {
+        method: 'POST',
+        body: JSON.stringify({ packageId: pkg.id }),
+      });
+      const entry = res.data.entryUrl || pkg.entryUrl;
+      const url = new URL(entry);
+      url.hash = `seo-os-handoff=${encodeURIComponent(res.data.token)}`;
+      window.open(url.toString(), '_blank', 'noopener,noreferrer');
+      toast.success(`Opened ${res.data.domain || pkg.domain} for Companion fill`);
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, 'Could not create Companion handoff — opening URL only'));
+      window.open(pkg.entryUrl, '_blank', 'noopener,noreferrer');
+    }
+  };
   const { getAccessToken } = useAuth();
   const orgId = useAppStore((s) => s.currentOrgId);
   const qc = useQueryClient();
@@ -541,9 +560,7 @@ export function AssistedManualPage() {
                         <div className="flex flex-wrap items-center gap-2">
                           <Button
                             size="sm"
-                            onClick={() =>
-                              window.open(pkg.entryUrl, '_blank', 'noopener,noreferrer')
-                            }
+                            onClick={() => void openPackageInCompanion(pkg)}
                           >
                             <ExternalLink className="h-3.5 w-3.5 mr-1" /> Open package
                           </Button>

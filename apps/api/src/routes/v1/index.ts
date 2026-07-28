@@ -73,6 +73,7 @@ import { reportsRouter } from './reports.routes.js';
 import { technicalSeoRouter } from './technical-seo.routes.js';
 import { integrationsRouter } from './integrations.routes.js';
 import { betaOrgRouter, betaGlobalRouter } from './beta.routes.js';
+import { extensionProjectRouter, extensionPublicRouter } from './extension.routes.js';
 import { getExecutiveSummary } from '../../modules/executive/executive.service.js';
 import { logger } from '../../lib/logger.js';
 
@@ -107,6 +108,7 @@ v1Router.get('/version', async (_req, res) => {
 v1Router.use('/notifications', notificationsRouter);
 v1Router.use('/organizations', auditRouter);
 v1Router.use('/beta', betaGlobalRouter);
+v1Router.use('/extension', extensionPublicRouter);
 
 v1Router.get('/me', jwtOnlyMiddleware, async (req, res, next) => {
   try {
@@ -524,6 +526,7 @@ projectScopeRouter.use('/chat', chatRouter);
 projectScopeRouter.use('/intelligence', intelligenceRouter);
 projectScopeRouter.use('/campaigns', campaignsRouter);
 projectScopeRouter.use('/backlink-builder', backlinkBuilderRouter);
+projectScopeRouter.use('/extension', extensionProjectRouter);
 projectScopeRouter.use(browserExecutionRouter);
 projectScopeRouter.use(imageIntelligenceRouter);
 projectScopeRouter.use(providerFrameworkRouter);

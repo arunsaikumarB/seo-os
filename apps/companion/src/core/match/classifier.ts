@@ -154,6 +154,17 @@ function classifyStructural(field: NormalizedField): FieldClassification | null 
     };
   }
 
+  if (blobHasHint(blob, STRUCTURAL_HINTS.newsletter)) {
+    return {
+      field,
+      role: 'newsletter',
+      confidence: 90,
+      matchedAlias: 'newsletter',
+      matchedBy: ['Keyword'],
+      reason: 'Newsletter / promo / coupon control',
+    };
+  }
+
   if (blobHasHint(blob, STRUCTURAL_HINTS.submit) && field.kind === 'input' && (type === 'submit' || type === 'button')) {
     return {
       field,
@@ -299,6 +310,7 @@ function ROLE_LABELS_SAFE(role: FieldRole): string {
     submit: 'Submit',
     login: 'Login',
     search: 'Search',
+    newsletter: 'Newsletter',
     unknown: 'Unknown',
   };
   return map[role] ?? role;

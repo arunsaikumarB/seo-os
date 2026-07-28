@@ -219,11 +219,15 @@ export const ROLE_LABELS: Record<FieldRole, string> = {
   submit: 'Submit',
   login: 'Login',
   search: 'Search',
+  newsletter: 'Newsletter',
   unknown: 'Unknown',
 };
 
 /** Structural / keyword hints for non-fillable roles (not alias-scored the same way) */
-export const STRUCTURAL_HINTS: Record<'captcha' | 'payment' | 'submit' | 'login' | 'search', string[]> = {
+export const STRUCTURAL_HINTS: Record<
+  'captcha' | 'payment' | 'submit' | 'login' | 'search' | 'newsletter',
+  string[]
+> = {
   captcha: [
     'captcha',
     'recaptcha',
@@ -280,4 +284,5 @@ export const STRUCTURAL_HINTS: Record<'captcha' | 'payment' | 'submit' | 'login'
     'mfa',
   ],
   search: ['search', 'query', 'find', 'filter', 'keyword search', 'site search'],
+  newsletter: ['newsletter', 'subscribe', 'mailing list', 'promo code', 'coupon', 'discount code'],
 };

@@ -1,4 +1,4 @@
-/** SEO OS Companion — Phase 1.1 Form Intelligence types */
+/** SEO OS Companion — Phase 2 types (delivery layer; SEO OS owns content) */
 
 export type FieldRole =
   | 'business_name'
@@ -21,10 +21,10 @@ export type FieldRole =
   | 'submit'
   | 'login'
   | 'search'
+  | 'newsletter'
   | 'unknown';
 
-/** Roles we attempt to fill from the business profile */
-export const FILLABLE_ROLES: ReadonlyArray<Exclude<FieldRole, 'unknown' | 'captcha' | 'payment' | 'submit' | 'login' | 'search'>> = [
+export const FILLABLE_ROLES = [
   'business_name',
   'title',
   'website',
@@ -46,23 +46,35 @@ export type FillableRole = (typeof FILLABLE_ROLES)[number];
 
 export const CONFIDENCE_FILL_THRESHOLD = 80;
 
-export interface BusinessProfile {
+/** Flat package from SEO OS — never stored permanently as a profile */
+export type OpportunityPackageFields = {
+  title: string;
+  url: string;
+  description: string;
+  shortDescription: string;
   businessName: string;
-  website: string;
   email: string;
   phone: string;
-  title: string;
-  description: string;
+  category: string;
+  facebook: string;
+  linkedin: string;
+  twitter: string;
   address: string;
   city: string;
   state: string;
   country: string;
   zip: string;
-  category: string;
-  facebook: string;
-  linkedin: string;
-  twitter: string;
-}
+};
+
+export type CurrentOpportunity = {
+  opportunityId: string;
+  packageId: string;
+  workspaceId: string;
+  domain: string;
+  entryUrl: string;
+  package: OpportunityPackageFields;
+  learningKey: string;
+};
 
 export type FieldControlKind =
   | 'input'
@@ -73,7 +85,6 @@ export type FieldControlKind =
   | 'contenteditable';
 
 export interface NormalizedField {
-  /** Stable id for overlays / navigation */
   uid: string;
   element: HTMLElement;
   kind: FieldControlKind;
@@ -87,14 +98,12 @@ export interface NormalizedField {
   sectionHeading: string;
   required: boolean;
   autocomplete: string;
-  /** Radio/checkbox value attribute */
   valueAttr: string;
 }
 
 export interface FieldClassification {
   field: NormalizedField;
   role: FieldRole;
-  /** 0–100 weighted score */
   confidence: number;
   matchedAlias: string | null;
   matchedBy: string[];
@@ -107,7 +116,7 @@ export type FillAction =
   | 'missing'
   | 'captcha'
   | 'low_confidence'
-  | 'empty_profile';
+  | 'empty_package';
 
 export interface FillDetail {
   uid: string;
@@ -136,8 +145,15 @@ export interface FillResult {
   classifications: FieldClassification[];
 }
 
+/** Phase 3+ learning — stub only */
 export interface DomainLearningHook {
   getDomainAliases?(hostname: string): Partial<Record<FillableRole, string[]>> | null;
+  rememberMapping?(_input: {
+    learningKey: string;
+    role: FillableRole;
+    selector: string;
+    alias: string;
+  }): void;
 }
 
 export interface AiMatchHook {
