@@ -3,9 +3,9 @@ import { defineManifest } from '@crxjs/vite-plugin';
 export default defineManifest({
   manifest_version: 3,
   name: 'SEO OS Companion',
-  version: '0.2.3',
+  version: '0.2.4',
   description:
-    'Phase 2.1 — in-memory handoff only. No storage. Fetches packages from SEO OS. Never submits.',
+    'Phase 2.2 — one active package in memory. Activate from SEO OS. Never submits.',
   icons: {
     '16': 'public/icons/icon-16.png',
     '32': 'public/icons/icon-32.png',
@@ -25,7 +25,7 @@ export default defineManifest({
     service_worker: 'src/background/service-worker.ts',
     type: 'module',
   },
-  permissions: ['storage', 'activeTab'],
+  permissions: ['activeTab', 'tabs'],
   host_permissions: ['http://*/*', 'https://*/*'],
   content_scripts: [
     {

@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { FillSummary } from '../core/types';
-import { CONFIDENCE_FILL_THRESHOLD } from '../core/types';
+import { CONFIDENCE_FILL_THRESHOLD, activePackageToFillFields } from '../core/types';
 import { fillMatchedFields, previewClassifications, roleLabel } from '../core/fill/form-filler';
 import { noopDomainLearning } from '../core/hooks';
-import { redeemPendingIfAny } from '../core/api/opportunity';
-import { captureHandoffFromUrl } from '../core/session/handoff';
-import { onHandoffReceived } from '../core/session/web-bridge';
+import { onPackageActivated } from '../core/session/web-bridge';
 import {
   type ConnectionDiagnostics,
   companionLog,
@@ -13,10 +11,11 @@ import {
   onDiagnosticsChange,
 } from '../core/diagnostics/connection';
 import {
-  type RuntimeMemory,
-  getMemory,
-  onMemoryChange,
-  packageFieldCount,
+  clearPackage,
+  fieldCount,
+  getActivePackage,
+  getConnectionState,
+  onActivePackageChange,
 } from '../core/runtime/memory';
 import {
   disableInspector,
@@ -32,7 +31,8 @@ import { startWizardWatcher, stopWizardWatcher } from '../core/wizard/watcher';
 function DiagRow({ label, value }: { label: string; value: string }) {
   const positive =
     value === 'Yes' ||
-    (label.startsWith('Current') && value !== '—' && value !== 'No');
+    (label.startsWith('Current') && value !== '—' && value !== 'No') ||
+    (label === 'Fields' && value !== '0');
   return (
     <div className="soc-diag-row">
       <span>{label}</span>
@@ -41,36 +41,39 @@ function DiagRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function statusLabel(m: RuntimeMemory): string {
-  switch (m.connectionState) {
-    case 'connected':
-      return 'Connected';
-    case 'loading_package':
-      return 'Loading package…';
-    case 'error':
-      return 'Error';
-    default:
-      return 'Waiting for Handoff…';
+function formatGenerated(iso: string | null): string {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso);
+    const mins = Math.round((Date.now() - d.getTime()) / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins} min ago`;
+    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  } catch {
+    return iso;
   }
 }
 
 export function Widget() {
   const [expanded, setExpanded] = useState(false);
-  const [memory, setMemory] = useState<RuntimeMemory>(getMemory());
+  const [tick, setTick] = useState(0);
   const [diag, setDiag] = useState<ConnectionDiagnostics>(getDiagnostics());
   const [busy, setBusy] = useState(false);
   const [summary, setSummary] = useState<FillSummary | null>(null);
   const [inspect, setInspect] = useState(false);
   const [debug, setDebug] = useState(false);
   const [missingIndex, setMissingIndex] = useState(0);
-  const [preview, setPreview] = useState({ detected: 0, fillable: 0, formReason: '' });
+  const [preview, setPreview] = useState({ detected: 0, fillable: 0 });
+
+  const active = getActivePackage();
+  const connected = getConnectionState() === 'connected';
 
   const refreshPreview = useCallback(() => {
-    const { fields, classifications, formReason } = previewClassifications({
+    const { fields, classifications } = previewClassifications({
       domainLearning: noopDomainLearning,
     });
     const fillable = classifications.filter((c) => isFillConfident(c)).length;
-    setPreview({ detected: fields.length, fillable, formReason });
+    setPreview({ detected: fields.length, fillable });
     for (const c of classifications) {
       c.field.element.setAttribute('data-soc-uid', c.field.uid);
     }
@@ -80,52 +83,41 @@ export function Widget() {
     return classifications;
   }, [inspect]);
 
-  const tryRedeemFromUrl = useCallback(async () => {
-    const token = captureHandoffFromUrl();
-    if (!token) return;
-    companionLog('ui.redeem_from_url', {});
-    await redeemPendingIfAny();
+  useEffect(() => {
+    companionLog('ui.mount', { phase: '2.2' });
+    const offPkg = onActivePackageChange(() => setTick((t) => t + 1));
+    const offAct = onPackageActivated(() => setTick((t) => t + 1));
+    const offDiag = onDiagnosticsChange(setDiag);
+    return () => {
+      offPkg();
+      offAct();
+      offDiag();
+      stopWizardWatcher();
+    };
   }, []);
 
   useEffect(() => {
-    companionLog('ui.mount', { state: 'waiting_for_handoff' });
-    const offMem = onMemoryChange(setMemory);
-    const offDiag = onDiagnosticsChange(setDiag);
-    const offHand = onHandoffReceived(() => {
-      companionLog('ui.handoff_event', {});
-      setMemory(getMemory());
-    });
-    void tryRedeemFromUrl();
-    return () => {
-      offMem();
-      offDiag();
-      offHand();
-      stopWizardWatcher();
-    };
-  }, [tryRedeemFromUrl]);
-
-  useEffect(() => {
-    if (!expanded) return;
-    if (memory.connectionState === 'connected') refreshPreview();
-  }, [expanded, memory.connectionState, memory.opportunityId, refreshPreview]);
+    if (!expanded || !connected) return;
+    refreshPreview();
+  }, [expanded, connected, tick, refreshPreview]);
 
   useEffect(() => {
     if (!inspect) {
       disableInspector();
       return;
     }
-    const classifications = refreshPreview();
-    enableInspector(classifications);
+    enableInspector(refreshPreview());
     return () => disableInspector();
   }, [inspect, refreshPreview]);
 
   const onFill = () => {
-    const pkg = memory.currentPackage;
+    const pkg = getActivePackage();
     if (!pkg || busy) return;
     setBusy(true);
     try {
+      const flat = activePackageToFillFields(pkg);
       const fillResult = fillMatchedFields({
-        package: pkg,
+        package: flat,
         domainLearning: noopDomainLearning,
         threshold: CONFIDENCE_FILL_THRESHOLD,
         debug,
@@ -134,11 +126,17 @@ export function Widget() {
       setSummary(fillResult.summary);
       setMissingIndex(0);
       if (inspect) setInspectorClassifications(fillResult.classifications);
-      startWizardWatcher(pkg);
+      startWizardWatcher(flat);
       refreshPreview();
     } finally {
       setBusy(false);
     }
+  };
+
+  const onClear = () => {
+    stopWizardWatcher();
+    clearPackage();
+    setSummary(null);
   };
 
   const missingCount = summary?.missingRequired.length ?? 0;
@@ -150,7 +148,7 @@ export function Widget() {
     setMissingIndex((i) => i + 1);
   };
 
-  const fieldReady = packageFieldCount(memory.currentPackage);
+  void tick; // force re-read active on package change
 
   if (!expanded) {
     return (
@@ -171,7 +169,7 @@ export function Widget() {
       <header className="soc-header">
         <div>
           <div className="soc-brand">SEO OS Companion</div>
-          <div className="soc-sub">{statusLabel(memory)}</div>
+          <div className="soc-sub">{connected ? 'Connected' : 'Waiting for Package'}</div>
         </div>
         <button
           type="button"
@@ -184,19 +182,24 @@ export function Widget() {
       </header>
 
       <div className="soc-body">
-        {memory.connectionState === 'connected' && memory.currentPackage ? (
+        {connected && active ? (
           <>
             <div className="soc-opp">
-              <div className="soc-opp-label">Opportunity</div>
-              <div className="soc-opp-domain">{memory.opportunityId}</div>
+              <div className="soc-opp-label">Current Opportunity</div>
+              <div className="soc-opp-domain">{active.domain}</div>
               <div className="soc-opp-label" style={{ marginTop: 6 }}>
-                Domain
+                Opportunity ID
               </div>
-              <div className="soc-opp-domain">{memory.domain}</div>
+              <div className="soc-opp-domain" style={{ fontSize: 12, fontWeight: 600 }}>
+                {active.opportunityId}
+              </div>
             </div>
 
             <p className="soc-meta">
-              Package <strong>{fieldReady} fields ready</strong>
+              Package Ready <strong>{fieldCount(active)} fields</strong>
+            </p>
+            <p className="soc-meta">
+              Generated <strong>{formatGenerated(active.generatedAt)}</strong>
             </p>
             <p className="soc-meta">
               Detected <strong>{preview.detected}</strong> · Fillable{' '}
@@ -206,49 +209,28 @@ export function Widget() {
             <button type="button" className="soc-primary" disabled={busy} onClick={onFill}>
               {busy ? 'Filling…' : 'Fill Current Step'}
             </button>
-          </>
-        ) : memory.connectionState === 'loading_package' ? (
-          <div className="soc-warn">
-            <p className="soc-error-title">Waiting for Package…</p>
-            <p>Handoff received — loading opportunity package from SEO OS.</p>
-          </div>
-        ) : memory.connectionState === 'error' ? (
-          <div className="soc-warn">
-            <p className="soc-error-title">Connection failed</p>
-            <p>{memory.lastError || 'Unknown error'}</p>
-            <p className="soc-muted">Open the package again from SEO OS Assisted Manual.</p>
-            <button
-              type="button"
-              className="soc-secondary"
-              onClick={() => void tryRedeemFromUrl()}
-            >
-              Retry URL handoff
+            <button type="button" className="soc-secondary" onClick={onClear}>
+              Clear Package
             </button>
-          </div>
+          </>
         ) : (
           <div className="soc-warn">
-            <p className="soc-error-title">Waiting for Handoff…</p>
-            <p>No handoff received. Open the package from SEO OS.</p>
+            <p className="soc-error-title">Waiting for Package</p>
+            <p>
+              In SEO OS → Assisted Manual → click <strong>Activate Package</strong>. The package is
+              sent directly into memory — no tokens, no storage.
+            </p>
           </div>
         )}
 
         <div className="soc-diag">
           <div className="soc-summary-title">Diagnostics</div>
-          <DiagRow label="Message Received" value={diag.messageReceived} />
-          <DiagRow label="Token Valid" value={diag.tokenValid} />
-          <DiagRow label="Package Request Started" value={diag.packageRequestStarted} />
-          <DiagRow label="API Reachable" value={diag.apiReachable} />
-          <DiagRow label="Authenticated" value={diag.authenticated} />
-          <DiagRow label="Package Loaded" value={diag.packageLoaded} />
           <DiagRow label="Connected" value={diag.connected} />
-          <DiagRow label="Current Opportunity" value={diag.opportunityId || memory.opportunityId || '—'} />
-          <DiagRow label="Current Domain" value={diag.domain || memory.domain || '—'} />
-          {diag.lastStage && (
-            <p className="soc-muted">
-              Stage: <code>{diag.lastStage}</code>
-              {diag.lastHttpStatus != null ? ` · HTTP ${diag.lastHttpStatus}` : ''}
-            </p>
-          )}
+          <DiagRow label="Package Loaded" value={diag.packageLoaded} />
+          <DiagRow label="Current Opportunity" value={diag.opportunityId || '—'} />
+          <DiagRow label="Current Domain" value={diag.domain || '—'} />
+          <DiagRow label="Fields" value={String(diag.fieldCount)} />
+          <DiagRow label="Generated" value={formatGenerated(diag.generatedAt)} />
         </div>
 
         <div className="soc-row">
@@ -280,9 +262,9 @@ export function Widget() {
         </button>
 
         <ul className="soc-rules">
-          <li>In-memory only — refresh needs a new Open package</li>
-          <li>Never Submit / CAPTCHA / payment / login</li>
-          <li>Console: [SEO OS Companion] / [SEO OS Handoff]</li>
+          <li>One active package in memory</li>
+          <li>Activate another package to replace</li>
+          <li>Never Submit / CAPTCHA / payment</li>
         </ul>
 
         {summary && (
@@ -301,23 +283,16 @@ export function Widget() {
               <span>
                 Missing <b>{summary.missing}</b>
               </span>
-              <span>
-                CAPTCHA <b>{summary.captcha}</b>
-              </span>
             </div>
-            {summary.details.length > 0 && (
-              <ul className="soc-details">
-                {summary.details.slice(0, 12).map((d, i) => (
-                  <li key={`${d.uid}-${i}`}>
-                    <span className={`soc-pill soc-pill-${d.action}`}>
-                      {d.action === 'filled' ? 'ok' : d.action === 'missing' ? 'miss' : 'skip'}
-                    </span>
-                    {roleLabel(d.role)}
-                    <span className="soc-muted"> — {d.reason}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
+            {summary.details.slice(0, 10).map((d, i) => (
+              <div key={`${d.uid}-${i}`} className="soc-details">
+                <span className={`soc-pill soc-pill-${d.action}`}>
+                  {d.action === 'filled' ? 'ok' : 'skip'}
+                </span>{' '}
+                {roleLabel(d.role)}
+                <span className="soc-muted"> — {d.reason}</span>
+              </div>
+            ))}
           </div>
         )}
       </div>

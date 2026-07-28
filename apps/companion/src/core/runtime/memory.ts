@@ -1,187 +1,161 @@
 /**
- * In-memory Companion runtime — Phase 2.1
- * No chrome.storage / localStorage / sessionStorage. Refresh = new handoff.
+ * Phase 2.2 — exactly one ActivePackage in memory.
+ * Content-script copy is synced from the service worker so Open Website tabs share it.
+ * No chrome.storage. No tokens. No history.
  */
-import type { OpportunityPackageFields } from '../types';
+import type { ActivePackage } from '../types';
 import { companionLog, patchDiagnostics } from '../diagnostics/connection';
 
-export type ConnectionState =
-  | 'waiting_for_handoff'
-  | 'loading_package'
-  | 'connected'
-  | 'error';
+export type ConnectionState = 'waiting_for_package' | 'connected';
 
-export type RuntimeMemory = {
-  connectionState: ConnectionState;
-  opportunityId: string | null;
-  packageId: string | null;
-  projectId: string | null;
-  domain: string | null;
-  entryUrl: string | null;
-  currentPackage: OpportunityPackageFields | null;
-  /** Transient — cleared immediately after successful package load */
-  pendingToken: string | null;
-  lastError: string | null;
-};
-
-const EMPTY_PACKAGE: OpportunityPackageFields = {
-  title: '',
-  url: '',
-  description: '',
-  shortDescription: '',
-  businessName: '',
-  email: '',
-  phone: '',
-  category: '',
-  facebook: '',
-  linkedin: '',
-  twitter: '',
-  address: '',
-  city: '',
-  state: '',
-  country: '',
-  zip: '',
-};
-
-let memory: RuntimeMemory = {
-  connectionState: 'waiting_for_handoff',
-  opportunityId: null,
-  packageId: null,
-  projectId: null,
-  domain: null,
-  entryUrl: null,
-  currentPackage: null,
-  pendingToken: null,
-  lastError: null,
-};
-
-type Listener = (m: RuntimeMemory) => void;
+type Listener = () => void;
 const listeners = new Set<Listener>();
 
+let active: ActivePackage | null = null;
+
 function emit(): void {
-  const snap = getMemory();
   for (const cb of listeners) {
     try {
-      cb(snap);
+      cb();
     } catch {
       /* ignore */
     }
   }
 }
 
-export function getMemory(): RuntimeMemory {
-  return { ...memory, currentPackage: memory.currentPackage ? { ...memory.currentPackage } : null };
+function applyLocal(pkg: ActivePackage | null, stage: string): void {
+  active = pkg
+    ? {
+        opportunityId: String(pkg.opportunityId),
+        domain: String(pkg.domain),
+        projectId: String(pkg.projectId),
+        generatedAt: String(pkg.generatedAt || new Date().toISOString()),
+        entryUrl: pkg.entryUrl,
+        fields: (pkg.fields ?? [])
+          .filter((f) => f && String(f.key ?? '').trim())
+          .map((f) => ({ key: String(f.key).trim(), value: String(f.value ?? '') })),
+      }
+    : null;
+
+  if (active) {
+    companionLog(stage, {
+      opportunityId: active.opportunityId,
+      domain: active.domain,
+      fieldCount: active.fields.length,
+      generatedAt: active.generatedAt,
+    });
+    patchDiagnostics({
+      connected: 'Yes',
+      packageLoaded: 'Yes',
+      opportunityId: active.opportunityId,
+      domain: active.domain,
+      fieldCount: active.fields.length,
+      generatedAt: active.generatedAt,
+      lastError: null,
+      lastStage: stage,
+    });
+  } else {
+    companionLog(stage, {});
+    patchDiagnostics({
+      connected: 'No',
+      packageLoaded: 'No',
+      opportunityId: null,
+      domain: null,
+      fieldCount: 0,
+      generatedAt: null,
+      lastError: null,
+      lastStage: stage,
+    });
+  }
+  emit();
 }
 
-export function onMemoryChange(cb: Listener): () => void {
+export function onActivePackageChange(cb: Listener): () => void {
   listeners.add(cb);
-  cb(getMemory());
+  cb();
   return () => listeners.delete(cb);
 }
 
-export function resetMemory(reason = 'reset'): void {
-  companionLog('memory.reset', { reason });
-  memory = {
-    connectionState: 'waiting_for_handoff',
-    opportunityId: null,
-    packageId: null,
-    projectId: null,
-    domain: null,
-    entryUrl: null,
-    currentPackage: null,
-    pendingToken: null,
-    lastError: null,
-  };
-  patchDiagnostics({
-    messageReceived: 'No',
-    tokenValid: 'No',
-    packageRequestStarted: 'No',
-    apiReachable: 'No',
-    authenticated: 'No',
-    packageLoaded: 'No',
-    connected: 'No',
-    opportunityId: null,
-    domain: null,
-    lastError: null,
-    lastStage: 'memory.reset',
+export function getActivePackage(): ActivePackage | null {
+  return active ? { ...active, fields: active.fields.map((f) => ({ ...f })) } : null;
+}
+
+export function getConnectionState(): ConnectionState {
+  return active ? 'connected' : 'waiting_for_package';
+}
+
+function notifyBackground(
+  type: 'companion.activate_package' | 'companion.clear_package',
+  pkg?: ActivePackage
+): void {
+  try {
+    chrome.runtime.sendMessage(
+      type === 'companion.activate_package'
+        ? { type, package: pkg }
+        : { type },
+      () => void chrome.runtime.lastError
+    );
+  } catch {
+    /* popup / tests without extension runtime */
+  }
+}
+
+/** Apply package locally and broadcast to service worker (canonical copy). */
+export function activatePackage(pkg: ActivePackage, opts?: { fromBackground?: boolean }): void {
+  const prev = active?.opportunityId ?? null;
+  applyLocal(pkg, 'package.activated');
+  companionLog('package.activated', {
+    previousOpportunityId: prev,
+    opportunityId: active?.opportunityId,
+    fromBackground: Boolean(opts?.fromBackground),
   });
-  emit();
+  if (!opts?.fromBackground) {
+    notifyBackground('companion.activate_package', active!);
+  }
 }
 
-export function setPendingToken(token: string): void {
-  memory.pendingToken = token;
-  memory.connectionState = 'loading_package';
-  memory.lastError = null;
-  emit();
+/** Clear local + broadcast. */
+export function clearPackage(opts?: { fromBackground?: boolean }): void {
+  applyLocal(null, 'package.cleared');
+  if (!opts?.fromBackground) {
+    notifyBackground('companion.clear_package');
+  }
 }
 
-export function clearPendingToken(): void {
-  memory.pendingToken = null;
-  emit();
+/** Hydrate from service worker (call on content-script mount). */
+export function pullActivePackageFromBackground(): void {
+  try {
+    chrome.runtime.sendMessage({ type: 'companion.get_active_package' }, (res) => {
+      if (chrome.runtime.lastError) return;
+      if (res?.ok && res.package) {
+        applyLocal(res.package as ActivePackage, 'package.synced_from_sw');
+      } else if (res?.ok && !res.package) {
+        applyLocal(null, 'package.synced_empty');
+      }
+    });
+  } catch {
+    /* ignore */
+  }
 }
 
-export function takePendingToken(): string | null {
-  const t = memory.pendingToken;
-  memory.pendingToken = null;
-  return t;
-}
-
-export function setError(error: string, stage: string): void {
-  memory.connectionState = 'error';
-  memory.lastError = error;
-  memory.pendingToken = null;
-  companionLog('memory.error', { error, stage }, 'error');
-  patchDiagnostics({
-    connected: 'No',
-    lastError: error,
-    lastStage: stage,
-  });
-  emit();
-}
-
-export function hydrateFromPackage(input: {
-  opportunityId: string;
-  packageId?: string;
-  projectId?: string;
-  domain: string;
-  entryUrl?: string;
-  package: OpportunityPackageFields;
-  source: 'postMessage' | 'api';
-}): void {
-  memory = {
-    connectionState: 'connected',
-    opportunityId: input.opportunityId,
-    packageId: input.packageId ?? null,
-    projectId: input.projectId ?? null,
-    domain: input.domain,
-    entryUrl: input.entryUrl ?? null,
-    currentPackage: { ...EMPTY_PACKAGE, ...input.package },
-    pendingToken: null, // forget token immediately
-    lastError: null,
-  };
-  companionLog('memory.hydrated', {
-    source: input.source,
-    opportunityId: input.opportunityId,
-    domain: input.domain,
-    filledKeys: Object.entries(memory.currentPackage!)
-      .filter(([, v]) => String(v).trim())
-      .map(([k]) => k),
-  });
-  const diagPatch: Parameters<typeof patchDiagnostics>[0] = {
-    packageLoaded: 'Yes',
-    connected: 'Yes',
-    authenticated: 'Yes',
-    opportunityId: input.opportunityId,
-    domain: input.domain,
-    lastError: null,
-    lastStage: `memory.hydrated.${input.source}`,
-  };
-  if (input.source === 'api') diagPatch.apiReachable = 'Yes';
-  patchDiagnostics(diagPatch);
-  emit();
-}
-
-export function packageFieldCount(pkg: OpportunityPackageFields | null): number {
+export function fieldCount(pkg: ActivePackage | null = active): number {
   if (!pkg) return 0;
-  return Object.values(pkg).filter((v) => String(v ?? '').trim().length > 0).length;
+  return pkg.fields.filter((f) => String(f.value ?? '').trim()).length;
+}
+
+/** Listen for SW broadcasts (other tabs activated / cleared). */
+export function installActivePackageSync(): void {
+  try {
+    chrome.runtime.onMessage.addListener((message) => {
+      if (message?.type === 'companion.active_package_changed') {
+        applyLocal(
+          (message.package as ActivePackage | null) ?? null,
+          message.package ? 'package.synced_broadcast' : 'package.cleared_broadcast'
+        );
+      }
+    });
+  } catch {
+    /* ignore */
+  }
+  pullActivePackageFromBackground();
 }

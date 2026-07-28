@@ -117,114 +117,81 @@ const BUCKET_LABEL: Record<string, string> = {
   needs_person: 'Needs a person',
 };
 
+/** Role → Companion ActivePackage field key (fill engine). */
+const ROLE_TO_ACTIVE_KEY: Record<string, string> = {
+  title: 'title',
+  url: 'url',
+  website: 'url',
+  description: 'description',
+  long_desc: 'description',
+  short_desc: 'shortDescription',
+  short_description: 'shortDescription',
+  business_name: 'businessName',
+  name: 'businessName',
+  email: 'email',
+  phone: 'phone',
+  category: 'category',
+  facebook: 'facebook',
+  linkedin: 'linkedin',
+  twitter: 'twitter',
+  address: 'address',
+  city: 'city',
+  state: 'state',
+  country: 'country',
+  zip: 'zip',
+  postal: 'zip',
+};
+
+type ActivePackagePayload = {
+  opportunityId: string;
+  domain: string;
+  projectId: string;
+  generatedAt: string;
+  entryUrl?: string;
+  fields: Array<{ key: string; value: string }>;
+};
+
+function buildActivePackageFields(
+  pkg: AssistedPackage,
+  resolveValue: (f: PackageField) => string
+): Array<{ key: string; value: string }> {
+  const byKey = new Map<string, string>();
+  const put = (key: string, value: string) => {
+    const v = value.trim();
+    if (!key || !v) return;
+    if (!byKey.has(key) || !byKey.get(key)) byKey.set(key, v);
+  };
+
+  for (const f of pkg.package?.fields ?? []) {
+    const role = String(f.role ?? '').trim();
+    const key = ROLE_TO_ACTIVE_KEY[role] ?? role;
+    if (role === 'category') {
+      const cat =
+        f.recommendedOption?.trim() ||
+        (f.confidence === 'high' ? resolveValue(f) : '') ||
+        '';
+      put('category', cat);
+      continue;
+    }
+    put(key, resolveValue(f));
+  }
+
+  for (const p of pkg.package?.pasteReadyContent ?? []) {
+    const role = String(p.role ?? '').trim();
+    const key = ROLE_TO_ACTIVE_KEY[role] ?? role;
+    put(key, String(p.value ?? ''));
+  }
+
+  const long = byKey.get('description') || '';
+  const short = byKey.get('shortDescription') || '';
+  if (!long && short) byKey.set('description', short);
+
+  return [...byKey.entries()].map(([key, value]) => ({ key, value }));
+}
+
 export function AssistedManualPage() {
   const { projectId = '' } = useParams();
   const { request } = useApi();
-
-  const openPackageInCompanion = async (pkg: { id: string; entryUrl: string; domain: string }) => {
-    const log = (
-      stage: string,
-      payload: Record<string, unknown> = {},
-      level: 'info' | 'warn' | 'error' = 'info'
-    ) => {
-      const entry = { scope: 'seo-os-web-handoff', stage, ts: new Date().toISOString(), ...payload };
-      const line = `[SEO OS Handoff] ${stage}`;
-      if (level === 'error') console.error(line, entry);
-      else if (level === 'warn') console.warn(line, entry);
-      else console.info(line, entry);
-    };
-
-    const redact = (token: string) => ({
-      present: true,
-      length: token.length,
-      fingerprint: `${token.slice(0, 8)}…${token.slice(-4)}`,
-    });
-
-    try {
-      log('handoff.request_start', {
-        packageId: pkg.id,
-        domain: pkg.domain,
-        projectId,
-        entryUrl: pkg.entryUrl,
-      });
-
-      const res = await request<{
-        data: {
-          token: string;
-          entryUrl: string;
-          domain: string;
-          opportunityId: string;
-          packageId: string;
-          projectId: string;
-          package: Record<string, string>;
-        };
-      }>(`/v1/projects/${projectId}/extension/handoff`, {
-        method: 'POST',
-        body: JSON.stringify({ packageId: pkg.id }),
-      });
-
-      const token = res.data.token;
-      const apiBase = getApiUrl();
-      log('handoff.token_received', {
-        token: redact(token),
-        opportunityId: res.data.opportunityId,
-        domain: res.data.domain || pkg.domain,
-        entryUrl: res.data.entryUrl || pkg.entryUrl,
-        apiBase,
-        packageKeys: Object.keys(res.data.package ?? {}),
-      });
-
-      // In-memory hydrate on this tab (package included — does not burn single-use token)
-      window.postMessage(
-        {
-          source: 'seo-os-web',
-          type: 'companion.handoff',
-          token,
-          apiBase,
-          domain: res.data.domain || pkg.domain,
-          opportunityId: res.data.opportunityId,
-          packageId: res.data.packageId,
-          projectId: res.data.projectId || projectId,
-          entryUrl: res.data.entryUrl || pkg.entryUrl,
-          package: res.data.package,
-        },
-        window.location.origin
-      );
-      log('handoff.postMessage_sent', {
-        token: redact(token),
-        opportunityId: res.data.opportunityId,
-        withPackage: true,
-      });
-
-      const entry = res.data.entryUrl || pkg.entryUrl;
-      const url = new URL(entry);
-      url.hash = `seo-os-handoff=${encodeURIComponent(token)}`;
-      log('handoff.open_directory_tab', {
-        url: url.toString().replace(/seo-os-handoff=[^&#]+/, 'seo-os-handoff=[redacted]'),
-        domain: res.data.domain || pkg.domain,
-      });
-      window.open(url.toString(), '_blank', 'noopener,noreferrer');
-      toast.success(`Companion connected · opened ${res.data.domain || pkg.domain}`);
-      log('handoff.complete', { opportunityId: res.data.opportunityId });
-    } catch (err) {
-      log(
-        'handoff.request_failed',
-        { error: getApiErrorMessage(err, 'handoff failed'), packageId: pkg.id },
-        'error'
-      );
-      toast.error(getApiErrorMessage(err, 'Could not create Companion handoff — opening URL only'));
-      window.postMessage(
-        {
-          source: 'seo-os-web',
-          type: 'companion.handoff_error',
-          error: getApiErrorMessage(err, 'Handoff API failed'),
-          packageId: pkg.id,
-        },
-        window.location.origin
-      );
-      window.open(pkg.entryUrl, '_blank', 'noopener,noreferrer');
-    }
-  };
   const { getAccessToken } = useAuth();
   const orgId = useAppStore((s) => s.currentOrgId);
   const qc = useQueryClient();
@@ -240,6 +207,96 @@ export function AssistedManualPage() {
   };
   const setFieldValue = (packageId: string, selector: string, value: string) => {
     setFieldEdits((prev) => ({ ...prev, [fieldKey(packageId, selector)]: value }));
+  };
+
+  /** Phase 2.2 — push full package into Companion memory (no token, no API fetch after). */
+  const activatePackageIntoCompanion = (pkg: AssistedPackage) => {
+    const log = (
+      stage: string,
+      payload: Record<string, unknown> = {},
+      level: 'info' | 'warn' | 'error' = 'info'
+    ) => {
+      const entry = { scope: 'seo-os-web-activate', stage, ts: new Date().toISOString(), ...payload };
+      const line = `[SEO OS Activate] ${stage}`;
+      if (level === 'error') console.error(line, entry);
+      else if (level === 'warn') console.warn(line, entry);
+      else console.info(line, entry);
+    };
+
+    try {
+      const opportunityId = String(pkg.opportunityId || pkg.id);
+      if (!opportunityId || !pkg.domain || !projectId) {
+        toast.error('Package is missing opportunity, domain, or project');
+        return;
+      }
+
+      const fields = buildActivePackageFields(pkg, (f) => fieldValue(pkg.id, f));
+      if (!fields.length) {
+        toast.error('Package has no fillable fields yet — generate content first');
+        window.postMessage(
+          {
+            source: 'seo-os-web',
+            type: 'companion.activate_error',
+            error: 'Package has no fillable fields',
+            packageId: pkg.id,
+          },
+          window.location.origin
+        );
+        return;
+      }
+
+      const payload: ActivePackagePayload = {
+        opportunityId,
+        domain: pkg.domain,
+        projectId,
+        generatedAt: pkg.preparedAt || new Date().toISOString(),
+        entryUrl: pkg.entryUrl,
+        fields,
+      };
+
+      log('activate.postMessage', {
+        opportunityId,
+        domain: pkg.domain,
+        fieldCount: fields.length,
+        keys: fields.map((f) => f.key),
+      });
+
+      window.postMessage(
+        {
+          source: 'seo-os-web',
+          type: 'companion.activate_package',
+          package: payload,
+        },
+        window.location.origin
+      );
+
+      toast.success(`Loaded into Companion · ${pkg.domain} · ${fields.length} fields`);
+      log('activate.complete', { opportunityId, fieldCount: fields.length });
+    } catch (err) {
+      log(
+        'activate.failed',
+        { error: getApiErrorMessage(err, 'activate failed'), packageId: pkg.id },
+        'error'
+      );
+      toast.error(getApiErrorMessage(err, 'Could not activate package in Companion'));
+      window.postMessage(
+        {
+          source: 'seo-os-web',
+          type: 'companion.activate_error',
+          error: getApiErrorMessage(err, 'Activate failed'),
+          packageId: pkg.id,
+        },
+        window.location.origin
+      );
+    }
+  };
+
+  const openWebsite = (pkg: AssistedPackage) => {
+    if (!pkg.entryUrl) {
+      toast.error('No entry URL for this package');
+      return;
+    }
+    window.open(pkg.entryUrl, '_blank', 'noopener,noreferrer');
   };
 
   const board = useQuery({
@@ -646,9 +703,16 @@ export function AssistedManualPage() {
                         <div className="flex flex-wrap items-center gap-2">
                           <Button
                             size="sm"
-                            onClick={() => void openPackageInCompanion(pkg)}
+                            onClick={() => activatePackageIntoCompanion(pkg)}
                           >
-                            <ExternalLink className="h-3.5 w-3.5 mr-1" /> Open package
+                            <ExternalLink className="h-3.5 w-3.5 mr-1" /> Activate Package
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openWebsite(pkg)}
+                          >
+                            <ExternalLink className="h-3.5 w-3.5 mr-1" /> Open website
                           </Button>
                           <Button
                             size="sm"

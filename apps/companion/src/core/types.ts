@@ -1,4 +1,18 @@
-/** SEO OS Companion — Phase 2 types (delivery layer; SEO OS owns content) */
+/** Phase 2.2 — single active package in memory (no tokens, no storage) */
+
+export type ActivePackageField = {
+  key: string;
+  value: string;
+};
+
+export type ActivePackage = {
+  opportunityId: string;
+  domain: string;
+  projectId: string;
+  generatedAt: string;
+  entryUrl?: string;
+  fields: ActivePackageField[];
+};
 
 export type FieldRole =
   | 'business_name'
@@ -46,7 +60,7 @@ export type FillableRole = (typeof FILLABLE_ROLES)[number];
 
 export const CONFIDENCE_FILL_THRESHOLD = 80;
 
-/** Flat package from SEO OS — never stored permanently as a profile */
+/** Flat map used by the fill engine — derived from ActivePackage.fields */
 export type OpportunityPackageFields = {
   title: string;
   url: string;
@@ -64,16 +78,6 @@ export type OpportunityPackageFields = {
   state: string;
   country: string;
   zip: string;
-};
-
-export type CurrentOpportunity = {
-  opportunityId: string;
-  packageId: string;
-  workspaceId: string;
-  domain: string;
-  entryUrl: string;
-  package: OpportunityPackageFields;
-  learningKey: string;
 };
 
 export type FieldControlKind =
@@ -145,7 +149,6 @@ export interface FillResult {
   classifications: FieldClassification[];
 }
 
-/** Phase 3+ learning — stub only */
 export interface DomainLearningHook {
   getDomainAliases?(hostname: string): Partial<Record<FillableRole, string[]>> | null;
   rememberMapping?(_input: {
@@ -160,4 +163,34 @@ export interface AiMatchHook {
   suggestRole?(
     field: NormalizedField
   ): Promise<{ role: FieldRole; confidence: number } | null>;
+}
+
+/** Map ActivePackage.fields → fill engine shape */
+export function activePackageToFillFields(pkg: ActivePackage): OpportunityPackageFields {
+  const map = new Map(pkg.fields.map((f) => [f.key.toLowerCase(), f.value]));
+  const get = (...keys: string[]) => {
+    for (const k of keys) {
+      const v = map.get(k.toLowerCase());
+      if (v?.trim()) return v.trim();
+    }
+    return '';
+  };
+  return {
+    title: get('title'),
+    url: get('url', 'website'),
+    description: get('description', 'long_desc', 'longDescription'),
+    shortDescription: get('shortDescription', 'short_desc', 'short_description'),
+    businessName: get('businessName', 'business_name', 'name', 'companyName'),
+    email: get('email'),
+    phone: get('phone'),
+    category: get('category'),
+    facebook: get('facebook'),
+    linkedin: get('linkedin'),
+    twitter: get('twitter'),
+    address: get('address'),
+    city: get('city'),
+    state: get('state'),
+    country: get('country'),
+    zip: get('zip', 'postal'),
+  };
 }

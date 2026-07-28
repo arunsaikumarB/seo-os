@@ -1,74 +1,34 @@
 /**
- * Connection handshake diagnostics — Phase 2.1 (no storage).
- * Tokens never logged in full.
+ * Connection diagnostics — Phase 2.2 (no tokens).
  */
-
 export type YesNo = 'Yes' | 'No';
 
 export type ConnectionDiagnostics = {
-  messageReceived: YesNo;
-  tokenValid: YesNo;
-  packageRequestStarted: YesNo;
-  apiReachable: YesNo;
-  authenticated: YesNo;
-  packageLoaded: YesNo;
   connected: YesNo;
+  packageLoaded: YesNo;
   opportunityId: string | null;
   domain: string | null;
+  fieldCount: number;
+  generatedAt: string | null;
   lastError: string | null;
   lastStage: string | null;
-  lastHttpStatus: number | null;
   updatedAt: string | null;
 };
 
 const DEFAULT: ConnectionDiagnostics = {
-  messageReceived: 'No',
-  tokenValid: 'No',
-  packageRequestStarted: 'No',
-  apiReachable: 'No',
-  authenticated: 'No',
-  packageLoaded: 'No',
   connected: 'No',
+  packageLoaded: 'No',
   opportunityId: null,
   domain: null,
+  fieldCount: 0,
+  generatedAt: null,
   lastError: null,
   lastStage: null,
-  lastHttpStatus: null,
   updatedAt: null,
 };
 
 let state: ConnectionDiagnostics = { ...DEFAULT };
 const listeners = new Set<(d: ConnectionDiagnostics) => void>();
-
-export function redactToken(token: string | null | undefined): {
-  present: boolean;
-  length: number;
-  fingerprint: string | null;
-} {
-  if (!token) return { present: false, length: 0, fingerprint: null };
-  return {
-    present: true,
-    length: token.length,
-    fingerprint: `${token.slice(0, 8)}…${token.slice(-4)}`,
-  };
-}
-
-export function summarizePackageBody(data: unknown): Record<string, unknown> {
-  if (!data || typeof data !== 'object') return { empty: true };
-  const d = data as Record<string, unknown>;
-  const pkg = (d.package ?? {}) as Record<string, unknown>;
-  const keys = Object.keys(pkg);
-  const filled = keys.filter((k) => String(pkg[k] ?? '').trim().length > 0);
-  return {
-    connected: d.connected ?? null,
-    opportunityId: d.opportunityId ?? null,
-    packageId: d.packageId ?? null,
-    projectId: d.projectId ?? null,
-    domain: d.domain ?? null,
-    packageFieldsFilled: filled.length,
-    filledKeys: filled,
-  };
-}
 
 export function companionLog(
   stage: string,
@@ -105,12 +65,6 @@ export function getDiagnostics(): ConnectionDiagnostics {
 
 export function patchDiagnostics(partial: Partial<ConnectionDiagnostics>): ConnectionDiagnostics {
   state = { ...state, ...partial };
-  emit();
-  return getDiagnostics();
-}
-
-export function resetDiagnostics(): ConnectionDiagnostics {
-  state = { ...DEFAULT };
   emit();
   return getDiagnostics();
 }

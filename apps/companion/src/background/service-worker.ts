@@ -1,86 +1,86 @@
 /**
- * SEO OS Companion — MV3 service worker (stateless).
- * Fetches opportunity packages; never stores tokens or packages.
+ * Phase 2.2 — canonical ActivePackage lives only in SW memory (not chrome.storage).
+ * Content scripts sync from here so Activate on SEO OS → Fill on directory tab works.
  */
-import { DEFAULT_API_BASE } from '../core/session/handoff';
-import {
-  companionLog,
-  redactToken,
-  summarizePackageBody,
-} from '../core/diagnostics/connection';
+import type { ActivePackage } from '../core/types';
+import { companionLog } from '../core/diagnostics/connection';
+
+let active: ActivePackage | null = null;
+
+function normalize(pkg: ActivePackage): ActivePackage {
+  return {
+    opportunityId: String(pkg.opportunityId),
+    domain: String(pkg.domain),
+    projectId: String(pkg.projectId),
+    generatedAt: String(pkg.generatedAt || new Date().toISOString()),
+    entryUrl: pkg.entryUrl,
+    fields: (pkg.fields ?? [])
+      .filter((f) => f && String(f.key ?? '').trim())
+      .map((f) => ({ key: String(f.key).trim(), value: String(f.value ?? '') })),
+  };
+}
+
+function broadcast(): void {
+  const payload = {
+    type: 'companion.active_package_changed' as const,
+    package: active,
+  };
+  chrome.tabs.query({}, (tabs) => {
+    for (const tab of tabs) {
+      if (tab.id == null) continue;
+      chrome.tabs.sendMessage(tab.id, payload, () => void chrome.runtime.lastError);
+    }
+  });
+}
 
 chrome.runtime.onInstalled.addListener((details) => {
-  companionLog('sw.installed', { reason: details.reason });
+  companionLog('sw.installed', { reason: details.reason, phase: '2.2' });
+  active = null;
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'companion.ping') {
-    sendResponse({ ok: true, phase: '2.1', name: 'SEO OS Companion' });
+    sendResponse({
+      ok: true,
+      phase: '2.2',
+      name: 'SEO OS Companion',
+      hasPackage: Boolean(active),
+    });
     return false;
   }
 
-  if (message?.type === 'companion.fetchCurrentOpportunity') {
-    const token = String(message.token ?? '');
-    const apiBase = String(message.apiBase || DEFAULT_API_BASE).replace(/\/$/, '');
-    const url = `${apiBase}/v1/extension/opportunity/current`;
-    companionLog('sw.fetch_start', { url, token: redactToken(token) });
-
-    // Always settle sendResponse — never leave the channel hanging
-    void (async () => {
-      try {
-        const res = await fetch(url, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: 'application/json',
-          },
-        });
-        const body = (await res.json().catch(() => ({}))) as {
-          data?: unknown;
-          detail?: string;
-          title?: string;
-        };
-        const summary = body.data
-          ? summarizePackageBody(body.data)
-          : { detail: body.detail, title: body.title };
-
-        companionLog(res.ok ? 'sw.fetch_ok' : 'sw.fetch_http_error', {
-          status: res.status,
-          body: summary,
-        }, res.ok ? 'info' : 'error');
-
-        if (!res.ok) {
-          sendResponse({
-            ok: false,
-            status: res.status,
-            error: body.detail || body.title || `API ${res.status}`,
-            summary,
-          });
-          return;
-        }
-        sendResponse({
-          ok: true,
-          status: res.status,
-          data: body.data,
-          summary,
-        });
-      } catch (err) {
-        companionLog(
-          'sw.fetch_network_error',
-          { error: err instanceof Error ? err.message : String(err) },
-          'error'
-        );
-        sendResponse({
-          ok: false,
-          status: 0,
-          error: err instanceof Error ? err.message : 'Fetch failed',
-        });
-      }
-    })();
-
-    return true; // async sendResponse
+  if (message?.type === 'companion.get_active_package') {
+    sendResponse({ ok: true, package: active });
+    return false;
   }
 
-  // Unknown message — respond so the channel closes cleanly
+  if (message?.type === 'companion.activate_package') {
+    const raw = message.package as ActivePackage | undefined;
+    if (!raw?.opportunityId || !raw?.domain || !raw?.projectId) {
+      sendResponse({ ok: false, error: 'Invalid package' });
+      return false;
+    }
+    active = normalize(raw);
+    companionLog('sw.package_activated', {
+      opportunityId: active.opportunityId,
+      domain: active.domain,
+      fieldCount: active.fields.length,
+    });
+    broadcast();
+    sendResponse({ ok: true, package: active });
+    return false;
+  }
+
+  if (message?.type === 'companion.clear_package') {
+    companionLog('sw.package_cleared', {
+      previousOpportunityId: active?.opportunityId ?? null,
+    });
+    active = null;
+    broadcast();
+    sendResponse({ ok: true });
+    return false;
+  }
+
   sendResponse({ ok: false, error: 'Unknown message type' });
   return false;
 });

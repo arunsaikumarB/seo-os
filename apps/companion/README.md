@@ -1,14 +1,15 @@
-# SEO OS Companion — Phase 2.1 (Production Handoff)
+# SEO OS Companion — Phase 2.2 (Activate Package)
 
-Stateless delivery layer. **No chrome.storage. No business profile. No token cache.**
+Lightweight browser assistant. **One active package in memory. No tokens. No chrome.storage. No backend fetch after activate.**
 
 ## Flow
 
-1. Assisted Manual → **Open package**
-2. API creates 5-minute **single-use** handoff (+ package in response)
-3. SEO OS tab: `postMessage` hydrates Companion **in memory**
-4. Directory tab: URL hash → one `GET /v1/extension/opportunity/current` → burn token
-5. Fill Current Step → user reviews / CAPTCHA / Submit
+1. Assisted Manual → **Activate Package** (sends full package via `postMessage`)
+2. Companion replaces any previous package in memory (synced via service worker for other tabs)
+3. **Open website** → directory form
+4. **Fill Current Step** → uses only the in-memory package
+5. User reviews / CAPTCHA / Submit
+6. **Clear Package** or close browser → memory empty
 
 ## Install
 
@@ -16,8 +17,8 @@ Stateless delivery layer. **No chrome.storage. No business profile. No token cac
 cd apps/companion && npm run build
 ```
 
-Load unpacked → `apps/companion/dist`
+Load unpacked → `apps/companion/dist` (reload after rebuild)
 
 ## Diagnostics
 
-Message Received · Token Valid · Package Request Started · API Reachable · Authenticated · Package Loaded · Connected · Opportunity · Domain
+Connected · Package Loaded · Current Opportunity · Current Domain · Fields · Generated
