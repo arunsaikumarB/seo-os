@@ -1,6 +1,6 @@
 /**
- * SEO OS Companion — MV3 service worker.
- * Fetches opportunity packages from SEO OS; never stores business profiles.
+ * SEO OS Companion — MV3 service worker (stateless).
+ * Fetches opportunity packages; never stores tokens or packages.
  */
 import { DEFAULT_API_BASE } from '../core/session/handoff';
 import {
@@ -15,8 +15,8 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'companion.ping') {
-    sendResponse({ ok: true, phase: 2, name: 'SEO OS Companion' });
-    return true;
+    sendResponse({ ok: true, phase: '2.1', name: 'SEO OS Companion' });
+    return false;
   }
 
   if (message?.type === 'companion.fetchCurrentOpportunity') {
@@ -25,6 +25,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const url = `${apiBase}/v1/extension/opportunity/current`;
     companionLog('sw.fetch_start', { url, token: redactToken(token) });
 
+    // Always settle sendResponse — never leave the channel hanging
     void (async () => {
       try {
         const res = await fetch(url, {
@@ -75,8 +76,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         });
       }
     })();
-    return true;
+
+    return true; // async sendResponse
   }
 
+  // Unknown message — respond so the channel closes cleanly
+  sendResponse({ ok: false, error: 'Unknown message type' });
   return false;
 });

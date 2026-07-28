@@ -149,7 +149,15 @@ export function AssistedManualPage() {
       });
 
       const res = await request<{
-        data: { token: string; entryUrl: string; domain: string; opportunityId: string };
+        data: {
+          token: string;
+          entryUrl: string;
+          domain: string;
+          opportunityId: string;
+          packageId: string;
+          projectId: string;
+          package: Record<string, string>;
+        };
       }>(`/v1/projects/${projectId}/extension/handoff`, {
         method: 'POST',
         body: JSON.stringify({ packageId: pkg.id }),
@@ -163,9 +171,10 @@ export function AssistedManualPage() {
         domain: res.data.domain || pkg.domain,
         entryUrl: res.data.entryUrl || pkg.entryUrl,
         apiBase,
+        packageKeys: Object.keys(res.data.package ?? {}),
       });
 
-      // Deliver handoff to Companion on this tab (shared storage → directory tab too)
+      // In-memory hydrate on this tab (package included — does not burn single-use token)
       window.postMessage(
         {
           source: 'seo-os-web',
@@ -174,12 +183,17 @@ export function AssistedManualPage() {
           apiBase,
           domain: res.data.domain || pkg.domain,
           opportunityId: res.data.opportunityId,
+          packageId: res.data.packageId,
+          projectId: res.data.projectId || projectId,
+          entryUrl: res.data.entryUrl || pkg.entryUrl,
+          package: res.data.package,
         },
-        '*'
+        window.location.origin
       );
       log('handoff.postMessage_sent', {
         token: redact(token),
         opportunityId: res.data.opportunityId,
+        withPackage: true,
       });
 
       const entry = res.data.entryUrl || pkg.entryUrl;
@@ -206,7 +220,7 @@ export function AssistedManualPage() {
           error: getApiErrorMessage(err, 'Handoff API failed'),
           packageId: pkg.id,
         },
-        '*'
+        window.location.origin
       );
       window.open(pkg.entryUrl, '_blank', 'noopener,noreferrer');
     }

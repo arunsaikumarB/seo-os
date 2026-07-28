@@ -1,11 +1,17 @@
-import type { CurrentOpportunity } from '../types';
+import type { CurrentOpportunity, OpportunityPackageFields } from '../types';
 import {
   companionLog,
   patchDiagnostics,
   redactToken,
   summarizePackageBody,
 } from '../diagnostics/connection';
-import { cacheCurrentOpportunity, getApiBase, getHandoffToken } from '../session/handoff';
+import {
+  clearPendingToken,
+  hydrateFromPackage,
+  setError,
+  takePendingToken,
+} from '../runtime/memory';
+import { getApiBase } from '../session/handoff';
 
 export type FetchResult =
   | { ok: true; data: CurrentOpportunity }
@@ -27,102 +33,100 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
+function mapApiToCurrent(data: Record<string, unknown>): CurrentOpportunity {
+  return {
+    opportunityId: String(data.opportunityId ?? ''),
+    packageId: String(data.packageId ?? ''),
+    workspaceId: String(data.workspaceId ?? data.projectId ?? ''),
+    domain: String(data.domain ?? ''),
+    entryUrl: String(data.entryUrl ?? ''),
+    package: (data.package ?? {}) as OpportunityPackageFields,
+    learningKey: String(data.learningKey ?? ''),
+  };
+}
+
 /**
- * Always fetch from SEO OS — never trust a permanent local business profile.
+ * Redeem a one-time handoff token → load package into memory → forget token.
  */
-export async function fetchCurrentOpportunity(_opts?: {
-  force?: boolean;
-}): Promise<FetchResult> {
-  companionLog('api.fetch_start', {});
-  patchDiagnostics({ lastStage: 'api.fetch_start', lastError: null });
-
-  const token = await getHandoffToken();
-  if (!token) {
-    const error =
-      'No handoff token — click Open package in Assisted Manual to create one';
-    companionLog('api.no_token', {}, 'warn');
-    patchDiagnostics({
-      tokenPresent: 'No',
-      packageLoaded: 'No',
-      authenticated: 'No',
-      lastError: error,
-      lastStage: 'api.no_token',
-    });
-    return { ok: false, error };
-  }
-
-  const apiBase = await getApiBase();
-  companionLog('api.request', {
-    url: `${apiBase}/v1/extension/opportunity/current`,
-    token: redactToken(token),
-    via: 'background_then_direct',
+export async function redeemHandoffToken(
+  token: string,
+  apiBase = getApiBase()
+): Promise<FetchResult> {
+  companionLog('api.redeem_start', { token: redactToken(token), apiBase });
+  patchDiagnostics({
+    packageRequestStarted: 'Yes',
+    tokenValid: 'Yes',
+    lastStage: 'api.redeem_start',
+    lastError: null,
   });
 
-  // Background fetch (no page CORS)
-  try {
-    companionLog('api.background_attempt', {});
-    const viaBg = await withTimeout(
-      chrome.runtime.sendMessage({
-        type: 'companion.fetchCurrentOpportunity',
-        token,
-        apiBase,
-      }) as Promise<
-        | {
-            ok?: boolean;
-            data?: CurrentOpportunity;
-            error?: string;
-            status?: number;
-            summary?: Record<string, unknown>;
+  const url = `${apiBase.replace(/\/$/, '')}/v1/extension/opportunity/current`;
+
+  const tryBackground = async (): Promise<FetchResult | null> => {
+    try {
+      const viaBg = await withTimeout(
+        new Promise<{
+          ok?: boolean;
+          data?: Record<string, unknown>;
+          error?: string;
+          status?: number;
+          summary?: Record<string, unknown>;
+        }>((resolve, reject) => {
+          try {
+            chrome.runtime.sendMessage(
+              { type: 'companion.fetchCurrentOpportunity', token, apiBase },
+              (response) => {
+                const err = chrome.runtime.lastError;
+                if (err) {
+                  reject(new Error(err.message));
+                  return;
+                }
+                resolve(response ?? { ok: false, error: 'Empty SW response' });
+              }
+            );
+          } catch (e) {
+            reject(e);
           }
-        | undefined
-      >,
-      8000
-    );
+        }),
+        10000
+      );
 
-    if (viaBg?.ok && viaBg.data) {
-      companionLog('api.background_success', {
-        status: viaBg.status ?? 200,
-        body: viaBg.summary ?? summarizePackageBody(viaBg.data),
-      });
-      patchDiagnostics({
-        apiReachable: 'Yes',
-        authenticated: 'Yes',
-        packageLoaded: 'Yes',
-        opportunityId: String(viaBg.data.opportunityId ?? ''),
-        lastHttpStatus: viaBg.status ?? 200,
-        lastStage: 'api.background_success',
-        lastError: null,
-      });
-      await cacheCurrentOpportunity(viaBg.data);
-      return { ok: true, data: viaBg.data };
-    }
-
-    if (viaBg && viaBg.ok === false) {
+      if (viaBg?.ok && viaBg.data) {
+        companionLog('api.background_success', {
+          status: viaBg.status ?? 200,
+          body: viaBg.summary ?? summarizePackageBody(viaBg.data),
+        });
+        applySuccess(viaBg.data, viaBg.status ?? 200);
+        return { ok: true, data: mapApiToCurrent(viaBg.data) };
+      }
+      if (viaBg && viaBg.ok === false) {
+        companionLog(
+          'api.background_failed',
+          { status: viaBg.status ?? null, error: viaBg.error },
+          'warn'
+        );
+        patchDiagnostics({
+          apiReachable: viaBg.status && viaBg.status > 0 ? 'Yes' : 'No',
+          lastHttpStatus: viaBg.status ?? null,
+        });
+      }
+    } catch (err) {
       companionLog(
-        'api.background_failed',
-        { status: viaBg.status ?? null, error: viaBg.error },
+        'api.background_error',
+        { error: err instanceof Error ? err.message : String(err) },
         'warn'
       );
-      patchDiagnostics({
-        apiReachable: viaBg.status != null && viaBg.status > 0 ? 'Yes' : 'No',
-        authenticated: viaBg.status === 401 || viaBg.status === 403 ? 'No' : 'No',
-        lastHttpStatus: viaBg.status ?? null,
-        lastStage: 'api.background_failed',
-      });
     }
-  } catch (err) {
-    companionLog(
-      'api.background_timeout_or_error',
-      { error: err instanceof Error ? err.message : String(err) },
-      'warn'
-    );
-    patchDiagnostics({ lastStage: 'api.background_timeout_or_error' });
-  }
+    return null;
+  };
+
+  const bg = await tryBackground();
+  if (bg) return bg;
 
   try {
-    companionLog('api.direct_attempt', { apiBase });
+    companionLog('api.direct_attempt', { url });
     const res = await withTimeout(
-      fetch(`${apiBase}/v1/extension/opportunity/current`, {
+      fetch(url, {
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: 'application/json',
@@ -131,7 +135,7 @@ export async function fetchCurrentOpportunity(_opts?: {
       15000
     );
     const body = (await res.json().catch(() => ({}))) as {
-      data?: CurrentOpportunity;
+      data?: Record<string, unknown>;
       detail?: string;
       title?: string;
     };
@@ -153,49 +157,83 @@ export async function fetchCurrentOpportunity(_opts?: {
     if (!res.ok) {
       const error =
         res.status === 401 || res.status === 403
-          ? `Handoff rejected (${res.status}) — token invalid or expired. Click Open package again.`
-          : body.detail || body.title || `API returned HTTP ${res.status}`;
+          ? body.detail ||
+            'Handoff expired or already used. Please reopen the package from SEO OS.'
+          : res.status === 404
+            ? 'Package not found.'
+            : body.detail || body.title || `Authentication failed (HTTP ${res.status}).`;
+      clearPendingToken();
+      setError(error, 'api.direct_http_error');
       patchDiagnostics({
         authenticated: 'No',
         packageLoaded: 'No',
-        lastError: error,
-      });
-      return { ok: false, error };
-    }
-    if (!body.data) {
-      const error = 'API returned 200 but package payload was empty';
-      patchDiagnostics({
-        authenticated: 'Yes',
-        packageLoaded: 'No',
+        connected: 'No',
         lastError: error,
       });
       return { ok: false, error };
     }
 
-    patchDiagnostics({
-      authenticated: 'Yes',
-      packageLoaded: 'Yes',
-      opportunityId: String(body.data.opportunityId ?? ''),
-      lastError: null,
-    });
-    await cacheCurrentOpportunity(body.data);
-    return { ok: true, data: body.data };
+    if (!body.data) {
+      const error = 'Package not found — empty API response.';
+      clearPendingToken();
+      setError(error, 'api.empty_body');
+      return { ok: false, error };
+    }
+
+    applySuccess(body.data, res.status);
+    return { ok: true, data: mapApiToCurrent(body.data) };
   } catch (err) {
     const timedOut = err instanceof Error && err.message === 'timeout';
     const error = timedOut
-      ? `SEO OS API timed out contacting ${apiBase}`
+      ? 'Network unavailable — SEO OS API timed out.'
       : err instanceof Error
-        ? `API unreachable: ${err.message}`
-        : 'Failed to reach SEO OS API';
-    companionLog('api.direct_failed', { error, apiBase }, 'error');
+        ? `Network unavailable: ${err.message}`
+        : 'Network unavailable.';
+    companionLog('api.direct_failed', { error }, 'error');
+    clearPendingToken();
+    setError(error, 'api.direct_failed');
     patchDiagnostics({
       apiReachable: 'No',
       authenticated: 'No',
       packageLoaded: 'No',
+      connected: 'No',
       lastError: error,
-      lastStage: 'api.direct_failed',
       lastHttpStatus: null,
     });
     return { ok: false, error };
   }
+}
+
+function applySuccess(data: Record<string, unknown>, status: number): void {
+  const current = mapApiToCurrent(data);
+  hydrateFromPackage({
+    opportunityId: current.opportunityId,
+    packageId: current.packageId,
+    projectId: current.workspaceId,
+    domain: current.domain,
+    entryUrl: current.entryUrl,
+    package: current.package,
+    source: 'api',
+  });
+  // Token already taken/cleared by caller paths
+  takePendingToken();
+  clearPendingToken();
+  patchDiagnostics({
+    apiReachable: 'Yes',
+    authenticated: 'Yes',
+    packageLoaded: 'Yes',
+    connected: 'Yes',
+    opportunityId: current.opportunityId,
+    domain: current.domain,
+    lastHttpStatus: status,
+    lastError: null,
+    lastStage: 'api.package_loaded',
+  });
+}
+
+/** If URL or memory has a pending token, redeem it now. */
+export async function redeemPendingIfAny(): Promise<FetchResult | null> {
+  const token = takePendingToken();
+  if (!token) return null;
+  return redeemHandoffToken(token);
 }
