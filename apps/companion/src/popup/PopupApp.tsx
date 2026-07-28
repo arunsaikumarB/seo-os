@@ -15,6 +15,7 @@ const FIELDS: Array<{ key: keyof BusinessProfile; label: string; multiline?: boo
   { key: 'state', label: 'State' },
   { key: 'country', label: 'Country' },
   { key: 'zip', label: 'ZIP' },
+  { key: 'category', label: 'Category' },
   { key: 'facebook', label: 'Facebook' },
   { key: 'linkedin', label: 'LinkedIn' },
   { key: 'twitter', label: 'Twitter' },

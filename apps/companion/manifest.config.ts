@@ -3,9 +3,9 @@ import { defineManifest } from '@crxjs/vite-plugin';
 export default defineManifest({
   manifest_version: 3,
   name: 'SEO OS Companion',
-  version: '0.1.0',
+  version: '0.1.1',
   description:
-    'Phase 1 MVP — floating form-fill assistant for directory and submission pages. Never submits, never solves CAPTCHA.',
+    'Phase 1.1 Form Intelligence — per-field matching, confidence ≥80%, inspect overlays. Never submits, never solves CAPTCHA.',
   icons: {
     '16': 'public/icons/icon-16.png',
     '32': 'public/icons/icon-32.png',

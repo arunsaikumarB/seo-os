@@ -1,23 +1,50 @@
-/** Shared Companion types — Phase 1. Designed for Phase 2+ domain learning & AI matchers. */
+/** SEO OS Companion — Phase 1.1 Form Intelligence types */
 
 export type FieldRole =
   | 'business_name'
+  | 'title'
   | 'website'
   | 'email'
   | 'phone'
-  | 'title'
   | 'description'
   | 'address'
   | 'city'
   | 'state'
   | 'country'
   | 'zip'
+  | 'category'
   | 'facebook'
   | 'linkedin'
   | 'twitter'
+  | 'captcha'
+  | 'payment'
+  | 'submit'
+  | 'login'
+  | 'search'
   | 'unknown';
 
-export type MatchConfidence = 'high' | 'medium' | 'low' | 'none';
+/** Roles we attempt to fill from the business profile */
+export const FILLABLE_ROLES: ReadonlyArray<Exclude<FieldRole, 'unknown' | 'captcha' | 'payment' | 'submit' | 'login' | 'search'>> = [
+  'business_name',
+  'title',
+  'website',
+  'email',
+  'phone',
+  'description',
+  'address',
+  'city',
+  'state',
+  'country',
+  'zip',
+  'category',
+  'facebook',
+  'linkedin',
+  'twitter',
+] as const;
+
+export type FillableRole = (typeof FILLABLE_ROLES)[number];
+
+export const CONFIDENCE_FILL_THRESHOLD = 80;
 
 export interface BusinessProfile {
   businessName: string;
@@ -31,60 +58,90 @@ export interface BusinessProfile {
   state: string;
   country: string;
   zip: string;
+  category: string;
   facebook: string;
   linkedin: string;
   twitter: string;
 }
 
-export interface DetectedField {
-  element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
-  tag: 'input' | 'textarea' | 'select';
-  type: string;
+export type FieldControlKind =
+  | 'input'
+  | 'textarea'
+  | 'select'
+  | 'radio'
+  | 'checkbox'
+  | 'contenteditable';
+
+export interface NormalizedField {
+  /** Stable id for overlays / navigation */
+  uid: string;
+  element: HTMLElement;
+  kind: FieldControlKind;
+  inputType: string;
   name: string;
   id: string;
   placeholder: string;
   ariaLabel: string;
-  labelText: string;
+  label: string;
+  nearbyText: string;
+  sectionHeading: string;
+  required: boolean;
   autocomplete: string;
-  /** Concatenated signals used for matching */
-  signals: string[];
+  /** Radio/checkbox value attribute */
+  valueAttr: string;
 }
 
-export interface FieldMatch {
-  field: DetectedField;
+export interface FieldClassification {
+  field: NormalizedField;
   role: FieldRole;
-  confidence: MatchConfidence;
+  /** 0–100 weighted score */
+  confidence: number;
   matchedAlias: string | null;
-  /** Why this match was chosen — useful for Phase 2 learning */
+  matchedBy: string[];
   reason: string;
 }
 
+export type FillAction =
+  | 'filled'
+  | 'skipped'
+  | 'missing'
+  | 'captcha'
+  | 'low_confidence'
+  | 'empty_profile';
+
+export interface FillDetail {
+  uid: string;
+  role: FieldRole;
+  action: FillAction;
+  reason: string;
+  label: string;
+  confidence: number;
+  matchedAlias: string | null;
+  matchedBy: string[];
+  required: boolean;
+}
+
 export interface FillSummary {
-  matched: number;
+  detected: number;
   filled: number;
   skipped: number;
-  details: Array<{
-    role: FieldRole;
-    action: 'filled' | 'skipped' | 'matched_empty';
-    reason: string;
-    label: string;
-  }>;
+  missing: number;
+  captcha: number;
+  details: FillDetail[];
+  missingRequired: FillDetail[];
 }
 
 export interface FillResult {
   summary: FillSummary;
-  matches: FieldMatch[];
+  classifications: FieldClassification[];
 }
 
-/** Future Phase 2+: domain-specific alias overrides & learned mappings */
 export interface DomainLearningHook {
-  getDomainAliases?(hostname: string): Record<string, string[]> | null;
+  getDomainAliases?(hostname: string): Partial<Record<FillableRole, string[]>> | null;
 }
 
-/** Future Phase 3+: AI-assisted matching */
 export interface AiMatchHook {
   suggestRole?(
-    field: DetectedField,
-    candidates: FieldRole[]
-  ): Promise<{ role: FieldRole; confidence: MatchConfidence } | null>;
+    field: NormalizedField
+  ): Promise<{ role: FieldRole; confidence: number } | null>;
 }

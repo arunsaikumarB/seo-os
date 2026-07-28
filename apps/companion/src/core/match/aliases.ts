@@ -1,49 +1,73 @@
-import type { FieldRole } from '../types';
+import type { FieldRole, FillableRole } from '../types';
 
 /**
- * Configurable alias dictionary — Phase 1.
- * Keys are FieldRole; values are lowercase aliases matched against
- * label / placeholder / name / id / aria-label.
- *
- * Phase 2 can merge domain-learned aliases on top of this map.
+ * Expanded alias dictionary — Phase 1.1.
+ * All aliases stored lowercase; matcher normalizes field signals the same way.
  */
-export const FIELD_ALIASES: Record<Exclude<FieldRole, 'unknown'>, string[]> = {
+export const FIELD_ALIASES: Record<FillableRole, string[]> = {
   business_name: [
     'business name',
     'company name',
     'company',
     'organization',
     'organisation',
-    'org name',
     'business',
+    'vendor',
+    'listing name',
     'brand name',
     'brand',
     'site name',
     'website name',
-    'listing name',
+    'org name',
+    'trading name',
+    'dba',
+    'doing business as',
+    'entity name',
     'business_name',
     'company_name',
     'companyname',
     'businessname',
     'org',
+    'firm name',
+    'agency name',
+    'store name',
+  ],
+  title: [
+    'title',
+    'page title',
+    'listing title',
+    'headline',
+    'subject',
+    'post title',
+    'entry title',
+    'submission title',
+    'article title',
+    'job title',
+    'position title',
   ],
   website: [
     'website',
-    'website url',
-    'web site',
-    'url',
-    'site url',
     'homepage',
     'home page',
+    'site',
+    'url',
+    'business url',
+    'company url',
+    'website url',
+    'web site',
     'web address',
+    'site url',
     'company website',
     'business website',
     'website_url',
     'websiteurl',
-    'site',
+    'weburl',
+    'link',
+    'your website',
   ],
   email: [
     'email',
+    'e mail',
     'e-mail',
     'email address',
     'e-mail address',
@@ -53,6 +77,7 @@ export const FIELD_ALIASES: Record<Exclude<FieldRole, 'unknown'>, string[]> = {
     'email_address',
     'emailaddress',
     'mail',
+    'your email',
   ],
   phone: [
     'phone',
@@ -66,30 +91,30 @@ export const FIELD_ALIASES: Record<Exclude<FieldRole, 'unknown'>, string[]> = {
     'phone_number',
     'phonenumber',
     'contact phone',
-  ],
-  title: [
-    'title',
-    'page title',
-    'listing title',
-    'headline',
-    'subject',
-    'job title',
-    'position',
-    'post title',
+    'business phone',
+    'mobile number',
+    'fax',
   ],
   description: [
     'description',
     'about',
-    'about us',
-    'bio',
     'summary',
+    'business description',
+    'company description',
+    'tell us about your business',
+    'about us',
+    'about your business',
+    'about your company',
+    'bio',
     'details',
     'long description',
     'short description',
-    'business description',
-    'company description',
     'overview',
     'desc',
+    'company overview',
+    'business overview',
+    'what do you do',
+    'tell us about',
   ],
   address: [
     'address',
@@ -101,17 +126,20 @@ export const FIELD_ALIASES: Record<Exclude<FieldRole, 'unknown'>, string[]> = {
     'addr',
     'mailing address',
     'business address',
+    'street address 1',
+    'address line1',
   ],
-  city: ['city', 'town', 'locality', 'municipality'],
+  city: ['city', 'town', 'locality', 'municipality', 'city town'],
   state: [
     'state',
     'province',
     'region',
-    'state/province',
     'state province',
+    'state/province',
     'county',
+    'prefecture',
   ],
-  country: ['country', 'nation', 'country/region', 'country region'],
+  country: ['country', 'nation', 'country region', 'country/region'],
   zip: [
     'zip',
     'zip code',
@@ -124,6 +152,22 @@ export const FIELD_ALIASES: Record<Exclude<FieldRole, 'unknown'>, string[]> = {
     'pin code',
     'pincode',
   ],
+  category: [
+    'category',
+    'categories',
+    'business category',
+    'industry',
+    'niche',
+    'type',
+    'business type',
+    'listing category',
+    'directory category',
+    'select category',
+    'choose category',
+    'primary category',
+    'classification',
+    'sector',
+  ],
   facebook: [
     'facebook',
     'facebook url',
@@ -131,6 +175,7 @@ export const FIELD_ALIASES: Record<Exclude<FieldRole, 'unknown'>, string[]> = {
     'fb',
     'fb url',
     'facebook_url',
+    'facebook profile',
   ],
   linkedin: [
     'linkedin',
@@ -146,43 +191,93 @@ export const FIELD_ALIASES: Record<Exclude<FieldRole, 'unknown'>, string[]> = {
     'twitter handle',
     'x',
     'x url',
-    'x.com',
+    'x com',
     'twitter_url',
     'tweet',
+    'x profile',
   ],
 };
 
-export const ROLE_LABELS: Record<Exclude<FieldRole, 'unknown'>, string> = {
+export const ROLE_LABELS: Record<FieldRole, string> = {
   business_name: 'Business Name',
+  title: 'Title',
   website: 'Website',
   email: 'Email',
   phone: 'Phone',
-  title: 'Title',
   description: 'Description',
   address: 'Address',
   city: 'City',
   state: 'State',
   country: 'Country',
   zip: 'ZIP',
+  category: 'Category',
   facebook: 'Facebook',
   linkedin: 'LinkedIn',
   twitter: 'Twitter',
+  captcha: 'CAPTCHA',
+  payment: 'Payment',
+  submit: 'Submit',
+  login: 'Login',
+  search: 'Search',
+  unknown: 'Unknown',
 };
 
-export type AliasDictionary = typeof FIELD_ALIASES;
-
-/** Merge base aliases with optional overrides (Phase 2 domain learning). */
-export function mergeAliases(
-  base: AliasDictionary,
-  overrides?: Partial<Record<Exclude<FieldRole, 'unknown'>, string[]>> | null
-): AliasDictionary {
-  if (!overrides) return base;
-  const next = { ...base };
-  for (const [role, extra] of Object.entries(overrides) as Array<
-    [Exclude<FieldRole, 'unknown'>, string[]]
-  >) {
-    if (!extra?.length) continue;
-    next[role] = [...new Set([...base[role], ...extra.map((a) => a.toLowerCase())])];
-  }
-  return next;
-}
+/** Structural / keyword hints for non-fillable roles (not alias-scored the same way) */
+export const STRUCTURAL_HINTS: Record<'captcha' | 'payment' | 'submit' | 'login' | 'search', string[]> = {
+  captcha: [
+    'captcha',
+    'recaptcha',
+    'hcaptcha',
+    'turnstile',
+    'i am not a robot',
+    'security check',
+    'verify you are human',
+  ],
+  payment: [
+    'credit card',
+    'card number',
+    'cardnumber',
+    'cvv',
+    'cvc',
+    'expiry',
+    'expiration',
+    'billing',
+    'payment method',
+    'pay with',
+    'pricing plan',
+    'price plan',
+    'subscription',
+    'iban',
+    'routing number',
+    'paypal',
+    'stripe',
+    'mastercard',
+    'visa',
+    'amex',
+    'monthly fee',
+    'annual fee',
+    'paid plan',
+    'premium plan',
+    'free plan',
+    'choose a plan',
+    'select plan',
+    'payment',
+  ],
+  submit: ['submit', 'send', 'publish', 'post listing', 'create listing', 'finish', 'complete registration'],
+  login: [
+    'password',
+    'passwd',
+    'username',
+    'user name',
+    'sign in',
+    'signin',
+    'log in',
+    'login',
+    'otp',
+    'one time',
+    'verification code',
+    '2fa',
+    'mfa',
+  ],
+  search: ['search', 'query', 'find', 'filter', 'keyword search', 'site search'],
+};

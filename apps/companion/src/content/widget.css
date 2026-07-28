@@ -179,3 +179,69 @@
 .soc-muted {
   color: #64748b;
 }
+
+.soc-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.soc-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #115e59;
+  cursor: pointer;
+  user-select: none;
+}
+
+.soc-toggle input {
+  accent-color: #0f766e;
+}
+
+.soc-secondary {
+  border: 1px solid #5eead4;
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: #fff;
+  color: #0f766e;
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.soc-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.soc-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+}
+
+.soc-missing-block {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #99f6e4;
+}
+
+.soc-pill-missing,
+.soc-pill-captcha {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.soc-pill-ok,
+.soc-pill-filled {
+  background: #ccfbf1;
+  color: #0f766e;
+}
+
+.soc-pill-low_confidence,
+.soc-pill-empty_profile {
+  background: #fef9c3;
+  color: #854d0e;
+}

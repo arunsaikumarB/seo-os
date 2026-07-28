@@ -1,10 +1,10 @@
-# SEO OS Companion — Phase 1 (MVP)
+# SEO OS Companion — Phase 1.1 (Form Intelligence)
 
-Manifest V3 browser extension for Chromium (Chrome, Brave, Edge, Arc, Opera).
+Manifest V3 extension for Chromium (Chrome, Brave, Edge, Arc, Opera).
 
-Floating widget on every page → detect form fields → match via alias dictionary → **Fill Form** with your business profile. Never submits, never solves CAPTCHA, never fills login/payment forms.
+Deterministic form intelligence: richer DOM scan, per-field classification, weighted confidence ≥80%, inspect overlays, fill highlights, Next Missing. **No AI. No auto-submit.**
 
-## Install (unpacked)
+## Install
 
 ```bash
 cd apps/companion
@@ -12,48 +12,33 @@ npm install
 npm run build
 ```
 
-1. Open `chrome://extensions` (or Brave/Edge equivalent)
-2. Enable **Developer mode**
-3. **Load unpacked** → select `apps/companion/dist`
+Load unpacked → `apps/companion/dist`
 
-## Dev
+## Phase 1.1 features
 
-```bash
-npm run dev
-```
+| Feature | Behavior |
+|---------|----------|
+| DOM scanner | `input`, `textarea`, `select`, radio, checkbox, `contenteditable` |
+| Classifier | Per-field roles (never page-level “payment”) |
+| Pricing | Skip payment/pricing controls only; still fill business fields |
+| Confidence | Exact label +60, placeholder +25, name +20, aria +20, nearby +15, section +10 · fill ≥80% |
+| Inspect Fields | Color overlays + hover tooltip (role / confidence / alias) |
+| After fill | Green filled · yellow skipped · red required missing |
+| Summary | Detected / Filled / Skipped / Missing / CAPTCHA + missing required list |
+| Next Missing | Scrolls to next required unfilled field |
+| Debug | Console log of each field’s confidence & matched-by |
 
-CRXJS serves an unpacked extension; load the path printed by Vite (usually `apps/companion/dist`).
+## Safety
 
-## Usage
+- Never click Submit
+- Never solve CAPTCHA
+- Never fill login or payment fields
+- Unknown / low-confidence fields skipped
 
-1. Click the toolbar icon → edit **business profile** → Save  
-2. Open any submission/directory page  
-3. Click the teal **S** FAB (bottom-right) to expand  
-4. Press **Fill Form** → read Matched / Filled / Skipped summary  
+## Modules
 
-## Architecture (modular for later phases)
-
-| Module | Role |
-|--------|------|
-| `core/detect` | Find `input` / `textarea` / `select`, read labels & signals |
-| `core/match` | Alias dictionary + confidence scoring |
-| `core/fill` | Write values; **never** clicks Submit |
-| `core/safety` | Skip login, payment, CAPTCHA-related controls |
-| `core/profile` | Sync storage for fill values |
-| `core/hooks` | Stubs for Phase 2 domain learning & Phase 3 AI matching |
-| `components/Widget` | Collapsed FAB → expanded panel |
-| `popup` | Profile editor |
-| `background` | MV3 service worker |
-
-## Safety (hard rules)
-
-- Fill only medium/high confidence matches  
-- Skip unknown fields  
-- Never click Submit  
-- Never solve CAPTCHA  
-- Never interact with login or payment forms  
-
-## Phase roadmap hooks
-
-- **Phase 2:** `DomainLearningHook.getDomainAliases(hostname)`  
-- **Phase 3:** `AiMatchHook.suggestRole(field)`
+- `core/detect/dom-scanner.ts`
+- `core/match/{aliases,confidence,classifier}.ts`
+- `core/fill/form-filler.ts`
+- `core/overlay/{inspector,highlights,missing-nav}.ts`
+- `core/hooks.ts` — Phase 2/3 stubs

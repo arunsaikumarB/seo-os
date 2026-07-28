@@ -1,6 +1,6 @@
-import type { BusinessProfile, FieldRole } from '../types';
+import type { BusinessProfile, FillableRole } from '../types';
 
-const ROLE_TO_PROFILE: Record<Exclude<FieldRole, 'unknown'>, keyof BusinessProfile> = {
+const ROLE_TO_PROFILE: Record<FillableRole, keyof BusinessProfile> = {
   business_name: 'businessName',
   website: 'website',
   email: 'email',
@@ -12,6 +12,7 @@ const ROLE_TO_PROFILE: Record<Exclude<FieldRole, 'unknown'>, keyof BusinessProfi
   state: 'state',
   country: 'country',
   zip: 'zip',
+  category: 'category',
   facebook: 'facebook',
   linkedin: 'linkedin',
   twitter: 'twitter',
@@ -19,9 +20,8 @@ const ROLE_TO_PROFILE: Record<Exclude<FieldRole, 'unknown'>, keyof BusinessProfi
 
 export function profileValueForRole(
   profile: BusinessProfile,
-  role: FieldRole
+  role: FillableRole
 ): string {
-  if (role === 'unknown') return '';
   const key = ROLE_TO_PROFILE[role];
   return String(profile[key] ?? '').trim();
 }
@@ -38,12 +38,12 @@ export const EMPTY_PROFILE: BusinessProfile = {
   state: '',
   country: '',
   zip: '',
+  category: '',
   facebook: '',
   linkedin: '',
   twitter: '',
 };
 
-/** Demo defaults so Fill Form works out of the box — edit via popup. */
 export const DEMO_PROFILE: BusinessProfile = {
   businessName: 'Acme SEO Co',
   website: 'https://example.com',
@@ -57,6 +57,7 @@ export const DEMO_PROFILE: BusinessProfile = {
   state: 'CA',
   country: 'United States',
   zip: '94103',
+  category: 'Marketing',
   facebook: 'https://facebook.com/example',
   linkedin: 'https://linkedin.com/company/example',
   twitter: 'https://x.com/example',
