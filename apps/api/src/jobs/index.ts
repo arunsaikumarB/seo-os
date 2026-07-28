@@ -140,6 +140,9 @@ export async function startJobInfrastructure(): Promise<void> {
     const healthReconcileJobs = jobs.filter(
       (j) => (j.data as Record<string, unknown>)?.type === 'campaign_health_reconcile'
     );
+    const assistedHealJobs = jobs.filter(
+      (j) => (j.data as Record<string, unknown>)?.type === 'assisted_heal_missing'
+    );
     const otherJobs = jobs.filter((j) => {
       const d = j.data as Record<string, unknown>;
       return (
@@ -156,6 +159,7 @@ export async function startJobInfrastructure(): Promise<void> {
         d?.type !== 'automation_recover_stuck' &&
         d?.type !== 'content_generate' &&
         d?.type !== 'campaign_health_reconcile' &&
+        d?.type !== 'assisted_heal_missing' &&
         !String(d?.type ?? '').startsWith('image_') &&
         !String(d?.type ?? '').startsWith('provider_')
       );
@@ -255,6 +259,20 @@ export async function startJobInfrastructure(): Promise<void> {
         }
       }
     }
+    if (assistedHealJobs.length) {
+      const { runAssistedMissingHealJob } = await import(
+        '../modules/browser-execution/assisted-manual.service.js'
+      );
+      for (const job of assistedHealJobs) {
+        const ws = String((job.data as Record<string, unknown>).workspaceId ?? '');
+        if (!ws) continue;
+        try {
+          await runAssistedMissingHealJob(ws);
+        } catch (err) {
+          logger.warn({ err, workspaceId: ws }, 'assisted_heal_missing failed');
+        }
+      }
+    }
     for (const job of otherJobs) {
       logger.debug({ jobId: job.id }, 'Low-priority job received');
     }
@@ -328,16 +346,18 @@ export async function startJobInfrastructure(): Promise<void> {
     }, { singletonKey: 'automation-recover-stuck', startAfter: 60 });
   }
 
-  // P1 — warm headless Chromium so first job startup is <300ms when pool is hot
-  try {
-    const { warmBrowserPool } = await import(
-      '../modules/browser-execution/browser-runtime.service.js'
-    );
-    const warm = await warmBrowserPool('headless');
-    logger.info(warm, 'BEE browser pool warm complete');
-  } catch (err) {
-    logger.warn({ err }, 'BEE browser pool warm failed (will launch on first job)');
-  }
+  // P1 — warm headless Chromium in background (never block API boot)
+  void (async () => {
+    try {
+      const { warmBrowserPool } = await import(
+        '../modules/browser-execution/browser-runtime.service.js'
+      );
+      const warm = await warmBrowserPool('headless');
+      logger.info(warm, 'BEE browser pool warm complete');
+    } catch (err) {
+      logger.warn({ err }, 'BEE browser pool warm failed (will launch on first job)');
+    }
+  })();
 
   logger.info(
     'Job infrastructure ready (queues initialized; agents, ingest, crawl, playwright/BEE+watch/resume, outreach, workflow, report, integration, bee-learning/queue/session-health, image-intelligence, provider-framework, recover-stuck, content-generate handlers registered)'

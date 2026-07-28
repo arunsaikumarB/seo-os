@@ -1639,12 +1639,42 @@ async function enforceSimilarity(workspaceId: string) {
   }
 }
 
+const assistedHealInFlight = new Set<string>();
+
+/** Background enqueue — never block HTTP on Playwright prepares. */
+async function enqueueAssistedMissingHeal(workspaceId: string): Promise<void> {
+  if (assistedHealInFlight.has(workspaceId)) return;
+  try {
+    const { enqueueJob, QUEUES } = await import('../../jobs/boss.js');
+    await enqueueJob(
+      QUEUES.LOW,
+      'assisted_heal_missing',
+      { type: 'assisted_heal_missing', workspaceId },
+      { singletonKey: `assisted-heal-${workspaceId}`, startAfter: 1 }
+    );
+  } catch (err) {
+    logger.warn({ err, workspaceId }, 'assisted heal-missing enqueue failed');
+  }
+}
+
+/** Job handler entry — Playwright-heavy prepare for missing packages. */
+export async function runAssistedMissingHealJob(workspaceId: string): Promise<void> {
+  if (!workspaceId || assistedHealInFlight.has(workspaceId)) return;
+  assistedHealInFlight.add(workspaceId);
+  try {
+    await healMissingAssistedPackages(workspaceId);
+  } finally {
+    assistedHealInFlight.delete(workspaceId);
+  }
+}
+
 export async function listAssistedPackages(workspaceId: string) {
-  // When auto-publish is OFF, Automable content-ready sites must appear in Assisted Manual
-  await healMissingAssistedPackages(workspaceId).catch((err) =>
-    logger.warn({ err, workspaceId }, 'assisted heal-missing on list failed')
-  );
-  // Heal legacy Done packages that never wrote CSM Submitted / export rows
+  // CRITICAL: never run Playwright package-prepare on the list GET path — it saturates
+  // the single browser session and blocks the whole API (app appears "not loading").
+  // Heavy heal runs in background; light DB-only heals stay inline.
+  void enqueueAssistedMissingHeal(workspaceId);
+
+  // Heal legacy Done packages that never wrote CSM Submitted / export rows (DB only)
   await healAssistedDoneSubmissions(workspaceId).catch((err) =>
     logger.warn({ err, workspaceId }, 'assisted heal Done→Submitted failed')
   );
