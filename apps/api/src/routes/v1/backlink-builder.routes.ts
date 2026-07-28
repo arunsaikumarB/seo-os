@@ -189,6 +189,115 @@ backlinkBuilderRouter.get(
   }
 );
 
+/** Bulk Link Probe — rank imports into Ready / Check / Blocked / Dead / No form */
+backlinkBuilderRouter.get(
+  '/link-probe/stats',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const { getLinkProbeStats } = await import(
+        '../../modules/backlinks/link-probe.service.js'
+      );
+      res.json({ data: await getLinkProbeStats(param(req.params.projectId)) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+backlinkBuilderRouter.get(
+  '/link-probe/queue',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const { listLinkProbeQueue } = await import(
+        '../../modules/backlinks/link-probe.service.js'
+      );
+      const band = typeof req.query.band === 'string' ? req.query.band : 'all';
+      const limit = req.query.limit != null ? Number(req.query.limit) : 100;
+      res.json({
+        data: await listLinkProbeQueue({
+          workspaceId: param(req.params.projectId),
+          band: band as
+            | 'ready'
+            | 'check'
+            | 'blocked'
+            | 'dead'
+            | 'no_form'
+            | 'unprobed'
+            | 'all',
+          limit,
+        }),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+backlinkBuilderRouter.post(
+  '/link-probe/run',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const body = z
+        .object({
+          opportunityIds: z.array(z.string().uuid()).max(250).optional(),
+          limit: z.number().int().min(1).max(250).optional(),
+          force: z.boolean().optional(),
+          sync: z.boolean().optional(),
+        })
+        .safeParse(req.body ?? {});
+      if (!body.success) {
+        throw new AppError(400, 'VALIDATION_ERROR', 'Invalid link probe request');
+      }
+      const workspaceId = param(req.params.projectId);
+      const { auth } = req as AuthenticatedRequest;
+
+      // Small sync runs for immediate feedback; otherwise enqueue
+      if (body.data.sync || (body.data.limit && body.data.limit <= 15)) {
+        const { runLinkProbeBatch } = await import(
+          '../../modules/backlinks/link-probe.service.js'
+        );
+        const result = await runLinkProbeBatch({
+          workspaceId,
+          opportunityIds: body.data.opportunityIds,
+          limit: body.data.limit ?? 15,
+          force: body.data.force,
+        });
+        res.json({ data: { mode: 'sync', ...result } });
+        return;
+      }
+
+      const { enqueueLinkProbe } = await import(
+        '../../modules/backlinks/link-probe.service.js'
+      );
+      const queued = await enqueueLinkProbe({
+        workspaceId,
+        orgId: auth.orgId,
+        userId: auth.userId,
+        opportunityIds: body.data.opportunityIds,
+        limit: body.data.limit ?? 80,
+        force: body.data.force,
+      });
+      res.status(202).json({
+        data: {
+          mode: 'async',
+          ...queued,
+          message: queued.queued
+            ? 'Link probe queued — refresh Ranked Queue in a minute'
+            : 'Workers unavailable — try sync: true with a small limit',
+        },
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 /** Phase 7 — Assisted Manual worklist (pilot ≤10) */
 backlinkBuilderRouter.get(
   '/assisted-manual',

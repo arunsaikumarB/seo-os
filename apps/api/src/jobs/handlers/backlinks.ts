@@ -29,6 +29,19 @@ export async function handleBacklinkJobs(
           }
         );
         logger.info({ jobId: job.id }, 'Backlink discovery completed');
+      } else if (type === 'backlink_link_probe') {
+        const { runLinkProbeBatch } = await import(
+          '../../modules/backlinks/link-probe.service.js'
+        );
+        const result = await runLinkProbeBatch({
+          workspaceId: String(job.data.workspaceId),
+          opportunityIds: Array.isArray(job.data.opportunityIds)
+            ? (job.data.opportunityIds as string[])
+            : undefined,
+          limit: job.data.limit != null ? Number(job.data.limit) : undefined,
+          force: Boolean(job.data.force),
+        });
+        logger.info({ jobId: job.id, ...result }, 'Link probe batch completed');
       } else {
         logger.debug({ jobId: job.id, type }, 'Unknown backlink job type');
       }

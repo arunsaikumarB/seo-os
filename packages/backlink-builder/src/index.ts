@@ -49,3 +49,4 @@ export * from './target-form.js';
 export * from './content-limits.js';
 export * from './form-unavailable.js';
 export * from './wizard-walk.js';
+export * from './link-probe.js';
