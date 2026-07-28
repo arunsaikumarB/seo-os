@@ -1,10 +1,15 @@
 /**
- * Phase 2.2 — exactly one ActivePackage in memory.
- * Content-script copy is synced from the service worker so Open Website tabs share it.
- * No chrome.storage. No tokens. No history.
+ * Phase 2.3 — one ActivePackage in memory + learning auth (SW-synced).
+ * No chrome.storage. Learning credentials live only in SW/content memory.
  */
 import type { ActivePackage } from '../types';
 import { companionLog, patchDiagnostics } from '../diagnostics/connection';
+import {
+  clearLearningCache,
+  fetchDomainKnowledge,
+  setLearningAuth,
+  type LearningAuth,
+} from '../learning/api';
 
 export type ConnectionState = 'waiting_for_package' | 'connected';
 
@@ -12,6 +17,7 @@ type Listener = () => void;
 const listeners = new Set<Listener>();
 
 let active: ActivePackage | null = null;
+let learningAuth: LearningAuth | null = null;
 
 function emit(): void {
   for (const cb of listeners) {
@@ -70,6 +76,12 @@ function applyLocal(pkg: ActivePackage | null, stage: string): void {
   emit();
 }
 
+function applyLearning(auth: LearningAuth | null): void {
+  learningAuth = auth;
+  setLearningAuth(auth);
+  if (!auth) clearLearningCache();
+}
+
 export function onActivePackageChange(cb: Listener): () => void {
   listeners.add(cb);
   cb();
@@ -86,51 +98,71 @@ export function getConnectionState(): ConnectionState {
 
 function notifyBackground(
   type: 'companion.activate_package' | 'companion.clear_package',
-  pkg?: ActivePackage
+  pkg?: ActivePackage,
+  learning?: LearningAuth | null
 ): void {
   try {
     chrome.runtime.sendMessage(
       type === 'companion.activate_package'
-        ? { type, package: pkg }
+        ? { type, package: pkg, learning }
         : { type },
       () => void chrome.runtime.lastError
     );
   } catch {
-    /* popup / tests without extension runtime */
+    /* popup / tests */
   }
 }
 
-/** Apply package locally and broadcast to service worker (canonical copy). */
-export function activatePackage(pkg: ActivePackage, opts?: { fromBackground?: boolean }): void {
+export function activatePackage(
+  pkg: ActivePackage,
+  opts?: { fromBackground?: boolean; learning?: LearningAuth | null }
+): void {
   const prev = active?.opportunityId ?? null;
   applyLocal(pkg, 'package.activated');
+  if (opts?.learning !== undefined) {
+    applyLearning(opts.learning);
+  }
   companionLog('package.activated', {
     previousOpportunityId: prev,
     opportunityId: active?.opportunityId,
     fromBackground: Boolean(opts?.fromBackground),
+    hasLearningAuth: Boolean(learningAuth),
   });
+
+  // Prefetch domain knowledge for the package domain (and current host)
+  const host = typeof location !== 'undefined' ? location.hostname : pkg.domain;
+  void fetchDomainKnowledge(pkg.domain);
+  if (host && host !== pkg.domain) void fetchDomainKnowledge(host);
+
   if (!opts?.fromBackground) {
-    notifyBackground('companion.activate_package', active!);
+    notifyBackground('companion.activate_package', active!, learningAuth);
   }
 }
 
-/** Clear local + broadcast. */
 export function clearPackage(opts?: { fromBackground?: boolean }): void {
   applyLocal(null, 'package.cleared');
+  applyLearning(null);
   if (!opts?.fromBackground) {
     notifyBackground('companion.clear_package');
   }
 }
 
-/** Hydrate from service worker (call on content-script mount). */
 export function pullActivePackageFromBackground(): void {
   try {
     chrome.runtime.sendMessage({ type: 'companion.get_active_package' }, (res) => {
       if (chrome.runtime.lastError) return;
+      if (res?.learning) {
+        applyLearning(res.learning as LearningAuth);
+      }
       if (res?.ok && res.package) {
         applyLocal(res.package as ActivePackage, 'package.synced_from_sw');
+        const host = typeof location !== 'undefined' ? location.hostname : '';
+        const domain = (res.package as ActivePackage).domain;
+        void fetchDomainKnowledge(domain);
+        if (host) void fetchDomainKnowledge(host);
       } else if (res?.ok && !res.package) {
         applyLocal(null, 'package.synced_empty');
+        applyLearning(null);
       }
     });
   } catch {
@@ -143,15 +175,23 @@ export function fieldCount(pkg: ActivePackage | null = active): number {
   return pkg.fields.filter((f) => String(f.value ?? '').trim()).length;
 }
 
-/** Listen for SW broadcasts (other tabs activated / cleared). */
 export function installActivePackageSync(): void {
   try {
     chrome.runtime.onMessage.addListener((message) => {
       if (message?.type === 'companion.active_package_changed') {
+        if (message.learning !== undefined) {
+          applyLearning((message.learning as LearningAuth | null) ?? null);
+        }
         applyLocal(
           (message.package as ActivePackage | null) ?? null,
           message.package ? 'package.synced_broadcast' : 'package.cleared_broadcast'
         );
+        if (message.package) {
+          const domain = (message.package as ActivePackage).domain;
+          const host = typeof location !== 'undefined' ? location.hostname : '';
+          void fetchDomainKnowledge(domain);
+          if (host) void fetchDomainKnowledge(host);
+        }
       }
     });
   } catch {

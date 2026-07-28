@@ -1,14 +1,19 @@
 import { normalizeText } from '../detect/dom-scanner';
 import type { NormalizedField } from '../types';
 
-/** Weighted confidence — Phase 1.1 */
+/**
+ * Weighted confidence — Phase 2.3
+ * Domain knowledge applies +100 separately in the classifier.
+ */
 export const WEIGHTS = {
   exactLabel: 60,
-  placeholder: 25,
-  nameAttr: 20,
-  ariaLabel: 20,
-  nearbyLabel: 15,
-  sectionHeading: 10,
+  placeholder: 40,
+  nameAttr: 35,
+  idAttr: 30,
+  ariaLabel: 25,
+  nearbyLabel: 20,
+  sectionHeading: 15,
+  domainMapping: 100,
 } as const;
 
 export interface SignalScore {
@@ -22,7 +27,6 @@ function exactOrWord(signal: string, alias: string): 'exact' | 'word' | 'none' {
   if (signal === alias) return 'exact';
   const re = new RegExp(`(?:^|\\s)${escapeReg(alias)}(?:\\s|$)`);
   if (re.test(signal)) return 'word';
-  // name/id style: company_name contains company name tokens
   if (alias.length >= 4 && signal.includes(alias)) return 'word';
   return 'none';
 }
@@ -33,7 +37,7 @@ function escapeReg(s: string): string {
 
 /**
  * Score one field against one alias using weighted signal hits.
- * Cap at 100.
+ * Cap at 100 (domain boost applied outside).
  */
 export function scoreAliasAgainstField(field: NormalizedField, aliasRaw: string): SignalScore {
   const alias = normalizeText(aliasRaw);
@@ -43,6 +47,7 @@ export function scoreAliasAgainstField(field: NormalizedField, aliasRaw: string)
   const label = normalizeText(field.label);
   const placeholder = normalizeText(field.placeholder);
   const name = normalizeText(field.name);
+  const id = normalizeText(field.id);
   const aria = normalizeText(field.ariaLabel);
   const nearby = normalizeText(field.nearbyText);
   const heading = normalizeText(field.sectionHeading);
@@ -63,6 +68,10 @@ export function scoreAliasAgainstField(field: NormalizedField, aliasRaw: string)
   if (exactOrWord(name, alias) !== 'none') {
     score += WEIGHTS.nameAttr;
     matchedBy.push('Name');
+  }
+  if (exactOrWord(id, alias) !== 'none') {
+    score += WEIGHTS.idAttr;
+    matchedBy.push('ID');
   }
   if (exactOrWord(aria, alias) !== 'none') {
     score += WEIGHTS.ariaLabel;
@@ -98,5 +107,20 @@ export function bestAliasScore(
 
 export function blobHasHint(blob: string, hints: string[]): boolean {
   const n = normalizeText(blob);
-  return hints.some((h) => exactOrWord(n, normalizeText(h)) !== 'none' || n.includes(normalizeText(h)));
+  return hints.some(
+    (h) => exactOrWord(n, normalizeText(h)) !== 'none' || n.includes(normalizeText(h))
+  );
+}
+
+/** Normalize a DOM field key for domain knowledge lookup */
+export function fieldKnowledgeKey(field: NormalizedField): string[] {
+  const keys = [field.name, field.id, field.label, field.ariaLabel, field.placeholder]
+    .map((s) =>
+      String(s ?? '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '_')
+    )
+    .filter(Boolean);
+  return [...new Set(keys)];
 }

@@ -209,8 +209,8 @@ export function AssistedManualPage() {
     setFieldEdits((prev) => ({ ...prev, [fieldKey(packageId, selector)]: value }));
   };
 
-  /** Phase 2.2 — push full package into Companion memory (no token, no API fetch after). */
-  const activatePackageIntoCompanion = (pkg: AssistedPackage) => {
+  /** Phase 2.3 — push package + learning credentials into Companion memory. */
+  const activatePackageIntoCompanion = async (pkg: AssistedPackage) => {
     const log = (
       stage: string,
       payload: Record<string, unknown> = {},
@@ -254,11 +254,15 @@ export function AssistedManualPage() {
         fields,
       };
 
+      const accessToken = (await getAccessToken()) || '';
+      const apiBase = getApiUrl();
+
       log('activate.postMessage', {
         opportunityId,
         domain: pkg.domain,
         fieldCount: fields.length,
         keys: fields.map((f) => f.key),
+        hasLearningAuth: Boolean(accessToken && orgId),
       });
 
       window.postMessage(
@@ -266,6 +270,10 @@ export function AssistedManualPage() {
           source: 'seo-os-web',
           type: 'companion.activate_package',
           package: payload,
+          apiBase,
+          accessToken,
+          orgId: orgId || '',
+          projectId,
         },
         window.location.origin
       );
@@ -703,7 +711,7 @@ export function AssistedManualPage() {
                         <div className="flex flex-wrap items-center gap-2">
                           <Button
                             size="sm"
-                            onClick={() => activatePackageIntoCompanion(pkg)}
+                            onClick={() => void activatePackageIntoCompanion(pkg)}
                           >
                             <ExternalLink className="h-3.5 w-3.5 mr-1" /> Activate Package
                           </Button>

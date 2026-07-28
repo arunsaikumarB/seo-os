@@ -17,6 +17,7 @@ import {
   GraduationCap,
   FolderPlus,
   ClipboardList,
+  BookOpen,
 } from 'lucide-react';
 import type { NavItem } from './navigation';
 
@@ -138,6 +139,11 @@ export const workflowNavSections: WorkflowNavSection[] = [
         label: 'Learning',
         href: 'command-center',
         icon: GraduationCap,
+      },
+      {
+        label: 'Field Knowledge',
+        href: 'learning/field-knowledge',
+        icon: BookOpen,
       },
       {
         label: 'System Health',

@@ -1,14 +1,17 @@
 import { fieldDisplayLabel, mergeAliasLists, normalizeText } from '../detect/dom-scanner';
 import type {
+  DomainFieldMapping,
   DomainLearningHook,
   FieldClassification,
   FieldRole,
   FillableRole,
+  MappingDiagnostics,
+  MatchSource,
   NormalizedField,
 } from '../types';
 import { CONFIDENCE_FILL_THRESHOLD, FILLABLE_ROLES } from '../types';
 import { FIELD_ALIASES, STRUCTURAL_HINTS } from './aliases';
-import { bestAliasScore, blobHasHint } from './confidence';
+import { bestAliasScore, blobHasHint, fieldKnowledgeKey, WEIGHTS } from './confidence';
 
 function signalBlob(field: NormalizedField): string {
   return [
@@ -28,29 +31,22 @@ function signalBlob(field: NormalizedField): string {
 function classifyStructural(field: NormalizedField): FieldClassification | null {
   const blob = signalBlob(field);
   const type = field.inputType;
+  const structural = (role: FieldRole, confidence: number, reason: string, alias: string): FieldClassification => ({
+    field,
+    role,
+    confidence,
+    matchedAlias: alias,
+    matchedBy: ['Type'],
+    reason,
+    matchSource: 'structural',
+  });
 
   if (type === 'password') {
-    return {
-      field,
-      role: 'login',
-      confidence: 100,
-      matchedAlias: 'type=password',
-      matchedBy: ['Type'],
-      reason: 'Password input',
-    };
+    return structural('login', 100, 'Password input', 'type=password');
   }
-
   if (type === 'submit' || type === 'button' || type === 'image' || type === 'reset') {
-    return {
-      field,
-      role: 'submit',
-      confidence: 100,
-      matchedAlias: `type=${type}`,
-      matchedBy: ['Type'],
-      reason: 'Submit/button control',
-    };
+    return structural('submit', 100, 'Submit/button control', `type=${type}`);
   }
-
   if (type === 'email') {
     return {
       field,
@@ -59,6 +55,7 @@ function classifyStructural(field: NormalizedField): FieldClassification | null 
       matchedAlias: 'type=email',
       matchedBy: ['Type'],
       reason: 'input type=email',
+      matchSource: 'alias',
     };
   }
   if (type === 'tel') {
@@ -69,6 +66,7 @@ function classifyStructural(field: NormalizedField): FieldClassification | null 
       matchedAlias: 'type=tel',
       matchedBy: ['Type'],
       reason: 'input type=tel',
+      matchSource: 'alias',
     };
   }
   if (type === 'url') {
@@ -79,20 +77,13 @@ function classifyStructural(field: NormalizedField): FieldClassification | null 
       matchedAlias: 'type=url',
       matchedBy: ['Type'],
       reason: 'input type=url',
+      matchSource: 'alias',
     };
   }
   if (type === 'search') {
-    return {
-      field,
-      role: 'search',
-      confidence: 95,
-      matchedAlias: 'type=search',
-      matchedBy: ['Type'],
-      reason: 'input type=search',
-    };
+    return structural('search', 95, 'input type=search', 'type=search');
   }
 
-  // CAPTCHA — field-level only
   if (blobHasHint(blob, STRUCTURAL_HINTS.captcha)) {
     return {
       field,
@@ -101,27 +92,16 @@ function classifyStructural(field: NormalizedField): FieldClassification | null 
       matchedAlias: 'captcha hint',
       matchedBy: ['Keyword'],
       reason: 'CAPTCHA-related control',
+      matchSource: 'structural',
     };
   }
 
-  // Payment / pricing — field-level only (never page-level)
   if (
     field.autocomplete.includes('cc-') ||
     blobHasHint(blob, STRUCTURAL_HINTS.payment) ||
     /^(cc-|card)/i.test(field.name) ||
     /^(cc-|card)/i.test(field.id)
   ) {
-    // Radio/checkbox pricing plans
-    if (field.kind === 'radio' || field.kind === 'checkbox' || field.kind === 'select') {
-      return {
-        field,
-        role: 'payment',
-        confidence: 92,
-        matchedAlias: 'pricing/payment',
-        matchedBy: ['Keyword'],
-        reason: 'Payment or pricing control',
-      };
-    }
     return {
       field,
       role: 'payment',
@@ -129,6 +109,7 @@ function classifyStructural(field: NormalizedField): FieldClassification | null 
       matchedAlias: 'payment',
       matchedBy: ['Keyword'],
       reason: 'Payment field',
+      matchSource: 'structural',
     };
   }
 
@@ -140,10 +121,14 @@ function classifyStructural(field: NormalizedField): FieldClassification | null 
       matchedAlias: 'login hint',
       matchedBy: ['Keyword'],
       reason: 'Login-related control',
+      matchSource: 'structural',
     };
   }
 
-  if (blobHasHint(blob, STRUCTURAL_HINTS.search) && (type === 'search' || /search/i.test(field.name + field.id))) {
+  if (
+    blobHasHint(blob, STRUCTURAL_HINTS.search) &&
+    (type === 'search' || /search/i.test(field.name + field.id))
+  ) {
     return {
       field,
       role: 'search',
@@ -151,6 +136,7 @@ function classifyStructural(field: NormalizedField): FieldClassification | null 
       matchedAlias: 'search',
       matchedBy: ['Keyword'],
       reason: 'Search control',
+      matchSource: 'structural',
     };
   }
 
@@ -162,20 +148,53 @@ function classifyStructural(field: NormalizedField): FieldClassification | null 
       matchedAlias: 'newsletter',
       matchedBy: ['Keyword'],
       reason: 'Newsletter / promo / coupon control',
+      matchSource: 'structural',
     };
   }
 
-  if (blobHasHint(blob, STRUCTURAL_HINTS.submit) && field.kind === 'input' && (type === 'submit' || type === 'button')) {
+  return null;
+}
+
+function matchDomainMapping(
+  field: NormalizedField,
+  mappings: DomainFieldMapping[]
+): FieldClassification | null {
+  if (!mappings.length) return null;
+  const keys = fieldKnowledgeKey(field);
+  for (const m of mappings) {
+    const wf = String(m.websiteField ?? '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '_');
+    if (!wf) continue;
+    const hit =
+      keys.includes(wf) ||
+      keys.some((k) => k === wf || k.includes(wf) || wf.includes(k));
+    if (!hit) continue;
+
+    const mapped = String(m.mappedTo ?? '').trim().toLowerCase();
+    if (mapped === 'skip') {
+      return {
+        field,
+        role: 'unknown',
+        confidence: 0,
+        matchedAlias: wf,
+        matchedBy: ['Domain Knowledge'],
+        reason: 'Domain mapping: Skip',
+        matchSource: 'skipped',
+      };
+    }
+    if (!FILLABLE_ROLES.includes(mapped as FillableRole)) continue;
     return {
       field,
-      role: 'submit',
-      confidence: 90,
-      matchedAlias: 'submit',
-      matchedBy: ['Keyword'],
-      reason: 'Submit control',
+      role: mapped as FillableRole,
+      confidence: WEIGHTS.domainMapping,
+      matchedAlias: wf,
+      matchedBy: ['Domain Knowledge'],
+      reason: `Verified domain mapping "${wf}" → ${mapped}`,
+      matchSource: 'domain',
     };
   }
-
   return null;
 }
 
@@ -186,7 +205,9 @@ export interface ClassifyOptions {
 }
 
 /**
- * Per-field classifier — never classifies an entire page as payment.
+ * Mapping priority:
+ * 1 Domain Knowledge → 2 Shared verified → 3 Global Alias → 4 Confidence → 5 Skip
+ * Never guess. Unknown stays unknown until verified.
  */
 export function classifyFields(
   fields: NormalizedField[],
@@ -194,6 +215,11 @@ export function classifyFields(
 ): FieldClassification[] {
   let aliases = options.aliases ?? FIELD_ALIASES;
   const host = options.hostname ?? (typeof location !== 'undefined' ? location.hostname : '');
+  const mappings =
+    (options.domainLearning?.getDomainMappings && host
+      ? options.domainLearning.getDomainMappings(host)
+      : null) ?? [];
+
   if (options.domainLearning?.getDomainAliases && host) {
     aliases = mergeAliasLists(aliases, options.domainLearning.getDomainAliases(host));
   }
@@ -202,11 +228,18 @@ export function classifyFields(
     const structural = classifyStructural(field);
     if (structural) return structural;
 
+    // Priority 1–2: domain / shared verified knowledge
+    const domainHit = matchDomainMapping(field, mappings);
+    if (domainHit) return domainHit;
+
+    // Priority 3–4: global alias + confidence scoring
     let best: FieldClassification | null = null;
     for (const role of FILLABLE_ROLES) {
       const hit = bestAliasScore(field, aliases[role] ?? []);
       if (!hit) continue;
       if (!best || hit.score > best.confidence) {
+        const strongAlias =
+          hit.matchedBy.includes('Label') && hit.score >= CONFIDENCE_FILL_THRESHOLD;
         best = {
           field,
           role,
@@ -214,6 +247,7 @@ export function classifyFields(
           matchedAlias: hit.matchedAlias,
           matchedBy: hit.matchedBy,
           reason: `Matched alias "${hit.matchedAlias}" via ${hit.matchedBy.join(', ')}`,
+          matchSource: strongAlias ? 'alias' : 'confidence',
         };
       }
     }
@@ -226,22 +260,24 @@ export function classifyFields(
         matchedAlias: null,
         matchedBy: [],
         reason: 'No alias match',
+        matchSource: 'unknown',
       };
     }
     return best;
   });
 
-  // One fillable role → strongest field only (others demoted to unknown for fill,
-  // but keep classification for inspector with note)
+  // One fillable role → strongest field only
   const winners = new Map<FieldRole, FieldClassification>();
   for (const c of raw) {
     if (!FILLABLE_ROLES.includes(c.role as FillableRole)) continue;
+    if (c.matchSource === 'skipped') continue;
     const prev = winners.get(c.role);
     if (!prev || c.confidence > prev.confidence) winners.set(c.role, c);
   }
 
   return raw.map((c) => {
     if (!FILLABLE_ROLES.includes(c.role as FillableRole)) return c;
+    if (c.matchSource === 'skipped') return c;
     const win = winners.get(c.role);
     if (win && win.field.uid !== c.field.uid) {
       return {
@@ -251,17 +287,70 @@ export function classifyFields(
         matchedAlias: null,
         matchedBy: [],
         reason: `Duplicate ${c.role} — weaker than ${fieldDisplayLabel(win.field)}`,
+        matchSource: 'unknown' as MatchSource,
       };
     }
     return c;
   });
 }
 
-export function isFillConfident(c: FieldClassification, threshold = CONFIDENCE_FILL_THRESHOLD): boolean {
-  return (
-    FILLABLE_ROLES.includes(c.role as FillableRole) &&
-    c.confidence >= threshold
-  );
+export function isFillConfident(
+  c: FieldClassification,
+  threshold = CONFIDENCE_FILL_THRESHOLD
+): boolean {
+  if (c.matchSource === 'skipped' || c.matchSource === 'structural') return false;
+  return FILLABLE_ROLES.includes(c.role as FillableRole) && c.confidence >= threshold;
+}
+
+export function computeMappingDiagnostics(
+  classifications: FieldClassification[]
+): MappingDiagnostics {
+  let mapped = 0;
+  let domainMatches = 0;
+  let aliasMatches = 0;
+  let confidenceMatches = 0;
+  let unknown = 0;
+  let skipped = 0;
+  let confSum = 0;
+  let confN = 0;
+
+  for (const c of classifications) {
+    if (c.matchSource === 'domain') {
+      domainMatches++;
+      mapped++;
+      confSum += c.confidence;
+      confN++;
+    } else if (c.matchSource === 'alias') {
+      aliasMatches++;
+      if (c.confidence >= CONFIDENCE_FILL_THRESHOLD) mapped++;
+      confSum += c.confidence;
+      confN++;
+    } else if (c.matchSource === 'confidence') {
+      confidenceMatches++;
+      if (c.confidence >= CONFIDENCE_FILL_THRESHOLD) mapped++;
+      confSum += c.confidence;
+      confN++;
+    } else if (
+      c.matchSource === 'structural' ||
+      c.matchSource === 'skipped' ||
+      ['captcha', 'payment', 'submit', 'login', 'search', 'newsletter'].includes(c.role)
+    ) {
+      skipped++;
+    } else {
+      unknown++;
+    }
+  }
+
+  return {
+    detected: classifications.length,
+    mapped,
+    domainMatches,
+    aliasMatches,
+    confidenceMatches,
+    unknown,
+    skipped,
+    avgConfidence: confN ? Math.round(confSum / confN) : 0,
+  };
 }
 
 export function debugLogClassifications(
@@ -270,13 +359,13 @@ export function debugLogClassifications(
 ): void {
   const lines: string[] = ['[SEO OS Companion] Detected Fields', '================'];
   for (const c of classifications) {
-    const name = ROLE_LABELS_SAFE(c.role);
-    lines.push(name);
+    lines.push(ROLE_LABELS_SAFE(c.role));
     lines.push(`Confidence ${c.confidence}%`);
+    lines.push(`Source ${c.matchSource ?? '—'}`);
     if (c.matchedBy.length) lines.push(`Matched By\n${c.matchedBy.join(', ')}`);
     if (c.matchedAlias) lines.push(`Matched Alias\n${c.matchedAlias}`);
     const filled = filledUids.has(c.field.uid);
-    if (FILLABLE_ROLES.includes(c.role as FillableRole) && c.confidence >= CONFIDENCE_FILL_THRESHOLD) {
+    if (isFillConfident(c)) {
       lines.push(`Filled\n${filled ? 'YES' : 'NO'}`);
     } else {
       lines.push(`Reason\n${c.reason || 'Low Confidence'}`);
@@ -288,7 +377,6 @@ export function debugLogClassifications(
 }
 
 function ROLE_LABELS_SAFE(role: FieldRole): string {
-  // lazy avoid circular — inline titles
   const map: Record<string, string> = {
     business_name: 'Business Name',
     title: 'Title',

@@ -5,7 +5,7 @@ export function PopupApp() {
     <div className="popup">
       <header>
         <h1>SEO OS Companion</h1>
-        <p>Phase 2.2 — one active package in memory</p>
+        <p>Phase 2.3 — intelligent field mapping + shared learning</p>
       </header>
       <div className="card">
         <p>

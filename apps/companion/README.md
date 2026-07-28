@@ -1,15 +1,14 @@
-# SEO OS Companion — Phase 2.2 (Activate Package)
+# SEO OS Companion — Phase 2.3 (Intelligent Field Mapping)
 
-Lightweight browser assistant. **One active package in memory. No tokens. No chrome.storage. No backend fetch after activate.**
+Deterministic field mapper. **No LLM. No auto-submit. One active package in memory.**
 
 ## Flow
 
-1. Assisted Manual → **Activate Package** (sends full package via `postMessage`)
-2. Companion replaces any previous package in memory (synced via service worker for other tabs)
-3. **Open website** → directory form
-4. **Fill Current Step** → uses only the in-memory package
-5. User reviews / CAPTCHA / Submit
-6. **Clear Package** or close browser → memory empty
+1. Assisted Manual → **Activate Package** (package + learning credentials in memory)
+2. **Open website** → Companion loads domain knowledge from SEO OS
+3. Mapping priority: Domain Knowledge → Aliases → Confidence ≥80% → Skip
+4. **Fill Current Step** / **Teach Companion** (corrections → `POST /v1/learning/field-mapping`)
+5. Shared knowledge improves every future visit for the whole org
 
 ## Install
 
@@ -17,8 +16,14 @@ Lightweight browser assistant. **One active package in memory. No tokens. No chr
 cd apps/companion && npm run build
 ```
 
-Load unpacked → `apps/companion/dist` (reload after rebuild)
+Load unpacked → `apps/companion/dist`
 
-## Diagnostics
+## Confidence colors
 
-Connected · Package Loaded · Current Opportunity · Current Domain · Fields · Generated
+| Color | Meaning |
+|-------|---------|
+| Green | Verified domain mapping |
+| Blue | Global alias |
+| Yellow | Confidence match |
+| Gray | Skipped |
+| Red | Unknown |

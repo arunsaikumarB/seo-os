@@ -4,7 +4,9 @@
  */
 import type { OpportunityPackageFields } from '../types';
 import { fillMatchedFields } from '../fill/form-filler';
-import { noopDomainLearning } from '../hooks';
+import { createDomainLearningHook } from '../hooks';
+
+const domainLearning = createDomainLearningHook();
 
 let observer: MutationObserver | null = null;
 let enabled = false;
@@ -33,7 +35,7 @@ function maybeAutofill(): void {
   lastFingerprint = fp;
   fillMatchedFields({
     package: pkg,
-    domainLearning: noopDomainLearning,
+    domainLearning,
     visibleOnly: true,
   });
 }

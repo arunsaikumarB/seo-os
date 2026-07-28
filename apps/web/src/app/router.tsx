@@ -31,6 +31,9 @@ const ProjectHomePage = lazy(() =>
 const CommandCenterPage = lazy(() =>
   import('@/pages/command-center').then((m) => ({ default: m.CommandCenterPage }))
 );
+const FieldKnowledgePage = lazy(() =>
+  import('@/pages/learning/field-knowledge').then((m) => ({ default: m.FieldKnowledgePage }))
+);
 const KnowledgeLibraryPage = lazy(() =>
   import('@/pages/knowledge/library').then((m) => ({ default: m.KnowledgeLibraryPage }))
 );
@@ -487,6 +490,10 @@ export function AppRouter() {
                       element={lazyEl(VideoStudioPage)}
                     />
                     <Route path="command-center" element={lazyEl(CommandCenterPage)} />
+                    <Route
+                      path="learning/field-knowledge"
+                      element={lazyEl(FieldKnowledgePage)}
+                    />
                     <Route path="knowledge/library" element={lazyEl(KnowledgeLibraryPage)} />
                     <Route path="memory/timeline" element={lazyEl(MemoryTimelinePage)} />
                     <Route path="intelligence/website" element={lazyEl(WebsiteAnalyzerPage)} />

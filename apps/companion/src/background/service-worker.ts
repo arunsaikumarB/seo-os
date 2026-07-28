@@ -1,11 +1,18 @@
 /**
- * Phase 2.2 — canonical ActivePackage lives only in SW memory (not chrome.storage).
- * Content scripts sync from here so Activate on SEO OS → Fill on directory tab works.
+ * Phase 2.3 — ActivePackage + learning auth in SW memory (not chrome.storage).
  */
 import type { ActivePackage } from '../core/types';
 import { companionLog } from '../core/diagnostics/connection';
 
+type LearningAuth = {
+  apiBase: string;
+  accessToken: string;
+  orgId: string;
+  projectId: string;
+};
+
 let active: ActivePackage | null = null;
+let learning: LearningAuth | null = null;
 
 function normalize(pkg: ActivePackage): ActivePackage {
   return {
@@ -24,6 +31,7 @@ function broadcast(): void {
   const payload = {
     type: 'companion.active_package_changed' as const,
     package: active,
+    learning,
   };
   chrome.tabs.query({}, (tabs) => {
     for (const tab of tabs) {
@@ -34,15 +42,16 @@ function broadcast(): void {
 }
 
 chrome.runtime.onInstalled.addListener((details) => {
-  companionLog('sw.installed', { reason: details.reason, phase: '2.2' });
+  companionLog('sw.installed', { reason: details.reason, phase: '2.3' });
   active = null;
+  learning = null;
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'companion.ping') {
     sendResponse({
       ok: true,
-      phase: '2.2',
+      phase: '2.3',
       name: 'SEO OS Companion',
       hasPackage: Boolean(active),
     });
@@ -50,7 +59,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message?.type === 'companion.get_active_package') {
-    sendResponse({ ok: true, package: active });
+    sendResponse({ ok: true, package: active, learning });
     return false;
   }
 
@@ -61,13 +70,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return false;
     }
     active = normalize(raw);
+    if (message.learning?.apiBase && message.learning?.accessToken && message.learning?.orgId) {
+      learning = {
+        apiBase: String(message.learning.apiBase).replace(/\/$/, ''),
+        accessToken: String(message.learning.accessToken),
+        orgId: String(message.learning.orgId),
+        projectId: String(message.learning.projectId ?? active.projectId),
+      };
+    }
     companionLog('sw.package_activated', {
       opportunityId: active.opportunityId,
       domain: active.domain,
       fieldCount: active.fields.length,
+      hasLearning: Boolean(learning),
     });
     broadcast();
-    sendResponse({ ok: true, package: active });
+    sendResponse({ ok: true, package: active, learning });
     return false;
   }
 
@@ -76,6 +94,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       previousOpportunityId: active?.opportunityId ?? null,
     });
     active = null;
+    learning = null;
     broadcast();
     sendResponse({ ok: true });
     return false;

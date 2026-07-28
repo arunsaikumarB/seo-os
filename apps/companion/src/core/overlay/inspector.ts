@@ -1,24 +1,36 @@
-import type { FieldClassification, FieldRole } from '../types';
+import type { FieldClassification, MatchSource } from '../types';
 import { FILLABLE_ROLES } from '../types';
 import type { FillableRole } from '../types';
+import { CONFIDENCE_FILL_THRESHOLD } from '../types';
 
 const STYLE_ID = 'seo-os-companion-overlay-styles';
 const TIP_ID = 'seo-os-companion-inspect-tip';
 
-const COLORS: Record<string, string> = {
-  business: 'rgba(34, 197, 94, 0.55)', // green
-  category: 'rgba(234, 179, 8, 0.55)', // yellow
-  description: 'rgba(59, 130, 246, 0.55)', // blue
-  captcha: 'rgba(239, 68, 68, 0.55)', // red
-  skipped: 'rgba(71, 85, 105, 0.45)', // gray
+/** Phase 2.3 confidence colors */
+const COLORS: Record<MatchSource | 'default', string> = {
+  domain: 'rgba(34, 197, 94, 0.65)', // green — verified domain
+  alias: 'rgba(59, 130, 246, 0.6)', // blue — global alias
+  confidence: 'rgba(234, 179, 8, 0.6)', // yellow — confidence match
+  skipped: 'rgba(100, 116, 139, 0.5)', // gray
+  structural: 'rgba(100, 116, 139, 0.5)',
+  unknown: 'rgba(239, 68, 68, 0.55)', // red
+  default: 'rgba(100, 116, 139, 0.45)',
 };
 
-function overlayColor(role: FieldRole): string {
-  if (role === 'category') return COLORS.category;
-  if (role === 'description') return COLORS.description;
-  if (role === 'captcha') return COLORS.captcha;
-  if (FILLABLE_ROLES.includes(role as FillableRole)) return COLORS.business;
-  return COLORS.skipped;
+function sourceFor(c: FieldClassification): MatchSource {
+  if (c.matchSource) return c.matchSource;
+  if (['captcha', 'payment', 'submit', 'login', 'search', 'newsletter'].includes(c.role)) {
+    return 'structural';
+  }
+  if (c.role === 'unknown') return 'unknown';
+  if (FILLABLE_ROLES.includes(c.role as FillableRole)) {
+    return c.confidence >= CONFIDENCE_FILL_THRESHOLD ? 'alias' : 'confidence';
+  }
+  return 'skipped';
+}
+
+function overlayColor(c: FieldClassification): string {
+  return COLORS[sourceFor(c)] ?? COLORS.default;
 }
 
 function ensureStyles(): void {
@@ -34,7 +46,7 @@ function ensureStyles(): void {
     #${TIP_ID} {
       position: fixed;
       z-index: 2147483645;
-      max-width: 260px;
+      max-width: 280px;
       padding: 8px 10px;
       border-radius: 10px;
       background: #0f172a;
@@ -63,7 +75,7 @@ function tipEl(): HTMLElement {
   return tip;
 }
 
-function roleTitle(role: FieldRole): string {
+function roleTitle(role: string): string {
   const map: Record<string, string> = {
     business_name: 'Business Name',
     title: 'Title',
@@ -90,21 +102,40 @@ function roleTitle(role: FieldRole): string {
   return map[role] ?? role;
 }
 
+function sourceLabel(s: MatchSource): string {
+  switch (s) {
+    case 'domain':
+      return 'Verified Domain Mapping';
+    case 'alias':
+      return 'Global Alias';
+    case 'confidence':
+      return 'Confidence Match';
+    case 'skipped':
+    case 'structural':
+      return 'Skipped';
+    default:
+      return 'Unknown';
+  }
+}
+
 function onEnter(c: FieldClassification, ev: Event): void {
   const tip = tipEl();
   const e = ev as MouseEvent;
   tip.hidden = false;
+  const src = sourceFor(c);
   tip.textContent = [
     'Field',
     roleTitle(c.role),
     '',
-    'Confidence',
-    `${c.confidence}%`,
-    '',
-    'Matched Alias',
-    c.matchedAlias || '—',
-  ].join('\n');
-  tip.style.left = `${Math.min(e.clientX + 12, window.innerWidth - 280)}px`;
+    `Confidence ${c.confidence}%`,
+    sourceLabel(src),
+    c.matchedAlias ? `Alias: ${c.matchedAlias}` : '',
+    c.matchedBy.length ? `Signals: ${c.matchedBy.join(', ')}` : '',
+    c.reason,
+  ]
+    .filter(Boolean)
+    .join('\n');
+  tip.style.left = `${Math.min(e.clientX + 12, window.innerWidth - 290)}px`;
   tip.style.top = `${Math.min(e.clientY + 12, window.innerHeight - 120)}px`;
 }
 
@@ -112,68 +143,52 @@ function onLeave(): void {
   tipEl().hidden = true;
 }
 
-function onMove(ev: Event): void {
-  const tip = tipEl();
-  if (tip.hidden) return;
-  const e = ev as MouseEvent;
-  tip.style.left = `${Math.min(e.clientX + 12, window.innerWidth - 280)}px`;
-  tip.style.top = `${Math.min(e.clientY + 12, window.innerHeight - 120)}px`;
-}
-
 export function setInspectorClassifications(next: FieldClassification[]): void {
   classifications = next;
-  if (active) {
-    clearInspectorOverlays();
-    paintInspector();
-  }
+  if (!active) return;
+  applyOutlines();
 }
 
-function paintInspector(): void {
-  ensureStyles();
+function clearOutlines(): void {
   for (const c of classifications) {
     const el = c.field.element;
-    el.classList.add('soc-inspect-outline');
-    el.style.setProperty('--soc-outline', overlayColor(c.role));
-    const enter = (ev: Event) => onEnter(c, ev);
-    const leave = () => onLeave();
-    const move = (ev: Event) => onMove(ev);
-    el.addEventListener('mouseenter', enter);
-    el.addEventListener('mouseleave', leave);
-    el.addEventListener('mousemove', move);
-    listeners.set(el, enter);
-    (el as HTMLElement & { __socLeave?: () => void; __socMove?: (e: Event) => void }).__socLeave =
-      leave;
-    (el as HTMLElement & { __socMove?: (e: Event) => void }).__socMove = move;
-  }
-}
-
-export function clearInspectorOverlays(): void {
-  document.querySelectorAll('.soc-inspect-outline').forEach((node) => {
-    const el = node as HTMLElement & {
-      __socLeave?: () => void;
-      __socMove?: (e: Event) => void;
-    };
     el.classList.remove('soc-inspect-outline');
     el.style.removeProperty('--soc-outline');
-    const enter = listeners.get(el);
-    if (enter) el.removeEventListener('mouseenter', enter);
-    if (el.__socLeave) el.removeEventListener('mouseleave', el.__socLeave);
-    if (el.__socMove) el.removeEventListener('mousemove', el.__socMove);
-    listeners.delete(el);
-  });
+    const fn = listeners.get(el);
+    if (fn) {
+      el.removeEventListener('mouseenter', fn);
+      el.removeEventListener('mouseleave', onLeave);
+      listeners.delete(el);
+    }
+  }
   tipEl().hidden = true;
 }
 
-export function enableInspector(next: FieldClassification[]): void {
-  classifications = next;
+function applyOutlines(): void {
+  ensureStyles();
+  for (const c of classifications) {
+    const el = c.field.element;
+    const color = overlayColor(c);
+    el.classList.add('soc-inspect-outline');
+    el.style.setProperty('--soc-outline', color.replace(/[\d.]+\)$/, '1)'));
+    const enter = (ev: Event) => onEnter(c, ev);
+    listeners.set(el, enter);
+    el.addEventListener('mouseenter', enter);
+    el.addEventListener('mouseleave', onLeave);
+  }
+}
+
+export function enableInspector(next?: FieldClassification[]): void {
+  if (next) classifications = next;
   active = true;
-  clearInspectorOverlays();
-  paintInspector();
+  clearOutlines();
+  applyOutlines();
 }
 
 export function disableInspector(): void {
+  clearOutlines();
   active = false;
-  clearInspectorOverlays();
+  tipEl().hidden = true;
 }
 
 export function isInspectorEnabled(): boolean {

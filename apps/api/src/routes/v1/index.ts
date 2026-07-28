@@ -74,6 +74,7 @@ import { technicalSeoRouter } from './technical-seo.routes.js';
 import { integrationsRouter } from './integrations.routes.js';
 import { betaOrgRouter, betaGlobalRouter } from './beta.routes.js';
 import { extensionProjectRouter, extensionPublicRouter } from './extension.routes.js';
+import { learningRouter } from './learning.routes.js';
 import { getExecutiveSummary } from '../../modules/executive/executive.service.js';
 import { logger } from '../../lib/logger.js';
 
@@ -109,6 +110,7 @@ v1Router.use('/notifications', notificationsRouter);
 v1Router.use('/organizations', auditRouter);
 v1Router.use('/beta', betaGlobalRouter);
 v1Router.use('/extension', extensionPublicRouter);
+v1Router.use('/learning', learningRouter);
 
 v1Router.get('/me', jwtOnlyMiddleware, async (req, res, next) => {
   try {

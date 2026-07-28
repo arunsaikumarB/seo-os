@@ -2,6 +2,7 @@ import { fieldDisplayLabel, scanDomFields } from '../detect/dom-scanner';
 import { resolveScanRoot } from '../detect/submission-form';
 import {
   classifyFields,
+  computeMappingDiagnostics,
   debugLogClassifications,
   isEmptyValue,
   isFillConfident,
@@ -145,6 +146,7 @@ export function fillMatchedFields(options: FillFormOptions): FillResult {
       matchedAlias: c.matchedAlias,
       matchedBy: c.matchedBy,
       required: c.field.required,
+      matchSource: c.matchSource,
     };
 
     if (c.role === 'captcha') {
@@ -259,6 +261,7 @@ export function fillMatchedFields(options: FillFormOptions): FillResult {
     captcha,
     details,
     missingRequired: details.filter((d) => d.action === 'missing'),
+    mapping: computeMappingDiagnostics(classifications),
   };
 
   if (options.debug) {

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { FillSummary } from '../core/types';
+import type { FieldClassification, FillSummary, MappingDiagnostics } from '../core/types';
 import { CONFIDENCE_FILL_THRESHOLD, activePackageToFillFields } from '../core/types';
 import { fillMatchedFields, previewClassifications, roleLabel } from '../core/fill/form-filler';
-import { noopDomainLearning } from '../core/hooks';
+import { createDomainLearningHook } from '../core/hooks';
 import { onPackageActivated } from '../core/session/web-bridge';
 import {
   type ConnectionDiagnostics,
@@ -25,8 +25,13 @@ import {
 } from '../core/overlay/inspector';
 import { scrollToElement } from '../core/overlay/highlights';
 import { getMissingTargets } from '../core/overlay/missing-nav';
-import { isFillConfident } from '../core/match/classifier';
+import { computeMappingDiagnostics } from '../core/match/classifier';
+import { TEACHABLE_ROLES } from '../core/match/aliases';
+import { fieldKnowledgeKey } from '../core/match/confidence';
+import { onLearningChange, uploadFieldMapping } from '../core/learning/api';
 import { startWizardWatcher, stopWizardWatcher } from '../core/wizard/watcher';
+
+const domainLearning = createDomainLearningHook();
 
 function DiagRow({ label, value }: { label: string; value: string }) {
   const positive =
@@ -54,44 +59,56 @@ function formatGenerated(iso: string | null): string {
   }
 }
 
+function websiteFieldKey(c: FieldClassification): string {
+  const keys = fieldKnowledgeKey(c.field);
+  return keys[0] || c.field.name || c.field.id || c.field.label || c.field.uid;
+}
+
 export function Widget() {
   const [expanded, setExpanded] = useState(false);
   const [tick, setTick] = useState(0);
   const [diag, setDiag] = useState<ConnectionDiagnostics>(getDiagnostics());
   const [busy, setBusy] = useState(false);
   const [summary, setSummary] = useState<FillSummary | null>(null);
+  const [mapping, setMapping] = useState<MappingDiagnostics | null>(null);
+  const [classifications, setClassifications] = useState<FieldClassification[]>([]);
   const [inspect, setInspect] = useState(false);
   const [debug, setDebug] = useState(false);
+  const [teach, setTeach] = useState(false);
+  const [teachUid, setTeachUid] = useState<string | null>(null);
+  const [teachBusy, setTeachBusy] = useState(false);
   const [missingIndex, setMissingIndex] = useState(0);
-  const [preview, setPreview] = useState({ detected: 0, fillable: 0 });
 
   const active = getActivePackage();
   const connected = getConnectionState() === 'connected';
 
   const refreshPreview = useCallback(() => {
-    const { fields, classifications } = previewClassifications({
-      domainLearning: noopDomainLearning,
+    const { fields, classifications: next } = previewClassifications({
+      domainLearning,
     });
-    const fillable = classifications.filter((c) => isFillConfident(c)).length;
-    setPreview({ detected: fields.length, fillable });
-    for (const c of classifications) {
+    void fields;
+    setClassifications(next);
+    setMapping(computeMappingDiagnostics(next));
+    for (const c of next) {
       c.field.element.setAttribute('data-soc-uid', c.field.uid);
     }
     if (isInspectorEnabled() || inspect) {
-      setInspectorClassifications(classifications);
+      setInspectorClassifications(next);
     }
-    return classifications;
+    return next;
   }, [inspect]);
 
   useEffect(() => {
-    companionLog('ui.mount', { phase: '2.2' });
+    companionLog('ui.mount', { phase: '2.3' });
     const offPkg = onActivePackageChange(() => setTick((t) => t + 1));
     const offAct = onPackageActivated(() => setTick((t) => t + 1));
     const offDiag = onDiagnosticsChange(setDiag);
+    const offLearn = onLearningChange(() => setTick((t) => t + 1));
     return () => {
       offPkg();
       offAct();
       offDiag();
+      offLearn();
       stopWizardWatcher();
     };
   }, []);
@@ -118,12 +135,14 @@ export function Widget() {
       const flat = activePackageToFillFields(pkg);
       const fillResult = fillMatchedFields({
         package: flat,
-        domainLearning: noopDomainLearning,
+        domainLearning,
         threshold: CONFIDENCE_FILL_THRESHOLD,
         debug,
         visibleOnly: true,
       });
       setSummary(fillResult.summary);
+      setMapping(fillResult.summary.mapping ?? computeMappingDiagnostics(fillResult.classifications));
+      setClassifications(fillResult.classifications);
       setMissingIndex(0);
       if (inspect) setInspectorClassifications(fillResult.classifications);
       startWizardWatcher(flat);
@@ -137,6 +156,31 @@ export function Widget() {
     stopWizardWatcher();
     clearPackage();
     setSummary(null);
+    setMapping(null);
+    setClassifications([]);
+    setTeach(false);
+  };
+
+  const onTeachConfirm = async (c: FieldClassification, mappedTo: string) => {
+    const domain = active?.domain || location.hostname;
+    const websiteField = websiteFieldKey(c);
+    setTeachBusy(true);
+    try {
+      const ok = await uploadFieldMapping({
+        domain,
+        websiteField,
+        mappedTo,
+        confidence: 1,
+        verifiedBy: 'user',
+      });
+      if (ok) {
+        companionLog('teach.saved', { domain, websiteField, mappedTo });
+        setTeachUid(null);
+        refreshPreview();
+      }
+    } finally {
+      setTeachBusy(false);
+    }
   };
 
   const missingCount = summary?.missingRequired.length ?? 0;
@@ -148,7 +192,14 @@ export function Widget() {
     setMissingIndex((i) => i + 1);
   };
 
-  void tick; // force re-read active on package change
+  const teachCandidates = classifications.filter(
+    (c) =>
+      c.matchSource === 'unknown' ||
+      c.matchSource === 'confidence' ||
+      (c.role === 'unknown' && c.matchSource !== 'structural')
+  );
+
+  void tick;
 
   if (!expanded) {
     return (
@@ -185,29 +236,40 @@ export function Widget() {
         {connected && active ? (
           <>
             <div className="soc-opp">
-              <div className="soc-opp-label">Current Opportunity</div>
+              <div className="soc-opp-label">Current Package</div>
               <div className="soc-opp-domain">{active.domain}</div>
-              <div className="soc-opp-label" style={{ marginTop: 6 }}>
-                Opportunity ID
-              </div>
-              <div className="soc-opp-domain" style={{ fontSize: 12, fontWeight: 600 }}>
-                {active.opportunityId}
-              </div>
+              <p className="soc-meta" style={{ marginTop: 6 }}>
+                <strong>{fieldCount(active)} fields</strong> · Generated{' '}
+                <strong>{formatGenerated(active.generatedAt)}</strong>
+              </p>
             </div>
 
-            <p className="soc-meta">
-              Package Ready <strong>{fieldCount(active)} fields</strong>
-            </p>
-            <p className="soc-meta">
-              Generated <strong>{formatGenerated(active.generatedAt)}</strong>
-            </p>
-            <p className="soc-meta">
-              Detected <strong>{preview.detected}</strong> · Fillable{' '}
-              <strong>{preview.fillable}</strong>
-            </p>
+            {mapping && (
+              <div className="soc-map-stats">
+                <div>
+                  Detected <b>{mapping.detected}</b>
+                </div>
+                <div>
+                  Mapped <b>{mapping.mapped}</b>
+                </div>
+                <div>
+                  Unknown <b>{mapping.unknown}</b>
+                </div>
+              </div>
+            )}
 
             <button type="button" className="soc-primary" disabled={busy} onClick={onFill}>
               {busy ? 'Filling…' : 'Fill Current Step'}
+            </button>
+            <button
+              type="button"
+              className="soc-secondary"
+              onClick={() => {
+                setTeach((v) => !v);
+                refreshPreview();
+              }}
+            >
+              Teach Companion{teach ? ' ▲' : ''}
             </button>
             <button type="button" className="soc-secondary" onClick={onClear}>
               Clear Package
@@ -217,20 +279,68 @@ export function Widget() {
           <div className="soc-warn">
             <p className="soc-error-title">Waiting for Package</p>
             <p>
-              In SEO OS → Assisted Manual → click <strong>Activate Package</strong>. The package is
-              sent directly into memory — no tokens, no storage.
+              In SEO OS → Assisted Manual → <strong>Activate Package</strong>.
             </p>
           </div>
         )}
 
+        {teach && connected && (
+          <div className="soc-teach">
+            <div className="soc-summary-title">Incorrect Mapping</div>
+            <p className="soc-meta">Which package field should this be?</p>
+            {teachCandidates.length === 0 ? (
+              <p className="soc-meta">No unknown / low-confidence fields on this step.</p>
+            ) : (
+              teachCandidates.slice(0, 8).map((c) => (
+                <div key={c.field.uid} className="soc-teach-card">
+                  <button
+                    type="button"
+                    className="soc-teach-field"
+                    onClick={() => setTeachUid(teachUid === c.field.uid ? null : c.field.uid)}
+                  >
+                    Mark field wrong · {c.field.label || c.field.name || c.field.id || 'field'}
+                  </button>
+                  {teachUid === c.field.uid && (
+                    <div className="soc-teach-options">
+                      {TEACHABLE_ROLES.map((opt) => (
+                        <label key={opt.role} className="soc-teach-opt">
+                          <input
+                            type="radio"
+                            name={`teach-${c.field.uid}`}
+                            disabled={teachBusy}
+                            onChange={() => void onTeachConfirm(c, opt.role)}
+                          />
+                          {opt.label}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
         <div className="soc-diag">
-          <div className="soc-summary-title">Diagnostics</div>
-          <DiagRow label="Connected" value={diag.connected} />
-          <DiagRow label="Package Loaded" value={diag.packageLoaded} />
-          <DiagRow label="Current Opportunity" value={diag.opportunityId || '—'} />
-          <DiagRow label="Current Domain" value={diag.domain || '—'} />
-          <DiagRow label="Fields" value={String(diag.fieldCount)} />
-          <DiagRow label="Generated" value={formatGenerated(diag.generatedAt)} />
+          <div className="soc-summary-title">Mapping Diagnostics</div>
+          {mapping ? (
+            <>
+              <DiagRow label="Detected" value={String(mapping.detected)} />
+              <DiagRow label="Mapped" value={String(mapping.mapped)} />
+              <DiagRow label="Domain Matches" value={String(mapping.domainMatches)} />
+              <DiagRow label="Alias Matches" value={String(mapping.aliasMatches)} />
+              <DiagRow label="Unknown" value={String(mapping.unknown)} />
+              <DiagRow label="Skipped" value={String(mapping.skipped)} />
+              <DiagRow label="Confidence" value={`${mapping.avgConfidence}%`} />
+            </>
+          ) : (
+            <>
+              <DiagRow label="Connected" value={diag.connected} />
+              <DiagRow label="Package Loaded" value={diag.packageLoaded} />
+              <DiagRow label="Current Opportunity" value={diag.opportunityId || '—'} />
+              <DiagRow label="Current Domain" value={diag.domain || '—'} />
+            </>
+          )}
         </div>
 
         <div className="soc-row">
@@ -262,18 +372,15 @@ export function Widget() {
         </button>
 
         <ul className="soc-rules">
-          <li>One active package in memory</li>
-          <li>Activate another package to replace</li>
+          <li>Green = domain · Blue = alias · Yellow = confidence</li>
           <li>Never Submit / CAPTCHA / payment</li>
+          <li>Unknown until verified</li>
         </ul>
 
         {summary && (
           <div className="soc-summary">
-            <div className="soc-summary-title">Summary</div>
+            <div className="soc-summary-title">Fill Summary</div>
             <div className="soc-stats soc-stats-grid">
-              <span>
-                Detected <b>{summary.detected}</b>
-              </span>
               <span>
                 Filled <b>{summary.filled}</b>
               </span>
@@ -286,8 +393,8 @@ export function Widget() {
             </div>
             {summary.details.slice(0, 10).map((d, i) => (
               <div key={`${d.uid}-${i}`} className="soc-details">
-                <span className={`soc-pill soc-pill-${d.action}`}>
-                  {d.action === 'filled' ? 'ok' : 'skip'}
+                <span className={`soc-pill soc-pill-${d.matchSource ?? d.action}`}>
+                  {d.matchSource ?? d.action}
                 </span>{' '}
                 {roleLabel(d.role)}
                 <span className="soc-muted"> — {d.reason}</span>

@@ -112,7 +112,28 @@ export interface FieldClassification {
   matchedAlias: string | null;
   matchedBy: string[];
   reason: string;
+  /** How the mapping was resolved — drives confidence colors */
+  matchSource?: MatchSource;
 }
+
+export type MatchSource =
+  | 'domain'
+  | 'alias'
+  | 'confidence'
+  | 'structural'
+  | 'unknown'
+  | 'skipped';
+
+export type MappingDiagnostics = {
+  detected: number;
+  mapped: number;
+  domainMatches: number;
+  aliasMatches: number;
+  confidenceMatches: number;
+  unknown: number;
+  skipped: number;
+  avgConfidence: number;
+};
 
 export type FillAction =
   | 'filled'
@@ -132,6 +153,7 @@ export interface FillDetail {
   matchedAlias: string | null;
   matchedBy: string[];
   required: boolean;
+  matchSource?: MatchSource;
 }
 
 export interface FillSummary {
@@ -142,6 +164,7 @@ export interface FillSummary {
   captcha: number;
   details: FillDetail[];
   missingRequired: FillDetail[];
+  mapping?: MappingDiagnostics;
 }
 
 export interface FillResult {
@@ -149,8 +172,17 @@ export interface FillResult {
   classifications: FieldClassification[];
 }
 
+export type DomainFieldMapping = {
+  websiteField: string;
+  mappedTo: string;
+  confidence?: number;
+  verifiedBy?: string;
+};
+
 export interface DomainLearningHook {
   getDomainAliases?(hostname: string): Partial<Record<FillableRole, string[]>> | null;
+  /** Verified shared mappings — highest priority */
+  getDomainMappings?(hostname: string): DomainFieldMapping[] | null;
   rememberMapping?(_input: {
     learningKey: string;
     role: FillableRole;

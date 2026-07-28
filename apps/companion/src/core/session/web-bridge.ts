@@ -1,9 +1,11 @@
 /**
- * Bridge: SEO OS activates a package via postMessage — no tokens, no fetch.
+ * Bridge: SEO OS activates a package via postMessage — no handoff tokens.
+ * Optional learning credentials (apiBase + accessToken + orgId) for shared knowledge.
  */
 import type { ActivePackage } from '../types';
 import { companionLog, patchDiagnostics } from '../diagnostics/connection';
 import { activatePackage } from '../runtime/memory';
+import type { LearningAuth } from '../learning/api';
 
 export type ActivateListener = () => void;
 const listeners = new Set<ActivateListener>();
@@ -62,24 +64,27 @@ function normalizeActivePackage(raw: unknown): ActivePackage | null {
   };
 }
 
+function normalizeLearning(data: Record<string, unknown>): LearningAuth | null {
+  const apiBase = String(data.apiBase ?? '').trim();
+  const accessToken = String(data.accessToken ?? '').trim();
+  const orgId = String(data.orgId ?? '').trim();
+  const projectId = String(data.projectId ?? '').trim();
+  if (!apiBase || !accessToken || !orgId) return null;
+  return { apiBase, accessToken, orgId, projectId };
+}
+
 export function installWebHandoffBridge(): void {
-  companionLog('bridge.installed', { origin: location.origin });
+  companionLog('bridge.installed', { origin: location.origin, phase: '2.3' });
   window.addEventListener('message', (event) => {
     if (event.origin && event.origin !== location.origin && !isAllowedOrigin(event.origin)) {
       companionLog('bridge.origin_rejected', { origin: event.origin }, 'warn');
       return;
     }
-    // Prefer same-window messages from SEO OS page
     if (event.source !== window && event.source !== null) {
       if (!isAllowedOrigin(event.origin)) return;
     }
 
-    const data = event.data as {
-      source?: string;
-      type?: string;
-      package?: unknown;
-      error?: string;
-    } | null;
+    const data = event.data as Record<string, unknown> | null;
     if (!data || data.source !== 'seo-os-web') return;
 
     if (data.type === 'companion.activate_error') {
@@ -94,6 +99,7 @@ export function installWebHandoffBridge(): void {
 
     companionLog('bridge.activate_received', {
       hasPackage: Boolean(data.package),
+      hasLearning: Boolean(data.accessToken && data.apiBase),
     });
 
     const pkg = normalizeActivePackage(data.package);
@@ -105,7 +111,12 @@ export function installWebHandoffBridge(): void {
       return;
     }
 
-    activatePackage(pkg);
+    const learning = normalizeLearning({
+      ...data,
+      projectId: pkg.projectId,
+    });
+
+    activatePackage(pkg, { learning });
     notify();
   });
 }

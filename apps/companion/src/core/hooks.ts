@@ -1,14 +1,15 @@
 export type { DomainLearningHook, AiMatchHook } from './types';
-import { learningStore } from './learning/store';
+export { createDomainLearningHook } from './learning/api';
 
-/** Phase 2: no local aliases. Phase 3 can wire learningStore. */
+/** Prefer createDomainLearningHook() — wired to shared SEO OS knowledge. */
 export const noopDomainLearning = {
   getDomainAliases(_hostname: string) {
     return null;
   },
-  rememberMapping() {
-    void learningStore;
+  getDomainMappings(_hostname: string) {
+    return null;
   },
+  rememberMapping() {},
 };
 
 export const noopAiMatch = {
