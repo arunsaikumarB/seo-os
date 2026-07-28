@@ -11,11 +11,20 @@ import type {
 } from '../types';
 import { CONFIDENCE_FILL_THRESHOLD, FILLABLE_ROLES } from '../types';
 import { FIELD_ALIASES, STRUCTURAL_HINTS } from './aliases';
-import { bestAliasScore, blobHasHint, fieldKnowledgeKey, WEIGHTS } from './confidence';
+import {
+  bestAliasScore,
+  bestResolvedLabelScore,
+  blobHasHint,
+  fieldKnowledgeKey,
+  WEIGHTS,
+} from './confidence';
+import { logResolvedFields } from '../detect/label-resolver';
+import { ROLE_LABELS } from './aliases';
 
 function signalBlob(field: NormalizedField): string {
   return [
     field.label,
+    field.rawLabel,
     field.placeholder,
     field.name,
     field.id,
@@ -232,23 +241,63 @@ export function classifyFields(
     const domainHit = matchDomainMapping(field, mappings);
     if (domainHit) return domainHit;
 
-    // Priority 3–4: global alias + confidence scoring
+    // Priority 3–4: resolved label → alias library (Phase 2.3.1)
+    // Pass ONLY the resolved label into the alias engine; confidence from resolver.
     let best: FieldClassification | null = null;
     for (const role of FILLABLE_ROLES) {
-      const hit = bestAliasScore(field, aliases[role] ?? []);
-      if (!hit) continue;
-      if (!best || hit.score > best.confidence) {
-        const strongAlias =
-          hit.matchedBy.includes('Label') && hit.score >= CONFIDENCE_FILL_THRESHOLD;
-        best = {
-          field,
-          role,
-          confidence: hit.score,
-          matchedAlias: hit.matchedAlias,
-          matchedBy: hit.matchedBy,
-          reason: `Matched alias "${hit.matchedAlias}" via ${hit.matchedBy.join(', ')}`,
-          matchSource: strongAlias ? 'alias' : 'confidence',
-        };
+      const aliasesForRole = aliases[role] ?? [];
+      const labelHit = field.label
+        ? bestResolvedLabelScore(field.label, aliasesForRole)
+        : null;
+      if (labelHit) {
+        const confidence = Math.max(
+          field.labelResolverConfidence || 0,
+          Math.min(100, labelHit.score)
+        );
+        // Prefer resolver confidence when we have a real text resolver
+        const useConfidence =
+          field.labelResolverConfidence >= 75
+            ? field.labelResolverConfidence
+            : confidence;
+        if (!best || useConfidence > best.confidence) {
+          best = {
+            field,
+            role,
+            confidence: useConfidence,
+            matchedAlias: labelHit.matchedAlias,
+            matchedBy: [
+              ...labelHit.matchedBy,
+              `Resolver:${field.labelResolver || 'NONE'}`,
+            ],
+            reason: `Resolved "${field.rawLabel || field.label}" via ${field.labelResolver} → alias "${labelHit.matchedAlias}"`,
+            matchSource:
+              useConfidence >= CONFIDENCE_FILL_THRESHOLD ? 'alias' : 'confidence',
+          };
+        }
+        continue;
+      }
+
+      // Fallback multi-signal only when label resolver was weak (name/id)
+      if (
+        field.labelResolver === 'NAME_ATTR' ||
+        field.labelResolver === 'ID_ATTR' ||
+        field.labelResolver === 'NONE' ||
+        !field.label
+      ) {
+        const hit = bestAliasScore(field, aliasesForRole);
+        if (!hit) continue;
+        if (!best || hit.score > best.confidence) {
+          best = {
+            field,
+            role,
+            confidence: hit.score,
+            matchedAlias: hit.matchedAlias,
+            matchedBy: hit.matchedBy,
+            reason: `Matched alias "${hit.matchedAlias}" via ${hit.matchedBy.join(', ')}`,
+            matchSource:
+              hit.score >= CONFIDENCE_FILL_THRESHOLD ? 'confidence' : 'confidence',
+          };
+        }
       }
     }
 
@@ -265,6 +314,16 @@ export function classifyFields(
     }
     return best;
   });
+
+  // Mandatory label-resolution log (Phase 2.3.1)
+  logResolvedFields(
+    raw.map((c) => c.field),
+    raw.map((c) => ({
+      matchedAlias: c.matchedAlias ?? ROLE_LABELS[c.role] ?? c.role,
+      confidence: c.confidence,
+      role: ROLE_LABELS[c.role] ?? c.role,
+    }))
+  );
 
   // One fillable role → strongest field only
   const winners = new Map<FieldRole, FieldClassification>();
@@ -357,11 +416,23 @@ export function debugLogClassifications(
   classifications: FieldClassification[],
   filledUids: Set<string>
 ): void {
+  logResolvedFields(
+    classifications.map((c) => c.field),
+    classifications.map((c) => ({
+      matchedAlias: c.matchedAlias ?? ROLE_LABELS[c.role] ?? c.role,
+      confidence: c.confidence,
+      role: ROLE_LABELS[c.role] ?? c.role,
+    }))
+  );
+
   const lines: string[] = ['[SEO OS Companion] Detected Fields', '================'];
   for (const c of classifications) {
     lines.push(ROLE_LABELS_SAFE(c.role));
     lines.push(`Confidence ${c.confidence}%`);
     lines.push(`Source ${c.matchSource ?? '—'}`);
+    lines.push(`Resolver ${c.field.labelResolver ?? 'NONE'}`);
+    lines.push(`Raw Label ${c.field.rawLabel || '(none)'}`);
+    lines.push(`Normalized ${c.field.label || '(none)'}`);
     if (c.matchedBy.length) lines.push(`Matched By\n${c.matchedBy.join(', ')}`);
     if (c.matchedAlias) lines.push(`Matched Alias\n${c.matchedAlias}`);
     const filled = filledUids.has(c.field.uid);

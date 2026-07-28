@@ -4,6 +4,7 @@ import type { NormalizedField } from '../types';
 /**
  * Weighted confidence — Phase 2.3
  * Domain knowledge applies +100 separately in the classifier.
+ * Phase 2.3.1: primary path matches the resolved label only; resolver confidence wins.
  */
 export const WEIGHTS = {
   exactLabel: 60,
@@ -28,6 +29,7 @@ function exactOrWord(signal: string, alias: string): 'exact' | 'word' | 'none' {
   const re = new RegExp(`(?:^|\\s)${escapeReg(alias)}(?:\\s|$)`);
   if (re.test(signal)) return 'word';
   if (alias.length >= 4 && signal.includes(alias)) return 'word';
+  if (signal.length >= 3 && alias.includes(signal)) return 'word';
   return 'none';
 }
 
@@ -36,8 +38,40 @@ function escapeReg(s: string): string {
 }
 
 /**
- * Score one field against one alias using weighted signal hits.
- * Cap at 100 (domain boost applied outside).
+ * Phase 2.3.1 — match ONLY the resolved label against an alias.
+ * Confidence is filled in by the classifier from labelResolverConfidence.
+ */
+export function scoreResolvedLabelAgainstAlias(
+  resolvedLabel: string,
+  aliasRaw: string
+): SignalScore | null {
+  const label = normalizeText(resolvedLabel);
+  const alias = normalizeText(aliasRaw);
+  if (!label || !alias) return null;
+  const hit = exactOrWord(label, alias);
+  if (hit === 'none') return null;
+  return {
+    score: hit === 'exact' ? 100 : 90,
+    matchedBy: ['Resolved Label'],
+    matchedAlias: aliasRaw,
+  };
+}
+
+export function bestResolvedLabelScore(
+  resolvedLabel: string,
+  aliases: string[]
+): SignalScore | null {
+  let best: SignalScore | null = null;
+  for (const alias of aliases) {
+    const hit = scoreResolvedLabelAgainstAlias(resolvedLabel, alias);
+    if (!hit) continue;
+    if (!best || hit.score > best.score) best = hit;
+  }
+  return best;
+}
+
+/**
+ * Legacy multi-signal scorer (kept for domain alias overlays / fallbacks).
  */
 export function scoreAliasAgainstField(field: NormalizedField, aliasRaw: string): SignalScore {
   const alias = normalizeText(aliasRaw);
@@ -114,7 +148,14 @@ export function blobHasHint(blob: string, hints: string[]): boolean {
 
 /** Normalize a DOM field key for domain knowledge lookup */
 export function fieldKnowledgeKey(field: NormalizedField): string[] {
-  const keys = [field.name, field.id, field.label, field.ariaLabel, field.placeholder]
+  const keys = [
+    field.name,
+    field.id,
+    field.label,
+    field.rawLabel,
+    field.ariaLabel,
+    field.placeholder,
+  ]
     .map((s) =>
       String(s ?? '')
         .trim()

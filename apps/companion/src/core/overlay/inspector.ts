@@ -125,13 +125,20 @@ function onEnter(c: FieldClassification, ev: Event): void {
   const src = sourceFor(c);
   tip.textContent = [
     'Field',
-    roleTitle(c.role),
+    c.field.element.tagName,
+    '',
+    'Resolved Label',
+    c.field.rawLabel || c.field.label || '(none)',
+    '',
+    'Resolver',
+    c.field.labelResolver || 'NONE',
     '',
     `Confidence ${c.confidence}%`,
-    sourceLabel(src),
+    '',
+    'Mapped To',
+    roleTitle(c.role),
     c.matchedAlias ? `Alias: ${c.matchedAlias}` : '',
-    c.matchedBy.length ? `Signals: ${c.matchedBy.join(', ')}` : '',
-    c.reason,
+    sourceLabel(src),
   ]
     .filter(Boolean)
     .join('\n');

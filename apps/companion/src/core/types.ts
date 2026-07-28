@@ -97,7 +97,14 @@ export interface NormalizedField {
   id: string;
   placeholder: string;
   ariaLabel: string;
+  /** Normalized resolved label (for alias matching) */
   label: string;
+  /** Original visible label text before normalization */
+  rawLabel: string;
+  /** Which resolver produced the label */
+  labelResolver: string;
+  /** Resolver confidence (0–100) */
+  labelResolverConfidence: number;
   nearbyText: string;
   sectionHeading: string;
   required: boolean;
