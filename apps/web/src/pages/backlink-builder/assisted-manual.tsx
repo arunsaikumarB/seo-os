@@ -63,7 +63,7 @@ type AssistedPackage = {
   opportunityId: string;
   domain: string;
   entryUrl: string;
-  bucket: 'ready' | 'check_fields' | 'needs_person';
+  bucket: 'ready' | 'check_fields' | 'needs_person' | 'paid_aside';
   status: string;
   gate: string;
   fingerprintStatus: string;
@@ -116,6 +116,7 @@ const BUCKET_LABEL: Record<string, string> = {
   ready: 'Ready',
   check_fields: 'Check these fields',
   needs_person: 'Needs a person',
+  paid_aside: 'Paid (set aside)',
 };
 
 /** Role → Companion ActivePackage field key (fill engine). */
@@ -372,6 +373,7 @@ export function AssistedManualPage() {
             ready: number;
             checkFields: number;
             needsPerson: number;
+            paidAside?: number;
             assistedOk?: boolean;
             conservationOk?: boolean;
           };
@@ -409,6 +411,24 @@ export function AssistedManualPage() {
       void qc.invalidateQueries({ queryKey: ['assisted-manual-metrics', projectId] });
     },
     onError: (e) => toast.error(getApiErrorMessage(e, 'Prepare failed')),
+  });
+
+  const rescanPricing = useMutation({
+    mutationFn: () =>
+      request<{
+        data: { scanned: number; free: number; paid: number; unknown: number; failed: number };
+      }>(`/v1/projects/${projectId}/backlink-builder/assisted-manual/rescan-pricing`, {
+        method: 'POST',
+        body: JSON.stringify({ limit: 100, force: true }),
+      }),
+    onSuccess: (res) => {
+      const d = res.data;
+      toast.success(
+        `Free/Paid scan: ${d.free} free · ${d.paid} paid (set aside) · ${d.unknown} unknown`
+      );
+      void qc.invalidateQueries({ queryKey: ['assisted-manual', projectId] });
+    },
+    onError: (e) => toast.error(getApiErrorMessage(e, 'Free/Paid scan failed')),
   });
 
   const patchStatus = useMutation({
@@ -610,6 +630,7 @@ export function AssistedManualPage() {
     ready: packages.filter((p) => p.bucket === 'ready'),
     check_fields: packages.filter((p) => p.bucket === 'check_fields'),
     needs_person: packages.filter((p) => p.bucket === 'needs_person'),
+    paid_aside: packages.filter((p) => p.bucket === 'paid_aside'),
   };
 
   return (
@@ -620,14 +641,27 @@ export function AssistedManualPage() {
             <ClipboardList className="h-6 w-6" /> Assisted Manual
           </h1>
           <p className="text-muted-foreground mt-1 max-w-2xl">
-            Open each prepared package, paste the fields, clear any login/CAPTCHA yourself, and
-            submit on the site. Every content-ready site lands here — one manual lane.
+            Free worklist only — form/payment text must include the word “free”. Paid listings
+            (no “free”) are parked below. Sites with both free and paid still count as Free —
+            pick Free yourself on the site.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" onClick={() => prepare.mutate()} disabled={prepare.isPending}>
             <RefreshCw className={cn('h-3.5 w-3.5 mr-1', prepare.isPending && 'animate-spin')} />
             Prepare all content-ready sites
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => rescanPricing.mutate()}
+            disabled={rescanPricing.isPending}
+            title="Re-fetch pages and park listings without the word free"
+          >
+            <RefreshCw
+              className={cn('h-3.5 w-3.5 mr-1', rescanPricing.isPending && 'animate-spin')}
+            />
+            Scan Free vs Paid
           </Button>
           <Button size="sm" variant="outline" onClick={() => void downloadExcel()}>
             <Download className="h-3.5 w-3.5 mr-1" /> Excel
@@ -648,10 +682,11 @@ export function AssistedManualPage() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-3 sm:grid-cols-4 text-sm">
-        <Stat label="Ready" value={d?.counts.ready} />
-        <Stat label="Check these fields" value={d?.counts.checkFields} />
+      <div className="grid gap-3 sm:grid-cols-5 text-sm">
+        <Stat label="Ready (free)" value={d?.counts.ready} />
+        <Stat label="Check fields" value={d?.counts.checkFields} />
         <Stat label="Needs a person" value={d?.counts.needsPerson} />
+        <Stat label="Paid (set aside)" value={d?.counts.paidAside ?? byBucket.paid_aside.length} />
         <Stat
           label="Conservation"
           value={d?.counts.conservationOk === false ? 'FAIL' : 'ok'}
@@ -699,18 +734,28 @@ export function AssistedManualPage() {
         </Card>
       ) : null}
 
-      {(['ready', 'check_fields', 'needs_person'] as const).map((bucket) => (
+      {(['ready', 'check_fields', 'needs_person', 'paid_aside'] as const).map((bucket) => (
         <section key={bucket} className="space-y-2">
           <h2 className="text-sm font-medium">
             {BUCKET_LABEL[bucket]}{' '}
             <span className="text-muted-foreground tabular-nums">
               ({byBucket[bucket].length})
             </span>
+            {bucket === 'paid_aside' ? (
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                — not in the free worklist
+              </span>
+            ) : null}
           </h2>
           {byBucket[bucket].length === 0 ? (
             <p className="text-sm text-muted-foreground pl-1">None yet.</p>
           ) : (
-            <ul className="rounded-xl border divide-y overflow-hidden bg-card">
+            <ul
+              className={cn(
+                'rounded-xl border divide-y overflow-hidden bg-card',
+                bucket === 'paid_aside' && 'opacity-80 border-dashed'
+              )}
+            >
               {byBucket[bucket].map((pkg) => {
                 const open = openId === pkg.id;
                 const issues = collectPackageIssues(pkg);

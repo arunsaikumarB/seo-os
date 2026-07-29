@@ -37,6 +37,8 @@ const SIMPLE_FORM = `
     <option>Technology</option>
     <option>Health</option>
   </select>
+  <label><input type="radio" name="plan" value="free" checked /> Free listing</label>
+  <label><input type="radio" name="plan" value="premium" /> Premium</label>
   <label for="logo">Logo</label>
   <input id="logo" name="logo" type="file" accept=".jpg,.png" />
   <label><input type="checkbox" name="terms" required /> I agree to terms</label>
@@ -46,8 +48,20 @@ const SIMPLE_FORM = `
 const MULTI_STEP = `
 <div class="wizard" data-step="1">Step 1 of 3</div>
 <form>
+  <label><input type="radio" name="type" value="free" /> Free</label>
   <input name="title" id="title" />
   <button type="button">Next</button>
+</form>
+`;
+
+const PAID_ONLY_FORM = `
+<form>
+  <div class="pricing">
+    <label><input type="radio" name="plan" /> Premium Listing $49</label>
+    <label><input type="radio" name="plan" /> Featured Plan</label>
+  </div>
+  <input name="url" id="url" type="url" />
+  <textarea name="description" id="description"></textarea>
 </form>
 `;
 
@@ -445,6 +459,25 @@ describe('Phase 7 Assisted Manual', () => {
     );
   });
 
+  it('parks paid-only forms (no free word) in paid_aside', () => {
+    const recipe = buildSiteRecipe({
+      domain: 'paid.example',
+      entryUrl: 'https://paid.example/submit',
+      html: PAID_ONLY_FORM,
+    });
+    expect(recipe.listingPricing).toBe('paid');
+    const pkg = buildAssistedPackage({
+      recipe,
+      content: {
+        title: 'Chefgaa',
+        longDescription: 'Restaurant POS',
+        url: 'https://chefgaa.com',
+      },
+    });
+    expect(pkg.bucket).toBe('paid_aside');
+    expect(pkg.listingPricing).toBe('paid');
+  });
+
   it('routes multi-step to Needs a person (AT4)', () => {
     const recipe = buildSiteRecipe({
       domain: 'wizard.example',
@@ -479,6 +512,7 @@ describe('Phase 7 Assisted Manual', () => {
           <option>Business & Economy</option>
           <option>Computers & Internet</option>
         </select>
+        <label><input type="radio" name="linktype" value="free" /> Free</label>
         <input type="submit" value="Go To Step Two" />
       </form>
     `;

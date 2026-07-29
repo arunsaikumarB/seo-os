@@ -33,6 +33,7 @@ type LinkProbeResult = {
   gates: string[];
   reasons: string[];
   probedAt: string;
+  listingPricing?: 'free' | 'paid' | 'unknown';
 };
 
 type QueueItem = {
@@ -99,6 +100,7 @@ export function RankedSubmitQueuePage() {
   const { request } = useApi();
   const qc = useQueryClient();
   const [band, setBand] = useState<ProbeBand | 'all'>('ready');
+  const [pricingFilter, setPricingFilter] = useState<'free' | 'paid' | 'all'>('free');
 
   const statsQ = useQuery({
     queryKey: ['link-probe-stats', projectId],
@@ -143,7 +145,15 @@ export function RankedSubmitQueuePage() {
   });
 
   const stats = statsQ.data?.data ?? queueQ.data?.data.stats;
-  const items = queueQ.data?.data.items ?? [];
+  const rawItems = queueQ.data?.data.items ?? [];
+  const items = useMemo(() => {
+    if (pricingFilter === 'all') return rawItems;
+    return rawItems.filter((it) => {
+      const p = it.probe.listingPricing ?? 'unknown';
+      if (pricingFilter === 'free') return p === 'free' || p === 'unknown';
+      return p === 'paid';
+    });
+  }, [rawItems, pricingFilter]);
 
   const funnelHint = useMemo(() => {
     if (!stats) return 'Run a probe to rank your imported websites.';
@@ -162,8 +172,8 @@ export function RankedSubmitQueuePage() {
               <ListChecks className="h-6 w-6" /> Ranked Submit Queue
             </h1>
             <p className="text-muted-foreground text-sm mt-1 max-w-2xl">
-              Automatically find the websites that have a real, fillable submission form. Work only
-              the Ready band — skip dead links, CAPTCHA walls, and pages with no form.
+              Rank imported sites by form readiness. Default filter is Free only — form/payment
+              must include the word “free”. Paid listings are set aside.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -260,6 +270,24 @@ export function RankedSubmitQueuePage() {
               {b.label}
             </Button>
           ))}
+          <span className="text-xs text-muted-foreground mx-1">·</span>
+          {(
+            [
+              { id: 'free' as const, label: 'Free only' },
+              { id: 'paid' as const, label: 'Paid aside' },
+              { id: 'all' as const, label: 'All pricing' },
+            ] as const
+          ).map((p) => (
+            <Button
+              key={p.id}
+              size="sm"
+              variant={pricingFilter === p.id ? 'secondary' : 'outline'}
+              className="h-8"
+              onClick={() => setPricingFilter(p.id)}
+            >
+              {p.label}
+            </Button>
+          ))}
           <span className="text-xs text-muted-foreground ml-auto">
             Unprobed: {stats?.unprobed ?? 0}
           </span>
@@ -308,6 +336,25 @@ export function RankedSubmitQueuePage() {
                       >
                         {item.probe.band} · {item.probe.score}
                       </Badge>
+                      {item.probe.listingPricing ? (
+                        <Badge
+                          className={cn(
+                            'text-[10px]',
+                            item.probe.listingPricing === 'free' &&
+                              'bg-emerald-500/15 text-emerald-800 border-emerald-500/30',
+                            item.probe.listingPricing === 'paid' &&
+                              'bg-slate-500/15 text-slate-800 border-slate-500/30',
+                            item.probe.listingPricing === 'unknown' &&
+                              'bg-muted text-muted-foreground'
+                          )}
+                        >
+                          {item.probe.listingPricing === 'free'
+                            ? 'Free'
+                            : item.probe.listingPricing === 'paid'
+                              ? 'Paid'
+                              : 'Pricing ?'}
+                        </Badge>
+                      ) : null}
                       {item.probe.multiStep ? (
                         <Badge className="text-[10px] border-amber-500/40">Multi-step</Badge>
                       ) : null}

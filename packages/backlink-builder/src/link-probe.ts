@@ -12,6 +12,7 @@ import {
 } from './form-url-discovery.js';
 import { htmlHasFormElement, looksLikeSpaShell } from './form-unavailable.js';
 import { selectTargetForm } from './target-form.js';
+import { resolveListingPricing, type ListingPricingKind } from './listing-pricing.js';
 
 export const LINK_PROBE_BANDS = [
   'ready',
@@ -44,6 +45,8 @@ export type LinkProbeResult = {
   reasons: string[];
   pagesChecked: number;
   probedAt: string;
+  /** Free-word rule on form/payment HTML. */
+  listingPricing: ListingPricingKind;
 };
 
 export type ProbePageInput = {
@@ -75,6 +78,7 @@ function emptyResult(partial: Partial<LinkProbeResult>): LinkProbeResult {
     reasons: [],
     pagesChecked: 0,
     probedAt: new Date().toISOString(),
+    listingPricing: 'unknown',
     ...partial,
   };
 }
@@ -159,6 +163,7 @@ export function classifyProbedPage(input: ProbePageInput): LinkProbeResult {
   const gates = classifyGates(html, input.url);
   const hardGates = gates.filter((g) => HARD_GATES.has(g));
   const target = selectTargetForm(html, { minScore: 2 });
+  const listingPricing = resolveListingPricing({ html });
 
   const formFound =
     Boolean(target.formFound) ||
@@ -174,6 +179,7 @@ export function classifyProbedPage(input: ProbePageInput): LinkProbeResult {
       formUrl: input.url,
       pagesChecked: 1,
       reasons: ['SPA shell without form HTML'],
+      listingPricing,
       probedAt,
     });
   }
@@ -195,6 +201,7 @@ export function classifyProbedPage(input: ProbePageInput): LinkProbeResult {
       gates,
       pagesChecked: 1,
       reasons: [pageScore.reason || 'No submission form detected'],
+      listingPricing,
       probedAt,
     });
   }
@@ -204,6 +211,11 @@ export function classifyProbedPage(input: ProbePageInput): LinkProbeResult {
   if (pageScore.reason) reasons.push(pageScore.reason);
   if (multiStep) reasons.push('multi_step');
   if (hardGates.length) reasons.push(`gates:${hardGates.join(',')}`);
+  if (listingPricing === 'paid') reasons.push('paid_no_free_word');
+  if (listingPricing === 'free') reasons.push('free_listing');
+
+  // Paid listings are never "ready" — park for Ranked Queue free filter
+  const paidBand = listingPricing === 'paid';
 
   if (hardGates.length) {
     return emptyResult({
@@ -224,14 +236,15 @@ export function classifyProbedPage(input: ProbePageInput): LinkProbeResult {
       gates,
       reasons,
       pagesChecked: 1,
+      listingPricing,
       probedAt,
     });
   }
 
-  if (multiStep || composite < 55 || !pageScore.hasUrl) {
+  if (paidBand || multiStep || composite < 55 || !pageScore.hasUrl) {
     return emptyResult({
-      band: 'check',
-      score: composite,
+      band: paidBand ? 'check' : 'check',
+      score: paidBand ? Math.min(composite, 40) : composite,
       alive: true,
       httpStatus: status,
       formFound: true,
@@ -245,8 +258,13 @@ export function classifyProbedPage(input: ProbePageInput): LinkProbeResult {
       multiStep,
       spaShell,
       gates,
-      reasons: reasons.length ? reasons : ['Needs field / step review'],
+      reasons: reasons.length
+        ? reasons
+        : paidBand
+          ? ['Paid — no free word in form/payment']
+          : ['Needs field / step review'],
       pagesChecked: 1,
+      listingPricing,
       probedAt,
     });
   }
@@ -269,6 +287,7 @@ export function classifyProbedPage(input: ProbePageInput): LinkProbeResult {
     gates,
     reasons: reasons.length ? reasons : ['Single-step form with fillable fields'],
     pagesChecked: 1,
+    listingPricing,
     probedAt,
   });
 }
@@ -307,6 +326,13 @@ export function mergeProbeResults(
     ...best,
     pagesChecked,
     probedAt: new Date().toISOString(),
+    // Prefer free if any candidate found free; else keep best's pricing
+    listingPricing:
+      all.some((r) => r.listingPricing === 'free')
+        ? 'free'
+        : all.some((r) => r.listingPricing === 'paid')
+          ? 'paid'
+          : best.listingPricing ?? 'unknown',
   };
 }
 

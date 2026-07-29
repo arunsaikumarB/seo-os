@@ -339,6 +339,30 @@ backlinkBuilderRouter.post(
   }
 );
 
+backlinkBuilderRouter.post(
+  '/assisted-manual/rescan-pricing',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const body = z
+        .object({
+          limit: z.number().int().min(1).max(200).optional(),
+          force: z.boolean().optional(),
+        })
+        .parse(req.body ?? {});
+      const { rescanAssistedListingPricing } = await import(
+        '../../modules/browser-execution/assisted-manual.service.js'
+      );
+      res.json({
+        data: await rescanAssistedListingPricing(param(req.params.projectId), body),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 backlinkBuilderRouter.get(
   '/assisted-manual/metrics',
   authMiddleware,

@@ -173,6 +173,7 @@ async function probeOpportunity(
       reasons: ['Missing URL'],
       pagesChecked: 0,
       probedAt: new Date().toISOString(),
+      listingPricing: 'unknown',
     };
   }
 
@@ -322,6 +323,7 @@ export async function runLinkProbeBatch(input: {
         reasons: [err instanceof Error ? err.message : 'probe_error'],
         pagesChecked: 0,
         probedAt: new Date().toISOString(),
+        listingPricing: 'unknown',
       };
       await saveProbe(row.id, (row.metadata as Record<string, unknown>) ?? {}, fail);
       bands.dead = (bands.dead ?? 0) + 1;

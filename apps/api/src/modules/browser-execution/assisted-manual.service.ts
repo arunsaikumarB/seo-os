@@ -47,10 +47,12 @@ import {
   isIntermediateWizardStep,
   htmlHasCoreContentFields,
   formatWizardStepSequence,
+  resolveListingPricing,
   type AssistedPackagePayload,
   type FieldRole,
   type FormDiscoverySource,
   type FormUrlHintBundle,
+  type ListingPricingKind,
   type PackageStatus,
   type SiteRecipe,
 } from '@seo-os/backlink-builder';
@@ -1504,11 +1506,27 @@ async function prepareOnePackage(
     }
   }
 
-  if (payload.fields.some((f) => f.overLimit)) {
+  if (payload.fields.some((f) => f.overLimit) && payload.bucket !== 'paid_aside') {
     payload.bucket = 'needs_person';
     payload.failureReason =
       payload.failureReason ??
       'Content exceeds known character limit — regenerate or edit';
+  }
+
+  // Final free/paid park — word "free" in form/payment → free worklist; else paid_aside
+  const pricing = resolveListingPricing({
+    html,
+    wizardWalkStatus: payload.wizardWalkStatus ?? recipe.wizardWalkStatus,
+    prior: (payload.listingPricing as ListingPricingKind | null) ?? recipe.listingPricing,
+  });
+  payload.listingPricing = pricing;
+  recipe.listingPricing = pricing;
+  if (pricing === 'paid' || payload.wizardWalkStatus === 'paid_only') {
+    payload.bucket = 'paid_aside';
+    payload.failureReason =
+      payload.failureReason?.includes('Paid')
+        ? payload.failureReason
+        : 'Paid listing — no “free” word in form/payment sections. Set aside.';
   }
 
   const row = {
@@ -1684,6 +1702,9 @@ export async function listAssistedPackages(workspaceId: string) {
   await healStripCategoryFromPackages(workspaceId).catch((err) =>
     logger.warn({ err, workspaceId }, 'assisted heal strip category fields failed')
   );
+  await healPaidAsideFromStoredSignals(workspaceId).catch((err) =>
+    logger.warn({ err, workspaceId }, 'assisted heal paid_aside failed')
+  );
 
   const { data: rows } = await admin()
     .from('assisted_packages')
@@ -1707,9 +1728,14 @@ export async function listAssistedPackages(workspaceId: string) {
       liveFingerprint: null,
     });
     let current = row;
-    if (status === 'stale' && row.fingerprint_status !== 'stale') {
+    const priorPayload = (row.payload as AssistedPackagePayload) ?? ({} as AssistedPackagePayload);
+    const alreadyPaid =
+      String(row.bucket) === 'paid_aside' ||
+      priorPayload.listingPricing === 'paid' ||
+      priorPayload.wizardWalkStatus === 'paid_only';
+    if (status === 'stale' && row.fingerprint_status !== 'stale' && !alreadyPaid) {
       const payload = {
-        ...(row.payload as AssistedPackagePayload),
+        ...priorPayload,
         fingerprintStatus: 'stale' as const,
         bucket: 'needs_person' as const,
         failureReason: 'Package expired — re-prepare',
@@ -1741,7 +1767,7 @@ export async function listAssistedPackages(workspaceId: string) {
     automatable: board.counts.automatable,
     manualTotal: board.counts.manual,
     assistedPackages: packages.map((p) => ({
-      bucket: p.bucket as 'ready' | 'check_fields' | 'needs_person',
+      bucket: p.bucket as 'ready' | 'check_fields' | 'needs_person' | 'paid_aside',
     })),
     manualWithPackage,
   });
@@ -1753,6 +1779,7 @@ export async function listAssistedPackages(workspaceId: string) {
       'Does not guarantee the listing goes live.',
       'Multi-step forms: content is prepared for later steps — you navigate and paste.',
       'Does not attach images for you.',
+      'Free only: form/payment must contain the word “free”. No “free” → Paid (set aside).',
     ],
     pilot: {
       max: ASSISTED_MANUAL_PILOT_MAX,
@@ -2005,6 +2032,155 @@ export async function updateAssistedPackageStatus(
   }
 
   return formatPackageRow(data);
+}
+
+/**
+ * Park packages that already know they are paid (wizard paid_only / prior stamp)
+ * without waiting for a full re-prepare.
+ */
+async function healPaidAsideFromStoredSignals(workspaceId: string) {
+  const { data: rows } = await admin()
+    .from('assisted_packages')
+    .select('id, bucket, payload, failure_reason, status')
+    .eq('workspace_id', workspaceId)
+    .neq('bucket', 'paid_aside')
+    .limit(400);
+  if (!rows?.length) return;
+
+  for (const row of rows) {
+    if (String(row.status) === 'skipped' || String(row.status) === 'done') continue;
+    const payload = (row.payload as AssistedPackagePayload) ?? ({} as AssistedPackagePayload);
+    const pricing = resolveListingPricing({
+      wizardWalkStatus: payload.wizardWalkStatus,
+      prior: payload.listingPricing as ListingPricingKind | null,
+    });
+    const notes = `${payload.failureReason ?? ''} ${payload.gateNotes ?? ''} ${payload.multiStepLabel ?? ''}`;
+    const looksPaid =
+      pricing === 'paid' ||
+      payload.wizardWalkStatus === 'paid_only' ||
+      /paid\s+submission\s+only|paid\s+listing|no\s+[“"]?free/i.test(notes);
+
+    if (!looksPaid) continue;
+
+    const nextPayload: AssistedPackagePayload = {
+      ...payload,
+      listingPricing: 'paid',
+      bucket: 'paid_aside',
+      failureReason:
+        'Paid listing — no “free” word in form/payment sections. Set aside.',
+    };
+    await admin()
+      .from('assisted_packages')
+      .update({
+        bucket: 'paid_aside',
+        failure_reason: nextPayload.failureReason,
+        payload: nextPayload,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', row.id);
+  }
+}
+
+/**
+ * Lightweight free/paid rescan — fetch entry/form URL HTML and park paid packages.
+ * Use after import / when the worklist is full of unpriced "Needs a person" cards.
+ */
+export async function rescanAssistedListingPricing(
+  workspaceId: string,
+  opts?: { limit?: number; force?: boolean }
+) {
+  const limit = Math.min(200, Math.max(1, opts?.limit ?? 80));
+  const force = Boolean(opts?.force);
+
+  const { data: rows, error } = await admin()
+    .from('assisted_packages')
+    .select('id, domain, entry_url, bucket, payload, status')
+    .eq('workspace_id', workspaceId)
+    .order('prepared_at', { ascending: false })
+    .limit(limit * 2);
+  if (error) throw new AppError(500, 'INTERNAL_ERROR', error.message);
+
+  const candidates = (rows ?? []).filter((row) => {
+    if (String(row.status) === 'skipped' || String(row.status) === 'done') return false;
+    const payload = (row.payload as AssistedPackagePayload) ?? ({} as AssistedPackagePayload);
+    if (force) return true;
+    if (payload.listingPricing === 'free' || payload.listingPricing === 'paid') return false;
+    return true;
+  }).slice(0, limit);
+
+  let free = 0;
+  let paid = 0;
+  let unknown = 0;
+  let failed = 0;
+
+  for (const row of candidates) {
+    const payload = (row.payload as AssistedPackagePayload) ?? ({} as AssistedPackagePayload);
+    const url =
+      String(payload.resolvedFormUrl || payload.entryUrl || row.entry_url || '').trim();
+    if (!url) {
+      unknown += 1;
+      continue;
+    }
+    const html = await fetchHtml(url);
+    const pricing = resolveListingPricing({
+      html,
+      wizardWalkStatus: payload.wizardWalkStatus,
+      prior: payload.listingPricing as ListingPricingKind | null,
+    });
+
+    if (!html && pricing === 'unknown') {
+      failed += 1;
+      continue;
+    }
+
+    if (pricing === 'free') free += 1;
+    else if (pricing === 'paid') paid += 1;
+    else unknown += 1;
+
+    const nextBucket =
+      pricing === 'paid'
+        ? 'paid_aside'
+        : String(row.bucket) === 'paid_aside' && pricing === 'free'
+          ? 'needs_person'
+          : String(row.bucket);
+
+    const nextPayload: AssistedPackagePayload = {
+      ...payload,
+      listingPricing: pricing,
+      bucket: nextBucket as AssistedPackagePayload['bucket'],
+      failureReason:
+        pricing === 'paid'
+          ? 'Paid listing — no “free” word in form/payment sections. Set aside.'
+          : pricing === 'free' && String(row.bucket) === 'paid_aside'
+            ? null
+            : payload.failureReason,
+    };
+
+    await admin()
+      .from('assisted_packages')
+      .update({
+        bucket: nextBucket,
+        failure_reason: nextPayload.failureReason,
+        payload: nextPayload,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', row.id);
+  }
+
+  logger.info(
+    { workspaceId, scanned: candidates.length, free, paid, unknown, failed },
+    'assisted-manual listing pricing rescan'
+  );
+
+  return {
+    scanned: candidates.length,
+    free,
+    paid,
+    unknown,
+    failed,
+    honesty:
+      'Rule: word “free” in form/payment sections → Free worklist; otherwise Paid (set aside). Both free+paid still counts as Free — pick Free on the site.',
+  };
 }
 
 /**

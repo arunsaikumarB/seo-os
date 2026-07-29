@@ -18,6 +18,12 @@ import {
   formUnavailableMessage,
 } from './form-unavailable.js';
 import { htmlHasCoreContentFields } from './wizard-walk.js';
+import {
+  resolveListingPricing,
+  type ListingPricingKind,
+} from './listing-pricing.js';
+
+export type { ListingPricingKind } from './listing-pricing.js';
 
 /**
  * Phase 7 — Assisted Manual packages (human submits; app never auto-publishes).
@@ -121,7 +127,7 @@ export function gateBlocksReady(gate: AssistedGate | string | null | undefined):
   return g !== 'none' && g !== '';
 }
 
-export type AssistedBucket = 'ready' | 'check_fields' | 'needs_person';
+export type AssistedBucket = 'ready' | 'check_fields' | 'needs_person' | 'paid_aside';
 export type PackageStatus = 'not_started' | 'in_progress' | 'done' | 'failed' | 'skipped';
 export type FingerprintStatus = 'fresh' | 'stale' | 'changed';
 
@@ -136,7 +142,8 @@ export type AssistedVisualStatus =
   | 'warning'
   | 'ready'
   | 'check_fields'
-  | 'needs_person';
+  | 'needs_person'
+  | 'paid_aside';
 
 export type AssistedVisualTone = 'ok' | 'warn' | 'block';
 
@@ -211,6 +218,17 @@ export function resolveAssistedVisualStatus(pkg: {
       badgeLabel: null,
       blocked: true,
       needsHumanReview: true,
+      completedAt: null,
+    };
+  }
+
+  if (bucket === 'paid_aside') {
+    return {
+      visualStatus: 'paid_aside',
+      tone: 'warn',
+      badgeLabel: null,
+      blocked: false,
+      needsHumanReview: false,
       completedAt: null,
     };
   }
@@ -331,6 +349,11 @@ export type SiteRecipe = {
   readerVersion?: number;
   /** Field-role / confidence classifier version — bump when mapping rules change. */
   classifierVersion?: number;
+  /**
+   * Free vs paid — word "free" in form/payment sections → free; otherwise paid.
+   * Sites with both still count as free (human picks Free on the site).
+   */
+  listingPricing?: ListingPricingKind | null;
 };
 
 export function recipeVersionsCurrent(recipe: SiteRecipe | null | undefined): boolean {
@@ -433,6 +456,8 @@ export type AssistedPackagePayload = {
   targetFormSelector?: string | null;
   readerVersion?: number;
   classifierVersion?: number;
+  /** Free worklist vs paid park (see listing-pricing.ts). */
+  listingPricing?: ListingPricingKind | null;
 };
 
 export type AssistedLaneCounts = {
@@ -446,6 +471,7 @@ export type AssistedLaneCounts = {
   ready: number;
   checkFields: number;
   needsPerson: number;
+  paidAside: number;
   assistedOk: boolean;
   /** Phase 6.3 lane conservation: automatable + manualTotal === active */
   conservationOk: boolean;
@@ -469,6 +495,7 @@ export function computeAssistedLaneCounts(input: {
   const ready = input.assistedPackages.filter((p) => p.bucket === 'ready').length;
   const checkFields = input.assistedPackages.filter((p) => p.bucket === 'check_fields').length;
   const needsPerson = input.assistedPackages.filter((p) => p.bucket === 'needs_person').length;
+  const paidAside = input.assistedPackages.filter((p) => p.bucket === 'paid_aside').length;
   return {
     automatable: input.automatable,
     assisted,
@@ -478,7 +505,8 @@ export function computeAssistedLaneCounts(input: {
     ready,
     checkFields,
     needsPerson,
-    assistedOk: ready + checkFields + needsPerson === assisted,
+    paidAside,
+    assistedOk: ready + checkFields + needsPerson + paidAside === assisted,
     conservationOk: input.automatable + input.manualTotal === active,
   };
 }
@@ -1675,6 +1703,13 @@ export function buildSiteRecipe(input: {
     formFailureReason: target.failureReason,
     readerVersion: ASSISTED_FORM_READER_VERSION,
     classifierVersion: ASSISTED_FIELD_CLASSIFIER_VERSION,
+    listingPricing: resolveListingPricing({
+      html: input.html,
+      wizardWalkStatus:
+        input.wizardWalkStatus ??
+        (wizardReachedForm ? 'reached_form' : input.existing?.wizardWalkStatus ?? null),
+      prior: input.existing?.listingPricing,
+    }),
   };
 }
 
@@ -1950,7 +1985,16 @@ export function assignAssistedBucket(input: {
   fields: PackageFieldValue[];
   fingerprintStatus: FingerprintStatus;
   formFound: boolean;
+  listingPricing?: ListingPricingKind | null;
 }): AssistedBucket {
+  const pricing =
+    input.listingPricing ??
+    input.recipe.listingPricing ??
+    resolveListingPricing({ wizardWalkStatus: input.recipe.wizardWalkStatus });
+  // Paid (no "free" word in form/payment) — park outside the free worklist
+  if (pricing === 'paid' || input.recipe.wizardWalkStatus === 'paid_only') {
+    return 'paid_aside';
+  }
   if (!input.formFound) return 'needs_person';
   if (input.fingerprintStatus === 'changed' || input.fingerprintStatus === 'stale') {
     return 'needs_person';
@@ -2345,9 +2389,17 @@ export function buildAssistedPackage(input: {
     fields: checkedFields,
     fingerprintStatus,
     formFound,
+    listingPricing: input.recipe.listingPricing,
   });
-  if (input.content.contentTooSimilar) {
+  if (input.content.contentTooSimilar && bucket !== 'paid_aside') {
     bucket = 'needs_person';
+  }
+
+  const listingPricing: ListingPricingKind =
+    input.recipe.listingPricing ??
+    resolveListingPricing({ wizardWalkStatus: input.recipe.wizardWalkStatus });
+  if (listingPricing === 'paid') {
+    bucket = 'paid_aside';
   }
 
   let failureReason: string | null = null;
@@ -2387,6 +2439,11 @@ export function buildAssistedPackage(input: {
       input.recipe.gate === 'otp_phone'
         ? 'SMS confirmation code required after submit — keep your phone ready.'
         : 'Email confirmation code required after submit — check inbox before finishing.';
+  }
+
+  if (bucket === 'paid_aside') {
+    failureReason =
+      'Paid listing — no “free” word found in form/payment sections. Set aside (free worklist only).';
   }
 
   const youMust = formatYouMustSteps(input.recipe.humanSteps ?? []);
@@ -2444,6 +2501,7 @@ export function buildAssistedPackage(input: {
     // Never default to CURRENT — that fake-stamps failed prepares and skips the next re-read.
     readerVersion: Number(input.recipe.readerVersion) || 0,
     classifierVersion: Number(input.recipe.classifierVersion) || 0,
+    listingPricing,
   };
 }
 
