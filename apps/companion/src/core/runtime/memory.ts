@@ -1,6 +1,6 @@
 /**
- * Phase 2.3 — one ActivePackage in memory + learning auth (SW-synced).
- * No chrome.storage. Learning credentials live only in SW/content memory.
+ * Phase 2.3.2 — one ActivePackage in tab memory + learning auth.
+ * Durable copy lives in SW chrome.storage.session (survives SW sleep).
  */
 import type { ActivePackage } from '../types';
 import { companionLog, patchDiagnostics } from '../diagnostics/connection';

@@ -3,9 +3,9 @@ import { defineManifest } from '@crxjs/vite-plugin';
 export default defineManifest({
   manifest_version: 3,
   name: 'SEO OS Companion',
-  version: '0.2.6',
+  version: '0.2.7',
   description:
-    'Phase 2.3.1 — robust label resolution for table-based forms. Never submits.',
+    'Phase 2.3.2 — session package sync + reliable fill. Never submits.',
   icons: {
     '16': 'public/icons/icon-16.png',
     '32': 'public/icons/icon-32.png',
@@ -25,7 +25,7 @@ export default defineManifest({
     service_worker: 'src/background/service-worker.ts',
     type: 'module',
   },
-  permissions: ['activeTab', 'tabs'],
+  permissions: ['activeTab', 'tabs', 'storage'],
   host_permissions: ['http://*/*', 'https://*/*'],
   content_scripts: [
     {

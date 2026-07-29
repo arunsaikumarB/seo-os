@@ -1,6 +1,6 @@
 /**
- * Bridge: SEO OS activates a package via postMessage — no handoff tokens.
- * Optional learning credentials (apiBase + accessToken + orgId) for shared knowledge.
+ * Bridge: SEO OS activates a package via postMessage.
+ * Acks back to the page after the service worker confirms storage.
  */
 import type { ActivePackage } from '../types';
 import { companionLog, patchDiagnostics } from '../diagnostics/connection';
@@ -73,8 +73,50 @@ function normalizeLearning(data: Record<string, unknown>): LearningAuth | null {
   return { apiBase, accessToken, orgId, projectId };
 }
 
+function ackToPage(payload: Record<string, unknown>): void {
+  window.postMessage(
+    {
+      source: 'seo-os-companion',
+      type: 'companion.activate_ack',
+      ...payload,
+    },
+    location.origin
+  );
+}
+
+function pushToServiceWorker(
+  pkg: ActivePackage,
+  learning: LearningAuth | null
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage(
+        {
+          type: 'companion.activate_package',
+          package: pkg,
+          learning,
+        },
+        (res) => {
+          if (chrome.runtime.lastError) {
+            companionLog(
+              'bridge.sw_error',
+              { error: chrome.runtime.lastError.message },
+              'error'
+            );
+            resolve(false);
+            return;
+          }
+          resolve(Boolean(res?.ok));
+        }
+      );
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
 export function installWebHandoffBridge(): void {
-  companionLog('bridge.installed', { origin: location.origin, phase: '2.3' });
+  companionLog('bridge.installed', { origin: location.origin, phase: '2.3.2' });
   window.addEventListener('message', (event) => {
     if (event.origin && event.origin !== location.origin && !isAllowedOrigin(event.origin)) {
       companionLog('bridge.origin_rejected', { origin: event.origin }, 'warn');
@@ -91,6 +133,7 @@ export function installWebHandoffBridge(): void {
       const err = String(data.error ?? 'Activate failed');
       companionLog('bridge.activate_error', { error: err }, 'error');
       patchDiagnostics({ lastError: err, lastStage: 'bridge.activate_error' });
+      ackToPage({ ok: false, error: err });
       notify();
       return;
     }
@@ -107,6 +150,7 @@ export function installWebHandoffBridge(): void {
       const err = 'Invalid package payload from SEO OS';
       companionLog('bridge.activate_invalid', {}, 'error');
       patchDiagnostics({ lastError: err, lastStage: 'bridge.activate_invalid' });
+      ackToPage({ ok: false, error: err });
       notify();
       return;
     }
@@ -116,7 +160,21 @@ export function installWebHandoffBridge(): void {
       projectId: pkg.projectId,
     });
 
-    activatePackage(pkg, { learning });
-    notify();
+    // Apply locally without double-notifying SW, then push once and ack
+    activatePackage(pkg, { learning, fromBackground: true });
+    void pushToServiceWorker(pkg, learning).then((ok) => {
+      companionLog(ok ? 'bridge.sw_ack_ok' : 'bridge.sw_ack_fail', {
+        opportunityId: pkg.opportunityId,
+        fieldCount: pkg.fields.length,
+      });
+      ackToPage({
+        ok,
+        opportunityId: pkg.opportunityId,
+        domain: pkg.domain,
+        fieldCount: pkg.fields.length,
+        error: ok ? undefined : 'Companion extension did not confirm — reload the extension',
+      });
+      notify();
+    });
   });
 }

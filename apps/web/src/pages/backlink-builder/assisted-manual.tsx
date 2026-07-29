@@ -19,6 +19,7 @@ import { toast } from 'sonner';
 import { useApi } from '@/hooks/use-api';
 import { useAuth } from '@/providers/auth-provider';
 import { getApiUrl, getApiErrorMessage } from '@/lib/api';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import { useAppStore } from '@/stores/app-store';
 import { PageTransition } from '@/components/demo/page-transition';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -209,8 +210,11 @@ export function AssistedManualPage() {
     setFieldEdits((prev) => ({ ...prev, [fieldKey(packageId, selector)]: value }));
   };
 
-  /** Phase 2.3 — push package + learning credentials into Companion memory. */
-  const activatePackageIntoCompanion = async (pkg: AssistedPackage) => {
+  /** Phase 2.3.2 — push package, wait for Companion SW ack, then succeed. */
+  const activatePackageIntoCompanion = async (
+    pkg: AssistedPackage,
+    opts?: { openWebsite?: boolean; silent?: boolean }
+  ) => {
     const log = (
       stage: string,
       payload: Record<string, unknown> = {},
@@ -226,13 +230,13 @@ export function AssistedManualPage() {
     try {
       const opportunityId = String(pkg.opportunityId || pkg.id);
       if (!opportunityId || !pkg.domain || !projectId) {
-        toast.error('Package is missing opportunity, domain, or project');
-        return;
+        if (!opts?.silent) toast.error('Package is missing opportunity, domain, or project');
+        return false;
       }
 
       const fields = buildActivePackageFields(pkg, (f) => fieldValue(pkg.id, f));
       if (!fields.length) {
-        toast.error('Package has no fillable fields yet — generate content first');
+        if (!opts?.silent) toast.error('Package has no fillable fields yet — generate content first');
         window.postMessage(
           {
             source: 'seo-os-web',
@@ -242,7 +246,7 @@ export function AssistedManualPage() {
           },
           window.location.origin
         );
-        return;
+        return false;
       }
 
       const payload: ActivePackagePayload = {
@@ -265,6 +269,30 @@ export function AssistedManualPage() {
         hasLearningAuth: Boolean(accessToken && orgId),
       });
 
+      const ackPromise = new Promise<{ ok: boolean; error?: string }>((resolve) => {
+        const timer = window.setTimeout(() => {
+          window.removeEventListener('message', onAck);
+          resolve({
+            ok: false,
+            error:
+              'Companion did not respond — reload the unpacked extension (v0.2.7+) and try again',
+          });
+        }, 4000);
+        function onAck(event: MessageEvent) {
+          const d = event.data as Record<string, unknown> | null;
+          if (!d || d.source !== 'seo-os-companion' || d.type !== 'companion.activate_ack') {
+            return;
+          }
+          window.clearTimeout(timer);
+          window.removeEventListener('message', onAck);
+          resolve({
+            ok: Boolean(d.ok),
+            error: d.error ? String(d.error) : undefined,
+          });
+        }
+        window.addEventListener('message', onAck);
+      });
+
       window.postMessage(
         {
           source: 'seo-os-web',
@@ -278,15 +306,32 @@ export function AssistedManualPage() {
         window.location.origin
       );
 
-      toast.success(`Loaded into Companion · ${pkg.domain} · ${fields.length} fields`);
+      const ack = await ackPromise;
+      if (!ack.ok) {
+        if (!opts?.silent) toast.error(ack.error || 'Companion did not load the package');
+        log('activate.ack_failed', { error: ack.error }, 'error');
+        return false;
+      }
+
+      if (!opts?.silent) {
+        toast.success(`Loaded into Companion · ${pkg.domain} · ${fields.length} fields`);
+      }
       log('activate.complete', { opportunityId, fieldCount: fields.length });
+
+      if (opts?.openWebsite && pkg.entryUrl) {
+        window.open(pkg.entryUrl, '_blank', 'noopener,noreferrer');
+        toast.message('Opened website — use Fill Current Step in Companion');
+      }
+      return true;
     } catch (err) {
       log(
         'activate.failed',
         { error: getApiErrorMessage(err, 'activate failed'), packageId: pkg.id },
         'error'
       );
-      toast.error(getApiErrorMessage(err, 'Could not activate package in Companion'));
+      if (!opts?.silent) {
+        toast.error(getApiErrorMessage(err, 'Could not activate package in Companion'));
+      }
       window.postMessage(
         {
           source: 'seo-os-web',
@@ -296,15 +341,23 @@ export function AssistedManualPage() {
         },
         window.location.origin
       );
+      return false;
     }
   };
 
-  const openWebsite = (pkg: AssistedPackage) => {
+  const openWebsite = async (pkg: AssistedPackage) => {
     if (!pkg.entryUrl) {
       toast.error('No entry URL for this package');
       return;
     }
+    // Re-push so chrome.storage.session has the package before the directory tab mounts
+    const ok = await activatePackageIntoCompanion(pkg, { silent: true });
     window.open(pkg.entryUrl, '_blank', 'noopener,noreferrer');
+    if (ok) {
+      toast.message('Opened website — use Fill Current Step in Companion');
+    } else {
+      toast.warning('Opened site, but Companion has no package — click Activate Package first');
+    }
   };
 
   const board = useQuery({
@@ -1133,12 +1186,12 @@ function EditableFieldCard(props: {
       return;
     }
     try {
-      await navigator.clipboard.writeText(text);
+      await copyTextToClipboard(text);
       setCopied(true);
-      toast.success(`Copied ${f.label || f.role}`);
+      toast.success(`Copied ${f.label || f.role} — Ctrl+V to paste`);
       window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      toast.error('Clipboard unavailable');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Clipboard unavailable');
     }
   }
 
@@ -1245,12 +1298,12 @@ function PasteReadyCard({
       return;
     }
     try {
-      await navigator.clipboard.writeText(value);
+      await copyTextToClipboard(value);
       setCopied(true);
-      toast.success(`Copied ${item.label}`);
+      toast.success(`Copied ${item.label} — Ctrl+V to paste`);
       window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      toast.error('Clipboard unavailable');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Clipboard unavailable');
     }
   }
 
