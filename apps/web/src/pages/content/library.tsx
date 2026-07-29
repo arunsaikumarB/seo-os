@@ -61,8 +61,23 @@ function PreviewField({ label, value }: { label: string; value: unknown }) {
 
 function ContentPackPreview({ pack }: { pack: Record<string, unknown> }) {
   const mode = String(pack.studioMode ?? '');
+  const backlinkType = String(pack.backlinkType ?? '');
+  const isWeb2Article =
+    mode === 'article' ||
+    backlinkType === 'web2' ||
+    backlinkType === 'article_submission' ||
+    backlinkType === 'blog_submission';
+
   return (
     <div className="grid gap-3 sm:grid-cols-2 rounded-md border p-3 bg-muted/20">
+      {isWeb2Article && (
+        <p className="sm:col-span-2 text-xs text-amber-800 dark:text-amber-200 bg-amber-500/10 rounded px-2 py-1.5">
+          {String(
+            pack.web2PublishNote ??
+              'Web 2.0 publish requires platform login — this pack is for paste/publish after you sign in.'
+          )}
+        </p>
+      )}
       {(mode === 'directory' || mode === 'profile') && (
         <>
           <PreviewField label="Business name" value={pack.businessName} />
@@ -70,17 +85,25 @@ function ContentPackPreview({ pack }: { pack: Record<string, unknown> }) {
           <PreviewField label="Long description" value={pack.longDescription} />
         </>
       )}
-      {(mode === 'guest_post' || mode === 'article' || mode === 'resource' || !mode) && (
+      {(mode === 'guest_post' || mode === 'article' || mode === 'resource' || isWeb2Article || !mode) && (
         <>
           <PreviewField label="SEO title" value={pack.seoTitle ?? pack.title} />
+          <PreviewField label="Meta title" value={pack.metaTitle} />
           <PreviewField label="Meta description" value={pack.metaDescription} />
           <PreviewField label="Excerpt" value={pack.excerpt} />
         </>
       )}
+      {isWeb2Article && <PreviewField label="Tags" value={pack.tags} />}
       <PreviewField label="Article / body" value={pack.body} />
+      {isWeb2Article && (
+        <>
+          <PreviewField label="Image prompt" value={pack.imagePrompt} />
+          <PreviewField label="Alt text" value={pack.altText} />
+        </>
+      )}
       <PreviewField label="Images" value={pack.imageMetadata} />
       <PreviewField label="Internal links" value={pack.internalLinks} />
-      <PreviewField label="External links" value={pack.externalLinks ?? pack.suggestedLinks} />
+      <PreviewField label="External / backlinks" value={pack.externalLinks ?? pack.suggestedLinks} />
     </div>
   );
 }

@@ -505,6 +505,13 @@ export async function createContentPack(
   pack.estimatedApprovalProbability = intelligence.estimatedApprovalProbability;
   pack.estimatedReviewHours = intelligence.estimatedReviewHours;
   pack.requiredFields = plan.requirements.requiredFields;
+  pack.studioMode = pack.studioMode ?? plan.mode;
+  if (plan.mode === 'article' || String(storageType) === 'web2') {
+    pack.backlinkType = pack.backlinkType ?? 'web2';
+    pack.web2PublishNote =
+      pack.web2PublishNote ??
+      'Web 2.0 publish requires platform login — this pack is for paste/publish after you sign in.';
+  }
 
   const id = randomUUID();
   const { data, error } = await getSupabaseAdmin()

@@ -52,3 +52,5 @@ export * from './wizard-walk.js';
 export * from './link-probe.js';
 export * from './listing-pricing.js';
 export * from './submission-form-gate.js';
+export * from './web2-intelligence.js';
+export * from './web2-content-prompt.js';

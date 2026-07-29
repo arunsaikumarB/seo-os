@@ -29,6 +29,46 @@ async function resolveMediaNeedForOpportunity(
   opportunityId: string,
   item: CampaignItemRow
 ) {
+  const classification = String(item.classification ?? '').toLowerCase();
+  // Web 2.0 / article packs always get a featured-image brief + generate attempt
+  if (
+    classification === 'web2' ||
+    classification === 'blog_submission' ||
+    classification === 'article_submission' ||
+    classification === 'wiki_submission'
+  ) {
+    return {
+      images: true,
+      videos: false,
+      reason: 'web2_article_featured_image' as const,
+    };
+  }
+
+  // Also check persisted content pack type (after metadata stage)
+  try {
+    const { data: packRow } = await getSupabaseAdmin()
+      .from('content_packs')
+      .select('backlink_type, pack')
+      .eq('workspace_id', workspaceId)
+      .eq('opportunity_id', opportunityId)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const bt = String(packRow?.backlink_type ?? '').toLowerCase();
+    const mode = String(
+      (packRow?.pack as { studioMode?: string } | null)?.studioMode ?? ''
+    ).toLowerCase();
+    if (bt === 'web2' || mode === 'article') {
+      return {
+        images: true,
+        videos: false,
+        reason: 'web2_article_featured_image' as const,
+      };
+    }
+  } catch {
+    /* ignore */
+  }
+
   const domain = String(item.domain ?? '')
     .replace(/^www\./i, '')
     .toLowerCase();
