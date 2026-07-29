@@ -64,7 +64,13 @@ describe('qualifyOpportunity', () => {
       analysis({
         metricsSource: 'live',
         fetchStatusCode: 200,
-        metadata: { hasGuestPostHint: true, submissionPathConfirmed: true },
+        homepageReachable: true,
+        metadata: {
+          hasGuestPostHint: true,
+          submissionPathConfirmed: true,
+          homepageReachable: true,
+          homepageFetched: true,
+        },
         detectedPages: { submission: 'https://example.com/contribute' },
       }),
       classification({ opportunityScore: 67, backlinkType: 'guest_post' })
@@ -73,11 +79,34 @@ describe('qualifyOpportunity', () => {
     expect(q.classificationLabel).toBe('Guest Post');
   });
 
+  it('rejects timeout / DNS failures as dead — never qualifies', () => {
+    const q = qualifyOpportunity(
+      analysis({
+        metricsSource: 'estimated',
+        homepageReachable: false,
+        metadata: {
+          liveProbeAttempted: true,
+          homepageReachable: false,
+          homepageFetchError: 'getaddrinfo ENOTFOUND',
+        },
+      }),
+      classification({ opportunityScore: 95 })
+    );
+    expect(q.qualified).toBe(false);
+    expect(q.reason).toMatch(/unreachable/i);
+  });
+
   it('labels news as Editorial', () => {
     const q = qualifyOpportunity(
       analysis({
         metricsSource: 'live',
-        metadata: { hasGuidelines: true, submissionPathConfirmed: true },
+        homepageReachable: true,
+        metadata: {
+          hasGuidelines: true,
+          submissionPathConfirmed: true,
+          homepageReachable: true,
+          homepageFetched: true,
+        },
       }),
       classification({ backlinkType: 'news', opportunityScore: 74 })
     );

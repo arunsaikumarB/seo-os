@@ -236,6 +236,27 @@ automationRouter.post(
 );
 
 automationRouter.post(
+  '/ai-review/recheck-reachability',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const { healUnreachableApprovedSites } = await import(
+        '../../modules/campaigns/ai-review.service.js'
+      );
+      res.json({
+        data: await healUnreachableApprovedSites(param(req.params.projectId), {
+          limit: 80,
+          concurrency: 8,
+        }),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+automationRouter.post(
   '/ai-review/backfill',
   authMiddleware,
   requireRole('member'),

@@ -1,6 +1,7 @@
 /** Qualify classified domains before opportunity persistence */
 
 import type { DomainAnalysisResult } from './domain-analyzer.js';
+import { isDeadWebsiteAnalysis } from './domain-analyzer.js';
 import type { ClassificationResult } from './classification.js';
 import { getScoreTier } from './scoring.js';
 import { getTypeLabel, type BacklinkTypeId } from './backlink-types.js';
@@ -64,15 +65,8 @@ function hasPublicSubmissionPath(analysis: DomainAnalysisResult): boolean {
     }
   }
   const classification = meta.classification as { confidence?: number; id?: string } | undefined;
-  if (
-    classification &&
-    Number(classification.confidence ?? 0) >= 70 &&
-    classification.id &&
-    classification.id !== 'unknown' &&
-    classification.id !== 'outreach_required'
-  ) {
-    return true;
-  }
+  // Never invent a submission path from confidence alone — that approved dead sites.
+  void classification;
   return false;
 }
 
@@ -123,6 +117,20 @@ export function qualifyOpportunity(
     };
   }
 
+  if (isDeadWebsiteAnalysis(analysis)) {
+    const code = analysis.fetchStatusCode;
+    const err = String(analysis.metadata?.homepageFetchError ?? '');
+    return {
+      ...base,
+      qualified: false,
+      reason: code
+        ? `Homepage unreachable (HTTP ${code})`
+        : err
+          ? `Homepage unreachable (${err})`
+          : 'Homepage unreachable (timeout, DNS, or connection failure)',
+    };
+  }
+
   if (classification.opportunityScore < MIN_QUALIFY_SCORE) {
     return {
       ...base,
@@ -147,8 +155,8 @@ export function qualifyOpportunity(
     };
   }
 
-  // Existing high tier (75+) with live reachability — escalate for manual path confirmation
-  if (classification.opportunityScore >= 75 && analysis.metricsSource === 'live') {
+  // High score only qualifies when homepage was actually live (not robots-only)
+  if (classification.opportunityScore >= 75 && analysis.metricsSource === 'live' && analysis.homepageReachable === true) {
     return {
       ...base,
       qualified: true,

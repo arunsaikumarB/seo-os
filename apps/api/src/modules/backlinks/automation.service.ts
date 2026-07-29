@@ -7,6 +7,7 @@ import {
   classifyOpportunity,
   qualifyOpportunity,
   formatQualificationReport,
+  isDeadWebsiteAnalysis,
   contentTypesForOpportunity,
   deduplicateAndValidate,
   extractUrlsFromCsv,
@@ -578,9 +579,7 @@ export async function runAutomationPipeline(
               const existingId = await import('../campaigns/ai-review.service.js').then((m) =>
                 m.findExistingByDomain(workspaceId, domain)
               );
-              const deadWebsite =
-                (analysis.fetchStatusCode != null && analysis.fetchStatusCode >= 400) ||
-                analysis.robotsTxtStatus === 'unreachable';
+              const deadWebsite = isDeadWebsiteAnalysis(analysis);
               await getSupabaseAdmin()
                 .from('opportunities')
                 .insert({
@@ -663,9 +662,7 @@ export async function runAutomationPipeline(
             const existingId = await import('../campaigns/ai-review.service.js').then((m) =>
               m.findExistingByDomain(workspaceId, domain)
             );
-            const deadWebsite =
-              (analysis.fetchStatusCode != null && analysis.fetchStatusCode >= 400) ||
-              analysis.robotsTxtStatus === 'unreachable';
+            const deadWebsite = isDeadWebsiteAnalysis(analysis);
 
             const oppId = randomUUID();
             const oppInsert = await getSupabaseAdmin().from('opportunities').insert({

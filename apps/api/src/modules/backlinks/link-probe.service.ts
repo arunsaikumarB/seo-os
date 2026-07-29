@@ -131,17 +131,36 @@ async function probeUrl(
     fetchError: http.error,
   });
 
-  // Escalate SPA shells once if budget remains
+  // Escalate SPA shells once if budget remains — never override a hard transport/HTTP death
   if (
-    (result.band === 'no_form' && result.spaShell) ||
-    (result.band === 'dead' && !html && browserBudget.used < browserBudget.max)
+    result.band === 'no_form' &&
+    result.spaShell &&
+    browserBudget.used < browserBudget.max
   ) {
     const rendered = await maybeRender(url, browserBudget);
     if (rendered) {
       result = classifyProbedPage({
         url,
         html: rendered,
-        httpStatus: http.status ?? 200,
+        httpStatus: http.status ?? null,
+        fetchError: http.error,
+      });
+    }
+  } else if (
+    result.band === 'dead' &&
+    !html &&
+    !http.error &&
+    http.status != null &&
+    http.status < 400 &&
+    browserBudget.used < browserBudget.max
+  ) {
+    // Soft empty body with OK status — SPA may need render; keep dead if still empty
+    const rendered = await maybeRender(url, browserBudget);
+    if (rendered) {
+      result = classifyProbedPage({
+        url,
+        html: rendered,
+        httpStatus: http.status,
         fetchError: null,
       });
     }
