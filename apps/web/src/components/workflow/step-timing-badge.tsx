@@ -1,56 +1,61 @@
+import { useEffect, useState } from 'react';
 import { Clock } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import {
-  formatDurationMs,
-  formatEstimateMinutes,
-} from '@/lib/bee-execution-ui';
+import { formatDurationMs } from '@/lib/bee-execution-ui';
 
 export type StepTimingPhase = 'idle' | 'running' | 'done';
 
 export type StepTiming = {
   stepId: string;
   phase: StepTimingPhase;
-  estimateMinutes: number;
+  estimateMinutes?: number;
   elapsedMs: number | null;
+  /** ISO start — used to tick live elapsed while processing */
+  startedAt?: string | null;
 };
 
 type Props = {
   timing?: StepTiming | null;
-  /** Compact for stepper chips */
   compact?: boolean;
   className?: string;
 };
 
 /**
- * Clock badge: estimate (upcoming), live elapsed (running), or Took (done).
+ * Clock only while processing or after finish — never shows estimates.
  */
 export function StepTimingBadge({ timing, compact, className }: Props) {
-  if (!timing) return null;
+  const [now, setNow] = useState(() => Date.now());
 
-  let label: string;
-  if (timing.phase === 'done' && timing.elapsedMs != null) {
-    label = compact
-      ? formatDurationMs(timing.elapsedMs)
-      : `Took ${formatDurationMs(timing.elapsedMs)}`;
-  } else if (timing.phase === 'running') {
-    label =
-      timing.elapsedMs != null
-        ? compact
-          ? formatDurationMs(timing.elapsedMs)
-          : `${formatDurationMs(timing.elapsedMs)} · ETA ${formatEstimateMinutes(timing.estimateMinutes)}`
-        : formatEstimateMinutes(timing.estimateMinutes);
-  } else {
-    label = formatEstimateMinutes(timing.estimateMinutes);
+  useEffect(() => {
+    if (timing?.phase !== 'running') return;
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [timing?.phase, timing?.startedAt, timing?.stepId]);
+
+  if (!timing) return null;
+  if (timing.phase === 'idle') return null;
+
+  let ms: number | null = timing.elapsedMs;
+  if (timing.phase === 'running' && timing.startedAt) {
+    const start = new Date(timing.startedAt).getTime();
+    if (Number.isFinite(start)) ms = Math.max(0, now - start);
   }
+
+  if (ms == null || ms < 0) return null;
+
+  const label =
+    timing.phase === 'done'
+      ? compact
+        ? formatDurationMs(ms)
+        : `Took ${formatDurationMs(ms)}`
+      : formatDurationMs(ms);
 
   return (
     <span
       title={
         timing.phase === 'done'
-          ? `Processing time: ${formatDurationMs(timing.elapsedMs)}`
-          : timing.phase === 'running'
-            ? 'Processing…'
-            : `Typical time: ${formatEstimateMinutes(timing.estimateMinutes)}`
+          ? `Processing time: ${formatDurationMs(ms)}`
+          : 'Time spent processing'
       }
       className={cn(
         'inline-flex items-center gap-1 rounded-md border border-border/40 bg-muted/40 text-muted-foreground tabular-nums',

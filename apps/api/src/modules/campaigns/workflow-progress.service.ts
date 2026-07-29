@@ -49,6 +49,7 @@ export type StepTimingDto = {
   phase: 'idle' | 'running' | 'done';
   estimateMinutes: number;
   elapsedMs: number | null;
+  startedAt: string | null;
 };
 
 function msBetween(start?: string | null, end?: string | null): number | null {
@@ -65,7 +66,6 @@ async function computeStepTimings(
   project: { created_at?: string | null; updated_at?: string | null } | null
 ): Promise<StepTimingDto[]> {
   const flags = progress.flags;
-  const currentId = progress.currentStepId;
 
   const [{ data: runs }, { data: imports }] = await Promise.all([
     getSupabaseAdmin()
@@ -92,45 +92,63 @@ async function computeStepTimings(
     ['analyzing', 'generating', 'queued', 'running', 'validated'].includes(
       String(latestImport.status)
     );
+  const pipelineBusy = Boolean(runBusy || importBusy);
+  const pipelineStart =
+    latestRun?.started_at ?? latestRun?.created_at ?? latestImport?.created_at ?? null;
+  const pipelineEnd = latestRun?.completed_at ?? latestImport?.updated_at ?? null;
 
-  const importElapsed = runBusy
-    ? msBetween(latestRun?.started_at ?? latestRun?.created_at, null)
-    : msBetween(
-        latestRun?.started_at ?? latestImport?.created_at,
-        latestRun?.completed_at ?? latestImport?.updated_at
-      );
+  const importElapsed = pipelineBusy
+    ? msBetween(pipelineStart, null)
+    : msBetween(pipelineStart, pipelineEnd);
 
-  // Generation: span of campaign items currently generating / last completed package window
   const items = await listCampaignItems(workspaceId, { includeDeleted: false });
   const genBusy = items.some(
     (i) => i.generationStatus === 'Queued' || i.generationStatus === 'Generating'
   );
-  const genStarts = items
+  const genStartTimes = items
+    .filter((i) => i.generationStatus === 'Queued' || i.generationStatus === 'Generating')
     .map((i) => i.updatedAt)
     .filter(Boolean)
     .map((t) => new Date(String(t)).getTime())
     .filter((n) => Number.isFinite(n));
-  const genElapsed =
-    genBusy && genStarts.length
-      ? Date.now() - Math.min(...genStarts)
-      : flags.generateDone && genStarts.length
-        ? Math.max(...genStarts) - Math.min(...genStarts)
+  const allGenTimes = items
+    .map((i) => i.updatedAt)
+    .filter(Boolean)
+    .map((t) => new Date(String(t)).getTime())
+    .filter((n) => Number.isFinite(n));
+  const genStartedAt =
+    genBusy && genStartTimes.length
+      ? new Date(Math.min(...genStartTimes)).toISOString()
+      : null;
+  const genElapsed = genBusy
+    ? genStartedAt
+      ? msBetween(genStartedAt, null)
+      : null
+    : flags.generateDone && allGenTimes.length >= 2
+      ? Math.max(...allGenTimes) - Math.min(...allGenTimes)
+      : flags.generateDone && allGenTimes.length === 1
+        ? null
         : null;
 
   const createElapsed = flags.createDone
-    ? msBetween(project?.created_at, project?.updated_at) ?? 60_000
+    ? msBetween(project?.created_at, project?.updated_at)
     : null;
 
+  /** Only "running" when work is actually in flight — never because CSM says this is next. */
   const phaseFor = (id: GuidedWorkflowStepId): StepTimingDto['phase'] => {
     const row = progress.steps.find((s) => s.id === id);
     if (row?.state === 'done') return 'done';
-    if (id === currentId) {
-      if (id === 'import-websites' && (runBusy || importBusy)) return 'running';
-      if (id === 'ai-review' && (runBusy || importBusy || !flags.aiReviewDone)) return 'running';
-      if (id === 'generate-content' && genBusy) return 'running';
-      return 'running';
-    }
+    if (id === 'import-websites' && pipelineBusy) return 'running';
+    if (id === 'ai-review' && pipelineBusy && !flags.aiReviewDone) return 'running';
+    if (id === 'generate-content' && genBusy) return 'running';
     return 'idle';
+  };
+
+  const startedAtFor = (id: GuidedWorkflowStepId, phase: StepTimingDto['phase']): string | null => {
+    if (phase !== 'running') return null;
+    if (id === 'import-websites' || id === 'ai-review') return pipelineStart;
+    if (id === 'generate-content') return genStartedAt;
+    return null;
   };
 
   const elapsedFor = (id: GuidedWorkflowStepId): number | null => {
@@ -140,23 +158,24 @@ async function computeStepTimings(
       case 'import-websites':
         return importElapsed;
       case 'ai-review':
-        // Same pipeline as import study; show run duration when review finishes
-        return flags.aiReviewDone || runBusy || importBusy ? importElapsed : null;
+        return flags.aiReviewDone || pipelineBusy ? importElapsed : null;
       case 'generate-content':
         return genElapsed;
-      case 'submit-backlinks':
-        return null;
       default:
         return null;
     }
   };
 
-  return (Object.keys(ESTIMATE_MINUTES) as GuidedWorkflowStepId[]).map((stepId) => ({
-    stepId,
-    phase: phaseFor(stepId),
-    estimateMinutes: ESTIMATE_MINUTES[stepId],
-    elapsedMs: elapsedFor(stepId),
-  }));
+  return (Object.keys(ESTIMATE_MINUTES) as GuidedWorkflowStepId[]).map((stepId) => {
+    const phase = phaseFor(stepId);
+    return {
+      stepId,
+      phase,
+      estimateMinutes: ESTIMATE_MINUTES[stepId],
+      elapsedMs: elapsedFor(stepId),
+      startedAt: startedAtFor(stepId, phase),
+    };
+  });
 }
 
 /** Shared selector used by every stepper / learning-mode consumer. */

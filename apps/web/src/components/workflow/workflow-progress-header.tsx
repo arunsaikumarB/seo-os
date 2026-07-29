@@ -11,11 +11,14 @@ type Props = {
   className?: string;
 };
 
-/** Workflow steps with per-step clock (estimate / running / took). */
+/**
+ * Stepper follows the page you are on (activeStep), not CSM's first incomplete step.
+ * Clock shows only real processing time (running / took) — never estimates.
+ */
 export function WorkflowProgressHeader({ projectId, className }: Props) {
   const {
     steps,
-    currentStep,
+    activeStep,
     getStepHref,
     isStepComplete,
     hasSuccessfulImport,
@@ -33,7 +36,8 @@ export function WorkflowProgressHeader({ projectId, className }: Props) {
       <ol className="flex flex-wrap gap-1.5">
         {steps.map((step) => {
           const done = isStepComplete(step.id);
-          const current = step.id === currentStep.id && !done;
+          /** Highlight = route you are viewing, forever — never CSM "first incomplete". */
+          const onPage = activeStep != null && step.id === activeStep.id;
           const locked =
             lockLaterSteps &&
             step.id !== 'create-project' &&
@@ -43,12 +47,7 @@ export function WorkflowProgressHeader({ projectId, className }: Props) {
           const href = locked
             ? `/projects/${projectId}/backlink-builder/import`
             : getStepHref(step);
-          const timing = stepTimings.find((t) => t.stepId === step.id) ?? {
-            stepId: step.id,
-            phase: done ? ('done' as const) : current ? ('running' as const) : ('idle' as const),
-            estimateMinutes: step.estimatedMinutes ?? 5,
-            elapsedMs: null,
-          };
+          const timing = stepTimings.find((t) => t.stepId === step.id) ?? null;
           return (
             <li key={step.id}>
               <Link
@@ -60,9 +59,9 @@ export function WorkflowProgressHeader({ projectId, className }: Props) {
                 }
                 className={cn(
                   'inline-flex flex-col gap-0.5 rounded-lg px-2 py-1.5 text-[11px] font-medium transition-colors',
-                  done && 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300',
-                  current && 'bg-primary/10 text-primary ring-1 ring-primary/30',
-                  !done && !current && 'bg-muted/50 text-muted-foreground',
+                  onPage && 'bg-primary/10 text-primary ring-1 ring-primary/30',
+                  !onPage && done && 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300',
+                  !onPage && !done && 'bg-muted/50 text-muted-foreground',
                   locked && 'opacity-60'
                 )}
               >
@@ -70,12 +69,12 @@ export function WorkflowProgressHeader({ projectId, className }: Props) {
                   <span
                     className={cn(
                       'flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px]',
-                      done && 'bg-emerald-500 text-white',
-                      current && 'bg-primary text-primary-foreground',
-                      !done && !current && 'bg-muted text-muted-foreground'
+                      onPage && 'bg-primary text-primary-foreground',
+                      !onPage && done && 'bg-emerald-500 text-white',
+                      !onPage && !done && 'bg-muted text-muted-foreground'
                     )}
                   >
-                    {done ? <Check className="h-3 w-3" /> : step.number}
+                    {done && !onPage ? <Check className="h-3 w-3" /> : step.number}
                   </span>
                   <span className="hidden sm:inline truncate max-w-[7rem]">{label}</span>
                 </span>

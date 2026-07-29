@@ -58,6 +58,7 @@ type WorkflowProgressApi = {
     phase: 'idle' | 'running' | 'done';
     estimateMinutes: number;
     elapsedMs: number | null;
+    startedAt?: string | null;
   }>;
 };
 
