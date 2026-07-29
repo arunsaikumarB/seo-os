@@ -4,6 +4,7 @@ export * from './verification.js';
 export * from './ai-features.js';
 export * from './pagination.js';
 export * from './import-engine.js';
+export * from './import-targets.js';
 export * from './domain-analyzer.js';
 export * from './automation-pipeline.js';
 export * from './classification.js';

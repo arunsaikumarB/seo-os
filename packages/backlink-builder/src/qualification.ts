@@ -82,7 +82,12 @@ function hasPublicSubmissionPath(analysis: DomainAnalysisResult): boolean {
  */
 export function qualifyOpportunity(
   analysis: DomainAnalysisResult,
-  classification: ClassificationResult
+  classification: ClassificationResult,
+  opts: {
+    targetStorageTypes?: string[];
+    targetFamilyIds?: string[];
+    unrelatedReason?: string;
+  } = {}
 ): QualificationResult {
   const scoreTier = getScoreTier(classification.opportunityScore);
   const spamRisk = classification.spamRisk;
@@ -106,6 +111,17 @@ export function qualifyOpportunity(
     scoreTier,
     signals,
   };
+
+  const targets = opts.targetStorageTypes;
+  if (targets?.length && !targets.includes(classification.backlinkType)) {
+    return {
+      ...base,
+      qualified: false,
+      reason:
+        opts.unrelatedReason ??
+        `Unrelated to this import — classified as ${label}, not in selected types`,
+    };
+  }
 
   if (classification.opportunityScore < MIN_QUALIFY_SCORE) {
     return {

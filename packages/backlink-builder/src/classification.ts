@@ -45,6 +45,8 @@ export interface ClassificationContext {
   projectIndustry?: string;
   brandName?: string;
   learning?: LearningPattern[];
+  /** Storage types allowed for this import — biases classification toward matches */
+  targetStorageTypes?: BacklinkTypeId[];
 }
 
 function computeRelevance(analysis: DomainAnalysisResult, ctx: ClassificationContext): number {
@@ -111,6 +113,7 @@ export function classifyOpportunity(
         learning: ctx.learning,
         domain: analysis.domain,
         fallbackType: analysis.primaryType,
+        targetStorageTypes: ctx.targetStorageTypes,
       }
     );
 

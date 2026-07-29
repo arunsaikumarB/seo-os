@@ -42,6 +42,13 @@ const importSchema = z.object({
   fileName: z.string().optional(),
   /** When true (default), enqueue classify/score/content/queue after import. */
   runPipeline: z.boolean().optional().default(true),
+  /** Opportunity families the user is importing — unrelated sites are flagged in AI Review */
+  targetFamilies: z
+    .array(
+      z.enum(['web2_article', 'directory', 'community', 'media', 'outreach'])
+    )
+    .min(1)
+    .max(5),
 });
 
 const submissionSchema = z.object({
@@ -392,6 +399,7 @@ automationRouter.post('/import', authMiddleware, requireRole('member'), async (r
       fileName: body.fileName,
       userId,
       richRows,
+      targetFamilies: body.targetFamilies,
     });
 
     let pipeline: Awaited<ReturnType<typeof enqueueAutomationPipeline>> | null = null;

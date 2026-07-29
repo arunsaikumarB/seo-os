@@ -521,8 +521,9 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
           <CardHeader>
             <CardTitle className="text-base">3. Quality review &amp; preview</CardTitle>
             <CardDescription>
-              Open each asset to verify the visual, then Approve or Reject. Auto-reject happens when
-              score &lt; 60 or the provider is in draft SVG mode (no live IMAGE_FLUX_URL).
+              Open each asset to verify the visual, then Approve or Reject. Jobs fail when no live
+              IMAGE_FLUX_URL is configured — placeholder SVG images are no longer treated as real
+              photos.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">

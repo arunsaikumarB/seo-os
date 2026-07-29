@@ -1,11 +1,10 @@
 /**
  * Free-path image providers.
- * When IMAGE_FLUX_URL / IMAGE_SDXL_URL are unset, generate() returns a
- * deterministic SVG placeholder PNG-compatible payload is not faked as photo —
- * we produce a valid SVG asset labeled Estimated/provider-local for pipeline continuity,
- * OR call the configured HTTP endpoint (Replicate-compatible / local A1111-style).
+ * Live generation requires IMAGE_FLUX_URL / IMAGE_SDXL_URL (or Comfy).
+ * Draft SVG placeholders are disabled by default — they were shipping as fake
+ * "completed" Flux images. Set IMAGE_ALLOW_DRAFT_SVG=1 only for local tests.
  *
- * Production free path: set IMAGE_FLUX_URL or IMAGE_SDXL_URL to a self-hosted / free gateway.
+ * Production: set IMAGE_FLUX_URL or IMAGE_SDXL_URL to a self-hosted / free gateway.
  */
 import type {
   ImageGenerateInput,
@@ -32,6 +31,10 @@ function svgBytes(input: ImageGenerateInput, provider: string): Buffer {
   <text x="50%" y="68%" text-anchor="middle" fill="#5eead4" font-family="system-ui,sans-serif" font-size="${Math.max(10, Math.floor(input.width / 55))}">${promptSafe}</text>
 </svg>`;
   return Buffer.from(svg, 'utf8');
+}
+
+function allowDraftSvg(): boolean {
+  return process.env.IMAGE_ALLOW_DRAFT_SVG === '1' || process.env.IMAGE_ALLOW_DRAFT_SVG === 'true';
 }
 
 async function httpGenerate(
@@ -109,7 +112,8 @@ abstract class HttpOrLocalImageProvider implements ImageProvider {
       variation: true,
       upscale: false,
       removeBackground: false,
-      freeDefault: true,
+      // freeDefault no longer implies silent SVG success
+      freeDefault: false,
       maxWidth: 2048,
       maxHeight: 2048,
     };
@@ -120,7 +124,7 @@ abstract class HttpOrLocalImageProvider implements ImageProvider {
     if (!url) {
       return {
         status: 'unconfigured',
-        message: `Set ${this.envUrlKey} for live ${this.displayName}; local SVG draft mode available`,
+        message: `Set ${this.envUrlKey} for live ${this.displayName} photos (draft SVG disabled)`,
       };
     }
     try {
@@ -142,15 +146,22 @@ abstract class HttpOrLocalImageProvider implements ImageProvider {
   async generate(input: ImageGenerateInput): Promise<ImageGenerateResult> {
     const url = process.env[this.envUrlKey];
     if (url) return httpGenerate(url, input, this.key);
-    // Free local draft asset (SVG) — pipeline continues; Quality Engine may reject for "photo" submissions
-    return {
-      bytes: svgBytes(input, this.displayName),
-      mimeType: 'image/svg+xml',
-      width: input.width,
-      height: input.height,
-      seed: input.seed ?? Date.now() % 1_000_000,
-      providerMeta: { mode: 'local_draft_svg', note: `Configure ${this.envUrlKey} for raster generation` },
-    };
+    if (allowDraftSvg()) {
+      return {
+        bytes: svgBytes(input, this.displayName),
+        mimeType: 'image/svg+xml',
+        width: input.width,
+        height: input.height,
+        seed: input.seed ?? Date.now() % 1_000_000,
+        providerMeta: {
+          mode: 'local_draft_svg',
+          note: `Configure ${this.envUrlKey} for raster generation`,
+        },
+      };
+    }
+    throw new Error(
+      `${this.displayName} is not configured. Set ${this.envUrlKey} to a live image gateway — placeholder SVG images are disabled so they are never shown as real photos.`
+    );
   }
 
   async variation(input: ImageGenerateInput & { sourceBytes?: Buffer }): Promise<ImageGenerateResult> {

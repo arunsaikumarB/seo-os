@@ -18,7 +18,6 @@ import {
   FolderPlus,
   ClipboardList,
   BookOpen,
-  PenLine,
 } from 'lucide-react';
 import type { NavItem } from './navigation';
 
@@ -79,12 +78,6 @@ export const workflowNavSections: WorkflowNavSection[] = [
         icon: FileText,
         featureFlag: 'v11_content_studio_v2',
         stepNumber: 4,
-      },
-      {
-        label: 'Web 2.0 / Articles',
-        href: 'content/library?mode=web2',
-        icon: PenLine,
-        featureFlag: 'v11_content_studio_v2',
       },
       {
         label: 'Submit Backlinks',

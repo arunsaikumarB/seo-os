@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, Fragment } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ChevronDown, Download, Sparkles } from 'lucide-react';
@@ -8,7 +8,10 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { PageTransition } from '@/components/demo/page-transition';
 import { useApi } from '@/hooks/use-api';
-import { OpportunitySelector } from '@/components/opportunities/opportunity-selector';
+import {
+  OpportunitySelector,
+  useApprovedOpportunities,
+} from '@/components/opportunities/opportunity-selector';
 import { AiLoadingState } from '@/components/workflow/ai-activity-card';
 import { AdvancedTools } from '@/components/workflow/advanced-tools';
 import { ExceptionChip } from '@/components/workflow/exception-chip';
@@ -25,6 +28,23 @@ type ContentPackRow = {
   pack: Record<string, unknown>;
   opportunities?: { id: string; title: string; domain: string } | null;
 };
+
+function isWeb2Opp(o: {
+  storage_type?: string;
+  opportunity_type?: string;
+  backlink_type?: string;
+  studio_mode?: string;
+  web2_login_required?: boolean;
+}) {
+  const t = String(o.storage_type || o.opportunity_type || o.backlink_type || '').toLowerCase();
+  const studio = String(o.studio_mode || '').toLowerCase();
+  return (
+    t === 'web2' ||
+    t === 'guest_post' ||
+    studio === 'article' ||
+    o.web2_login_required === true
+  );
+}
 
 type BulkAction =
   | 'generate_all'
@@ -110,8 +130,6 @@ function ContentPackPreview({ pack }: { pack: Record<string, unknown> }) {
 
 export function ContentLibraryPage() {
   const { projectId = '' } = useParams();
-  const [searchParams] = useSearchParams();
-  const web2Mode = searchParams.get('mode') === 'web2';
   const { request } = useApi();
   const queryClient = useQueryClient();
   const { continueHref } = useWorkflow(projectId);
@@ -131,6 +149,12 @@ export function ContentLibraryPage() {
     failed,
   } = useCampaignAiStatus(projectId);
 
+  const approvedQ = useApprovedOpportunities(projectId);
+  const approvedOpps = approvedQ.data?.data ?? [];
+
+  const [contentLane, setContentLane] = useState<'web2' | 'listing'>('web2');
+  const [web2Option, setWeb2Option] = useState<'blog' | 'internal_links'>('blog');
+  const [internalLinks, setInternalLinks] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showTechnical, setShowTechnical] = useState(false);
@@ -138,6 +162,20 @@ export function ContentLibraryPage() {
   const [showAssets, setShowAssets] = useState(false);
   const [showCelebration, setShowCelebration] = useState(false);
   const wasRunning = useRef(false);
+
+  const web2Opps = useMemo(() => approvedOpps.filter(isWeb2Opp), [approvedOpps]);
+  const listingOpps = useMemo(() => approvedOpps.filter((o) => !isWeb2Opp(o)), [approvedOpps]);
+
+  useEffect(() => {
+    if (web2Opps.length === 0 && listingOpps.length > 0) setContentLane('listing');
+    else if (listingOpps.length === 0 && web2Opps.length > 0) setContentLane('web2');
+  }, [web2Opps.length, listingOpps.length]);
+
+  const laneOpps = contentLane === 'web2' ? web2Opps : listingOpps;
+  const laneItemIds = useMemo(
+    () => laneOpps.map((o) => o.id).filter(Boolean),
+    [laneOpps]
+  );
 
   const packsQ = useQuery({
     queryKey: ['content-packs', projectId],
@@ -229,9 +267,27 @@ export function ContentLibraryPage() {
 
   const startGeneration = useMutation({
     mutationFn: async () => {
+      if (contentLane === 'web2' && web2Option === 'internal_links' && internalLinks.trim()) {
+        const keywords = internalLinks
+          .split(/[\n,]+/)
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .slice(0, 40);
+        if (keywords.length) {
+          await request(`/v1/projects/${projectId}/backlink-builder/keywords/primary`, {
+            method: 'POST',
+            body: JSON.stringify({ keywords }),
+          });
+        }
+      }
       const res = await request<{ data: { message?: string } }>(
         `/v1/projects/${projectId}/backlink-builder/automation/content-generation/generate`,
-        { method: 'POST', body: JSON.stringify({}) }
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            itemIds: laneItemIds.length ? laneItemIds : undefined,
+          }),
+        }
       );
       return res.data;
     },
@@ -402,27 +458,133 @@ export function ContentLibraryPage() {
     <PageTransition className="mx-auto max-w-3xl space-y-4">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <Sparkles className="h-6 w-6" />{' '}
-          {web2Mode ? 'Web 2.0 / Article Content' : 'Generate Content'}
+          <Sparkles className="h-6 w-6" /> Generate Content
         </h1>
         <p className="text-muted-foreground text-sm mt-1">
-          {web2Mode
-            ? 'Long-form packs for Medium, Blogger, free blog networks — paste/publish after platform login'
-            : 'AI Content Pipeline'}
+          One step for all approved sites — pick the content lane that matches what you imported
         </p>
       </div>
 
-      {web2Mode ? (
-        <Card className="border-amber-500/30 bg-amber-500/5">
-          <CardContent className="pt-4 text-sm text-muted-foreground space-y-1">
-            <p>
-              Select approved Web 2.0 / blog opportunities, generate the article pack (title, body,
-              tags, image prompt), then publish manually on the platform after you log in.
+      <Card className="rounded-2xl border-border/40 shadow-sm">
+        <CardContent className="pt-4 space-y-3">
+          <p className="text-sm font-medium">Content lane</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => setContentLane('web2')}
+              className={cn(
+                'rounded-lg border px-3 py-2.5 text-left',
+                contentLane === 'web2' ? 'border-primary bg-primary/10' : 'border-border/60'
+              )}
+            >
+              <p className="text-sm font-medium">Web 2.0 / Blog / Articles</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5 tabular-nums">
+                {web2Opps.length} approved · long-form pack → image → paste publish
+              </p>
+            </button>
+            <button
+              type="button"
+              onClick={() => setContentLane('listing')}
+              className={cn(
+                'rounded-lg border px-3 py-2.5 text-left',
+                contentLane === 'listing' ? 'border-primary bg-primary/10' : 'border-border/60'
+              )}
+            >
+              <p className="text-sm font-medium">Directories / Listings / Other</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5 tabular-nums">
+                {listingOpps.length} approved · form packs for Submit Backlinks
+              </p>
+            </button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {contentLane === 'web2' && generateState === 'idle' ? (
+        <Card className="rounded-2xl border-border/40 shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Web 2.0 / article flow</CardTitle>
+            <CardDescription>
+              Matches the study → content → image → autofill → submit path
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <ol className="space-y-2 list-decimal list-inside text-muted-foreground">
+              <li>
+                <span className="text-foreground">Links uploaded</span> — done in Import (with Web
+                2.0 / Articles selected)
+              </li>
+              <li>
+                <span className="text-foreground">Study link &amp; domain rules</span> — done in AI
+                Review (unrelated sites flagged)
+              </li>
+              <li>
+                <span className="text-foreground">Content generation</span> — choose option below
+              </li>
+              <li>
+                <span className="text-foreground">Images from content</span> — Image Studio after
+                packs (needs live IMAGE_FLUX_URL)
+              </li>
+              <li>
+                <span className="text-foreground">Auto-fill &amp; Submit</span> — paste/publish after
+                platform login → Submit Backlinks
+              </li>
+            </ol>
+            <div className="grid gap-2 sm:grid-cols-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setWeb2Option('blog')}
+                className={cn(
+                  'rounded-lg border px-3 py-2 text-left',
+                  web2Option === 'blog' ? 'border-primary bg-primary/10' : 'border-border/60'
+                )}
+              >
+                <p className="font-medium text-foreground">Option 1 — Generate blog content</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Title, body, tags, image prompt from site rules
+                </p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setWeb2Option('internal_links')}
+                className={cn(
+                  'rounded-lg border px-3 py-2 text-left',
+                  web2Option === 'internal_links'
+                    ? 'border-primary bg-primary/10'
+                    : 'border-border/60'
+                )}
+              >
+                <p className="font-medium text-foreground">Option 2 — Keywords / internal links</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Add targets first, then generate content around them
+                </p>
+              </button>
+            </div>
+            {web2Option === 'internal_links' ? (
+              <textarea
+                className="flex min-h-[100px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm font-mono"
+                placeholder={'keyword one\nhttps://yoursite.com/page\nanother keyword'}
+                value={internalLinks}
+                onChange={(e) => setInternalLinks(e.target.value)}
+              />
+            ) : null}
+            <p className="text-xs text-muted-foreground tabular-nums">
+              Will generate for {laneItemIds.length} Web 2.0 / article site
+              {laneItemIds.length === 1 ? '' : 's'}
+              {estimates?.durationLabel ? ` · ETA ${estimates.durationLabel}` : ''}
             </p>
-            <p>
-              Featured images: Advanced Tools → Image Studio (preview &amp; approve there). Directory
-              form submit stays under Submit Backlinks.
-            </p>
+            <Button
+              size="lg"
+              disabled={
+                startGeneration.isPending ||
+                laneItemIds.length === 0 ||
+                (web2Option === 'internal_links' && !internalLinks.trim())
+              }
+              onClick={() => startGeneration.mutate()}
+            >
+              {web2Option === 'internal_links'
+                ? 'Save links & generate content'
+                : 'Generate blog content'}
+            </Button>
           </CardContent>
         </Card>
       ) : null}
@@ -491,13 +653,14 @@ export function ContentLibraryPage() {
         </>
       ) : null}
 
-      {/* —— State A: Not started —— */}
-      {generateState === 'idle' ? (
+      {/* —— State A: Not started (listing lane) —— */}
+      {generateState === 'idle' && contentLane === 'listing' ? (
         <Card className="rounded-2xl border-border/40 shadow-sm">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Generate Content</CardTitle>
+            <CardTitle className="text-base">Directory / listing packs</CardTitle>
             <CardDescription className="tabular-nums">
-              {approvedCount} website{approvedCount === 1 ? '' : 's'} approved
+              {laneItemIds.length} website{laneItemIds.length === 1 ? '' : 's'} in this lane
+              {approvedCount > 0 ? ` · ${approvedCount} total approved` : ''}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -539,7 +702,7 @@ export function ContentLibraryPage() {
             </div>
             <Button
               size="lg"
-              disabled={startGeneration.isPending || approvedCount === 0}
+              disabled={startGeneration.isPending || laneItemIds.length === 0}
               onClick={() => startGeneration.mutate()}
             >
               Start AI Generation

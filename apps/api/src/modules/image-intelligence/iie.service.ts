@@ -149,7 +149,6 @@ export async function listImageProviders() {
   return Promise.all(
     registry.providers().map(async (p) => {
       const allowed = providerAllowed(p.key);
-      const caps = registry.get(p.key).capabilities();
       let health: { status: string; message?: string } = { status: 'unknown' };
       try {
         health = await registry.get(p.key).health();
@@ -157,12 +156,18 @@ export async function listImageProviders() {
         health = { status: 'down' };
       }
       const urlEnvKey = `IMAGE_${p.key.toUpperCase().replace(/-/g, '_')}_URL`;
-      const liveUrl = Boolean(process.env[urlEnvKey]);
-      const draftMode = !liveUrl && caps.freeDefault === true;
+      const liveUrl =
+        Boolean(process.env[urlEnvKey]) ||
+        (p.key === 'flux' && Boolean(process.env.IMAGE_FLUX_URL)) ||
+        (p.key === 'sdxl' && Boolean(process.env.IMAGE_SDXL_URL)) ||
+        (p.key === 'comfy' && Boolean(process.env.IMAGE_COMFY_URL));
+      const draftAllowed =
+        process.env.IMAGE_ALLOW_DRAFT_SVG === '1' || process.env.IMAGE_ALLOW_DRAFT_SVG === 'true';
+      const draftMode = !liveUrl && draftAllowed;
       return {
         ...p,
         flagEnabled: allowed,
-        configured: liveUrl || draftMode,
+        configured: liveUrl,
         draftMode,
         live: liveUrl,
         health,
@@ -561,18 +566,16 @@ export async function getImageGenerationReadiness(params: {
       }
       const caps = registry.get(p.key).capabilities();
       const urlEnvKey = `IMAGE_${p.key.toUpperCase().replace(/-/g, '_')}_URL`;
-      const envConfigured =
+      const liveUrl =
         Boolean(process.env[urlEnvKey]) ||
-        Boolean(caps.freeDefault) ||
-        // Legacy env aliases used in Railway/docs
         (p.key === 'flux' && Boolean(process.env.IMAGE_FLUX_URL)) ||
         (p.key === 'sdxl' && Boolean(process.env.IMAGE_SDXL_URL)) ||
         (p.key === 'comfy' && Boolean(process.env.IMAGE_COMFY_URL));
-      const draftMode = health.status === 'unconfigured' && caps.freeDefault === true;
-      const healthyEnough =
-        health.status === 'healthy' ||
-        health.status === 'degraded' ||
-        draftMode;
+      const draftAllowed =
+        process.env.IMAGE_ALLOW_DRAFT_SVG === '1' || process.env.IMAGE_ALLOW_DRAFT_SVG === 'true';
+      const draftMode = !liveUrl && draftAllowed;
+      const envConfigured = liveUrl;
+      const healthyEnough = health.status === 'healthy' || health.status === 'degraded';
       return {
         key: p.key,
         displayName: p.displayName,
@@ -598,11 +601,9 @@ export async function getImageGenerationReadiness(params: {
   const providerHealthyOk = healthyProviders.length > 0;
   const credentialsOk =
     Boolean(defaultProvider) &&
-    (defaultProvider!.draftMode ||
-      Boolean(process.env.IMAGE_PROVIDER_API_KEY) ||
+    (Boolean(process.env.IMAGE_PROVIDER_API_KEY) ||
       defaultProvider!.health.status === 'healthy' ||
-      defaultProvider!.health.status === 'degraded' ||
-      defaultProvider!.freeDefault);
+      defaultProvider!.health.status === 'degraded');
 
   let storageOk = false;
   let storageLabel = 'Storage bucket missing';

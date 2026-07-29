@@ -11,6 +11,37 @@ import { PageTransition } from '@/components/demo/page-transition';
 import { AiActivityCard } from '@/components/workflow/ai-activity-card';
 import { isSuccessfulImportRecord } from '@/lib/import-success';
 import { Upload, FileSpreadsheet, FileText, Link2, Sheet } from 'lucide-react';
+import { cn } from '@/lib/utils';
+
+const IMPORT_TARGET_OPTIONS = [
+  {
+    id: 'web2_article',
+    label: 'Web 2.0 / Blog / Articles',
+    description: 'Medium, Blogger, free blogs, article & guest-post sites',
+  },
+  {
+    id: 'directory',
+    label: 'Directories / Citations / Profiles',
+    description: 'Business listings, citations, profile pages',
+  },
+  {
+    id: 'community',
+    label: 'Forums / Q&A / Community',
+    description: 'Forums, Q&A, Reddit, Quora, bookmarks',
+  },
+  {
+    id: 'media',
+    label: 'PDF / Image / Video',
+    description: 'Document, infographic, video, podcast',
+  },
+  {
+    id: 'outreach',
+    label: 'Outreach / Resource / PR',
+    description: 'Resource pages, broken links, digital PR',
+  },
+] as const;
+
+type TargetFamilyId = (typeof IMPORT_TARGET_OPTIONS)[number]['id'];
 
 type ImportResult = {
   importId: string;
@@ -35,6 +66,8 @@ type ImportRecord = {
   opportunities_created: number;
   created_at: string;
   metadata?: {
+    targetFamilies?: string[];
+    targetFamilyLabels?: string[];
     classificationSummary?: {
       imported: number;
       classified: number;
@@ -75,6 +108,7 @@ export function BacklinkImportPage() {
   const [sourceType, setSourceType] = useState<string>('url_list');
   const [content, setContent] = useState('');
   const [fileName, setFileName] = useState<string | undefined>();
+  const [targetFamilies, setTargetFamilies] = useState<TargetFamilyId[]>(['web2_article']);
 
   const history = useQuery({
     queryKey: ['backlink-imports', projectId],
@@ -124,13 +158,29 @@ export function BacklinkImportPage() {
     },
   });
 
+  const toggleFamily = (id: TargetFamilyId) => {
+    setTargetFamilies((prev) => {
+      if (prev.includes(id)) {
+        if (prev.length === 1) return prev;
+        return prev.filter((x) => x !== id);
+      }
+      return [...prev, id];
+    });
+  };
+
   const importMutation = useMutation({
     mutationFn: () =>
       request<{ data: ImportResult }>(
         `/v1/projects/${projectId}/backlink-builder/automation/import`,
         {
           method: 'POST',
-          body: JSON.stringify({ sourceType, content, fileName, runPipeline: true }),
+          body: JSON.stringify({
+            sourceType,
+            content,
+            fileName,
+            runPipeline: true,
+            targetFamilies,
+          }),
         }
       ),
     onSuccess: (res) => {
@@ -251,7 +301,8 @@ export function BacklinkImportPage() {
           <Upload className="h-6 w-6" /> Import Websites
         </h1>
         <p className="text-muted-foreground mt-1">
-          Paste, CSV, Excel, or Sheets. AI validates, deduplicates, and studies each website.
+          Select the opportunity types you are importing first, then paste URLs / upload a file.
+          AI studies each site and flags anything unrelated to your selection.
         </p>
       </div>
 
@@ -281,17 +332,48 @@ export function BacklinkImportPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex flex-wrap gap-2">
-              {SOURCE_TYPES.map((t) => (
-                <Button
-                  key={t.id}
-                  size="sm"
-                  variant={sourceType === t.id ? 'default' : 'outline'}
-                  onClick={() => setSourceType(t.id)}
-                >
-                  <t.icon className="h-3.5 w-3.5 mr-1" /> {t.label}
-                </Button>
-              ))}
+            <div className="space-y-2">
+              <p className="text-sm font-medium">1. What are you importing?</p>
+              <p className="text-xs text-muted-foreground">
+                Pick one or more. Sites that do not match are marked unrelated in AI Review.
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {IMPORT_TARGET_OPTIONS.map((opt) => {
+                  const on = targetFamilies.includes(opt.id);
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => toggleFamily(opt.id)}
+                      className={cn(
+                        'rounded-lg border px-3 py-2.5 text-left transition-colors',
+                        on
+                          ? 'border-primary bg-primary/10'
+                          : 'border-border/60 hover:border-border'
+                      )}
+                    >
+                      <p className="text-sm font-medium">{opt.label}</p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">{opt.description}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm font-medium">2. Import source</p>
+              <div className="flex flex-wrap gap-2">
+                {SOURCE_TYPES.map((t) => (
+                  <Button
+                    key={t.id}
+                    size="sm"
+                    variant={sourceType === t.id ? 'default' : 'outline'}
+                    onClick={() => setSourceType(t.id)}
+                  >
+                    <t.icon className="h-3.5 w-3.5 mr-1" /> {t.label}
+                  </Button>
+                ))}
+              </div>
             </div>
 
             <textarea
@@ -328,7 +410,9 @@ export function BacklinkImportPage() {
               </label>
               <Button
                 size="sm"
-                disabled={!content.trim() || importMutation.isPending}
+                disabled={
+                  !content.trim() || importMutation.isPending || targetFamilies.length === 0
+                }
                 onClick={() => importMutation.mutate()}
               >
                 {importMutation.isPending ? 'Importing…' : 'Import & continue'}
