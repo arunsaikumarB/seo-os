@@ -172,8 +172,9 @@ export function RankedSubmitQueuePage() {
               <ListChecks className="h-6 w-6" /> Ranked Submit Queue
             </h1>
             <p className="text-muted-foreground text-sm mt-1 max-w-2xl">
-              Rank imported sites by form readiness. Default filter is Free only — form/payment
-              must include the word “free”. Paid listings are set aside.
+              Rank imported sites by form readiness. Default filter is Free only — free plan
+              radios or classic free submit forms (sidebar ad prices ignored). Paid listings are
+              set aside.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

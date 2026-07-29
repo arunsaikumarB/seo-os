@@ -421,7 +421,7 @@ export function AssistedManualPage() {
         data: { scanned: number; free: number; paid: number; unknown: number; failed: number };
       }>(`/v1/projects/${projectId}/backlink-builder/assisted-manual/rescan-pricing`, {
         method: 'POST',
-        body: JSON.stringify({ limit: 100, force: true }),
+        body: JSON.stringify({ limit: 200, force: true }),
       }),
     onSuccess: (res) => {
       const d = res.data;
@@ -659,7 +659,7 @@ export function AssistedManualPage() {
             variant="secondary"
             onClick={() => rescanPricing.mutate()}
             disabled={rescanPricing.isPending}
-            title="Re-fetch pages and park listings without the word free"
+            title="Re-fetch pages: free = form free option / classic submit; paid = token, free disabled, or $-only plan radios (sidebar ads ignored)"
           >
             <RefreshCw
               className={cn('h-3.5 w-3.5 mr-1', rescanPricing.isPending && 'animate-spin')}

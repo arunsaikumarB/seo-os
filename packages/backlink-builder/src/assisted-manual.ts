@@ -358,7 +358,7 @@ export type SiteRecipe = {
   /** Field-role / confidence classifier version — bump when mapping rules change. */
   classifierVersion?: number;
   /**
-   * Free vs paid — word "free" in form/payment sections → free; otherwise paid.
+   * Free vs paid — form plan radios / free-disabled / token (sidebar ad $ ignored).
    * Sites with both still count as free (human picks Free on the site).
    */
   listingPricing?: ListingPricingKind | null;
@@ -2002,7 +2002,7 @@ export function assignAssistedBucket(input: {
     input.listingPricing ??
     input.recipe.listingPricing ??
     resolveListingPricing({ wizardWalkStatus: input.recipe.wizardWalkStatus });
-  // Paid (no "free" word in form/payment) — park outside the free worklist
+  // Paid (disabled free / token / $-only form radios) — park outside free worklist
   if (pricing === 'paid' || input.recipe.wizardWalkStatus === 'paid_only') {
     return 'paid_aside';
   }
@@ -2465,7 +2465,7 @@ export function buildAssistedPackage(input: {
 
   if (bucket === 'paid_aside') {
     failureReason =
-      'Paid listing — no “free” word found in form/payment sections. Set aside (free worklist only).';
+      'Paid listing — free path disabled, premium token, or $-only plan radios. Set aside (free worklist only).';
   }
   if (bucket === 'no_form') {
     failureReason =

@@ -1523,7 +1523,7 @@ async function prepareOnePackage(
       'Content exceeds known character limit — regenerate or edit';
   }
 
-  // Final free/paid park — word "free" in form/payment → free worklist; else paid_aside
+  // Final free/paid park — form plan radios / free-disabled / token (see listing-pricing.ts)
   const pricing = resolveListingPricing({
     html,
     wizardWalkStatus: payload.wizardWalkStatus ?? recipe.wizardWalkStatus,
@@ -1537,7 +1537,7 @@ async function prepareOnePackage(
       payload.failureReason =
         payload.failureReason?.includes('Paid')
           ? payload.failureReason
-          : 'Paid listing — no “free” word in form/payment sections. Set aside.';
+          : 'Paid listing — free path disabled, premium token, or $-only plan radios. Set aside.';
     }
   }
 
@@ -2155,7 +2155,7 @@ async function healPaidAsideFromStoredSignals(workspaceId: string) {
       listingPricing: 'paid',
       bucket: 'paid_aside',
       failureReason:
-        'Paid listing — no “free” word in form/payment sections. Set aside.',
+        'Paid listing — free path disabled, premium token, or $-only plan radios. Set aside.',
     };
     await admin()
       .from('assisted_packages')
@@ -2170,8 +2170,8 @@ async function healPaidAsideFromStoredSignals(workspaceId: string) {
 }
 
 /**
- * Lightweight free/paid rescan — fetch entry/form URL HTML and park paid packages.
- * Use after import / when the worklist is full of unpriced "Needs a person" cards.
+ * Lightweight free/paid rescan — fetch entry/form URL HTML and park/unpark packages.
+ * force=true re-reads already-classified rows and prioritizes paid_aside (fix false-paids).
  */
 export async function rescanAssistedListingPricing(
   workspaceId: string,
@@ -2185,16 +2185,26 @@ export async function rescanAssistedListingPricing(
     .select('id, domain, entry_url, bucket, payload, status')
     .eq('workspace_id', workspaceId)
     .order('prepared_at', { ascending: false })
-    .limit(limit * 2);
+    .limit(Math.max(limit * 4, 400));
   if (error) throw new AppError(500, 'INTERNAL_ERROR', error.message);
 
-  const candidates = (rows ?? []).filter((row) => {
+  const eligible = (rows ?? []).filter((row) => {
     if (String(row.status) === 'skipped' || String(row.status) === 'done') return false;
     const payload = (row.payload as AssistedPackagePayload) ?? ({} as AssistedPackagePayload);
     if (force) return true;
     if (payload.listingPricing === 'free' || payload.listingPricing === 'paid') return false;
     return true;
-  }).slice(0, limit);
+  });
+
+  // When force: fix false-paids first (sidebar-$ ads misclassified as paid)
+  const ranked = force
+    ? [
+        ...eligible.filter((r) => String(r.bucket) === 'paid_aside'),
+        ...eligible.filter((r) => String(r.bucket) !== 'paid_aside'),
+      ]
+    : eligible;
+
+  const candidates = ranked.slice(0, limit);
 
   let free = 0;
   let paid = 0;
@@ -2210,10 +2220,11 @@ export async function rescanAssistedListingPricing(
       continue;
     }
     const html = await fetchHtml(url);
+    // force: ignore stale prior so sidebar-$ false-paids can become free from live HTML
     const pricing = resolveListingPricing({
       html,
       wizardWalkStatus: payload.wizardWalkStatus,
-      prior: payload.listingPricing as ListingPricingKind | null,
+      prior: force ? null : (payload.listingPricing as ListingPricingKind | null),
     });
 
     if (!html && pricing === 'unknown') {
@@ -2238,7 +2249,7 @@ export async function rescanAssistedListingPricing(
       bucket: nextBucket as AssistedPackagePayload['bucket'],
       failureReason:
         pricing === 'paid'
-          ? 'Paid listing — no “free” word in form/payment sections. Set aside.'
+          ? 'Paid listing — free path disabled, premium token, or $-only plan radios. Set aside.'
           : pricing === 'free' && String(row.bucket) === 'paid_aside'
             ? null
             : payload.failureReason,
@@ -2267,7 +2278,7 @@ export async function rescanAssistedListingPricing(
     unknown,
     failed,
     honesty:
-      'Free = active free option. Paid = free disabled, premium token, or $-only pricing. Both free+paid still counts as Free — pick Free on the site.',
+      'Free = free plan radio, or classic Title/URL form (sidebar ad $ ignored). Paid = free disabled, premium token, or $-only plan radios. Free+paid options → Free — pick Free on the site.',
   };
 }
 
