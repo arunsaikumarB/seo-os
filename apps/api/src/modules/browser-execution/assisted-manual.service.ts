@@ -1779,7 +1779,7 @@ export async function listAssistedPackages(workspaceId: string) {
       'Does not guarantee the listing goes live.',
       'Multi-step forms: content is prepared for later steps — you navigate and paste.',
       'Does not attach images for you.',
-      'Free only: form/payment must contain the word “free”. No “free” → Paid (set aside).',
+      'Free only when an active free option exists. Free-disabled / premium-token / $-only pricing → Paid (set aside).',
     ],
     pilot: {
       max: ASSISTED_MANUAL_PILOT_MAX,
@@ -2179,7 +2179,7 @@ export async function rescanAssistedListingPricing(
     unknown,
     failed,
     honesty:
-      'Rule: word “free” in form/payment sections → Free worklist; otherwise Paid (set aside). Both free+paid still counts as Free — pick Free on the site.',
+      'Free = active free option. Paid = free disabled, premium token, or $-only pricing. Both free+paid still counts as Free — pick Free on the site.',
   };
 }
 

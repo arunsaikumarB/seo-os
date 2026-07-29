@@ -1,9 +1,9 @@
 {
   "name": "@seo-os/companion",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "private": true,
   "type": "module",
-  "description": "SEO OS Companion — session package sync (Phase 2.3.2)",
+  "description": "SEO OS Companion — hardened free/paid + form detect (Phase 2.3.3)",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

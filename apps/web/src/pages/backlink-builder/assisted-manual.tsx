@@ -641,9 +641,9 @@ export function AssistedManualPage() {
             <ClipboardList className="h-6 w-6" /> Assisted Manual
           </h1>
           <p className="text-muted-foreground mt-1 max-w-2xl">
-            Free worklist only — form/payment text must include the word “free”. Paid listings
-            (no “free”) are parked below. Sites with both free and paid still count as Free —
-            pick Free yourself on the site.
+            Free worklist only — an active free option must exist. Pages that say free is
+            disabled, require a premium token, or only show $-priced plans are parked as Paid.
+            Sites with both free and paid still count as Free — pick Free on the site.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

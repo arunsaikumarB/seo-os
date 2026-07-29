@@ -213,6 +213,42 @@ export interface ClassifyOptions {
   aliases?: Record<FillableRole, string[]>;
 }
 
+function matchDirectoryNameAttr(field: NormalizedField): FieldClassification | null {
+  const n = (field.name || field.id || '').trim().toUpperCase().replace(/[- ]+/g, '_');
+  const map: Record<string, FillableRole> = {
+    TITLE: 'title',
+    HEADLINE: 'title',
+    LISTING_TITLE: 'title',
+    URL: 'website',
+    WEBSITE: 'website',
+    SITE_URL: 'website',
+    HOME_URL: 'website',
+    DESCRIPTION: 'description',
+    DESC: 'description',
+    LONG_DESCRIPTION: 'description',
+    SHORT_DESCRIPTION: 'description',
+    OWNER_NAME: 'business_name',
+    CONTACT_NAME: 'business_name',
+    YOUR_NAME: 'business_name',
+    OWNER_EMAIL: 'email',
+    CONTACT_EMAIL: 'email',
+    EMAIL: 'email',
+    PHONE: 'phone',
+    OWNER_PHONE: 'phone',
+  };
+  const role = map[n];
+  if (!role) return null;
+  return {
+    field,
+    role,
+    confidence: 98,
+    matchedAlias: field.name || field.id,
+    matchedBy: ['NameAttr'],
+    reason: `Directory name attribute "${field.name || field.id}" → ${role}`,
+    matchSource: 'alias',
+  };
+}
+
 /**
  * Mapping priority:
  * 1 Domain Knowledge → 2 Shared verified → 3 Global Alias → 4 Confidence → 5 Skip
@@ -235,6 +271,9 @@ export function classifyFields(
 
   const raw: FieldClassification[] = fields.map((field) => {
     const structural = classifyStructural(field);
+    // Directory name attrs beat weak structural "payment" hits on pricing radios near listing fields
+    const byName = matchDirectoryNameAttr(field);
+    if (byName) return byName;
     if (structural) return structural;
 
     // Priority 1–2: domain / shared verified knowledge

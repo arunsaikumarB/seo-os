@@ -94,7 +94,7 @@ export function scanDomFields(root: ParentNode = document): NormalizedField[] {
     if (n) out.push(n);
   };
 
-  root.querySelectorAll('input, textarea, select, [contenteditable="true"]').forEach((node) => {
+  const scanNode = (node: Element) => {
     const el = node as HTMLElement;
     const tag = el.tagName.toLowerCase();
 
@@ -131,7 +131,31 @@ export function scanDomFields(root: ParentNode = document): NormalizedField[] {
       }
       push(el, 'input', type);
     }
-  });
+  };
+
+  root.querySelectorAll('input, textarea, select, [contenteditable="true"]').forEach(scanNode);
+
+  // Form-associated controls outside the <form> tree (form="id")
+  if (root instanceof HTMLFormElement && root.id) {
+    try {
+      document
+        .querySelectorAll(`[form="${CSS.escape(root.id)}"]`)
+        .forEach((node) => scanNode(node as Element));
+    } catch {
+      /* ignore invalid id */
+    }
+  }
+
+  // Also pull HTMLFormElement.elements (includes named controls browsers associate)
+  if (root instanceof HTMLFormElement) {
+    try {
+      Array.from(root.elements).forEach((node) => {
+        if (node instanceof HTMLElement) scanNode(node);
+      });
+    } catch {
+      /* ignore */
+    }
+  }
 
   root.querySelectorAll('button').forEach((btn) => {
     const type = (btn.getAttribute('type') || 'submit').toLowerCase();
