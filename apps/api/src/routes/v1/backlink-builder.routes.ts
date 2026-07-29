@@ -99,6 +99,7 @@ backlinkBuilderRouter.get(
         data: {
           ...result.progress,
           input: result.input,
+          timings: result.timings,
           metricsSource: 'campaign_state',
         },
       });

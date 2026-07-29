@@ -162,3 +162,22 @@ export function formatEta(seconds: number | null | undefined): string {
   if (mins < 60) return `~${mins} min`;
   return `~${Math.round(mins / 60)}h ${mins % 60}m`;
 }
+
+/** Wall-clock duration for “Took …” labels (no tilde). */
+export function formatDurationMs(ms: number | null | undefined): string {
+  if (ms == null || ms < 0 || !Number.isFinite(ms)) return '—';
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  const mins = Math.floor(sec / 60);
+  const rem = sec % 60;
+  if (mins < 60) return rem > 0 ? `${mins}m ${rem}s` : `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  const m2 = mins % 60;
+  return m2 > 0 ? `${hours}h ${m2}m` : `${hours}h`;
+}
+
+export function formatEstimateMinutes(minutes: number | null | undefined): string {
+  if (minutes == null || minutes <= 0) return '—';
+  if (minutes < 1) return '~1 min';
+  return `~${Math.round(minutes)} min`;
+}

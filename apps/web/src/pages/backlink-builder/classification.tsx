@@ -357,13 +357,12 @@ export function ClassificationDashboardPage() {
           title="AI is reviewing websites"
           percent={35}
           current="Detecting opportunity type"
-          next="Scoring confidence & tier"
-          eta="~1 min"
+          next="Approve or reject when ready"
+          eta={null}
           items={[
-            { label: 'Homepage', state: 'done' },
-            { label: 'Navigation', state: 'done' },
-            { label: 'Forms', state: 'active' },
-            { label: 'Metadata', state: 'queued' },
+            { label: 'Study sites', state: 'active' },
+            { label: 'Group by type', state: 'queued' },
+            { label: 'Ready to decide', state: 'queued' },
           ]}
         />
       ) : null}
@@ -372,27 +371,23 @@ export function ClassificationDashboardPage() {
         <AiLoadingState message="AI is studying imported websites…" />
       ) : summary ? (
         <>
-          <Card className="rounded-2xl border-border/40 shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Import summary</CardTitle>
-              <CardDescription>
-                Live from Campaign State Manager
-                {!summary.invariantOk ? (
-                  <span className="text-red-600 ml-2">· invariant mismatch — check Campaign Health</span>
-                ) : null}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-x-4 gap-y-1 text-sm tabular-nums">
-              <span>Imported: {summary.imported}</span>
-              <span>Approved: {summary.approved}</span>
-              <span>Rejected: {summary.rejected}</span>
-              <span>Needs Classification: {summary.needsClassification}</span>
-              <span>Unsupported: {summary.unsupported}</span>
-              <span>Duplicate: {summary.duplicate}</span>
-              <span>Dead: {summary.dead}</span>
-              <span>Pending Analysis: {summary.pending}</span>
-            </CardContent>
-          </Card>
+          <div className="flex flex-wrap gap-3 text-sm tabular-nums text-muted-foreground">
+            <span>
+              <span className="text-foreground font-medium">{summary.approved}</span> approved
+            </span>
+            <span>
+              <span className="text-foreground font-medium">{summary.needsClassification}</span>{' '}
+              need review
+            </span>
+            <span>
+              <span className="text-foreground font-medium">{summary.rejected}</span> rejected
+            </span>
+            {summary.pending > 0 ? (
+              <span>
+                <span className="text-foreground font-medium">{summary.pending}</span> analyzing
+              </span>
+            ) : null}
+          </div>
 
           <div className="flex flex-wrap gap-2">
             {(
@@ -400,14 +395,11 @@ export function ClassificationDashboardPage() {
                 ['recommended', 'Recommended', tiers?.recommended.length ?? 0],
                 [
                   'needsClassification',
-                  'Needs Classification',
+                  'Needs review',
                   tiers?.needsClassification.length ?? 0,
                 ],
-                ['autoApproved', 'Auto-Approved', tiers?.autoApproved.length ?? 0],
+                ['autoApproved', 'Auto-approved', tiers?.autoApproved.length ?? 0],
                 ['rejected', 'Rejected', tiers?.rejected.length ?? 0],
-                ['unsupported', 'Unsupported', data?.tiers.unsupported.length ?? 0],
-                ['duplicate', 'Duplicate', data?.tiers.duplicate.length ?? 0],
-                ['dead', 'Dead', data?.tiers.dead.length ?? 0],
               ] as const
             ).map(([key, label, count]) => (
               <Button

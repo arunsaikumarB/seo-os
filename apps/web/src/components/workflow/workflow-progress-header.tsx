@@ -4,13 +4,14 @@ import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { useWorkflow } from '@/hooks/use-workflow';
 import { WORKFLOW_PIPELINE_LABELS } from '@/config/workflow-steps';
+import { StepTimingBadge } from '@/components/workflow/step-timing-badge';
 
 type Props = {
   projectId: string;
   className?: string;
 };
 
-/** Workflow steps only — no counts, chips, or sub-statuses (Phase 3.6). */
+/** Workflow steps with per-step clock (estimate / running / took). */
 export function WorkflowProgressHeader({ projectId, className }: Props) {
   const {
     steps,
@@ -19,6 +20,7 @@ export function WorkflowProgressHeader({ projectId, className }: Props) {
     isStepComplete,
     hasSuccessfulImport,
     importsLoaded,
+    stepTimings,
   } = useWorkflow(projectId);
   const lockLaterSteps = importsLoaded && !hasSuccessfulImport;
 
@@ -41,6 +43,12 @@ export function WorkflowProgressHeader({ projectId, className }: Props) {
           const href = locked
             ? `/projects/${projectId}/backlink-builder/import`
             : getStepHref(step);
+          const timing = stepTimings.find((t) => t.stepId === step.id) ?? {
+            stepId: step.id,
+            phase: done ? ('done' as const) : current ? ('running' as const) : ('idle' as const),
+            estimateMinutes: step.estimatedMinutes ?? 5,
+            elapsedMs: null,
+          };
           return (
             <li key={step.id}>
               <Link
@@ -51,24 +59,27 @@ export function WorkflowProgressHeader({ projectId, className }: Props) {
                     : undefined
                 }
                 className={cn(
-                  'inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-medium transition-colors',
+                  'inline-flex flex-col gap-0.5 rounded-lg px-2 py-1.5 text-[11px] font-medium transition-colors',
                   done && 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300',
                   current && 'bg-primary/10 text-primary ring-1 ring-primary/30',
                   !done && !current && 'bg-muted/50 text-muted-foreground',
                   locked && 'opacity-60'
                 )}
               >
-                <span
-                  className={cn(
-                    'flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px]',
-                    done && 'bg-emerald-500 text-white',
-                    current && 'bg-primary text-primary-foreground',
-                    !done && !current && 'bg-muted text-muted-foreground'
-                  )}
-                >
-                  {done ? <Check className="h-3 w-3" /> : step.number}
+                <span className="inline-flex items-center gap-1.5">
+                  <span
+                    className={cn(
+                      'flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px]',
+                      done && 'bg-emerald-500 text-white',
+                      current && 'bg-primary text-primary-foreground',
+                      !done && !current && 'bg-muted text-muted-foreground'
+                    )}
+                  >
+                    {done ? <Check className="h-3 w-3" /> : step.number}
+                  </span>
+                  <span className="hidden sm:inline truncate max-w-[7rem]">{label}</span>
                 </span>
-                <span className="hidden sm:inline truncate max-w-[7rem]">{label}</span>
+                <StepTimingBadge timing={timing} compact className="self-start ml-6 sm:ml-0" />
               </Link>
             </li>
           );

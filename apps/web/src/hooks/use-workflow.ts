@@ -53,6 +53,12 @@ type WorkflowProgressApi = {
     hasTrackedResults: boolean;
     hasReport: boolean;
   };
+  timings?: Array<{
+    stepId: string;
+    phase: 'idle' | 'running' | 'done';
+    estimateMinutes: number;
+    elapsedMs: number | null;
+  }>;
 };
 
 /**
@@ -221,6 +227,7 @@ export function useWorkflow(projectId: string) {
     learningMode,
     allComplete,
     workflowProgressApi: api,
+    stepTimings: api?.timings ?? [],
     isStepComplete,
     getStepHref: (step: WorkflowStep) => getStepHref(step, projectId),
   };

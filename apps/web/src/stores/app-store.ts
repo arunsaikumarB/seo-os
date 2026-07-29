@@ -39,7 +39,7 @@ export const useAppStore = create<AppState>()(
       demoMode: false,
       tourCompleted: false,
       showTour: false,
-      learningMode: true,
+      learningMode: false,
       expertMode: false,
       workflowProgress: {},
       helpDrawerOpen: false,

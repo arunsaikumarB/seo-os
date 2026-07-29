@@ -502,34 +502,13 @@ export function ContentLibraryPage() {
       {contentLane === 'web2' && generateState === 'idle' ? (
         <Card className="rounded-2xl border-border/40 shadow-sm">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Web 2.0 / article flow</CardTitle>
+            <CardTitle className="text-base">Web 2.0 / article content</CardTitle>
             <CardDescription>
-              Matches the study → content → image → autofill → submit path
+              Option 1: generate blog packs · Option 2: add keywords / internal links first
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
-            <ol className="space-y-2 list-decimal list-inside text-muted-foreground">
-              <li>
-                <span className="text-foreground">Links uploaded</span> — done in Import (with Web
-                2.0 / Articles selected)
-              </li>
-              <li>
-                <span className="text-foreground">Study link &amp; domain rules</span> — done in AI
-                Review (unrelated sites flagged)
-              </li>
-              <li>
-                <span className="text-foreground">Content generation</span> — choose option below
-              </li>
-              <li>
-                <span className="text-foreground">Images from content</span> — Image Studio after
-                packs (needs live IMAGE_FLUX_URL)
-              </li>
-              <li>
-                <span className="text-foreground">Auto-fill &amp; Submit</span> — paste/publish after
-                platform login → Submit Backlinks
-              </li>
-            </ol>
-            <div className="grid gap-2 sm:grid-cols-2 pt-1">
+            <div className="grid gap-2 sm:grid-cols-2">
               <button
                 type="button"
                 onClick={() => setWeb2Option('blog')}
@@ -539,9 +518,6 @@ export function ContentLibraryPage() {
                 )}
               >
                 <p className="font-medium text-foreground">Option 1 — Generate blog content</p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
-                  Title, body, tags, image prompt from site rules
-                </p>
               </button>
               <button
                 type="button"
@@ -554,9 +530,6 @@ export function ContentLibraryPage() {
                 )}
               >
                 <p className="font-medium text-foreground">Option 2 — Keywords / internal links</p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
-                  Add targets first, then generate content around them
-                </p>
               </button>
             </div>
             {web2Option === 'internal_links' ? (
@@ -568,9 +541,8 @@ export function ContentLibraryPage() {
               />
             ) : null}
             <p className="text-xs text-muted-foreground tabular-nums">
-              Will generate for {laneItemIds.length} Web 2.0 / article site
-              {laneItemIds.length === 1 ? '' : 's'}
-              {estimates?.durationLabel ? ` · ETA ${estimates.durationLabel}` : ''}
+              {laneItemIds.length} site{laneItemIds.length === 1 ? '' : 's'}
+              {estimates?.durationLabel ? ` · ${estimates.durationLabel}` : ''}
             </p>
             <Button
               size="lg"
@@ -582,7 +554,7 @@ export function ContentLibraryPage() {
               onClick={() => startGeneration.mutate()}
             >
               {web2Option === 'internal_links'
-                ? 'Save links & generate content'
+                ? 'Save links & generate'
                 : 'Generate blog content'}
             </Button>
           </CardContent>
@@ -616,40 +588,21 @@ export function ContentLibraryPage() {
       {/* —— State C: Complete —— */}
       {generateState === 'complete' ? (
         <>
-          {showCelebration ? (
-            <Card className="rounded-2xl border-emerald-500/30 bg-emerald-500/5 shadow-sm">
-              <CardContent className="pt-5 space-y-3">
-                <p className="font-medium">AI completed content generation.</p>
-                <p className="text-sm text-muted-foreground">
-                  {pkgCount} packages created. Everything is ready.
-                </p>
-                {(needsReview > 0 || failed > 0) ? null : (
-                  <Button asChild>
-                    <Link to={continueHref}>Continue →</Link>
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
-          ) : (
-            <Card className="rounded-2xl border-border/40 shadow-sm">
-              <CardContent className="pt-5 space-y-3">
-                <p className="font-medium text-sm">Generation Complete</p>
-                <p className="text-sm text-muted-foreground tabular-nums">
-                  {pkgCount} packages · {imgCount} images · {metaCount} metadata · {videoCount}{' '}
-                  video metadata
-                </p>
+          <Card className="rounded-2xl border-border/40 shadow-sm">
+            <CardContent className="pt-5 space-y-3">
+              <p className="font-medium text-sm">Generation complete</p>
+              <p className="text-sm text-muted-foreground tabular-nums">
+                {pkgCount} packages · {imgCount} images · {metaCount} metadata
+              </p>
+              {needsReview > 0 || failed > 0 ? (
                 <ExceptionChip projectId={projectId}>{reviewPanel}</ExceptionChip>
-                {needsReview === 0 && failed === 0 ? (
-                  <Button asChild>
-                    <Link to={continueHref}>Continue →</Link>
-                  </Button>
-                ) : null}
-              </CardContent>
-            </Card>
-          )}
-          {showCelebration && (needsReview > 0 || failed > 0) ? (
-            <ExceptionChip projectId={projectId}>{reviewPanel}</ExceptionChip>
-          ) : null}
+              ) : (
+                <Button asChild>
+                  <Link to={continueHref}>Continue →</Link>
+                </Button>
+              )}
+            </CardContent>
+          </Card>
         </>
       ) : null}
 

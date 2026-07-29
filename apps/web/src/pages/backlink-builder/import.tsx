@@ -10,8 +10,9 @@ import { toast } from 'sonner';
 import { PageTransition } from '@/components/demo/page-transition';
 import { AiActivityCard } from '@/components/workflow/ai-activity-card';
 import { isSuccessfulImportRecord } from '@/lib/import-success';
-import { Upload, FileSpreadsheet, FileText, Link2, Sheet } from 'lucide-react';
+import { Upload, FileSpreadsheet, FileText, Link2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { AdvancedTools } from '@/components/workflow/advanced-tools';
 
 const IMPORT_TARGET_OPTIONS = [
   {
@@ -120,41 +121,6 @@ export function BacklinkImportPage() {
     refetchInterval: (q) => {
       const rows = q.state.data?.data ?? [];
       return rows.some((r) => ACTIVE_STATUSES.has(String(r.status))) ? 4000 : false;
-    },
-  });
-
-  /** Phase 6.3.1 — confirmed / mixed Automation split (active CSM cohort) */
-  const laneBoard = useQuery({
-    queryKey: ['manual-submissions', projectId],
-    queryFn: () =>
-      request<{
-        data: {
-          counts: {
-            automatable: number;
-            manual: number;
-            active: number;
-            confidence: 'provisional' | 'confirmed' | 'mixed';
-            assisted?: number;
-            assistedReady?: number;
-            assistedCheckFields?: number;
-            assistedNeedsPerson?: number;
-            manualOffline?: number;
-          };
-          items: Array<{ id: string; website: string; reason: string; url: string | null }>;
-          assisted?: {
-            assisted: number;
-            ready: number;
-            checkFields: number;
-            needsPerson: number;
-            conservationOk: boolean;
-          } | null;
-        };
-      }>(`/v1/projects/${projectId}/backlink-builder/manual-submissions`),
-    enabled: !!projectId,
-    refetchInterval: () => {
-      const rows = history.data?.data ?? [];
-      const busy = rows.some((r) => ACTIVE_STATUSES.has(String(r.status)));
-      return busy ? 4000 : 15_000;
     },
   });
 
@@ -277,23 +243,6 @@ export function BacklinkImportPage() {
     ];
   })();
 
-  const provisionalFromImport =
-    importMutation.data?.data?.provisionalLanes ??
-    latest?.metadata?.provisionalLanes ??
-    null;
-  const confirmedCounts = laneBoard.data?.data.counts;
-  const showConfirmedSplit =
-    confirmedCounts != null &&
-    ((confirmedCounts.assisted ?? 0) > 0 ||
-      confirmedCounts.manual > 0 ||
-      confirmedCounts.active > 0 ||
-      (confirmedCounts.assistedReady ?? 0) > 0);
-  const assistedCount = confirmedCounts?.assisted ?? 0;
-  const packageFallback =
-    (confirmedCounts?.manual ?? 0) + (confirmedCounts?.automatable ?? 0) ||
-    (provisionalFromImport?.manual ?? 0) + (provisionalFromImport?.automatable ?? 0);
-  const showAssistedWorklist = provisionalFromImport != null || showConfirmedSplit;
-
   return (
     <PageTransition className="space-y-6 max-w-5xl">
       <div>
@@ -308,30 +257,23 @@ export function BacklinkImportPage() {
 
       {(pipelineBusy || importMutation.isPending) && (
         <AiActivityCard
-          title="AI is inspecting websites"
-          percent={importMutation.isPending ? 40 : pipelineBusy ? 68 : 0}
-          current={importMutation.isPending ? 'Validating URLs' : 'Analyzing forms'}
-          next={importMutation.isPending ? 'Checking robots.txt' : 'Grouping opportunities'}
-          eta="~1 min"
-          items={[
-            { label: 'Homepage', state: importMutation.isPending ? 'active' : 'done' },
-            { label: 'Navigation', state: importMutation.isPending ? 'queued' : 'done' },
-            { label: 'Forms', state: pipelineBusy && !importMutation.isPending ? 'active' : 'queued' },
-            { label: 'Robots.txt', state: 'queued' },
-            { label: 'Metadata', state: 'queued' },
-          ]}
+          title="AI is studying websites"
+          percent={importMutation.isPending ? 40 : 68}
+          current={importMutation.isPending ? 'Validating URLs' : 'Analyzing & grouping'}
+          next="Continue to AI Review when ready"
+          eta={null}
+          items={checklistItems}
         />
       )}
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="text-base">Import Source</CardTitle>
-            <CardDescription>
-              Import starts AI review automatically — you do not need to run anything else.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
+      <Card className="max-w-3xl">
+        <CardHeader>
+          <CardTitle className="text-base">Import Source</CardTitle>
+          <CardDescription>
+            Choose opportunity types, then paste or upload. AI reviews automatically.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
             <div className="space-y-2">
               <p className="text-sm font-medium">1. What are you importing?</p>
               <p className="text-xs text-muted-foreground">
@@ -420,161 +362,41 @@ export function BacklinkImportPage() {
             </div>
             {pipelineBusy && (
               <p className="text-xs text-muted-foreground">
-                AI is reviewing in the background. Opportunity counts appear when review finishes.
+                AI is reviewing in the background. Open AI Review when ready.
               </p>
             )}
           </CardContent>
         </Card>
 
-        <div className="space-y-4">
-          <AiActivityCard
-            title="After you import"
-            percent={null}
-            current={
-              !hasSuccessfulImport && !pipelineBusy
-                ? 'Waiting for your first import'
-                : pipelineBusy
-                  ? 'Validate & deduplicate'
-                  : 'Import complete'
-            }
-            next={
-              hasSuccessfulImport
-                ? 'Continue to AI Review'
-                : 'Paste URLs and click Import & continue'
-            }
-            items={checklistItems}
-          />
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Sheet className="h-4 w-4" /> Google Sheets
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm space-y-2">
-              <p className="text-muted-foreground">
-                Connect Google when ready — paste or CSV works now.
-              </p>
-              <Button size="sm" variant="outline" disabled>
-                Connect Google Sheets
-              </Button>
-            </CardContent>
-          </Card>
+      {hasSuccessfulImport && !pipelineBusy ? (
+        <div className="flex flex-wrap gap-2">
+          <Button asChild>
+            <Link to={`/projects/${projectId}/backlink-builder/classification`}>
+              Continue to AI Review →
+            </Link>
+          </Button>
         </div>
-      </div>
+      ) : null}
 
-      {showAssistedWorklist && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Assisted Manual worklist</CardTitle>
-            <CardDescription className="mt-1">
-              Every content-ready site is prepared for manual paste-and-submit. Ready · Check these
-              fields · Needs a person.
-              {confirmedCounts?.active != null ? <> · Active cohort {confirmedCounts.active}</> : null}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="space-y-1">
-                <p>
-                  📋 Packages:{' '}
-                  <span className="font-semibold tabular-nums">
-                    {assistedCount || packageFallback}
-                  </span>
-                  <span className="text-muted-foreground">
-                    {' '}
-                    — Ready {confirmedCounts?.assistedReady ?? 0} · Check{' '}
-                    {confirmedCounts?.assistedCheckFields ?? 0} · Needs person{' '}
-                    {confirmedCounts?.assistedNeedsPerson ?? 0}
-                  </span>
-                  {' · '}
-                  <Link
-                    className="underline-offset-2 hover:underline"
-                    to={`/projects/${projectId}/backlink-builder/assisted-manual`}
-                  >
-                    Open worklist
-                  </Link>
-                </p>
-              </div>
-              <Button size="sm" variant="outline" asChild>
-                <Link to={`/projects/${projectId}/backlink-builder/assisted-manual`}>
-                  Open Assisted Manual
-                </Link>
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {latest?.metadata?.classificationSummary && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">AI found opportunities</CardTitle>
-            <CardDescription>
-              {latest.metadata.classificationSummary.classified} of{' '}
-              {latest.metadata.classificationSummary.imported} websites reviewed ·{' '}
-              <Link
-                className="underline underline-offset-2"
-                to={`/projects/${projectId}/backlink-builder/classification`}
-              >
-                Open AI Review
-              </Link>
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {(latest.metadata.classificationSummary.byType ?? []).map((row) => (
-              <div
-                key={row.id}
-                className="flex items-center justify-between border-b border-border/50 py-1.5 last:border-0 text-sm"
-              >
-                <span className="font-medium">{row.label}</span>
-                <span className="tabular-nums font-semibold">{row.count}</span>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Import History</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            {(history.data?.data ?? []).map((imp) => (
-              <div
-                key={imp.id}
-                className="flex items-center justify-between gap-3 rounded-md border p-3 text-sm"
-              >
-                <div>
-                  <p className="font-medium">{imp.file_name ?? `${imp.source_type} import`}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {imp.valid_rows}/{imp.total_rows} valid · {imp.opportunities_created}{' '}
-                    opportunities · {new Date(imp.created_at).toLocaleDateString()}
-                  </p>
-                </div>
-                <Badge
-                  className={`text-[10px] capitalize ${
-                    ACTIVE_STATUSES.has(imp.status)
-                      ? 'animate-pulse'
-                      : ''
-                  }`}
-                >
-                  {ACTIVE_STATUSES.has(imp.status)
-                    ? 'AI reviewing'
-                    : imp.status === 'completed'
-                      ? 'Ready'
-                      : imp.status}
+      {history.data?.data && history.data.data.length > 0 ? (
+        <AdvancedTools>
+          <p className="text-sm font-medium mb-2">Import history</p>
+          <ul className="space-y-2 text-sm text-muted-foreground">
+            {history.data.data.slice(0, 5).map((row) => (
+              <li key={row.id} className="flex flex-wrap gap-2 tabular-nums">
+                <Badge className="capitalize text-[10px]">
+                  {row.status}
                 </Badge>
-              </div>
+                <span>{row.valid_rows} URLs</span>
+                <span>{new Date(row.created_at).toLocaleString()}</span>
+                {row.metadata?.targetFamilyLabels?.length ? (
+                  <span>{row.metadata.targetFamilyLabels.join(', ')}</span>
+                ) : null}
+              </li>
             ))}
-            {!history.data?.data?.length && (
-              <p className="text-muted-foreground text-sm">
-                No imports yet. Paste URLs above to get started.
-              </p>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+          </ul>
+        </AdvancedTools>
+      ) : null}
     </PageTransition>
   );
 }
