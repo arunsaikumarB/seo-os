@@ -18,7 +18,7 @@ import {
   FolderPlus,
   ClipboardList,
   BookOpen,
-  ListChecks,
+  PenLine,
 } from 'lucide-react';
 import type { NavItem } from './navigation';
 
@@ -81,17 +81,17 @@ export const workflowNavSections: WorkflowNavSection[] = [
         stepNumber: 4,
       },
       {
+        label: 'Web 2.0 / Articles',
+        href: 'content/library?mode=web2',
+        icon: PenLine,
+        featureFlag: 'v11_content_studio_v2',
+      },
+      {
         label: 'Submit Backlinks',
         href: 'backlink-builder/assisted-manual',
         icon: ClipboardList,
         featureFlag: 'backlink_builder',
         stepNumber: 5,
-      },
-      {
-        label: 'Ranked Queue',
-        href: 'backlink-builder/submit-queue',
-        icon: ListChecks,
-        featureFlag: 'backlink_builder',
       },
       {
         label: 'Track Results',

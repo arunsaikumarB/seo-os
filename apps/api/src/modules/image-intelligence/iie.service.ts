@@ -146,10 +146,75 @@ function providerAllowed(key: string): boolean {
 }
 
 export async function listImageProviders() {
-  return registry.providers().map((p) => ({
-    ...p,
-    flagEnabled: providerAllowed(p.key),
-  }));
+  return Promise.all(
+    registry.providers().map(async (p) => {
+      const allowed = providerAllowed(p.key);
+      const caps = registry.get(p.key).capabilities();
+      let health: { status: string; message?: string } = { status: 'unknown' };
+      try {
+        health = await registry.get(p.key).health();
+      } catch {
+        health = { status: 'down' };
+      }
+      const urlEnvKey = `IMAGE_${p.key.toUpperCase().replace(/-/g, '_')}_URL`;
+      const liveUrl = Boolean(process.env[urlEnvKey]);
+      const draftMode = !liveUrl && caps.freeDefault === true;
+      return {
+        ...p,
+        flagEnabled: allowed,
+        configured: liveUrl || draftMode,
+        draftMode,
+        live: liveUrl,
+        health,
+        displayStatus: !allowed
+          ? 'disabled'
+          : liveUrl
+            ? health.status === 'healthy' || health.status === 'degraded'
+              ? 'ready'
+              : health.status
+            : draftMode
+              ? 'draft'
+              : 'unconfigured',
+      };
+    })
+  );
+}
+
+async function signedPreviewUrl(storagePath: string | null | undefined): Promise<string | null> {
+  if (!storagePath) return null;
+  try {
+    const { data, error } = await getSupabaseAdmin()
+      .storage.from('image-intelligence')
+      .createSignedUrl(storagePath, 60 * 60);
+    if (error || !data?.signedUrl) return null;
+    return data.signedUrl;
+  } catch {
+    return null;
+  }
+}
+
+export async function listImages(workspaceId: string, status?: string) {
+  let q = getSupabaseAdmin()
+    .from('image_assets')
+    .select('*, image_metadata(*)')
+    .eq('workspace_id', workspaceId)
+    .is('deleted_at', null)
+    .order('created_at', { ascending: false })
+    .limit(100);
+  if (status) q = q.eq('status', status);
+  const { data } = await q;
+  const rows = data ?? [];
+  return Promise.all(
+    rows.map(async (row) => {
+      const previewUrl = await signedPreviewUrl(
+        (row as { storage_path?: string | null }).storage_path
+      );
+      return {
+        ...row,
+        preview_url: previewUrl,
+      };
+    })
+  );
 }
 
 export async function getOrCreateStyleProfile(workspaceId: string) {
@@ -370,19 +435,6 @@ export async function enqueueImageGenerate(params: {
   }
 
   return { jobs, imageTypes: IMAGE_TYPES };
-}
-
-export async function listImages(workspaceId: string, status?: string) {
-  let q = getSupabaseAdmin()
-    .from('image_assets')
-    .select('*, image_metadata(*)')
-    .eq('workspace_id', workspaceId)
-    .is('deleted_at', null)
-    .order('created_at', { ascending: false })
-    .limit(100);
-  if (status) q = q.eq('status', status);
-  const { data } = await q;
-  return data ?? [];
 }
 
 export async function listImageJobs(workspaceId: string) {

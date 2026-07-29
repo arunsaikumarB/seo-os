@@ -114,10 +114,21 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
           status: string;
           image_type: string;
           provider_key: string;
-          quality_scores?: { overall?: number; pass?: boolean };
+          quality_scores?: {
+            overall?: number;
+            pass?: boolean;
+            rejectReason?: string;
+            resolution?: number;
+            visualQuality?: number;
+          };
           rejected_reason?: string | null;
           opportunity_id?: string | null;
           created_at: string;
+          preview_url?: string | null;
+          mime_type?: string | null;
+          width?: number | null;
+          height?: number | null;
+          settings?: { providerMeta?: { mode?: string; note?: string } } | null;
         }>;
       }>(`/v1/projects/${projectId}/images`),
     enabled: !!projectId && kind === 'image',
@@ -508,50 +519,98 @@ function MediaStudio({ kind }: { kind: 'image' | 'video' }) {
       {kind === 'image' && relatedAssets.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">3. Quality review</CardTitle>
+            <CardTitle className="text-base">3. Quality review &amp; preview</CardTitle>
             <CardDescription>
-              Resolution, brand, logo, aspect ratio, and metadata run automatically after generation.
+              Open each asset to verify the visual, then Approve or Reject. Auto-reject happens when
+              score &lt; 60 or the provider is in draft SVG mode (no live IMAGE_FLUX_URL).
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-2">
-            {relatedAssets.map((a) => (
-              <div
-                key={a.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm"
-              >
-                <div>
-                  <p className="font-medium capitalize">{a.image_type.replace(/_/g, ' ')}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {a.provider_key}
-                    {a.quality_scores?.overall != null
-                      ? ` · quality ${a.quality_scores.overall}`
-                      : ''}
-                    {a.rejected_reason ? ` · ${a.rejected_reason}` : ''}
-                  </p>
+          <CardContent className="space-y-3">
+            {relatedAssets.map((a) => {
+              const draft =
+                a.settings?.providerMeta?.mode === 'local_draft_svg' ||
+                a.mime_type?.includes('svg');
+              const canReview =
+                a.status === 'scored' ||
+                a.status === 'ready' ||
+                a.status === 'rejected';
+              return (
+                <div
+                  key={a.id}
+                  className="rounded-md border px-3 py-3 text-sm space-y-3"
+                >
+                  <div className="flex flex-wrap gap-3">
+                    <div className="h-28 w-44 shrink-0 overflow-hidden rounded border bg-muted/30 flex items-center justify-center">
+                      {a.preview_url ? (
+                        <a href={a.preview_url} target="_blank" rel="noreferrer" className="block h-full w-full">
+                          <img
+                            src={a.preview_url}
+                            alt={`${a.image_type} preview`}
+                            className="h-full w-full object-cover"
+                          />
+                        </a>
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground px-2 text-center">
+                          No preview URL — storage bucket may be missing
+                        </span>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <p className="font-medium capitalize">{a.image_type.replace(/_/g, ' ')}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {a.provider_key}
+                        {a.width && a.height ? ` · ${a.width}×${a.height}` : ''}
+                        {a.quality_scores?.overall != null
+                          ? ` · quality ${a.quality_scores.overall}/100`
+                          : ''}
+                        {draft ? ' · draft SVG placeholder' : ''}
+                      </p>
+                      {(a.rejected_reason || a.quality_scores?.rejectReason) && (
+                        <p className="text-xs text-amber-800 dark:text-amber-200">
+                          {a.rejected_reason || a.quality_scores?.rejectReason}
+                        </p>
+                      )}
+                      {draft && (
+                        <p className="text-xs text-muted-foreground">
+                          FLUX/SDXL ran in local draft mode. Configure IMAGE_FLUX_URL (or SDXL) in
+                          Provider Settings, then regenerate for a real photo.
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                      <Badge className="text-[10px] capitalize">{a.status}</Badge>
+                      {canReview && (
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => reviewAsset.mutate({ id: a.id, status: 'approved' })}
+                          >
+                            {a.status === 'rejected' ? 'Override & Approve' : 'Approve'}
+                          </Button>
+                          {a.status !== 'rejected' && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => reviewAsset.mutate({ id: a.id, status: 'rejected' })}
+                            >
+                              Reject
+                            </Button>
+                          )}
+                        </div>
+                      )}
+                      {a.preview_url && (
+                        <Button size="sm" variant="ghost" asChild>
+                          <a href={a.preview_url} target="_blank" rel="noreferrer">
+                            Open full size
+                          </a>
+                        </Button>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Badge className="text-[10px] capitalize">{a.status}</Badge>
-                  {(a.status === 'scored' || a.status === 'ready') && (
-                    <>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => reviewAsset.mutate({ id: a.id, status: 'approved' })}
-                      >
-                        Approve
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => reviewAsset.mutate({ id: a.id, status: 'rejected' })}
-                      >
-                        Reject
-                      </Button>
-                    </>
-                  )}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </CardContent>
         </Card>
       )}

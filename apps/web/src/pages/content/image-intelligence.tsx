@@ -85,9 +85,15 @@ export function ImageIntelligencePanel({ embedded = false }: { embedded?: boolea
   const providers = useQuery({
     queryKey: ['iie-providers'],
     queryFn: () =>
-      request<{ data: Array<{ key: string; displayName: string; configured: boolean }> }>(
-        `/v1/projects/${projectId}/images/providers`
-      ),
+      request<{
+        data: Array<{
+          key: string;
+          displayName: string;
+          configured?: boolean;
+          draftMode?: boolean;
+          displayStatus?: string;
+        }>;
+      }>(`/v1/projects/${projectId}/images/providers`),
     enabled: !!projectId,
   });
 
@@ -270,7 +276,13 @@ export function ImageIntelligencePanel({ embedded = false }: { embedded?: boolea
           {(providers.data?.data ?? []).map((p) => (
             <Badge key={p.key} className="text-[10px]">
               {p.displayName}
-              {p.configured ? ' · ready' : ' · unconfigured'}
+              {p.displayStatus === 'ready'
+                ? ' · ready'
+                : p.displayStatus === 'draft' || p.draftMode
+                  ? ' · draft (no live URL)'
+                  : p.configured
+                    ? ` · ${p.displayStatus ?? 'ready'}`
+                    : ' · unconfigured'}
             </Badge>
           ))}
         </CardContent>

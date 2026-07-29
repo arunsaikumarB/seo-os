@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, Fragment } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ChevronDown, Download, Sparkles } from 'lucide-react';
@@ -110,6 +110,8 @@ function ContentPackPreview({ pack }: { pack: Record<string, unknown> }) {
 
 export function ContentLibraryPage() {
   const { projectId = '' } = useParams();
+  const [searchParams] = useSearchParams();
+  const web2Mode = searchParams.get('mode') === 'web2';
   const { request } = useApi();
   const queryClient = useQueryClient();
   const { continueHref } = useWorkflow(projectId);
@@ -400,10 +402,30 @@ export function ContentLibraryPage() {
     <PageTransition className="mx-auto max-w-3xl space-y-4">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <Sparkles className="h-6 w-6" /> Generate Content
+          <Sparkles className="h-6 w-6" />{' '}
+          {web2Mode ? 'Web 2.0 / Article Content' : 'Generate Content'}
         </h1>
-        <p className="text-muted-foreground text-sm mt-1">AI Content Pipeline</p>
+        <p className="text-muted-foreground text-sm mt-1">
+          {web2Mode
+            ? 'Long-form packs for Medium, Blogger, free blog networks — paste/publish after platform login'
+            : 'AI Content Pipeline'}
+        </p>
       </div>
+
+      {web2Mode ? (
+        <Card className="border-amber-500/30 bg-amber-500/5">
+          <CardContent className="pt-4 text-sm text-muted-foreground space-y-1">
+            <p>
+              Select approved Web 2.0 / blog opportunities, generate the article pack (title, body,
+              tags, image prompt), then publish manually on the platform after you log in.
+            </p>
+            <p>
+              Featured images: Advanced Tools → Image Studio (preview &amp; approve there). Directory
+              form submit stays under Submit Backlinks.
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {boardLoading ? <AiLoadingState message="Loading…" /> : null}
 
