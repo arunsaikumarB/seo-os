@@ -105,30 +105,101 @@ async function computeStepTimings(
   const genBusy = items.some(
     (i) => i.generationStatus === 'Queued' || i.generationStatus === 'Generating'
   );
-  const genStartTimes = items
+  const genCohort = items.filter(
+    (i) =>
+      i.generationStatus === 'Queued' ||
+      i.generationStatus === 'Generating' ||
+      i.generationStatus === 'Completed' ||
+      i.generationStatus === 'Needs Review' ||
+      ['Package Generated', 'Ready', 'Submitting', 'Waiting Human', 'Submitted', 'Verified', 'Completed'].includes(
+        i.currentStatus
+      )
+  );
+  const genTimes = genCohort
+    .map((i) => i.updatedAt)
+    .filter(Boolean)
+    .map((t) => new Date(String(t)).getTime())
+    .filter((n) => Number.isFinite(n));
+  const genBusyTimes = items
     .filter((i) => i.generationStatus === 'Queued' || i.generationStatus === 'Generating')
     .map((i) => i.updatedAt)
     .filter(Boolean)
     .map((t) => new Date(String(t)).getTime())
     .filter((n) => Number.isFinite(n));
-  const allGenTimes = items
-    .map((i) => i.updatedAt)
-    .filter(Boolean)
-    .map((t) => new Date(String(t)).getTime())
-    .filter((n) => Number.isFinite(n));
   const genStartedAt =
-    genBusy && genStartTimes.length
-      ? new Date(Math.min(...genStartTimes)).toISOString()
+    genBusy && genBusyTimes.length
+      ? new Date(Math.min(...genBusyTimes)).toISOString()
       : null;
   const genElapsed = genBusy
     ? genStartedAt
       ? msBetween(genStartedAt, null)
       : null
-    : flags.generateDone && allGenTimes.length >= 2
-      ? Math.max(...allGenTimes) - Math.min(...allGenTimes)
-      : flags.generateDone && allGenTimes.length === 1
-        ? null
+    : genTimes.length >= 2
+      ? Math.max(...genTimes) - Math.min(...genTimes)
+      : genTimes.length === 1
+        ? 0
         : null;
+
+  const submitBusy = items.some((i) => i.currentStatus === 'Submitting');
+  const submitCohort = items.filter((i) =>
+    ['Submitting', 'Waiting Human', 'Submitted', 'Verified', 'Completed', 'Ready', 'Package Generated'].includes(
+      i.currentStatus
+    )
+  );
+  const submitTimes = submitCohort
+    .map((i) => i.updatedAt)
+    .filter(Boolean)
+    .map((t) => new Date(String(t)).getTime())
+    .filter((n) => Number.isFinite(n));
+  const submitBusyTimes = items
+    .filter((i) => i.currentStatus === 'Submitting')
+    .map((i) => i.updatedAt)
+    .filter(Boolean)
+    .map((t) => new Date(String(t)).getTime())
+    .filter((n) => Number.isFinite(n));
+  const submitStartedAt =
+    submitBusy && submitBusyTimes.length
+      ? new Date(Math.min(...submitBusyTimes)).toISOString()
+      : null;
+  const submitElapsed = submitBusy
+    ? submitStartedAt
+      ? msBetween(submitStartedAt, null)
+      : null
+    : flags.submitDone && submitTimes.length >= 2
+      ? Math.max(...submitTimes) - Math.min(...submitTimes)
+      : flags.submitDone && submitTimes.length === 1
+        ? 0
+        : null;
+
+  const trackedItems = items.filter((i) =>
+    ['Submitted', 'Verified', 'Completed'].includes(i.currentStatus)
+  );
+  const trackTimes = trackedItems
+    .map((i) => i.updatedAt)
+    .filter(Boolean)
+    .map((t) => new Date(String(t)).getTime())
+    .filter((n) => Number.isFinite(n));
+  const trackElapsed =
+    flags.trackResultsDone && trackTimes.length >= 2
+      ? Math.max(...trackTimes) - Math.min(...trackTimes)
+      : flags.trackResultsDone && trackTimes.length === 1
+        ? 0
+        : null;
+
+  let reportElapsed: number | null = null;
+  if (flags.reportsDone) {
+    const { data: reports } = await getSupabaseAdmin()
+      .from('reports')
+      .select('created_at')
+      .eq('workspace_id', workspaceId)
+      .order('created_at', { ascending: true })
+      .limit(5);
+    const rTimes = (reports ?? [])
+      .map((r) => new Date(String(r.created_at)).getTime())
+      .filter((n) => Number.isFinite(n));
+    if (rTimes.length >= 2) reportElapsed = Math.max(...rTimes) - Math.min(...rTimes);
+    else if (rTimes.length === 1) reportElapsed = 0;
+  }
 
   const createElapsed = flags.createDone
     ? msBetween(project?.created_at, project?.updated_at)
@@ -141,6 +212,7 @@ async function computeStepTimings(
     if (id === 'import-websites' && pipelineBusy) return 'running';
     if (id === 'ai-review' && pipelineBusy && !flags.aiReviewDone) return 'running';
     if (id === 'generate-content' && genBusy) return 'running';
+    if (id === 'submit-backlinks' && submitBusy) return 'running';
     return 'idle';
   };
 
@@ -148,6 +220,7 @@ async function computeStepTimings(
     if (phase !== 'running') return null;
     if (id === 'import-websites' || id === 'ai-review') return pipelineStart;
     if (id === 'generate-content') return genStartedAt;
+    if (id === 'submit-backlinks') return submitStartedAt;
     return null;
   };
 
@@ -160,7 +233,13 @@ async function computeStepTimings(
       case 'ai-review':
         return flags.aiReviewDone || pipelineBusy ? importElapsed : null;
       case 'generate-content':
-        return genElapsed;
+        return flags.generateDone || genBusy ? genElapsed : null;
+      case 'submit-backlinks':
+        return flags.submitDone || submitBusy ? submitElapsed : null;
+      case 'track-results':
+        return flags.trackResultsDone ? trackElapsed : null;
+      case 'reports-analytics':
+        return flags.reportsDone ? reportElapsed : null;
       default:
         return null;
     }

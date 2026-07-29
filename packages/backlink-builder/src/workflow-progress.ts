@@ -39,14 +39,18 @@ export type WorkflowProgressInput = {
   approvedCount: number;
   /** Approved sites with a finished package */
   generatedPackages: number;
-  /** Approved sites still queued / generating / not started */
+  /** Approved sites still queued / generating (in flight — not idle backlog) */
   pendingGeneration: number;
+  /** Approved sites not started yet (other lane / optional backlog) */
+  awaitingGeneration: number;
   /** Approved sites whose generation failed */
   failedGeneration: number;
   /** Packages that belong on the submit lane (content-ready + terminal) */
   contentReadyCount: number;
   /** Content-ready items still not_started / in_progress (not Done/Verified/Skipped) */
   submitOpenCount: number;
+  /** Items currently in Submitting lifecycle */
+  submitInFlight: number;
   /** At least one Submitted / Verified / Completed result to track */
   hasTrackedResults: boolean;
   /** At least one generated report */
@@ -119,16 +123,19 @@ function stepDoneFlags(input: WorkflowProgressInput) {
     importDone &&
     input.aiReviewPending === 0 &&
     (input.aiNeedsReview === 0 || input.approvedCount > 0);
+  // Generate done when a batch finished and nothing is mid-flight.
+  // Other approved lanes with awaitingGeneration stay optional backlog.
   const generateDone =
     aiReviewDone &&
     (input.approvedCount === 0 ||
-      (input.generatedPackages >= input.approvedCount &&
-        input.pendingGeneration === 0 &&
-        input.failedGeneration === 0));
+      (input.generatedPackages > 0 && input.pendingGeneration === 0));
+  // Submit done when open queue cleared, or ≥1 result with nothing actively submitting.
   const submitDone =
     generateDone &&
-    (input.contentReadyCount === 0 || input.submitOpenCount === 0);
-  // Track Results: informational — done only when real results exist (never on visit)
+    (input.contentReadyCount === 0 ||
+      input.submitOpenCount === 0 ||
+      (input.hasTrackedResults && input.submitInFlight === 0));
+  // Track Results: informational — done when real results exist
   const trackResultsDone = submitDone && input.hasTrackedResults;
   const reportsDone = trackResultsDone && input.hasReport;
   return {
@@ -207,9 +214,11 @@ export function deriveWorkflowProgressInput(opts: {
   let approvedCount = 0;
   let generatedPackages = 0;
   let pendingGeneration = 0;
+  let awaitingGeneration = 0;
   let failedGeneration = 0;
   let contentReadyCount = 0;
   let submitOpenCount = 0;
+  let submitInFlight = 0;
   let tracked = 0;
 
   for (const item of visible) {
@@ -231,9 +240,11 @@ export function deriveWorkflowProgressInput(opts: {
         GENERATED_LIFECYCLES.includes(status)
       ) {
         generatedPackages++;
-      } else {
-        // Idle / Queued / Generating / null — not yet a finished package
+      } else if (gen === 'Queued' || gen === 'Generating') {
         pendingGeneration++;
+      } else {
+        // Idle / null — other lane or not started yet
+        awaitingGeneration++;
       }
     }
 
@@ -244,6 +255,7 @@ export function deriveWorkflowProgressInput(opts: {
       contentReadyCount++;
       if (SUBMIT_OPEN.includes(status)) submitOpenCount++;
     }
+    if (status === 'Submitting') submitInFlight++;
 
     if (
       status === 'Submitted' ||
@@ -262,9 +274,11 @@ export function deriveWorkflowProgressInput(opts: {
     approvedCount,
     generatedPackages,
     pendingGeneration,
+    awaitingGeneration,
     failedGeneration,
     contentReadyCount,
     submitOpenCount,
+    submitInFlight,
     hasTrackedResults: tracked > 0,
     hasReport: Boolean(opts.hasReport),
   };

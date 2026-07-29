@@ -48,9 +48,11 @@ type WorkflowProgressApi = {
     approvedCount: number;
     generatedPackages: number;
     pendingGeneration: number;
+    awaitingGeneration: number;
     failedGeneration: number;
     contentReadyCount: number;
     submitOpenCount: number;
+    submitInFlight: number;
     hasTrackedResults: boolean;
     hasReport: boolean;
   };
