@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, Fragment } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ChevronDown, Download, Sparkles } from 'lucide-react';
@@ -19,6 +19,32 @@ import { ImageIntelligencePanel } from '@/pages/content/image-intelligence';
 import { useCampaignAiStatus } from '@/hooks/use-campaign-ai-status';
 import { useWorkflow } from '@/hooks/use-workflow';
 import { cn } from '@/lib/utils';
+
+type ContentLane = 'web2' | 'listing';
+
+function contentLaneStorageKey(projectId: string) {
+  return `seo-os:content-lane:${projectId}`;
+}
+
+function readStoredContentLane(projectId: string): ContentLane | null {
+  if (!projectId) return null;
+  try {
+    const v = localStorage.getItem(contentLaneStorageKey(projectId));
+    if (v === 'web2' || v === 'listing') return v;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+function writeStoredContentLane(projectId: string, lane: ContentLane) {
+  if (!projectId) return;
+  try {
+    localStorage.setItem(contentLaneStorageKey(projectId), lane);
+  } catch {
+    /* ignore */
+  }
+}
 
 type ContentPackRow = {
   id: string;
@@ -130,6 +156,7 @@ function ContentPackPreview({ pack }: { pack: Record<string, unknown> }) {
 
 export function ContentLibraryPage() {
   const { projectId = '' } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { request } = useApi();
   const queryClient = useQueryClient();
   const { continueHref } = useWorkflow(projectId);
@@ -152,7 +179,13 @@ export function ContentLibraryPage() {
   const approvedQ = useApprovedOpportunities(projectId);
   const approvedOpps = approvedQ.data?.data ?? [];
 
-  const [contentLane, setContentLane] = useState<'web2' | 'listing'>('web2');
+  const laneFromUrl = searchParams.get('lane');
+  const initialLane: ContentLane =
+    laneFromUrl === 'web2' || laneFromUrl === 'listing'
+      ? laneFromUrl
+      : (readStoredContentLane(projectId) ?? 'web2');
+
+  const [contentLane, setContentLaneState] = useState<ContentLane>(initialLane);
   const [web2Option, setWeb2Option] = useState<'blog' | 'internal_links'>('blog');
   const [internalLinks, setInternalLinks] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -163,13 +196,45 @@ export function ContentLibraryPage() {
   const [showCelebration, setShowCelebration] = useState(false);
   const wasRunning = useRef(false);
 
+  const setContentLane = (lane: ContentLane) => {
+    setContentLaneState(lane);
+    writeStoredContentLane(projectId, lane);
+    const next = new URLSearchParams(searchParams);
+    next.set('lane', lane);
+    setSearchParams(next, { replace: true });
+  };
+
   const web2Opps = useMemo(() => approvedOpps.filter(isWeb2Opp), [approvedOpps]);
   const listingOpps = useMemo(() => approvedOpps.filter((o) => !isWeb2Opp(o)), [approvedOpps]);
 
+  // Restore saved/URL lane when project changes; only auto-switch if current lane is empty.
   useEffect(() => {
+    const fromUrl = searchParams.get('lane');
+    const stored = readStoredContentLane(projectId);
+    const preferred: ContentLane | null =
+      fromUrl === 'web2' || fromUrl === 'listing'
+        ? fromUrl
+        : stored;
+
+    if (preferred) {
+      const preferredEmpty =
+        (preferred === 'web2' && web2Opps.length === 0 && listingOpps.length > 0) ||
+        (preferred === 'listing' && listingOpps.length === 0 && web2Opps.length > 0);
+      if (!preferredEmpty) {
+        if (preferred !== contentLane) setContentLaneState(preferred);
+        if (fromUrl !== preferred) {
+          const next = new URLSearchParams(searchParams);
+          next.set('lane', preferred);
+          setSearchParams(next, { replace: true });
+        }
+        return;
+      }
+    }
+
     if (web2Opps.length === 0 && listingOpps.length > 0) setContentLane('listing');
     else if (listingOpps.length === 0 && web2Opps.length > 0) setContentLane('web2');
-  }, [web2Opps.length, listingOpps.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, web2Opps.length, listingOpps.length]);
 
   const laneOpps = contentLane === 'web2' ? web2Opps : listingOpps;
   const laneItemIds = useMemo(
