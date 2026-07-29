@@ -339,13 +339,15 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
       campaignState = 'Running';
       campaignIsRunning = true;
       aiStatusLine = `Submitting (${liveRunning} running / ${liveQueued} queued)`;
-    } else if (liveWaiting > 0 || assistedOpen > 0) {
+    } else if (liveWaiting > 0) {
       campaignState = 'Waiting Human';
       campaignIsRunning = false;
-      aiStatusLine =
-        assistedOpen > 0
-          ? `Assisted Manual — ${assistedOpen} site${assistedOpen === 1 ? '' : 's'} remaining`
-          : 'Waiting for you';
+      aiStatusLine = 'Waiting for you';
+    } else if (assistedOpen > 0) {
+      // Assisted Manual packages are NOT browser Waiting Human — do not flag Chromium.
+      campaignState = 'Idle';
+      campaignIsRunning = false;
+      aiStatusLine = `Assisted Manual — ${assistedOpen} site${assistedOpen === 1 ? '' : 's'} remaining`;
     } else if (liveQueued > 0) {
       campaignState = 'Starting';
       campaignIsRunning = false;
@@ -368,10 +370,7 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
       : queued + inFlight;
   const liveWaitingHuman =
     policy.auto_publish_automatable !== true
-      ? Math.max(
-          state.items.filter((i) => i.status === 'Waiting Human').length,
-          assistedOpen > 0 ? assistedOpen : c['Waiting Human']
-        )
+      ? state.items.filter((i) => i.status === 'Waiting Human').length
       : c['Waiting Human'];
   // Finished only when the CSM cohort is fully terminal — never while Assisted packages remain
   const submittedCount = c.Submitted + c.Completed;
@@ -397,6 +396,9 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
     /** CSM Submission Ready count (Phase 5.5) — was wrongly bound to execution job Ready */
     ready: submissionReady,
     submissionReady,
+    /** Open Assisted Manual packages (paste-and-submit) — not browser Waiting Human */
+    assistedOpen,
+    assistedManualRemaining: assistedOpen,
     handoff,
     paused: 0,
     needs_approval: liveWaitingHuman,
@@ -461,6 +463,8 @@ export async function getStatisticsFromExecutionState(workspaceId: string) {
       submitted: submittedCount,
       verified: verifiedCount,
       waitingHuman: liveWaitingHuman,
+      assistedOpen,
+      assistedManualRemaining: assistedOpen,
       skipped: c.Skipped,
       failed: c.Failed,
       deleted: c.Deleted,

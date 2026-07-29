@@ -725,8 +725,12 @@ export function BrowserExecutionCenterPage() {
                     <p className="text-sm font-medium">{sum?.aiStatusLine ?? s?.aiStatusLine ?? 'Submitting backlinks'}</p>
                     <p className="text-xs text-muted-foreground mt-1">
                       Progress {progressPercent}% · Completed {completedJobs} · Running{' '}
-                      {sum?.running ?? s?.running ?? 0} · Waiting Human{' '}
-                      {sum?.waitingHuman ?? actionItems.length} · Remaining {remainingJobs}
+                      {sum?.running ?? s?.running ?? 0}
+                      {runtimeHealthy
+                        ? ` · Waiting Human ${sum?.waitingHuman ?? actionItems.length}`
+                        : ` · Assisted left ${sum?.assistedOpen ?? remainingJobs}`}
+                      {' · Remaining '}
+                      {remainingJobs}
                     </p>
                   </div>
                   {sum?.etaSeconds || s?.etaSeconds ? (
@@ -971,8 +975,10 @@ export function BrowserExecutionCenterPage() {
                   <CardTitle className="text-base">Campaign websites</CardTitle>
                   <CardDescription>
                     {totalJobs > 0
-                      ? 'Live counts from the Execution Summary — expand only when you need the list.'
-                      : 'Select sites and start submission — AI handles the rest.'}
+                      ? runtimeHealthy
+                        ? 'Live counts from the Execution Summary — expand only when you need the list.'
+                        : 'Submit packages in Assisted Manual — auto browser is optional.'
+                      : 'Select sites after browser runtime is healthy, or use Assisted Manual.'}
                   </CardDescription>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -1051,24 +1057,17 @@ export function BrowserExecutionCenterPage() {
                 </div>
               </div>
               {!runtimeHealthy ? (
-                <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                  <p className="font-medium">Browser setup needed</p>
-                  <p className="mt-0.5">
-                    Chromium is not launchable on the API worker — this is a missing browser
-                    runtime, not a stuck submission queue.{' '}
-                    <button
-                      type="button"
-                      className="underline font-medium"
-                      onClick={() => setShowAdvanced(true)}
-                    >
-                      Technical details
-                    </button>
+                <div className="mt-2 rounded-md border border-border/50 bg-muted/40 px-3 py-2.5 text-sm space-y-2">
+                  <p className="font-medium">Use Submit Backlinks (Assisted Manual)</p>
+                  <p className="text-xs text-muted-foreground">
+                    Auto browser submit is not required for this project. Open each prepared package,
+                    paste fields, and submit on the site yourself — that is the supported path.
                   </p>
-                  {runtime.data?.data.last_error ? (
-                    <p className="mt-1 font-mono text-[11px] break-all text-amber-950/80">
-                      {runtime.data.data.last_error}
-                    </p>
-                  ) : null}
+                  <Button size="sm" asChild>
+                    <Link to={`/projects/${projectId}/backlink-builder/assisted-manual`}>
+                      Open Assisted Manual →
+                    </Link>
+                  </Button>
                 </div>
               ) : null}
             </CardHeader>
@@ -1086,7 +1085,12 @@ export function BrowserExecutionCenterPage() {
                       [
                         ['Running', sum?.running ?? s?.running ?? 0],
                         ['Completed', completedJobs],
-                        ['Waiting Human', sum?.waitingHuman ?? actionItems.length],
+                        [
+                          runtimeHealthy ? 'Waiting Human' : 'Assisted left',
+                          runtimeHealthy
+                            ? (sum?.waitingHuman ?? actionItems.length)
+                            : (sum?.assistedOpen ?? remainingJobs),
+                        ],
                         ['Remaining', remainingJobs],
                       ] as const
                     ).map(([label, value]) => (
