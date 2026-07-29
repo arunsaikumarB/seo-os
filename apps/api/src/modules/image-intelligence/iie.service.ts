@@ -61,24 +61,57 @@ export async function getProjectMediaNeeds(workspaceId: string): Promise<{
 
   const { data: typed } = await getSupabaseAdmin()
     .from('opportunities')
-    .select('id, opportunity_type')
+    .select('id, opportunity_type, metadata')
     .eq('workspace_id', workspaceId)
-    .in('opportunity_type', [
-      'image_submission',
-      'infographic',
-      'infographic_submission',
-      'video',
-      'video_submission',
-    ])
-    .limit(20);
+    .limit(200);
   const hasImageType = (typed ?? []).some((o) =>
     /image|infographic/i.test(String(o.opportunity_type ?? ''))
   );
   const hasVideoType = (typed ?? []).some((o) =>
     /video/i.test(String(o.opportunity_type ?? ''))
   );
+  // Web 2.0 / guest post / article packs need featured images even without form upload fields
+  const hasContentImageType = (typed ?? []).some((o) => {
+    const t = String(o.opportunity_type ?? '').toLowerCase();
+    if (
+      t === 'web2' ||
+      t === 'guest_post' ||
+      t === 'article_submission' ||
+      t === 'blog_submission' ||
+      t === 'press_release'
+    ) {
+      return true;
+    }
+    const meta = (o.metadata as Record<string, unknown> | null) ?? {};
+    const web2 = (meta.linkProbe as { web2?: { detected?: boolean } } | undefined)?.web2;
+    if (web2?.detected) return true;
+    const classification =
+      typeof meta.classification === 'object' && meta.classification
+        ? (meta.classification as Record<string, unknown>)
+        : {};
+    const cid = String(classification.id ?? classification.type ?? '').toLowerCase();
+    return (
+      cid === 'web2' ||
+      cid === 'blog_submission' ||
+      cid === 'article_submission' ||
+      cid === 'guest_post'
+    );
+  });
 
-  const images = sitesWithImageUpload > 0 || hasImageType;
+  const { data: packs } = await getSupabaseAdmin()
+    .from('content_packs')
+    .select('backlink_type, pack')
+    .eq('workspace_id', workspaceId)
+    .limit(50);
+  const packNeedsImage = (packs ?? []).some((row) => {
+    const bt = String(row.backlink_type ?? '').toLowerCase();
+    if (bt === 'web2' || bt === 'guest_post') return true;
+    const pack = (row.pack as Record<string, unknown> | null) ?? {};
+    return Boolean(pack.imagePrompt || pack.featuredImage || pack.studioMode === 'article');
+  });
+
+  const images =
+    sitesWithImageUpload > 0 || hasImageType || hasContentImageType || packNeedsImage;
   const videos = hasVideoType;
 
   return {
@@ -86,7 +119,11 @@ export async function getProjectMediaNeeds(workspaceId: string): Promise<{
     videos,
     sitesWithImageUpload,
     reason: images
-      ? `${sitesWithImageUpload || 1} site(s) require image/file upload`
+      ? sitesWithImageUpload > 0
+        ? `${sitesWithImageUpload} site(s) require image/file upload`
+        : hasContentImageType || packNeedsImage
+          ? 'Web 2.0 / article / guest-post packs need featured images'
+          : `${sitesWithImageUpload || 1} site(s) require image/file upload`
       : 'No target forms with image/file upload — Image Studio hidden for text-only submissions',
   };
 }
@@ -193,6 +230,7 @@ export async function enqueueImageGenerate(params: {
 
   let topic: string | undefined;
   let backlinkType: string | undefined;
+  let packImagePrompt: string | undefined;
   if (params.opportunityId) {
     const { data: opp } = await getSupabaseAdmin()
       .from('opportunities')
@@ -201,6 +239,22 @@ export async function enqueueImageGenerate(params: {
       .maybeSingle();
     topic = opp?.title ? String(opp.title) : undefined;
     backlinkType = opp?.opportunity_type ? String(opp.opportunity_type) : undefined;
+
+    const { data: packRow } = await getSupabaseAdmin()
+      .from('content_packs')
+      .select('pack, backlink_type')
+      .eq('workspace_id', params.workspaceId)
+      .eq('opportunity_id', params.opportunityId)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const pack = (packRow?.pack as Record<string, unknown> | null) ?? {};
+    const fromPack = String(pack.imagePrompt ?? '').trim();
+    if (fromPack) packImagePrompt = fromPack;
+    if (!backlinkType && packRow?.backlink_type) {
+      backlinkType = String(packRow.backlink_type);
+    }
+    if (!topic && pack.seoTitle) topic = String(pack.seoTitle);
   }
 
   const style = buildDomainStyleProfile({
@@ -222,7 +276,7 @@ export async function enqueueImageGenerate(params: {
       topic,
       backlinkType,
       brandName: String(ws?.name ?? 'Brand'),
-      customPrompt: params.customPrompt,
+      customPrompt: params.customPrompt || packImagePrompt,
     });
     if (params.width) promptPack.width = params.width;
     if (params.height) promptPack.height = params.height;

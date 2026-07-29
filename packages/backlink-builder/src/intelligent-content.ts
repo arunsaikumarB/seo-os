@@ -179,7 +179,14 @@ export function studioModeLabel(mode: ContentStudioMode): string {
 }
 
 export function shouldOpenImageStudio(mode: ContentStudioMode): boolean {
-  return mode === 'image' || mode === 'infographic';
+  return (
+    mode === 'image' ||
+    mode === 'infographic' ||
+    mode === 'article' ||
+    mode === 'guest_post' ||
+    mode === 'press' ||
+    mode === 'resource'
+  );
 }
 
 export function shouldOpenVideoStudio(mode: ContentStudioMode): boolean {
