@@ -2,6 +2,7 @@ import {
   BACKLINK_TYPES,
   buildIntelligentContentPlan,
   detectSubmissionRequirements,
+  metadataDisqualifiesSubmission,
   websiteRowStatus,
   type ExecutionPublicStatus,
 } from '@seo-os/backlink-builder';
@@ -91,7 +92,12 @@ export async function listApprovedOpportunities(workspaceId: string) {
     .limit(200);
   if (error) throw error;
 
-  const ids = (opps ?? []).map((o) => o.id);
+  // Hard gate: never surface no_form / dead probes in Approved / submit pickers
+  const oppsFiltered = (opps ?? []).filter(
+    (o) => !metadataDisqualifiesSubmission((o.metadata as Record<string, unknown>) ?? {})
+  );
+
+  const ids = oppsFiltered.map((o) => o.id);
   const jobsByOpp = new Map<
     string,
     {
@@ -145,7 +151,7 @@ export async function listApprovedOpportunities(workspaceId: string) {
     }
   }
 
-  return (opps ?? [])
+  return oppsFiltered
     .filter((opp) => {
       // Delete Forever — never show on Submit Backlinks / project pickers
       const auto = String(opp.automation_status ?? '');

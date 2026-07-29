@@ -435,7 +435,7 @@ describe('Phase 7 Assisted Manual', () => {
     expect(next.fields.find((f) => f.selector === '#website')?.role).toBe('url');
   });
 
-  it('attaches paste-ready content even when form not found (Needs a person)', () => {
+  it('parks content pages with no form as no_form (never Needs a person theater)', () => {
     const recipe = buildSiteRecipe({
       domain: 'empty.example',
       entryUrl: 'https://empty.example/',
@@ -452,11 +452,9 @@ describe('Phase 7 Assisted Manual', () => {
       },
       formFound: false,
     });
-    expect(pkg.bucket).toBe('needs_person');
-    expect(pkg.formUnavailable).toBeFalsy();
-    expect(pkg.pasteReadyContent?.map((c) => c.role)).toEqual(
-      expect.arrayContaining(['title', 'long_desc', 'url'])
-    );
+    expect(pkg.bucket).toBe('no_form');
+    expect(pkg.formUnavailable).toBe(true);
+    expect(pkg.failureReason).toMatch(/No submission form/i);
   });
 
   it('parks paid-only forms (no free word) in paid_aside', () => {

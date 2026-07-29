@@ -63,7 +63,7 @@ type AssistedPackage = {
   opportunityId: string;
   domain: string;
   entryUrl: string;
-  bucket: 'ready' | 'check_fields' | 'needs_person' | 'paid_aside';
+  bucket: 'ready' | 'check_fields' | 'needs_person' | 'paid_aside' | 'no_form';
   status: string;
   gate: string;
   fingerprintStatus: string;
@@ -117,6 +117,7 @@ const BUCKET_LABEL: Record<string, string> = {
   check_fields: 'Check these fields',
   needs_person: 'Needs a person',
   paid_aside: 'Paid (set aside)',
+  no_form: 'No form (set aside)',
 };
 
 /** Role → Companion ActivePackage field key (fill engine). */
@@ -374,6 +375,7 @@ export function AssistedManualPage() {
             checkFields: number;
             needsPerson: number;
             paidAside?: number;
+            noForm?: number;
             assistedOk?: boolean;
             conservationOk?: boolean;
           };
@@ -631,6 +633,7 @@ export function AssistedManualPage() {
     check_fields: packages.filter((p) => p.bucket === 'check_fields'),
     needs_person: packages.filter((p) => p.bucket === 'needs_person'),
     paid_aside: packages.filter((p) => p.bucket === 'paid_aside'),
+    no_form: packages.filter((p) => p.bucket === 'no_form'),
   };
 
   return (
@@ -682,11 +685,12 @@ export function AssistedManualPage() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-3 sm:grid-cols-5 text-sm">
+      <div className="grid gap-3 sm:grid-cols-6 text-sm">
         <Stat label="Ready (free)" value={d?.counts.ready} />
         <Stat label="Check fields" value={d?.counts.checkFields} />
         <Stat label="Needs a person" value={d?.counts.needsPerson} />
         <Stat label="Paid (set aside)" value={d?.counts.paidAside ?? byBucket.paid_aside.length} />
+        <Stat label="No form" value={d?.counts.noForm ?? byBucket.no_form.length} />
         <Stat
           label="Conservation"
           value={d?.counts.conservationOk === false ? 'FAIL' : 'ok'}
@@ -734,7 +738,7 @@ export function AssistedManualPage() {
         </Card>
       ) : null}
 
-      {(['ready', 'check_fields', 'needs_person', 'paid_aside'] as const).map((bucket) => (
+      {(['ready', 'check_fields', 'needs_person', 'paid_aside', 'no_form'] as const).map((bucket) => (
         <section key={bucket} className="space-y-2">
           <h2 className="text-sm font-medium">
             {BUCKET_LABEL[bucket]}{' '}
@@ -746,6 +750,11 @@ export function AssistedManualPage() {
                 — not in the free worklist
               </span>
             ) : null}
+            {bucket === 'no_form' ? (
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                — blog/content pages with no listing form (never approve)
+              </span>
+            ) : null}
           </h2>
           {byBucket[bucket].length === 0 ? (
             <p className="text-sm text-muted-foreground pl-1">None yet.</p>
@@ -753,7 +762,8 @@ export function AssistedManualPage() {
             <ul
               className={cn(
                 'rounded-xl border divide-y overflow-hidden bg-card',
-                bucket === 'paid_aside' && 'opacity-80 border-dashed'
+                bucket === 'paid_aside' && 'opacity-80 border-dashed',
+                bucket === 'no_form' && 'opacity-70 border-dashed'
               )}
             >
               {byBucket[bucket].map((pkg) => {

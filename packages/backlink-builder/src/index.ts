@@ -51,3 +51,4 @@ export * from './form-unavailable.js';
 export * from './wizard-walk.js';
 export * from './link-probe.js';
 export * from './listing-pricing.js';
+export * from './submission-form-gate.js';

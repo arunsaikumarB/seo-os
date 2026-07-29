@@ -6,6 +6,7 @@ import {
   computeAiReviewSummary,
   decideAfterAnalysis,
   isAiReviewTerminal,
+  metadataDisqualifiesSubmission,
   type ApprovedBy,
   type ReviewDecision,
   type ReviewTier,
@@ -45,6 +46,11 @@ function toReviewItem(i: CampaignItemRow): AiReviewItem {
     (decision === 'Needs Classification' || i.reviewTier === 'needs_classification');
   const classified =
     Boolean(i.classification) && String(i.classification).toLowerCase() !== 'unknown';
+  const meta =
+    typeof i.raw.metadata === 'object' && i.raw.metadata
+      ? (i.raw.metadata as Record<string, unknown>)
+      : {};
+  const noForm = metadataDisqualifiesSubmission(meta);
 
   return {
     id: i.id,
@@ -59,9 +65,10 @@ function toReviewItem(i: CampaignItemRow): AiReviewItem {
     currentStatus: i.currentStatus,
     lastError: i.lastError ?? null,
     duplicateOfId: i.duplicateOfId ?? null,
-    canApprove: !needsClass && !terminal && classified,
-    reason:
-      typeof i.raw.metadata === 'object' && i.raw.metadata
+    canApprove: !needsClass && !terminal && classified && !noForm,
+    reason: noForm
+      ? 'No submission form — cannot approve for backlink submit'
+      : typeof i.raw.metadata === 'object' && i.raw.metadata
         ? String(
             ((i.raw.metadata as Record<string, unknown>).classification as Record<string, unknown>)
               ?.reason ?? ''
@@ -196,6 +203,8 @@ export async function bulkAiReviewAction(
 ) {
   const before = await getAiReviewBoard(workspaceId);
   const byId = new Map(before.items.map((i) => [i.id, i]));
+  const fullItems = await listCampaignItems(workspaceId, { includeDeleted: false });
+  const byFull = new Map(fullItems.map((i) => [i.id, i]));
   let succeeded = 0;
   let skipped = 0;
   const skipReasons: string[] = [];
@@ -222,7 +231,9 @@ export async function bulkAiReviewAction(
           !item.canApprove
         ) {
           skipped++;
-          skipReasons.push(`${item.website}: need classification first`);
+          skipReasons.push(
+            `${item.website}: ${item.reason?.includes('No submission form') ? item.reason : 'need classification first'}`
+          );
           continue;
         }
         if (
@@ -232,6 +243,16 @@ export async function bulkAiReviewAction(
         ) {
           skipped++;
           skipReasons.push(`${item.website}: ${item.reviewDecision}`);
+          continue;
+        }
+        const full = byFull.get(id);
+        const meta =
+          full && typeof full.raw?.metadata === 'object' && full.raw.metadata
+            ? (full.raw.metadata as Record<string, unknown>)
+            : {};
+        if (metadataDisqualifiesSubmission(meta)) {
+          skipped++;
+          skipReasons.push(`${item.website}: no submission form (probed)`);
           continue;
         }
         await updateCampaignItem(workspaceId, id, {

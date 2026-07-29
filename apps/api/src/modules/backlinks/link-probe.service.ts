@@ -8,6 +8,7 @@ import {
   mergeProbeResults,
   normalizeSiteDomain,
   probeCandidateUrls,
+  evaluateSubmissionProbeGate,
   type LinkProbeBand,
   type LinkProbeResult,
 } from '@seo-os/backlink-builder';
@@ -15,6 +16,7 @@ import { AppError } from '@seo-os/shared';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { logger } from '../../lib/logger.js';
 import { enqueueJob, QUEUES } from '../../jobs/boss.js';
+import { updateCampaignItem } from '../campaigns/campaign-state.service.js';
 
 const PROBE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_BATCH = 80;
@@ -224,6 +226,65 @@ async function saveProbe(opportunityId: string, meta: Record<string, unknown>, p
   }
 }
 
+/**
+ * Permanent gate: no_form / dead probes revoke Approved and park the site.
+ * Never leave a content/blog homepage in the submit / Approved cohort.
+ */
+async function applyProbeSubmissionGate(
+  workspaceId: string,
+  opportunityId: string,
+  probe: LinkProbeResult
+): Promise<void> {
+  const gate = evaluateSubmissionProbeGate(probe);
+  if (!gate.disqualified || !gate.reviewDecision) return;
+
+  try {
+    await updateCampaignItem(workspaceId, opportunityId, {
+      currentStatus: gate.reviewDecision === 'Dead Website' ? 'Failed' : 'Ignored',
+      reviewDecision: gate.reviewDecision,
+      reviewTier: null,
+      approvedBy: null,
+      approval: 'rejected',
+      lastError: gate.reason,
+      blockerReason: gate.reason,
+      force: true,
+    });
+    // Park any Assisted package so it leaves the free worklist
+    const { data: pkgs } = await getSupabaseAdmin()
+      .from('assisted_packages')
+      .select('id, payload, status')
+      .eq('workspace_id', workspaceId)
+      .eq('opportunity_id', opportunityId)
+      .limit(5);
+    for (const row of pkgs ?? []) {
+      if (String(row.status) === 'done') continue;
+      const payload = {
+        ...((row.payload as Record<string, unknown>) ?? {}),
+        bucket: 'no_form',
+        formUnavailable: true,
+        failureReason: gate.reason,
+        listingPricing: (row.payload as { listingPricing?: string } | null)?.listingPricing ?? null,
+      };
+      await getSupabaseAdmin()
+        .from('assisted_packages')
+        .update({
+          bucket: 'no_form',
+          status: 'skipped',
+          failure_reason: gate.reason,
+          payload,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', row.id);
+    }
+    logger.info(
+      { workspaceId, opportunityId, band: probe.band, decision: gate.reviewDecision },
+      'link-probe: revoked Approved — no submission form / dead'
+    );
+  } catch (err) {
+    logger.warn({ err, opportunityId }, 'link-probe: submission gate apply failed');
+  }
+}
+
 async function mapPool<T, R>(
   items: T[],
   concurrency: number,
@@ -301,6 +362,7 @@ export async function runLinkProbeBatch(input: {
     try {
       const probe = await probeOpportunity(row, browserBudget);
       await saveProbe(row.id, (row.metadata as Record<string, unknown>) ?? {}, probe);
+      await applyProbeSubmissionGate(input.workspaceId, row.id, probe);
       bands[probe.band] = (bands[probe.band] ?? 0) + 1;
     } catch (err) {
       logger.warn({ err, opportunityId: row.id }, 'link-probe: item failed');
@@ -326,6 +388,7 @@ export async function runLinkProbeBatch(input: {
         listingPricing: 'unknown',
       };
       await saveProbe(row.id, (row.metadata as Record<string, unknown>) ?? {}, fail);
+      await applyProbeSubmissionGate(input.workspaceId, row.id, fail);
       bands.dead = (bands.dead ?? 0) + 1;
     }
   });

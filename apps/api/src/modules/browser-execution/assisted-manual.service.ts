@@ -48,6 +48,8 @@ import {
   htmlHasCoreContentFields,
   formatWizardStepSequence,
   resolveListingPricing,
+  metadataDisqualifiesSubmission,
+  NO_FORM_REJECT_REASON,
   type AssistedPackagePayload,
   type FieldRole,
   type FormDiscoverySource,
@@ -836,7 +838,7 @@ async function listContentReadyOpportunityIds(workspaceId: string): Promise<stri
 
   const { data: opps } = await admin()
     .from('opportunities')
-    .select('id, campaign_lifecycle, generation_status, automation_status')
+    .select('id, campaign_lifecycle, generation_status, automation_status, metadata')
     .eq('workspace_id', workspaceId)
     .neq('campaign_lifecycle', 'Deleted')
     .not('automation_status', 'in', '("deleted","ignored")')
@@ -853,6 +855,9 @@ async function listContentReadyOpportunityIds(workspaceId: string): Promise<stri
   ]);
 
   for (const o of opps ?? []) {
+    if (metadataDisqualifiesSubmission((o.metadata as Record<string, unknown>) ?? {})) {
+      continue;
+    }
     const life = String(o.campaign_lifecycle ?? '');
     const gen = String(o.generation_status ?? '');
     if (terminalLife.has(life)) continue;
@@ -874,10 +879,14 @@ async function listContentReadyOpportunityIds(workspaceId: string): Promise<stri
   if (ids.size > 0) {
     const { data: lifeRows } = await admin()
       .from('opportunities')
-      .select('id, campaign_lifecycle, automation_status')
+      .select('id, campaign_lifecycle, automation_status, metadata')
       .eq('workspace_id', workspaceId)
       .in('id', [...ids]);
     for (const row of lifeRows ?? []) {
+      if (metadataDisqualifiesSubmission((row.metadata as Record<string, unknown>) ?? {})) {
+        ids.delete(String(row.id));
+        continue;
+      }
       const life = String(row.campaign_lifecycle ?? '');
       const auto = String(row.automation_status ?? '').toLowerCase();
       if (terminalLife.has(life) || auto === 'deleted' || auto === 'ignored') {
@@ -1438,7 +1447,6 @@ async function prepareOnePackage(
     payload.classifierVersion =
       keepClass === ASSISTED_FIELD_CLASSIFIER_VERSION && !formFound ? 0 : keepClass;
     if (!formFound) {
-      const hasPaste = (payload.pasteReadyContent?.length ?? 0) > 0;
       const isMulti =
         Boolean(payload.multiStep) ||
         multiStepPage ||
@@ -1448,27 +1456,29 @@ async function prepareOnePackage(
         // Walk succeeded but formFound flag flipped later — keep populated package
         payload.formUnavailable = false;
         payload.wizardReachedForm = true;
-      } else if (isMulti || hasPaste || recipe.fields.length > 0) {
-        // Multi-step / sparse / content-ready — never mislabel as JS/login unavailable
+      } else if (isMulti) {
+        // Multi-step wizard — Needs a person with paste-ready content
         payload.formUnavailable = false;
         payload.bucket = 'needs_person';
-        payload.multiStep = payload.multiStep || isMulti;
+        payload.multiStep = true;
         payload.multiStepLabel =
-          payload.multiStepLabel ??
-          wizardLabel ??
-          (isMulti ? MULTI_STEP_FORM_LABEL : null);
+          payload.multiStepLabel ?? wizardLabel ?? MULTI_STEP_FORM_LABEL;
         payload.failureReason =
           payload.multiStepLabel ??
-          (hasPaste
-            ? 'Needs a person — content ready to paste on the site'
-            : rereadFailReason ?? discoveryFailureReason ?? payload.failureReason);
+          rereadFailReason ??
+          discoveryFailureReason ??
+          payload.failureReason;
         payload.gateNotes = payload.multiStepLabel ?? payload.gateNotes;
       } else {
+        // Content/blog page with no listing form — never Needs a person / Approved theater
         payload.formUnavailable = true;
-        payload.failureReason = formUnavailableMessage(
-          rereadFailReason ?? discoveryFailureReason ?? payload.failureReason
-        );
-        payload.bucket = 'needs_person';
+        payload.bucket = 'no_form';
+        payload.status = 'skipped';
+        payload.failureReason =
+          rereadFailReason ??
+          discoveryFailureReason ??
+          'No submission form found — content/blog pages cannot be approved for backlink submit';
+        payload.pasteReadyContent = undefined;
       }
     }
     if (rereadFailed && priorPayload) {
@@ -1521,12 +1531,19 @@ async function prepareOnePackage(
   });
   payload.listingPricing = pricing;
   recipe.listingPricing = pricing;
-  if (pricing === 'paid' || payload.wizardWalkStatus === 'paid_only') {
-    payload.bucket = 'paid_aside';
-    payload.failureReason =
-      payload.failureReason?.includes('Paid')
-        ? payload.failureReason
-        : 'Paid listing — no “free” word in form/payment sections. Set aside.';
+  if (payload.bucket !== 'no_form') {
+    if (pricing === 'paid' || payload.wizardWalkStatus === 'paid_only') {
+      payload.bucket = 'paid_aside';
+      payload.failureReason =
+        payload.failureReason?.includes('Paid')
+          ? payload.failureReason
+          : 'Paid listing — no “free” word in form/payment sections. Set aside.';
+    }
+  }
+
+  // Persist no_form as skipped so it leaves the active worklist
+  if (payload.bucket === 'no_form') {
+    payload.status = 'skipped';
   }
 
   const row = {
@@ -1705,6 +1722,10 @@ export async function listAssistedPackages(workspaceId: string) {
   await healPaidAsideFromStoredSignals(workspaceId).catch((err) =>
     logger.warn({ err, workspaceId }, 'assisted heal paid_aside failed')
   );
+  // Revoke Approved / park packages when linkProbe already says no_form / dead
+  await healNoFormFromProbeMetadata(workspaceId).catch((err) =>
+    logger.warn({ err, workspaceId }, 'assisted heal no_form failed')
+  );
 
   const { data: rows } = await admin()
     .from('assisted_packages')
@@ -1767,7 +1788,7 @@ export async function listAssistedPackages(workspaceId: string) {
     automatable: board.counts.automatable,
     manualTotal: board.counts.manual,
     assistedPackages: packages.map((p) => ({
-      bucket: p.bucket as 'ready' | 'check_fields' | 'needs_person' | 'paid_aside',
+      bucket: p.bucket as 'ready' | 'check_fields' | 'needs_person' | 'paid_aside' | 'no_form',
     })),
     manualWithPackage,
   });
@@ -1780,6 +1801,7 @@ export async function listAssistedPackages(workspaceId: string) {
       'Multi-step forms: content is prepared for later steps — you navigate and paste.',
       'Does not attach images for you.',
       'Free only when an active free option exists. Free-disabled / premium-token / $-only pricing → Paid (set aside).',
+      'No submission form (blog/guide/content pages) → never Approved for submit — parked as No form.',
     ],
     pilot: {
       max: ASSISTED_MANUAL_PILOT_MAX,
@@ -2032,6 +2054,72 @@ export async function updateAssistedPackageStatus(
   }
 
   return formatPackageRow(data);
+}
+
+/**
+ * When linkProbe already marked no_form/dead, park Assisted packages and leave worklist.
+ */
+async function healNoFormFromProbeMetadata(workspaceId: string) {
+  const { data: opps } = await admin()
+    .from('opportunities')
+    .select('id, metadata')
+    .eq('workspace_id', workspaceId)
+    .limit(500);
+  const badIds: string[] = [];
+  for (const o of opps ?? []) {
+    if (metadataDisqualifiesSubmission((o.metadata as Record<string, unknown>) ?? {})) {
+      badIds.push(String(o.id));
+    }
+  }
+  if (!badIds.length) return;
+
+  const { data: pkgs } = await admin()
+    .from('assisted_packages')
+    .select('id, opportunity_id, payload, status, bucket')
+    .eq('workspace_id', workspaceId)
+    .in('opportunity_id', badIds)
+    .limit(400);
+
+  for (const row of pkgs ?? []) {
+    if (String(row.status) === 'done') continue;
+    if (String(row.bucket) === 'no_form' && String(row.status) === 'skipped') continue;
+    const payload = {
+      ...((row.payload as AssistedPackagePayload) ?? {}),
+      bucket: 'no_form' as const,
+      formUnavailable: true,
+      failureReason: NO_FORM_REJECT_REASON,
+      status: 'skipped' as const,
+    };
+    await admin()
+      .from('assisted_packages')
+      .update({
+        bucket: 'no_form',
+        status: 'skipped',
+        failure_reason: NO_FORM_REJECT_REASON,
+        payload,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', row.id);
+  }
+
+  // Also revoke lifecycle for still-Approved no-form sites
+  const { updateCampaignItem } = await import('../campaigns/campaign-state.service.js');
+  for (const opportunityId of badIds.slice(0, 80)) {
+    try {
+      await updateCampaignItem(workspaceId, opportunityId, {
+        currentStatus: 'Ignored',
+        reviewDecision: 'Unsupported',
+        reviewTier: null,
+        approvedBy: null,
+        approval: 'rejected',
+        lastError: NO_FORM_REJECT_REASON,
+        blockerReason: NO_FORM_REJECT_REASON,
+        force: true,
+      });
+    } catch {
+      /* ignore transition noise */
+    }
+  }
 }
 
 /**

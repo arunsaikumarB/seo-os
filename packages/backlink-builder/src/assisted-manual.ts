@@ -14,9 +14,6 @@ import {
   maxPairwiseSimilarity,
   textsAreRepetitive,
 } from './content-limits.js';
-import {
-  formUnavailableMessage,
-} from './form-unavailable.js';
 import { htmlHasCoreContentFields } from './wizard-walk.js';
 import {
   resolveListingPricing,
@@ -127,7 +124,7 @@ export function gateBlocksReady(gate: AssistedGate | string | null | undefined):
   return g !== 'none' && g !== '';
 }
 
-export type AssistedBucket = 'ready' | 'check_fields' | 'needs_person' | 'paid_aside';
+export type AssistedBucket = 'ready' | 'check_fields' | 'needs_person' | 'paid_aside' | 'no_form';
 export type PackageStatus = 'not_started' | 'in_progress' | 'done' | 'failed' | 'skipped';
 export type FingerprintStatus = 'fresh' | 'stale' | 'changed';
 
@@ -228,6 +225,17 @@ export function resolveAssistedVisualStatus(pkg: {
       tone: 'warn',
       badgeLabel: null,
       blocked: false,
+      needsHumanReview: false,
+      completedAt: null,
+    };
+  }
+
+  if (bucket === 'no_form') {
+    return {
+      visualStatus: 'blocked',
+      tone: 'block',
+      badgeLabel: null,
+      blocked: true,
       needsHumanReview: false,
       completedAt: null,
     };
@@ -472,6 +480,7 @@ export type AssistedLaneCounts = {
   checkFields: number;
   needsPerson: number;
   paidAside: number;
+  noForm: number;
   assistedOk: boolean;
   /** Phase 6.3 lane conservation: automatable + manualTotal === active */
   conservationOk: boolean;
@@ -496,6 +505,7 @@ export function computeAssistedLaneCounts(input: {
   const checkFields = input.assistedPackages.filter((p) => p.bucket === 'check_fields').length;
   const needsPerson = input.assistedPackages.filter((p) => p.bucket === 'needs_person').length;
   const paidAside = input.assistedPackages.filter((p) => p.bucket === 'paid_aside').length;
+  const noForm = input.assistedPackages.filter((p) => p.bucket === 'no_form').length;
   return {
     automatable: input.automatable,
     assisted,
@@ -506,7 +516,8 @@ export function computeAssistedLaneCounts(input: {
     checkFields,
     needsPerson,
     paidAside,
-    assistedOk: ready + checkFields + needsPerson + paidAside === assisted,
+    noForm,
+    assistedOk: ready + checkFields + needsPerson + paidAside + noForm === assisted,
     conservationOk: input.automatable + input.manualTotal === active,
   };
 }
@@ -1995,7 +2006,17 @@ export function assignAssistedBucket(input: {
   if (pricing === 'paid' || input.recipe.wizardWalkStatus === 'paid_only') {
     return 'paid_aside';
   }
-  if (!input.formFound) return 'needs_person';
+  // No listing form: multi-step wizards still need a person; content pages → no_form park
+  if (!input.formFound) {
+    if (
+      input.recipe.multiStep ||
+      input.recipe.wizardWalkStatus ||
+      input.recipe.wizardReachedForm
+    ) {
+      return 'needs_person';
+    }
+    return 'no_form';
+  }
   if (input.fingerprintStatus === 'changed' || input.fingerprintStatus === 'stale') {
     return 'needs_person';
   }
@@ -2372,7 +2393,6 @@ export function buildAssistedPackage(input: {
   const multiStep =
     Boolean(input.recipe.multiStep) || input.recipe.gate === 'multi_step';
   const wizardReachedForm = Boolean(input.recipe.wizardReachedForm);
-  const sparseStepOne = isContentSparseStepOne(input.recipe.fields);
   // Always attach generated listing copy when we have it — especially Needs a person /
   // multi-step / form-not-found, so the user never gets an empty card.
   const pasteReadyContent = buildPasteReadyContent(input.content, mappedRoles);
@@ -2405,9 +2425,11 @@ export function buildAssistedPackage(input: {
   let failureReason: string | null = null;
   let formUnavailable = false;
   if (!formFound) {
-    // Still ship paste-ready content for multi-step / sparse / any generated copy.
-    // Only mark formUnavailable when we truly have nothing useful for the user.
-    if (multiStep || sparseStepOne || pasteReadyContent.length > 0) {
+    // Multi-step / wizard: keep Needs a person with paste-ready content.
+    // Plain content/blog pages with no form: park as no_form — never submit theater.
+    // Note: empty field lists are NOT "sparse step one" for this gate (that false-positive
+    // used to park blog homepages as Needs a person).
+    if (multiStep || wizardReachedForm) {
       formUnavailable = false;
       failureReason = multiStep
         ? multiStepLabel ?? MULTI_STEP_FORM_LABEL
@@ -2417,11 +2439,11 @@ export function buildAssistedPackage(input: {
             : null);
     } else {
       formUnavailable = true;
-      failureReason = formUnavailableMessage(
+      bucket = 'no_form';
+      failureReason =
         input.discoveryFailureReason?.trim() ||
-          input.recipe.formFailureReason?.trim() ||
-          null
-      );
+        input.recipe.formFailureReason?.trim() ||
+        'No submission form found — content/blog pages cannot be submitted';
     }
   } else if (input.content.contentTooSimilar) {
     failureReason =
@@ -2444,6 +2466,11 @@ export function buildAssistedPackage(input: {
   if (bucket === 'paid_aside') {
     failureReason =
       'Paid listing — no “free” word found in form/payment sections. Set aside (free worklist only).';
+  }
+  if (bucket === 'no_form') {
+    failureReason =
+      failureReason ||
+      'No submission form found — content/blog pages cannot be approved for backlink submit';
   }
 
   const youMust = formatYouMustSteps(input.recipe.humanSteps ?? []);

@@ -732,6 +732,17 @@ export async function runAutomationPipeline(
                 deadWebsite,
                 duplicateOfId: existingId && existingId !== oppId ? existingId : null,
               });
+              // Probe ASAP — no_form / dead revokes Approved forever
+              try {
+                const { enqueueLinkProbe } = await import('./link-probe.service.js');
+                await enqueueLinkProbe({
+                  workspaceId,
+                  opportunityIds: [oppId],
+                  limit: 1,
+                });
+              } catch (probeErr) {
+                console.warn('[import] enqueue link probe failed', probeErr);
+              }
             } catch (e) {
               console.error('[CSM] apply analysis failed', e);
             }
