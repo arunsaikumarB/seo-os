@@ -44,6 +44,7 @@ type WorkflowProgressApi = {
     projectReady: boolean;
     importedCount: number;
     aiReviewPending: number;
+    aiNeedsReview: number;
     approvedCount: number;
     generatedPackages: number;
     pendingGeneration: number;

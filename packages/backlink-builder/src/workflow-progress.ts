@@ -29,10 +29,12 @@ export type WorkflowProgressInput = {
   /** ≥1 non-deleted imported website */
   importedCount: number;
   /**
-   * Sites still awaiting analysis or classification.
-   * AI Review is done only when this is 0 (and importedCount > 0).
+   * Sites still awaiting analysis or a recommended confirm.
+   * Needs-review (low confidence) may remain as optional backlog.
    */
   aiReviewPending: number;
+  /** Low-confidence sites awaiting a human type/decision — does not block step done alone */
+  aiNeedsReview: number;
   /** Sites approved for content generation (Approved cohort) */
   approvedCount: number;
   /** Approved sites with a finished package */
@@ -111,7 +113,12 @@ const SUBMIT_OPEN: CampaignLifecycleStatus[] = [
 function stepDoneFlags(input: WorkflowProgressInput) {
   const createDone = Boolean(input.projectReady);
   const importDone = createDone && input.importedCount >= 1;
-  const aiReviewDone = importDone && input.aiReviewPending === 0;
+  // Blocking queue = still analyzing / Recommended confirms (aiReviewPending).
+  // Needs-review backlog is optional once ≥1 site is approved.
+  const aiReviewDone =
+    importDone &&
+    input.aiReviewPending === 0 &&
+    (input.aiNeedsReview === 0 || input.approvedCount > 0);
   const generateDone =
     aiReviewDone &&
     (input.approvedCount === 0 ||
@@ -193,7 +200,9 @@ export function deriveWorkflowProgressInput(opts: {
 }): WorkflowProgressInput {
   const visible = opts.items.filter((i) => i.currentStatus !== 'Deleted');
   const ai = computeAiReviewSummary(visible);
-  const aiReviewPending = ai.needsClassification + ai.pending;
+  /** Analyzing + Recommended confirms — blocks AI Review done */
+  const aiReviewPending = ai.pending;
+  const aiNeedsReview = ai.needsClassification;
 
   let approvedCount = 0;
   let generatedPackages = 0;
@@ -249,6 +258,7 @@ export function deriveWorkflowProgressInput(opts: {
     projectReady: opts.projectReady,
     importedCount: visible.length,
     aiReviewPending,
+    aiNeedsReview,
     approvedCount,
     generatedPackages,
     pendingGeneration,

@@ -60,6 +60,7 @@ describe('getWorkflowProgress (Phase 13)', () => {
       projectReady: true,
       importedCount: 2,
       aiReviewPending: 0,
+      aiNeedsReview: 0,
       approvedCount: 2,
       generatedPackages: 1,
       pendingGeneration: 1,
@@ -96,6 +97,7 @@ describe('getWorkflowProgress (Phase 13)', () => {
       projectReady: true,
       importedCount: 0,
       aiReviewPending: 0,
+      aiNeedsReview: 0,
       approvedCount: 0,
       generatedPackages: 0,
       pendingGeneration: 0,
@@ -112,7 +114,7 @@ describe('getWorkflowProgress (Phase 13)', () => {
     expect(progress.flags.submitDone).toBe(false);
   });
 
-  it('keeps AI Review current while classification is pending', () => {
+  it('marks AI Review done when Recommended is clear and ≥1 approved (Needs review optional)', () => {
     const items: CampaignItemInput[] = [
       item({
         id: '1',
@@ -124,6 +126,43 @@ describe('getWorkflowProgress (Phase 13)', () => {
         id: '2',
         currentStatus: 'Approved',
         reviewDecision: 'Approved',
+      }),
+    ];
+    const progress = getWorkflowProgress(
+      deriveWorkflowProgressInput({ projectReady: true, items })
+    );
+    expect(progress.flags.aiReviewDone).toBe(true);
+    expect(progress.currentStepId).toBe('generate-content');
+  });
+
+  it('keeps AI Review current while Recommended confirms remain', () => {
+    const items: CampaignItemInput[] = [
+      item({
+        id: '1',
+        currentStatus: 'Classified',
+        reviewDecision: 'Pending',
+        reviewTier: 'recommended',
+      }),
+      item({
+        id: '2',
+        currentStatus: 'Approved',
+        reviewDecision: 'Approved',
+      }),
+    ];
+    const progress = getWorkflowProgress(
+      deriveWorkflowProgressInput({ projectReady: true, items })
+    );
+    expect(progress.flags.aiReviewDone).toBe(false);
+    expect(progress.currentStepId).toBe('ai-review');
+  });
+
+  it('keeps AI Review current when only Needs review remains and nothing approved', () => {
+    const items: CampaignItemInput[] = [
+      item({
+        id: '1',
+        currentStatus: 'Classified',
+        reviewDecision: 'Needs Classification',
+        reviewTier: 'needs_classification',
       }),
     ];
     const progress = getWorkflowProgress(

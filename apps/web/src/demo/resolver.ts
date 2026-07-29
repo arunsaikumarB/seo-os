@@ -1106,6 +1106,7 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
           projectReady: true,
           importedCount: 6,
           aiReviewPending: 0,
+          aiNeedsReview: 0,
           approvedCount: 6,
           generatedPackages: 0,
           pendingGeneration: 6,
