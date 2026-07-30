@@ -22,6 +22,7 @@ import { getApiUrl, getApiErrorMessage } from '@/lib/api';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { useAppStore } from '@/stores/app-store';
 import { PageTransition } from '@/components/demo/page-transition';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -384,6 +385,21 @@ export function AssistedManualPage() {
     enabled: !!projectId,
   });
 
+  const metrics = useQuery({
+    queryKey: ['assisted-manual-metrics', projectId],
+    queryFn: () =>
+      request<{
+        data: {
+          medianMinutesPerSite: number | null;
+          correctionRate: number | null;
+          bucketMix: { ready: number; checkFields: number; needsPerson: number };
+          rejectionRate: number | null;
+          goNoGo: { medianOk: boolean; correctionOk: boolean };
+        };
+      }>(`/v1/projects/${projectId}/backlink-builder/assisted-manual/metrics`),
+    enabled: !!projectId,
+  });
+
   const prepare = useMutation({
     mutationFn: () =>
       request(`/v1/projects/${projectId}/backlink-builder/assisted-manual/prepare`, {
@@ -656,13 +672,71 @@ export function AssistedManualPage() {
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5 text-sm">
+      <Card className="border-amber-500/30 bg-amber-500/5">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">What this lane does not do</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ul className="text-sm text-muted-foreground space-y-1 list-disc pl-5">
+            {(d?.honesty ?? []).map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-3 sm:grid-cols-6 text-sm">
         <Stat label="Ready (free)" value={d?.counts.ready} />
         <Stat label="Check fields" value={d?.counts.checkFields} />
         <Stat label="Needs a person" value={d?.counts.needsPerson} />
         <Stat label="Paid (set aside)" value={d?.counts.paidAside ?? byBucket.paid_aside.length} />
         <Stat label="No form" value={d?.counts.noForm ?? byBucket.no_form.length} />
+        <Stat
+          label="Conservation"
+          value={d?.counts.conservationOk === false ? 'FAIL' : 'ok'}
+          warn={d?.counts.conservationOk === false}
+        />
       </div>
+
+      {metrics.data?.data ? (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Pilot metrics (§9)</CardTitle>
+            <CardDescription>
+              Median minutes · correction rate · bucket mix — decide scale-up on these numbers.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-2 sm:grid-cols-4 text-sm">
+            <p>
+              Median min/site:{' '}
+              <span className="font-semibold tabular-nums">
+                {metrics.data.data.medianMinutesPerSite ?? '—'}
+              </span>{' '}
+              <span className="text-muted-foreground">(target ≤4)</span>
+            </p>
+            <p>
+              Correction rate:{' '}
+              <span className="font-semibold tabular-nums">
+                {metrics.data.data.correctionRate != null
+                  ? `${Math.round(metrics.data.data.correctionRate * 100)}%`
+                  : '—'}
+              </span>{' '}
+              <span className="text-muted-foreground">(target ≤20%)</span>
+            </p>
+            <p>
+              Rejected at submit:{' '}
+              <span className="font-semibold tabular-nums">
+                {metrics.data.data.rejectionRate != null
+                  ? `${Math.round(metrics.data.data.rejectionRate * 100)}%`
+                  : '—'}
+              </span>
+            </p>
+            <p className="text-muted-foreground">
+              Log minutes on Done to unlock median.
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {(['ready', 'check_fields', 'needs_person', 'paid_aside', 'no_form'] as const).map((bucket) => (
         <section key={bucket} className="space-y-2">

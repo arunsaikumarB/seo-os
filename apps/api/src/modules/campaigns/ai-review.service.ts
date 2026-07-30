@@ -18,89 +18,6 @@ import {
 } from './campaign-state.service.js';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 
-async function probeHomepageAlive(
-  url: string
-): Promise<{ ok: boolean; detail: string; status: number | null }> {
-  try {
-    const res = await fetch(url, {
-      method: 'GET',
-      redirect: 'follow',
-      signal: AbortSignal.timeout(10_000),
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (compatible; SEO-OS-BacklinkBuilder/1.0; +https://seo-os.app)',
-        Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
-      },
-    });
-    if (!res.ok) {
-      return { ok: false, detail: `http_${res.status}`, status: res.status };
-    }
-    return { ok: true, detail: 'ok', status: res.status };
-  } catch (err) {
-    return {
-      ok: false,
-      detail: err instanceof Error ? err.message : 'fetch_failed',
-      status: null,
-    };
-  }
-}
-
-/**
- * Re-check Approved / Ready sites; mark unreachable ones Dead Website.
- * Prevents dead directories from staying approved after a fail-open import.
- */
-export async function healUnreachableApprovedSites(
-  workspaceId: string,
-  opts: { limit?: number; concurrency?: number } = {}
-): Promise<{ checked: number; markedDead: number; samples: string[] }> {
-  const limit = opts.limit ?? 40;
-  const concurrency = opts.concurrency ?? 6;
-  const items = await listCampaignItems(workspaceId, { includeDeleted: false });
-  const candidates = items
-    .filter((i) => {
-      if (i.reviewDecision === 'Dead Website') return false;
-      if (i.currentStatus === 'Deleted' || i.currentStatus === 'Rejected') return false;
-      const approvedLike =
-        i.reviewDecision === 'Approved' ||
-        i.currentStatus === 'Approved' ||
-        i.currentStatus === 'Ready' ||
-        i.currentStatus === 'Package Generated' ||
-        i.approval === 'approved';
-      return approvedLike && Boolean(String(i.websiteUrl ?? '').trim());
-    })
-    .slice(0, limit);
-
-  let markedDead = 0;
-  const samples: string[] = [];
-
-  for (let i = 0; i < candidates.length; i += concurrency) {
-    const batch = candidates.slice(i, i + concurrency);
-    await Promise.all(
-      batch.map(async (item) => {
-        const url = String(item.websiteUrl ?? '').trim();
-        if (!url) return;
-        const probe = await probeHomepageAlive(url);
-        if (probe.ok) return;
-        await updateCampaignItem(workspaceId, item.id, {
-          currentStatus: 'Failed',
-          reviewDecision: 'Dead Website',
-          reviewTier: 'needs_classification',
-          approvedBy: null,
-          approval: 'pending',
-          lastError: `Unreachable website — ${probe.detail}`,
-          force: true,
-        });
-        markedDead++;
-        if (samples.length < 12) {
-          samples.push(`${item.domain ?? url}: ${probe.detail}`);
-        }
-      })
-    );
-  }
-
-  return { checked: candidates.length, markedDead, samples };
-}
-
 export type AiReviewItem = {
   id: string;
   website: string;
@@ -163,14 +80,6 @@ function toReviewItem(i: CampaignItemRow): AiReviewItem {
 export async function getAiReviewBoard(workspaceId: string) {
   const { startPerfSpan } = await import('../../lib/perf-trace.js');
   const span = startPerfSpan('ai_review', { board: true });
-
-  // Revoke previously approved sites that no longer resolve (timeout/DNS/4xx/5xx)
-  try {
-    await healUnreachableApprovedSites(workspaceId, { limit: 40, concurrency: 6 });
-  } catch (e) {
-    console.warn('[AI Review] reachability heal failed', e);
-  }
-
   const items = await listCampaignItems(workspaceId, { includeDeleted: false });
 
   // Heal rows stuck with terminal status/decision but stale needs_classification tier

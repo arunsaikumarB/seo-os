@@ -7,7 +7,6 @@ import {
   classifyOpportunity,
   qualifyOpportunity,
   formatQualificationReport,
-  isDeadWebsiteAnalysis,
   contentTypesForOpportunity,
   deduplicateAndValidate,
   extractUrlsFromCsv,
@@ -25,10 +24,6 @@ import {
   type RichImportRow,
   type TrackingStatus,
   classifyUrlProvisional,
-  resolveTargetStorageTypes,
-  unrelatedImportReason,
-  familyLabels,
-  type ImportTargetFamilyId,
 } from '@seo-os/backlink-builder';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { getProjectById } from '../projects/project.service.js';
@@ -184,17 +179,10 @@ export async function createImport(
   workspaceId: string,
   sourceType: ImportSourceType,
   urls: string[],
-  opts: {
-    fileName?: string;
-    userId?: string;
-    richRows?: RichImportRow[];
-    targetFamilies?: ImportTargetFamilyId[];
-  } = {}
+  opts: { fileName?: string; userId?: string; richRows?: RichImportRow[] } = {}
 ) {
   const { rows, stats } = deduplicateAndValidate(urls);
   const importId = randomUUID();
-  const targetFamilies = opts.targetFamilies ?? [];
-  const targetStorageTypes = resolveTargetStorageTypes(targetFamilies);
 
   // Phase 6.3 — provisional Auto/Manual split (instant, URL-only)
   let provisionalAuto = 0;
@@ -240,9 +228,6 @@ export async function createImport(
       metadata: {
         richColumns: Boolean(opts.richRows?.length),
         richRowCount: opts.richRows?.length ?? 0,
-        targetFamilies,
-        targetStorageTypes,
-        targetFamilyLabels: familyLabels(targetFamilies),
         provisionalLanes: {
           automatable: provisionalAuto,
           manual: provisionalManual,
@@ -442,16 +427,8 @@ export async function runAutomationPipeline(
 
     const importMeta = (detail.metadata ?? {}) as {
       richByUrl?: Record<string, Record<string, string | null>>;
-      targetFamilies?: string[];
-      targetStorageTypes?: string[];
     };
     const richByUrl = importMeta.richByUrl ?? {};
-    const targetFamilies = Array.isArray(importMeta.targetFamilies)
-      ? importMeta.targetFamilies
-      : [];
-    const targetStorageTypes = Array.isArray(importMeta.targetStorageTypes)
-      ? importMeta.targetStorageTypes
-      : resolveTargetStorageTypes(targetFamilies);
     let opportunitiesCreated = 0;
     let analysesCreated = 0;
     let contentGenerated = 0;
@@ -523,9 +500,6 @@ export async function runAutomationPipeline(
               projectIndustry: brand.industry,
               brandName: brand.brandName,
               learning,
-              targetStorageTypes: targetStorageTypes.length
-                ? (targetStorageTypes as import('@seo-os/backlink-builder').BacklinkTypeId[])
-                : undefined,
             });
             classificationDecisions.push({
               classificationId: classification.classificationId,
@@ -542,13 +516,7 @@ export async function runAutomationPipeline(
               `${classification.classificationLabel} (${classification.confidence}%) — ${classification.reason} · Score ${classification.opportunityScore} — ${domain}`
             );
 
-            const qualification = qualifyOpportunity(analysis, classification, {
-              targetStorageTypes,
-              targetFamilyIds: targetFamilies,
-              unrelatedReason: targetFamilies.length
-                ? unrelatedImportReason(classification.backlinkType, targetFamilies)
-                : undefined,
-            });
+            const qualification = qualifyOpportunity(analysis, classification);
             qualificationReport.push(qualification);
             await log(
               'classify',
@@ -579,7 +547,9 @@ export async function runAutomationPipeline(
               const existingId = await import('../campaigns/ai-review.service.js').then((m) =>
                 m.findExistingByDomain(workspaceId, domain)
               );
-              const deadWebsite = isDeadWebsiteAnalysis(analysis);
+              const deadWebsite =
+                (analysis.fetchStatusCode != null && analysis.fetchStatusCode >= 400) ||
+                analysis.robotsTxtStatus === 'unreachable';
               await getSupabaseAdmin()
                 .from('opportunities')
                 .insert({
@@ -662,7 +632,9 @@ export async function runAutomationPipeline(
             const existingId = await import('../campaigns/ai-review.service.js').then((m) =>
               m.findExistingByDomain(workspaceId, domain)
             );
-            const deadWebsite = isDeadWebsiteAnalysis(analysis);
+            const deadWebsite =
+              (analysis.fetchStatusCode != null && analysis.fetchStatusCode >= 400) ||
+              analysis.robotsTxtStatus === 'unreachable';
 
             const oppId = randomUUID();
             const oppInsert = await getSupabaseAdmin().from('opportunities').insert({

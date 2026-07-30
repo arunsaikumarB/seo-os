@@ -7,9 +7,14 @@ import { CommandPalette } from './command-palette';
 import { Breadcrumbs } from './breadcrumbs';
 import { useBreadcrumbs } from '@/hooks/use-breadcrumbs';
 import { HelpDrawer } from '@/components/workflow/help-drawer';
+import { AiCoachPanel } from '@/components/workflow/ai-coach-panel';
+import { LearningModeBanner } from '@/components/workflow/learning-mode-banner';
+import { NextActionPanel } from '@/components/workflow/next-action-panel';
 import { WorkflowProgressHeader } from '@/components/workflow/workflow-progress-header';
+import { WorkflowCelebration } from '@/components/workflow/workflow-celebration';
 import { CampaignAiStatus } from '@/components/workflow/campaign-ai-status';
 import { OfflineBanner } from '@/components/beta/offline-banner';
+import { BetaAnnouncementBar } from '@/components/beta/beta-announcement-bar';
 import { useAppStore } from '@/stores/app-store';
 import { useAutoInterventionWindows } from '@/hooks/use-auto-intervention-windows';
 import { useStageNotificationDelivery } from '@/hooks/use-stage-notifications';
@@ -18,17 +23,17 @@ interface AppShellProps {
   projectId: string;
 }
 
-/** One progress header with timing. Page owns CTAs — no duplicate next-action / celebration chrome. */
+/** One progress header · AI status · one next action. Manual list is opt-in on Submit. */
 export function AppShell({ projectId }: AppShellProps) {
   const breadcrumbs = useBreadcrumbs(projectId);
   const location = useLocation();
   const setCurrentProjectId = useAppStore((s) => s.setCurrentProjectId);
+  const isHome =
+    location.pathname.endsWith('/home') ||
+    location.pathname.replace(/\/$/, '') === `/projects/${projectId}`;
   const onGeneratePage = location.pathname.includes('/content/library');
   /** Phase 11 — Assisted Manual has no auto-submit queue; never show Submitting status. */
   const onAssistedManual = location.pathname.includes('/assisted-manual');
-  const onHome =
-    location.pathname.endsWith('/home') ||
-    location.pathname.replace(/\/$/, '') === `/projects/${projectId}`;
 
   useAutoInterventionWindows(projectId);
   useStageNotificationDelivery();
@@ -49,15 +54,26 @@ export function AppShell({ projectId }: AppShellProps) {
       <Sidebar projectId={projectId} className="hidden md:flex" />
       <div className="flex flex-1 flex-col overflow-hidden">
         <OfflineBanner />
+        <BetaAnnouncementBar />
         <Topbar projectId={projectId} showProjectSwitcher />
-        <div className="flex items-center justify-between gap-3 border-b border-border/50 px-4 py-1.5 md:px-6">
+        <LearningModeBanner projectId={projectId} />
+        <div className="flex items-center justify-between gap-3 border-b border-border/50 px-4 py-2 md:px-6">
           <Breadcrumbs items={breadcrumbs} className="min-w-0 flex-1" />
-          <HelpDrawer projectId={projectId} />
+          <div className="flex shrink-0 items-center gap-2">
+            <HelpDrawer projectId={projectId} />
+            <AiCoachPanel />
+          </div>
         </div>
         <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto p-4 pb-20 md:p-6 md:pb-6">
-          {!onHome ? <WorkflowProgressHeader projectId={projectId} /> : null}
-          {!onGeneratePage && !onAssistedManual && !onHome ? (
+          <WorkflowProgressHeader projectId={projectId} />
+          <WorkflowCelebration projectId={projectId} />
+          {!onGeneratePage && !onAssistedManual ? (
             <CampaignAiStatus projectId={projectId} />
+          ) : null}
+          {!isHome && !onAssistedManual ? (
+            <div className="mb-6 max-w-xl">
+              <NextActionPanel projectId={projectId} />
+            </div>
           ) : null}
           <Outlet />
         </main>

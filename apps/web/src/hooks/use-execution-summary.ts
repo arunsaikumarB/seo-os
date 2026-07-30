@@ -14,8 +14,6 @@ export type ExecutionSummary = {
   submitted: number;
   verified: number;
   waitingHuman: number;
-  /** Assisted Manual packages still open — not browser Waiting Human */
-  assistedOpen: number;
   skipped: number;
   failed: number;
   deleted: number;
@@ -37,8 +35,6 @@ type StatsPayload = {
   executionSummary?: Partial<ExecutionSummary> & {
     submitted?: number;
     verified?: number;
-    assistedOpen?: number;
-    assistedManualRemaining?: number;
   };
   queued?: number;
   running?: number;
@@ -47,8 +43,6 @@ type StatsPayload = {
   verified?: number;
   completedJobs?: number;
   waitingHuman?: number;
-  assistedOpen?: number;
-  assistedManualRemaining?: number;
   needsYou?: number;
   needsYourAction?: number;
   skipped?: number;
@@ -77,9 +71,6 @@ function normalize(d: StatsPayload): ExecutionSummary {
   const waitingHuman = Number(
     es.waitingHuman ?? d.waitingHuman ?? d.needsYou ?? d.needsYourAction ?? 0
   );
-  const assistedOpen = Number(
-    es.assistedOpen ?? es.assistedManualRemaining ?? d.assistedOpen ?? d.assistedManualRemaining ?? 0
-  );
   const running = Number(es.running ?? d.running ?? 0);
   const remaining = Number(es.remaining ?? d.remainingJobs ?? 0);
   const total = Number(es.total ?? d.totalJobs ?? 0);
@@ -90,7 +81,6 @@ function normalize(d: StatsPayload): ExecutionSummary {
     submitted,
     verified,
     waitingHuman,
-    assistedOpen,
     skipped: Number(es.skipped ?? d.skipped ?? 0),
     failed: Number(es.failed ?? d.failed ?? 0),
     deleted: Number(es.deleted ?? d.deleted ?? 0),

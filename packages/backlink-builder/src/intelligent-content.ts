@@ -44,7 +44,7 @@ export type StudioUiSection =
 
 const MODE_SECTIONS: Record<ContentStudioMode, StudioUiSection[]> = {
   guest_post: ['blog_editor', 'seo_metadata', 'links_anchors', 'image_assets', 'preview'],
-  article: ['article_editor', 'seo_metadata', 'links_anchors', 'image_assets', 'preview'],
+  article: ['article_editor', 'seo_metadata', 'links_anchors', 'preview'],
   directory: ['business_fields', 'seo_metadata', 'image_assets', 'preview'],
   profile: ['profile_fields', 'image_assets', 'seo_metadata', 'preview'],
   forum: ['forum_editor', 'links_anchors', 'preview'],
@@ -53,7 +53,7 @@ const MODE_SECTIONS: Record<ContentStudioMode, StudioUiSection[]> = {
   image: ['image_assets', 'seo_metadata', 'preview'],
   infographic: ['image_assets', 'seo_metadata', 'preview'],
   video: ['video_assets', 'seo_metadata', 'preview'],
-  resource: ['article_editor', 'links_anchors', 'seo_metadata', 'image_assets', 'preview'],
+  resource: ['article_editor', 'links_anchors', 'seo_metadata', 'preview'],
   outreach: ['article_editor', 'links_anchors', 'preview'],
   generic: ['business_fields', 'seo_metadata', 'preview'],
 };
@@ -162,7 +162,7 @@ export function studioSectionsForMode(mode: ContentStudioMode): StudioUiSection[
 export function studioModeLabel(mode: ContentStudioMode): string {
   const labels: Record<ContentStudioMode, string> = {
     guest_post: 'Guest Post Mode',
-    article: 'Web 2.0 / Article Mode',
+    article: 'Article Submission Mode',
     directory: 'Directory Submission Mode',
     profile: 'Profile Creation Mode',
     forum: 'Forum Mode',
@@ -179,14 +179,7 @@ export function studioModeLabel(mode: ContentStudioMode): string {
 }
 
 export function shouldOpenImageStudio(mode: ContentStudioMode): boolean {
-  return (
-    mode === 'image' ||
-    mode === 'infographic' ||
-    mode === 'article' ||
-    mode === 'guest_post' ||
-    mode === 'press' ||
-    mode === 'resource'
-  );
+  return mode === 'image' || mode === 'infographic';
 }
 
 export function shouldOpenVideoStudio(mode: ContentStudioMode): boolean {

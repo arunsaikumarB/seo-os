@@ -21,17 +21,11 @@ export type SubmissionProbeGate = {
 
 /**
  * Probe bands that prove there is nothing to submit.
- * Web 2.0 platforms with curated publish recipes are NOT disqualified —
- * they need Generate Content + human login publish, not directory forms.
  */
 export function probeDisqualifiesSubmission(
-  probe: Pick<LinkProbeResult, 'band' | 'formFound' | 'alive' | 'web2'> | null | undefined
+  probe: Pick<LinkProbeResult, 'band' | 'formFound' | 'alive'> | null | undefined
 ): boolean {
   if (!probe) return false;
-  if (probe.web2?.detected && probe.web2.loginRequiredForPublish) {
-    // Known Web 2.0 — keep for article/content workflow
-    return false;
-  }
   if (probe.band === 'dead' || probe.alive === false) return true;
   if (probe.band === 'no_form') return true;
   if (probe.formFound === false && probe.band !== 'blocked' && probe.band !== 'check') {
@@ -42,12 +36,9 @@ export function probeDisqualifiesSubmission(
 }
 
 export function evaluateSubmissionProbeGate(
-  probe: Pick<LinkProbeResult, 'band' | 'formFound' | 'alive' | 'reasons' | 'web2'> | null | undefined
+  probe: Pick<LinkProbeResult, 'band' | 'formFound' | 'alive' | 'reasons'> | null | undefined
 ): SubmissionProbeGate {
   if (!probe) {
-    return { disqualified: false, reason: null, reviewDecision: null };
-  }
-  if (probe.web2?.detected && probe.web2.loginRequiredForPublish) {
     return { disqualified: false, reason: null, reviewDecision: null };
   }
   if (probe.band === 'dead' || probe.alive === false) {

@@ -35,8 +35,7 @@ describe('getWorkflowProgress (Phase 13)', () => {
     expect(input.aiReviewPending).toBe(0);
     expect(input.approvedCount).toBe(6);
     expect(input.generatedPackages).toBe(0);
-    expect(input.pendingGeneration).toBe(0);
-    expect(input.awaitingGeneration).toBe(6);
+    expect(input.pendingGeneration).toBe(6);
     expect(input.failedGeneration).toBe(0);
 
     const progress = getWorkflowProgress(input);
@@ -56,55 +55,22 @@ describe('getWorkflowProgress (Phase 13)', () => {
     expect(progress.steps.find((s) => s.id === 'reports-analytics')?.state).toBe('upcoming');
   });
 
-  it('does not mark Generate done when packages exist but generation still in flight', () => {
+  it('does not mark Generate done when packages exist but generation still pending', () => {
     const progress = getWorkflowProgress({
       projectReady: true,
       importedCount: 2,
       aiReviewPending: 0,
-      aiNeedsReview: 0,
       approvedCount: 2,
       generatedPackages: 1,
       pendingGeneration: 1,
-      awaitingGeneration: 0,
       failedGeneration: 0,
       contentReadyCount: 1,
       submitOpenCount: 1,
-      submitInFlight: 0,
       hasTrackedResults: false,
       hasReport: false,
     });
     expect(progress.flags.generateDone).toBe(false);
     expect(progress.currentStepId).toBe('generate-content');
-  });
-
-  it('marks Generate done when a lane finished even if another approved lane awaits', () => {
-    const items: CampaignItemInput[] = [
-      ...Array.from({ length: 37 }, (_, i) =>
-        item({
-          id: `list${i}`,
-          currentStatus: 'Ready',
-          reviewDecision: 'Approved',
-          generationStatus: 'Completed',
-        })
-      ),
-      ...Array.from({ length: 5 }, (_, i) =>
-        item({
-          id: `web${i}`,
-          currentStatus: 'Approved',
-          reviewDecision: 'Approved',
-          generationStatus: null,
-        })
-      ),
-    ];
-    const input = deriveWorkflowProgressInput({ projectReady: true, items });
-    expect(input.generatedPackages).toBe(37);
-    expect(input.pendingGeneration).toBe(0);
-    expect(input.awaitingGeneration).toBe(5);
-    const progress = getWorkflowProgress(input);
-    expect(progress.flags.generateDone).toBe(true);
-    expect(progress.flags.submitDone).toBe(false);
-    expect(progress.currentStepId).toBe('submit-backlinks');
-    expect(progress.completedCount).toBe(4);
   });
 
   it('flips Generate done and Submit current when all packages complete', () => {
@@ -130,15 +96,12 @@ describe('getWorkflowProgress (Phase 13)', () => {
       projectReady: true,
       importedCount: 0,
       aiReviewPending: 0,
-      aiNeedsReview: 0,
       approvedCount: 0,
       generatedPackages: 0,
       pendingGeneration: 0,
-      awaitingGeneration: 0,
       failedGeneration: 0,
       contentReadyCount: 0,
       submitOpenCount: 0,
-      submitInFlight: 0,
       hasTrackedResults: false,
       hasReport: false,
     });
@@ -149,7 +112,7 @@ describe('getWorkflowProgress (Phase 13)', () => {
     expect(progress.flags.submitDone).toBe(false);
   });
 
-  it('marks AI Review done when Recommended is clear and ≥1 approved (Needs review optional)', () => {
+  it('keeps AI Review current while classification is pending', () => {
     const items: CampaignItemInput[] = [
       item({
         id: '1',
@@ -166,48 +129,11 @@ describe('getWorkflowProgress (Phase 13)', () => {
     const progress = getWorkflowProgress(
       deriveWorkflowProgressInput({ projectReady: true, items })
     );
-    expect(progress.flags.aiReviewDone).toBe(true);
-    expect(progress.currentStepId).toBe('generate-content');
-  });
-
-  it('keeps AI Review current while Recommended confirms remain', () => {
-    const items: CampaignItemInput[] = [
-      item({
-        id: '1',
-        currentStatus: 'Classified',
-        reviewDecision: 'Pending',
-        reviewTier: 'recommended',
-      }),
-      item({
-        id: '2',
-        currentStatus: 'Approved',
-        reviewDecision: 'Approved',
-      }),
-    ];
-    const progress = getWorkflowProgress(
-      deriveWorkflowProgressInput({ projectReady: true, items })
-    );
     expect(progress.flags.aiReviewDone).toBe(false);
     expect(progress.currentStepId).toBe('ai-review');
   });
 
-  it('keeps AI Review current when only Needs review remains and nothing approved', () => {
-    const items: CampaignItemInput[] = [
-      item({
-        id: '1',
-        currentStatus: 'Classified',
-        reviewDecision: 'Needs Classification',
-        reviewTier: 'needs_classification',
-      }),
-    ];
-    const progress = getWorkflowProgress(
-      deriveWorkflowProgressInput({ projectReady: true, items })
-    );
-    expect(progress.flags.aiReviewDone).toBe(false);
-    expect(progress.currentStepId).toBe('ai-review');
-  });
-
-  it('marks Submit done when ≥1 result exists and nothing is actively submitting', () => {
+  it('marks Submit done only when every content-ready item is terminal', () => {
     const items: CampaignItemInput[] = [
       item({
         id: '1',
@@ -226,29 +152,6 @@ describe('getWorkflowProgress (Phase 13)', () => {
       deriveWorkflowProgressInput({ projectReady: true, items })
     );
     expect(progress.flags.generateDone).toBe(true);
-    expect(progress.flags.submitDone).toBe(true);
-    expect(progress.flags.trackResultsDone).toBe(true);
-    expect(progress.currentStepId).toBe('reports-analytics');
-  });
-
-  it('keeps Submit current while a submission is in flight', () => {
-    const items: CampaignItemInput[] = [
-      item({
-        id: '1',
-        currentStatus: 'Submitted',
-        reviewDecision: 'Approved',
-        generationStatus: 'Completed',
-      }),
-      item({
-        id: '2',
-        currentStatus: 'Submitting',
-        reviewDecision: 'Approved',
-        generationStatus: 'Completed',
-      }),
-    ];
-    const progress = getWorkflowProgress(
-      deriveWorkflowProgressInput({ projectReady: true, items })
-    );
     expect(progress.flags.submitDone).toBe(false);
     expect(progress.currentStepId).toBe('submit-backlinks');
   });

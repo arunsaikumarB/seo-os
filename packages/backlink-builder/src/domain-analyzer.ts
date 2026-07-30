@@ -36,11 +36,6 @@ export interface DomainAnalysisResult {
   robotsTxtStatus?: string;
   sitemapFound?: boolean;
   fetchStatusCode?: number;
-  /**
-   * True only when the primary homepage GET succeeded (2xx).
-   * Robots/sitemap alone must never mark a site reachable.
-   */
-  homepageReachable?: boolean;
   /** Rich page-structure signals used by the classification engine */
   websiteSignals?: WebsiteInspectionSignals;
   /** Site-inspection classification (confidence + reason) */
@@ -153,43 +148,8 @@ export function analyzeDomain(domain: string, url?: string): DomainAnalysisResul
 }
 
 /**
- * Hard-fail statuses for the primary URL (timeouts/DNS use homepageFetchError instead).
- */
-export function isUnreachableHttpStatus(status: number | null | undefined): boolean {
-  if (status == null || !Number.isFinite(status)) return false;
-  return status >= 400;
-}
-
-/**
- * Single dead-site predicate for import / qualify / AI Review.
- * Live probes that did not successfully fetch the homepage are always dead.
- */
-export function isDeadWebsiteAnalysis(analysis: {
-  fetchStatusCode?: number | null;
-  robotsTxtStatus?: string | null;
-  homepageReachable?: boolean | null;
-  metadata?: Record<string, unknown> | null;
-}): boolean {
-  const meta = analysis.metadata ?? {};
-  if (analysis.homepageReachable === true || meta.homepageReachable === true) return false;
-  if (analysis.homepageReachable === false || meta.homepageReachable === false) return true;
-  if (typeof meta.homepageFetchError === 'string' && meta.homepageFetchError.trim()) return true;
-  if (isUnreachableHttpStatus(analysis.fetchStatusCode ?? null)) return true;
-  if (meta.liveProbeAttempted === true && meta.homepageFetched !== true) return true;
-  if (
-    analysis.robotsTxtStatus === 'unreachable' &&
-    meta.homepageFetched !== true &&
-    analysis.fetchStatusCode == null
-  ) {
-    return true;
-  }
-  return false;
-}
-
-/**
  * Prefer live fetch of homepage / robots.txt / sitemap when network is available.
  * Falls back to estimated analysis with metricsSource='estimated'.
- * Homepage reachability is authoritative — robots/sitemap never fake "live".
  */
 export async function analyzeDomainLive(
   domain: string,
@@ -200,13 +160,9 @@ export async function analyzeDomainLive(
   const base = analyzeDomain(domain, url);
   const origin = `https://${base.domain}`;
   const meta = { ...base.metadata } as Record<string, unknown>;
-  meta.liveProbeAttempted = true;
-  meta.homepageReachable = false;
-  meta.homepageFetched = false;
   let robotsTxtStatus = 'unknown';
   let sitemapFound = false;
   let fetchStatusCode: number | undefined;
-  let homepageReachable = false;
   let metricsSource: 'estimated' | 'live' = 'estimated';
   let websiteSignals: WebsiteInspectionSignals | undefined;
   let htmlRaw = '';
@@ -215,21 +171,15 @@ export async function analyzeDomainLive(
     const homeRes = await fetchImpl(url ?? origin, {
       method: 'GET',
       redirect: 'follow',
-      signal: AbortSignal.timeout(12_000),
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (compatible; SEO-OS-BacklinkBuilder/1.0; +https://seo-os.app)',
-        Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
-      },
+      signal: AbortSignal.timeout(8000),
+      headers: { 'User-Agent': 'SEO-OS-BacklinkBuilder/1.0' },
     });
     fetchStatusCode = homeRes.status;
     if (homeRes.ok) {
-      homepageReachable = true;
       metricsSource = 'live';
       htmlRaw = await homeRes.text();
       const html = htmlRaw.slice(0, 120_000).toLowerCase();
       meta.homepageFetched = true;
-      meta.homepageReachable = true;
       meta.hasContactLink =
         html.includes('contact') || html.includes('mailto:') || html.includes('/about');
       meta.hasGuestPostHint =
@@ -269,14 +219,9 @@ export async function analyzeDomainLive(
         meta.qaPathConfirmed = true;
         base.detectedPages.qa = `${origin}/questions`;
       }
-    } else {
-      meta.homepageFetchError = `http_${homeRes.status}`;
-      meta.homepageReachable = false;
     }
   } catch (err) {
     meta.homepageFetchError = err instanceof Error ? err.message : 'fetch_failed';
-    meta.homepageReachable = false;
-    homepageReachable = false;
   }
 
   try {
@@ -290,7 +235,7 @@ export async function analyzeDomainLive(
       const robots = await robotsRes.text();
       meta.robotsTxtSnippet = robots.slice(0, 1000);
       if (/sitemap:\s*(\S+)/i.test(robots)) sitemapFound = true;
-      // Do NOT set metricsSource = 'live' from robots alone
+      metricsSource = 'live';
     } else {
       robotsTxtStatus = `http_${robotsRes.status}`;
     }
@@ -307,15 +252,14 @@ export async function analyzeDomainLive(
       });
       if (sm.ok) {
         sitemapFound = true;
-        // Do NOT set metricsSource = 'live' from sitemap alone
+        metricsSource = 'live';
       }
     } catch {
       /* ignore */
     }
   }
 
-  const fetchOk =
-    homepageReachable && Boolean(htmlRaw) && (fetchStatusCode == null || fetchStatusCode < 400);
+  const fetchOk = Boolean(htmlRaw) && (fetchStatusCode == null || fetchStatusCode < 400);
   websiteSignals = extractWebsiteSignals(htmlRaw || '<html></html>', {
     robotsOk: robotsTxtStatus === 'found',
     sitemapFound,
@@ -353,7 +297,6 @@ export async function analyzeDomainLive(
     robotsTxtStatus,
     sitemapFound,
     fetchStatusCode,
-    homepageReachable,
     websiteSignals,
     classificationDecision,
     metadata: {

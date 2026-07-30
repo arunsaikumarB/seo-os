@@ -35,7 +35,6 @@ export type SelectedOpportunity = {
   has_content_pack?: boolean;
   has_submission?: boolean;
   has_content_draft?: boolean;
-  web2_login_required?: boolean;
 };
 
 /** @deprecated Prefer SelectedOpportunity */
@@ -118,9 +117,6 @@ export function OpportunitySelector({
         (o.domain ?? '').toLowerCase().includes(q) ||
         String(o.opportunity_type).toLowerCase().includes(q) ||
         String(o.backlink_type ?? '').toLowerCase().includes(q) ||
-        String(o.classification_label ?? '').toLowerCase().includes(q) ||
-        String(o.studio_mode_label ?? '').toLowerCase().includes(q) ||
-        String(o.studio_mode ?? '').toLowerCase().includes(q) ||
         String(o.category ?? '').toLowerCase().includes(q) ||
         String(o.status).toLowerCase().includes(q)
       );
@@ -183,7 +179,7 @@ export function OpportunitySelector({
             <option key={o.id} value={o.id}>
               {o.website}
               {o.domain ? ` (${o.domain})` : ''}
-              {` · ${o.studio_mode_label ?? o.backlink_type ?? String(o.opportunity_type).replace(/_/g, ' ')}`}
+              {` · ${o.backlink_type ?? String(o.opportunity_type).replace(/_/g, ' ')}`}
               {` · score ${o.score}`}
             </option>
           ))}
@@ -218,10 +214,7 @@ export function OpportunitySelector({
                     <td className="px-3 py-2 font-medium">{o.website}</td>
                     <td className="px-3 py-2 text-muted-foreground">{o.domain ?? '—'}</td>
                     <td className="px-3 py-2 capitalize">
-                      {(o.studio_mode_label ?? o.backlink_type ?? o.opportunity_type).replace(
-                        /_/g,
-                        ' '
-                      )}
+                      {(o.backlink_type ?? o.opportunity_type).replace(/_/g, ' ')}
                     </td>
                     <td className="px-3 py-2 capitalize">
                       {String(o.category ?? '—').replace(/_/g, ' ')}
@@ -258,8 +251,7 @@ export function OpportunitySelector({
           <p className="text-xs text-muted-foreground capitalize">
             {selected.domain ?? 'No domain'}
             {' · '}
-            {selected.studio_mode_label ??
-              (selected.backlink_type ?? selected.opportunity_type).replace(/_/g, ' ')}
+            {(selected.backlink_type ?? selected.opportunity_type).replace(/_/g, ' ')}
             {' · '}
             {String(selected.category ?? '').replace(/_/g, ' ')}
             {' · score '}
@@ -271,14 +263,6 @@ export function OpportunitySelector({
             {' · '}
             {String(selected.status).replace(/_/g, ' ')}
           </p>
-          {(selected.web2_login_required ||
-            selected.studio_mode === 'article' ||
-            selected.storage_type === 'web2') && (
-            <p className="text-xs text-amber-800 dark:text-amber-200 bg-amber-500/10 rounded px-2 py-1.5">
-              Web 2.0 / article — generate the content pack here, then paste/publish after platform
-              login. Featured image uses the pack image prompt when available.
-            </p>
-          )}
           {showRequiredFields && (selected.required_fields?.length ?? 0) > 0 && (
             <div>
               <p className="text-xs text-muted-foreground mb-1">Required fields for this website</p>

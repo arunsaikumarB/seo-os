@@ -10,19 +10,11 @@ import {
   dedupeContentFields,
   fitDescriptionToCap,
   fitMetaDescription,
-  buildContentGenerationPrompt,
-  isWeb2ArticleStorageType,
   type BrandContext,
   type OpportunityAiContext,
 } from '@seo-os/backlink-builder';
 import { completeLlmWithFailover } from '../providers/llm-failover.service.js';
 import { logger } from '../../lib/logger.js';
-
-export {
-  buildContentGenerationPrompt as buildPrompt,
-  buildWeb2ArticlePrompt,
-  isWeb2ArticleStorageType,
-} from '@seo-os/backlink-builder';
 
 const MAX_PARSE_ATTEMPTS = 2;
 
@@ -40,6 +32,95 @@ function parseJsonObject(text: string): Record<string, unknown> {
     throw new Error('LLM response did not contain a JSON object');
   }
   return JSON.parse(raw.slice(start, end + 1)) as Record<string, unknown>;
+}
+
+function buildPrompt(params: {
+  brand: BrandContext & { projectUrl?: string | null };
+  opp: OpportunityAiContext;
+  storageType: string;
+  classificationLabel?: string | null;
+  reason?: string | null;
+  /** Prior package texts to avoid repeating (cross-site uniqueness). */
+  avoidTexts?: string[];
+  uniquenessAttempt?: number;
+  /** Concrete feature/fact this site's copy must lead with (rotated per opportunity). */
+  featureEmphasis?: string | null;
+  openingAngle?: string | null;
+}): string {
+  const site = params.opp.website_name || params.opp.domain || 'the target site';
+  const brandUrl =
+    params.brand.projectUrl ||
+    (params.brand.projectDomain ? `https://${params.brand.projectDomain}` : '');
+  const avoidBlock =
+    params.avoidTexts && params.avoidTexts.length > 0
+      ? `
+UNIQUENESS (attempt ${params.uniquenessAttempt ?? 1}): These descriptions were already used for OTHER sites in this campaign — write a MATERIALLY DIFFERENT opening, feature emphasis, and phrasing. Do not paraphrase them:
+${params.avoidTexts
+  .slice(0, 5)
+  .map((t, i) => `${i + 1}. ${t.slice(0, 280)}`)
+  .join('\n')}
+`
+      : '';
+  const angleBlock = `
+PER-SITE ANGLE (mandatory — this package must not read like any other listing):
+- Target site type: ${params.classificationLabel ?? params.storageType}
+- Lead with this real website fact/feature: ${params.featureEmphasis || '(use a different grounded topic than other listings)'}
+- Opening approach: ${params.openingAngle || 'different problem → capability framing'}
+- Different opening sentence, different feature emphasis, different phrasing from every other site.
+`;
+  return `You are writing backlink submission content for a real marketing campaign.
+
+PROJECT / BRAND (use these exact names — never invent "Our Brand"):
+- Brand name: ${params.brand.brandName}
+- Company name: ${params.brand.companyName ?? params.brand.brandName}
+- Domain: ${params.brand.projectDomain ?? 'unknown'}
+- URL: ${brandUrl || 'unknown'}
+- Industry: ${params.brand.industry ?? 'business'}
+- Contact name: ${params.brand.contactName ?? '(not provided — do not invent)'}
+- Contact email: ${params.brand.contactEmail ?? '(not provided — do not invent)'}
+
+GROUNDED FACTS FROM THE REAL WEBSITE (must drive titles/descriptions — do not invent products/integrations not listed):
+- Tagline: ${params.brand.tagline ?? '(none crawled)'}
+- Topics: ${(params.brand.primaryTopics ?? []).join('; ') || '(none)'}
+- Key features / facts: ${(params.brand.keyFeatures ?? []).join('; ') || '(none)'}
+- Knowledge snippets: ${(params.brand.knowledgeSnippets ?? []).join('; ') || '(none)'}
+
+TARGET SITE:
+- Name: ${site}
+- Domain: ${params.opp.domain ?? 'unknown'}
+- Opportunity title: ${params.opp.title}
+- Backlink / storage type: ${params.storageType}
+- Classification: ${params.classificationLabel ?? params.storageType}
+- Analysis reason: ${params.reason ?? 'n/a'}
+${angleBlock}${avoidBlock}
+Write ORIGINAL content tailored to this site type (directory blurb, forum reply, guest post, profile, Q&A, etc.).
+This package is for THIS site only — never reuse copy from another listing.
+
+Return ONLY a JSON object with:
+{
+  "seoTitle": string (45-60 chars, must include brand or product naturally),
+  "metaDescription": string (120-155 chars, HARD MAX 160),
+  "h1": string,
+  "h2": string[3-5],
+  "body": string (markdown; guest_post 350-900 words; directory/forum/profile shorter),
+  "shortDescription": string (ONE sentence, 180-195 chars, HARD MAX 200 — never longer),
+  "longDescription": string (distinct from shortDescription, 180-195 chars, HARD MAX 200 — never longer),
+  "businessDescription": string (≤200 chars, same rules),
+  "businessName": string (exact brand name),
+  "faq": [{"question": string, "answer": string}],
+  "suggestedLinks": [{"anchor": string, "url": string}],
+  "internalLinks": [{"anchor": string, "url": string}],
+  "authorBio": string,
+  "excerpt": string (≤200 chars)
+}
+
+Rules:
+- Mention ${params.brand.brandName} and ${params.brand.projectDomain ?? brandUrl} naturally.
+- Base claims ONLY on the grounded website facts above. If features are empty, write a cautious, general description — NEVER invent third-party integrations (QuickBooks, Shopify, etc.) that are not listed.
+- shortDescription, longDescription, metaDescription, and excerpt must each be UNIQUE — title ≠ short ≠ long ≠ meta. Do not paste the same paragraph into multiple fields.
+- Never use placeholders: "Our Brand", "Insight 1", "example.com", "{{", "Key Takeaways" scaffold lists.
+- Links must use https://${params.brand.projectDomain ?? 'the brand domain'} — never example.com.
+- Tone matches the site type (${params.storageType}).`;
 }
 
 function scoreLivePack(pack: Record<string, unknown>, brandName: string): Record<string, unknown> {
@@ -66,22 +147,6 @@ function scoreLivePack(pack: Record<string, unknown>, brandName: string): Record
       ...(brandHits < 1 ? ['Brand name missing from generated content'] : []),
     ],
   };
-}
-
-function normalizeTags(
-  llmTags: unknown,
-  brand: BrandContext,
-  storageType: string,
-  _articleMode: boolean
-): string[] {
-  if (Array.isArray(llmTags) && llmTags.length > 0) {
-    const cleaned = llmTags
-      .map((t) => String(t).trim().toLowerCase())
-      .filter((t) => t.length >= 2 && t.length <= 40)
-      .slice(0, 12);
-    if (cleaned.length) return [...new Set(cleaned)];
-  }
-  return [brand.industry ?? 'business', storageType].filter(Boolean) as string[];
 }
 
 /**
@@ -119,12 +184,10 @@ export async function generateLiveContentPack(params: {
     return pack;
   }
 
-  const articleMode = isWeb2ArticleStorageType(params.storageType, params.classificationId);
-  const prompt = buildContentGenerationPrompt({
+  const prompt = buildPrompt({
     brand: params.brand,
     opp: params.opp,
     storageType: params.storageType,
-    classificationId: params.classificationId,
     classificationLabel: params.classificationLabel,
     reason: params.reason,
     avoidTexts: params.avoidTexts,
@@ -136,9 +199,8 @@ export async function generateLiveContentPack(params: {
   const messages = [
     {
       role: 'system',
-      content: articleMode
-        ? 'You write original long-form Web 2.0 / article SEO content. Respond with JSON only. Never use template placeholders.'
-        : 'You write original SEO submission copy. Respond with JSON only. Never use template placeholders.',
+      content:
+        'You write original SEO submission copy. Respond with JSON only. Never use template placeholders.',
     },
     { role: 'user', content: prompt },
   ];
@@ -151,7 +213,7 @@ export async function generateLiveContentPack(params: {
       const result = await completeLlmWithFailover({
         workspaceId: params.workspaceId,
         messages,
-        options: { temperature: 0.7, maxTokens: articleMode ? 8192 : 4096 },
+        options: { temperature: 0.7, maxTokens: 4096 },
       });
       lastChain = result.chainSummary;
 
@@ -169,24 +231,18 @@ export async function generateLiveContentPack(params: {
       const shortFromLlm = String(llm.shortDescription ?? '').trim();
       const deduped = dedupeContentFields({
         title: String(llm.seoTitle ?? ''),
-        shortDescription: shortFromLlm || String(llm.excerpt ?? '').trim(),
+        shortDescription: shortFromLlm,
         longDescription:
           longFromLlm || fitDescriptionToCap(body).value || shortFromLlm,
         metaDescription: String(llm.metaDescription ?? ''),
       });
-
-      const imagePrompt = String(llm.imagePrompt ?? '').trim();
-      const altText = String(llm.altText ?? deduped.title).trim();
-      const tags = normalizeTags(llm.tags, params.brand, params.storageType, articleMode);
-
       const pack: Record<string, unknown> = {
         seoTitle: deduped.title,
-        metaTitle: String(llm.metaTitle ?? deduped.title).slice(0, 70),
         metaDescription: deduped.metaDescription || fitMetaDescription(deduped.shortDescription),
         h1: String(llm.h1 ?? llm.seoTitle ?? ''),
         h2: Array.isArray(llm.h2) ? llm.h2.map(String) : [],
         slug,
-        tags,
+        tags: [params.brand.industry ?? 'business', params.storageType].filter(Boolean),
         faq: Array.isArray(llm.faq) ? llm.faq : [],
         schemaJsonLd: {
           '@context': 'https://schema.org',
@@ -198,9 +254,7 @@ export async function generateLiveContentPack(params: {
         suggestedLinks: Array.isArray(llm.suggestedLinks)
           ? llm.suggestedLinks
           : [{ anchor: brandName, url: `https://${domain}` }],
-        suggestedImages: imagePrompt
-          ? [{ brief: imagePrompt, role: 'featured', altText }]
-          : [],
+        suggestedImages: [],
         bodyOutline: body,
         body,
         shortDescription: deduped.shortDescription,
@@ -215,14 +269,9 @@ export async function generateLiveContentPack(params: {
           ? llm.internalLinks
           : [{ anchor: brandName, url: `https://${domain}` }],
         externalLinks: Array.isArray(llm.suggestedLinks) ? llm.suggestedLinks : [],
-        imagePrompt: imagePrompt || null,
-        altText,
-        imageMetadata: imagePrompt
-          ? [{ prompt: imagePrompt, role: 'featured', altText }]
-          : [],
+        imageMetadata: [],
         videoMetadata: [],
-        backlinkType: articleMode ? 'web2' : params.storageType,
-        studioMode: articleMode ? 'article' : undefined,
+        backlinkType: params.storageType,
         generationStatus: {
           images: 'pending_provider',
           video: 'n/a',
@@ -233,11 +282,6 @@ export async function generateLiveContentPack(params: {
         failoverUsed: result.failoverUsed,
         contentFlags: deduped.flagged,
       };
-
-      if (articleMode) {
-        pack.web2PublishNote =
-          'Web 2.0 publish requires platform login — this pack is for paste/publish after you sign in.';
-      }
 
       const scan = scanPackForPlaceholders(pack);
       if (!scan.ok) {
@@ -264,6 +308,8 @@ export async function generateLiveContentPack(params: {
         },
         'LLM content generation attempt failed'
       );
+      // Provider failover already exhausted inside completeLlmWithFailover —
+      // only re-try for parse/placeholder issues on a successful provider hop.
       const isProviderExhausted =
         lastErr.message.includes('LLM failover exhausted') ||
         (lastErr as { code?: string }).code === 'LLM_FAILOVER_EXHAUSTED';

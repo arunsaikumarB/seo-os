@@ -244,18 +244,7 @@ export function scoreImageQuality(input: {
   }
 
   const overall = submissionReadiness;
-  const pass = overall >= 60 && seoScore >= 50 && input.providerMode !== 'local_draft_svg';
-  let rejectReason: string | undefined;
-  if (!pass) {
-    if (input.providerMode === 'local_draft_svg') {
-      rejectReason =
-        'Draft SVG placeholder (no live FLUX/SDXL URL) — set IMAGE_FLUX_URL or IMAGE_SDXL_URL for real photos, then regenerate';
-    } else if (overall < 60) {
-      rejectReason = `Quality score ${overall}/100 is below the 60 pass threshold — regenerate or adjust prompt`;
-    } else {
-      rejectReason = 'Below quality threshold — regenerate or configure live provider';
-    }
-  }
+  const pass = overall >= 60 && seoScore >= 50;
   return {
     resolution,
     sharpness,
@@ -266,7 +255,7 @@ export function scoreImageQuality(input: {
     submissionReadiness,
     overall,
     pass,
-    rejectReason,
+    rejectReason: pass ? undefined : 'Below quality threshold — regenerate or configure live provider',
   };
 }
 

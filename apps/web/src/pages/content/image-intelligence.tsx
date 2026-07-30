@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -30,8 +30,8 @@ type ImageAsset = {
 };
 
 const TYPES = [
-  'featured_image',
   'blog_hero',
+  'featured_image',
   'open_graph',
   'pinterest_pin',
   'directory_logo',
@@ -40,31 +40,12 @@ const TYPES = [
   'thumbnail',
 ];
 
-function defaultImageTypeForOpp(opp: {
-  studio_mode?: string;
-  storage_type?: string;
-  opportunity_type?: string;
-} | null): string {
-  const mode = String(opp?.studio_mode ?? '').toLowerCase();
-  const storage = String(opp?.storage_type ?? opp?.opportunity_type ?? '').toLowerCase();
-  if (mode === 'article' || storage === 'web2' || storage === 'blog_submission') {
-    return 'featured_image';
-  }
-  if (mode === 'guest_post') return 'guest_post_banner';
-  if (mode === 'directory' || mode === 'profile') return 'directory_logo';
-  return 'blog_hero';
-}
-
 export function ImageIntelligencePanel({ embedded = false }: { embedded?: boolean }) {
   const { projectId = '' } = useParams();
   const { request } = useApi();
   const qc = useQueryClient();
   const { opportunity: selectedOpp, setOpportunity } = useCurrentOpportunity(projectId);
-  const [imageType, setImageType] = useState('featured_image');
-
-  useEffect(() => {
-    setImageType(defaultImageTypeForOpp(selectedOpp));
-  }, [selectedOpp?.id, selectedOpp?.studio_mode, selectedOpp?.storage_type]);
+  const [imageType, setImageType] = useState('blog_hero');
 
   const meta = useQuery({
     queryKey: ['iie-images', projectId],
@@ -85,15 +66,9 @@ export function ImageIntelligencePanel({ embedded = false }: { embedded?: boolea
   const providers = useQuery({
     queryKey: ['iie-providers'],
     queryFn: () =>
-      request<{
-        data: Array<{
-          key: string;
-          displayName: string;
-          configured?: boolean;
-          draftMode?: boolean;
-          displayStatus?: string;
-        }>;
-      }>(`/v1/projects/${projectId}/images/providers`),
+      request<{ data: Array<{ key: string; displayName: string; configured: boolean }> }>(
+        `/v1/projects/${projectId}/images/providers`
+      ),
     enabled: !!projectId,
   });
 
@@ -215,12 +190,7 @@ export function ImageIntelligencePanel({ embedded = false }: { embedded?: boolea
           <CardTitle className="text-base flex items-center gap-2">
             <Sparkles className="h-4 w-4" /> Generate
           </CardTitle>
-          <CardDescription>
-            Prompts are auto-built from domain style profile
-            {selectedOpp?.studio_mode === 'article' || selectedOpp?.storage_type === 'web2'
-              ? ' — Web 2.0 / article packs also supply imagePrompt when generated'
-              : ' — no manual prompt required'}
-          </CardDescription>
+          <CardDescription>Prompts are auto-built from domain style profile — no manual prompt required</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <OpportunitySelector
@@ -276,13 +246,7 @@ export function ImageIntelligencePanel({ embedded = false }: { embedded?: boolea
           {(providers.data?.data ?? []).map((p) => (
             <Badge key={p.key} className="text-[10px]">
               {p.displayName}
-              {p.displayStatus === 'ready'
-                ? ' · ready'
-                : p.displayStatus === 'draft' || p.draftMode
-                  ? ' · draft (no live URL)'
-                  : p.configured
-                    ? ` · ${p.displayStatus ?? 'ready'}`
-                    : ' · unconfigured'}
+              {p.configured ? ' · ready' : ' · unconfigured'}
             </Badge>
           ))}
         </CardContent>

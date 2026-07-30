@@ -179,22 +179,7 @@ export async function listApprovedOpportunities(workspaceId: string) {
       typeof meta.contentIntelligence === 'object' && meta.contentIntelligence
         ? (meta.contentIntelligence as Record<string, unknown>)
         : {};
-    const linkProbe =
-      typeof meta.linkProbe === 'object' && meta.linkProbe
-        ? (meta.linkProbe as {
-            web2?: {
-              detected?: boolean;
-              classificationHint?: string;
-              storageType?: string;
-              platformLabel?: string;
-              loginRequiredForPublish?: boolean;
-              publishFields?: string[];
-            };
-          })
-        : {};
-    const web2 = linkProbe.web2?.detected ? linkProbe.web2 : null;
     const classificationId =
-      (web2 ? web2.classificationHint || 'blog_submission' : null) ||
       (classification.id as string) ||
       (classification.type as string) ||
       (contentIntel.detectedType as string) ||
@@ -202,28 +187,19 @@ export async function listApprovedOpportunities(workspaceId: string) {
     const plan = buildIntelligentContentPlan({
       classificationId,
       classificationLabel:
-        (web2?.platformLabel ? `Web 2.0 · ${web2.platformLabel}` : null) ||
         (classification.displayName as string) ||
         (classification.label as string) ||
         (contentIntel.detectedTypeLabel as string) ||
         null,
       opportunityType: String(
-        (web2 ? web2.storageType || 'web2' : null) ||
-          contentIntel.storageType ||
-          classification.storageType ||
-          opp.opportunity_type
+        contentIntel.storageType || classification.storageType || opp.opportunity_type
       ),
       workflowQueue:
-        (web2 ? 'article' : null) ||
         (classification.workflowQueue as string) ||
         (meta.workflowQueue as string) ||
         null,
-      confidence: Number(classification.confidence ?? contentIntel.confidence ?? (web2 ? 88 : 0)),
-      reason: String(
-        web2
-          ? 'Web 2.0 platform — generate article pack, publish after login'
-          : (classification.reason ?? contentIntel.reason ?? '')
-      ),
+      confidence: Number(classification.confidence ?? contentIntel.confidence ?? 0),
+      reason: String(classification.reason ?? contentIntel.reason ?? ''),
       domain: opp.domain as string | null,
       websiteName: opp.website_name as string | null,
     });
@@ -234,13 +210,6 @@ export async function listApprovedOpportunities(workspaceId: string) {
       requirements.requiredFields = [
         ...new Set([...requirements.requiredFields, ...plan.requirements.requiredFields]),
       ];
-    }
-    if (web2?.publishFields?.length) {
-      const mapped = web2.publishFields.map((f) =>
-        f === 'title' ? 'seoTitle' : f === 'featuredImage' ? 'featuredImage' : f
-      );
-      requirements.requiredFields = [...new Set([...requirements.requiredFields, ...mapped])];
-      requirements.loginRequired = true;
     }
 
     const campaignEligible =
@@ -305,9 +274,8 @@ export async function listApprovedOpportunities(workspaceId: string) {
       /** Content Studio / media: any approved row may generate packs */
       content_selectable: true,
       required_fields: requirements.requiredFields,
-      web2_login_required: Boolean(web2?.loginRequiredForPublish),
       requirements: {
-        loginRequired: requirements.loginRequired || Boolean(web2?.loginRequiredForPublish),
+        loginRequired: requirements.loginRequired,
         captchaRequired: requirements.captchaRequired,
         emailVerifyRequired: requirements.emailVerifyRequired,
         mediaRequirements: requirements.mediaRequirements,

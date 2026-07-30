@@ -919,15 +919,10 @@ export function classifyFromWebsiteInspection(
     learning?: LearningPattern[];
     domain?: string;
     fallbackType?: BacklinkTypeId;
-    /** Prefer classifications whose storageType is in this set */
-    targetStorageTypes?: readonly string[];
   } = {}
 ): ClassificationDecision {
   const html = (signals.rawSnippet ?? '').toLowerCase();
   const scores = new Map<string, { score: number; evidence: string[] }>();
-  const targets = opts.targetStorageTypes?.length
-    ? new Set(opts.targetStorageTypes)
-    : null;
 
   for (const rule of RULES) {
     const { hit, evidence } = rule.match(signals, html);
@@ -935,11 +930,6 @@ export function classifyFromWebsiteInspection(
     const prev = scores.get(rule.id) ?? { score: 0, evidence: [] };
     prev.score += rule.weight;
     prev.evidence.push(...evidence);
-    const meta = typeMeta(rule.id);
-    if (targets && meta && targets.has(meta.storageType)) {
-      prev.score += 22;
-      prev.evidence.push(`Matches selected import type (${meta.storageType})`);
-    }
     scores.set(rule.id, prev);
   }
 
@@ -987,16 +977,7 @@ export function classifyFromWebsiteInspection(
     .map(([id, v]) => ({ id, ...v }))
     .sort((a, b) => b.score - a.score);
 
-  let pickFrom = ranked;
-  if (targets) {
-    const inTarget = ranked.filter((r) => {
-      const m = typeMeta(r.id);
-      return m != null && targets.has(m.storageType) && r.score >= 18;
-    });
-    if (inTarget.length > 0) pickFrom = inTarget;
-  }
-
-  if (pickFrom.length === 0 || pickFrom[0]!.score < 18) {
+  if (ranked.length === 0 || ranked[0]!.score < 18) {
     const outreach = !signals.fetchOk
       ? {
           id: 'outreach_required' as const,
@@ -1024,9 +1005,9 @@ export function classifyFromWebsiteInspection(
     };
   }
 
-  const top = pickFrom[0]!;
+  const top = ranked[0]!;
   const meta = typeMeta(top.id) ?? typeMeta('unknown')!;
-  const second = pickFrom[1]?.score ?? ranked.find((r) => r.id !== top.id)?.score ?? 0;
+  const second = ranked[1]?.score ?? 0;
   const margin = top.score - second;
   const confidence = Math.min(
     99,
@@ -1042,17 +1023,14 @@ export function classifyFromWebsiteInspection(
     evidence: top.evidence.slice(0, 6),
     workflowQueue: meta.queue,
     assignedAgent: meta.agent,
-    alternatives: ranked
-      .filter((r) => r.id !== top.id)
-      .slice(0, 4)
-      .map((r) => {
-        const m = typeMeta(r.id);
-        return {
-          id: r.id,
-          confidence: Math.min(95, Math.round(40 + r.score * 0.5)),
-          displayName: m?.displayName ?? r.id,
-        };
-      }),
+    alternatives: ranked.slice(1, 4).map((r) => {
+      const m = typeMeta(r.id);
+      return {
+        id: r.id,
+        confidence: Math.min(95, Math.round(40 + r.score * 0.5)),
+        displayName: m?.displayName ?? r.id,
+      };
+    }),
   };
 }
 

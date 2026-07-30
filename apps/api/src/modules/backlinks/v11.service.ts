@@ -505,13 +505,6 @@ export async function createContentPack(
   pack.estimatedApprovalProbability = intelligence.estimatedApprovalProbability;
   pack.estimatedReviewHours = intelligence.estimatedReviewHours;
   pack.requiredFields = plan.requirements.requiredFields;
-  pack.studioMode = pack.studioMode ?? plan.mode;
-  if (plan.mode === 'article' || String(storageType) === 'web2') {
-    pack.backlinkType = pack.backlinkType ?? 'web2';
-    pack.web2PublishNote =
-      pack.web2PublishNote ??
-      'Web 2.0 publish requires platform login — this pack is for paste/publish after you sign in.';
-  }
 
   const id = randomUUID();
   const { data, error } = await getSupabaseAdmin()
@@ -816,23 +809,6 @@ export async function createMediaBrief(
     score: Number(opp.score ?? 0),
     website_name: opp.website_name as string | null,
   };
-  // Prefer imagePrompt from existing Web 2.0 / article content pack
-  let packImagePrompt: string | null = null;
-  let packAlt: string | null = null;
-  const { data: packRow } = await getSupabaseAdmin()
-    .from('content_packs')
-    .select('pack')
-    .eq('workspace_id', workspaceId)
-    .eq('opportunity_id', opportunityId)
-    .order('updated_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (packRow?.pack && typeof packRow.pack === 'object') {
-    const pack = packRow.pack as Record<string, unknown>;
-    packImagePrompt = String(pack.imagePrompt ?? '').trim() || null;
-    packAlt = String(pack.altText ?? pack.seoTitle ?? '').trim() || null;
-  }
-
   // Phase 5.6 — never invent example.com template briefs; pixel path is IIE / honest n/a
   const { isGenerationMockEnabled } = await import('@seo-os/backlink-builder');
   const brief = isGenerationMockEnabled()
@@ -840,18 +816,12 @@ export async function createMediaBrief(
       ? generateImageBrief(ctx, brand)
       : generateVideoBrief(ctx, brand)
     : {
-        suggestions: packImagePrompt
-          ? [{ prompt: packImagePrompt, role: 'featured', altText: packAlt }]
-          : [],
-        imagePrompt: packImagePrompt,
-        altText: packAlt,
+        suggestions: [],
         generationStatus: kind === 'image' ? 'pending_provider' : 'n/a',
         metricsSource: 'live',
         note:
           kind === 'image'
-            ? packImagePrompt
-              ? 'Using imagePrompt from content pack for featured image.'
-              : 'Image pixels via configured image provider only — no fabricated metadata.'
+            ? 'Image pixels via configured image provider only — no fabricated metadata.'
             : 'Video render not configured — metadata deferred.',
         brand: brand.brandName,
         projectDomain: brand.projectDomain,

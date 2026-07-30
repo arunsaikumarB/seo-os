@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, Fragment } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ChevronDown, Download, Sparkles } from 'lucide-react';
@@ -8,10 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { PageTransition } from '@/components/demo/page-transition';
 import { useApi } from '@/hooks/use-api';
-import {
-  OpportunitySelector,
-  useApprovedOpportunities,
-} from '@/components/opportunities/opportunity-selector';
+import { OpportunitySelector } from '@/components/opportunities/opportunity-selector';
 import { AiLoadingState } from '@/components/workflow/ai-activity-card';
 import { AdvancedTools } from '@/components/workflow/advanced-tools';
 import { ExceptionChip } from '@/components/workflow/exception-chip';
@@ -19,32 +16,6 @@ import { ImageIntelligencePanel } from '@/pages/content/image-intelligence';
 import { useCampaignAiStatus } from '@/hooks/use-campaign-ai-status';
 import { useWorkflow } from '@/hooks/use-workflow';
 import { cn } from '@/lib/utils';
-
-type ContentLane = 'web2' | 'listing';
-
-function contentLaneStorageKey(projectId: string) {
-  return `seo-os:content-lane:${projectId}`;
-}
-
-function readStoredContentLane(projectId: string): ContentLane | null {
-  if (!projectId) return null;
-  try {
-    const v = localStorage.getItem(contentLaneStorageKey(projectId));
-    if (v === 'web2' || v === 'listing') return v;
-  } catch {
-    /* ignore */
-  }
-  return null;
-}
-
-function writeStoredContentLane(projectId: string, lane: ContentLane) {
-  if (!projectId) return;
-  try {
-    localStorage.setItem(contentLaneStorageKey(projectId), lane);
-  } catch {
-    /* ignore */
-  }
-}
 
 type ContentPackRow = {
   id: string;
@@ -54,23 +25,6 @@ type ContentPackRow = {
   pack: Record<string, unknown>;
   opportunities?: { id: string; title: string; domain: string } | null;
 };
-
-function isWeb2Opp(o: {
-  storage_type?: string;
-  opportunity_type?: string;
-  backlink_type?: string;
-  studio_mode?: string;
-  web2_login_required?: boolean;
-}) {
-  const t = String(o.storage_type || o.opportunity_type || o.backlink_type || '').toLowerCase();
-  const studio = String(o.studio_mode || '').toLowerCase();
-  return (
-    t === 'web2' ||
-    t === 'guest_post' ||
-    studio === 'article' ||
-    o.web2_login_required === true
-  );
-}
 
 type BulkAction =
   | 'generate_all'
@@ -107,23 +61,8 @@ function PreviewField({ label, value }: { label: string; value: unknown }) {
 
 function ContentPackPreview({ pack }: { pack: Record<string, unknown> }) {
   const mode = String(pack.studioMode ?? '');
-  const backlinkType = String(pack.backlinkType ?? '');
-  const isWeb2Article =
-    mode === 'article' ||
-    backlinkType === 'web2' ||
-    backlinkType === 'article_submission' ||
-    backlinkType === 'blog_submission';
-
   return (
     <div className="grid gap-3 sm:grid-cols-2 rounded-md border p-3 bg-muted/20">
-      {isWeb2Article && (
-        <p className="sm:col-span-2 text-xs text-amber-800 dark:text-amber-200 bg-amber-500/10 rounded px-2 py-1.5">
-          {String(
-            pack.web2PublishNote ??
-              'Web 2.0 publish requires platform login — this pack is for paste/publish after you sign in.'
-          )}
-        </p>
-      )}
       {(mode === 'directory' || mode === 'profile') && (
         <>
           <PreviewField label="Business name" value={pack.businessName} />
@@ -131,32 +70,23 @@ function ContentPackPreview({ pack }: { pack: Record<string, unknown> }) {
           <PreviewField label="Long description" value={pack.longDescription} />
         </>
       )}
-      {(mode === 'guest_post' || mode === 'article' || mode === 'resource' || isWeb2Article || !mode) && (
+      {(mode === 'guest_post' || mode === 'article' || mode === 'resource' || !mode) && (
         <>
           <PreviewField label="SEO title" value={pack.seoTitle ?? pack.title} />
-          <PreviewField label="Meta title" value={pack.metaTitle} />
           <PreviewField label="Meta description" value={pack.metaDescription} />
           <PreviewField label="Excerpt" value={pack.excerpt} />
         </>
       )}
-      {isWeb2Article && <PreviewField label="Tags" value={pack.tags} />}
       <PreviewField label="Article / body" value={pack.body} />
-      {isWeb2Article && (
-        <>
-          <PreviewField label="Image prompt" value={pack.imagePrompt} />
-          <PreviewField label="Alt text" value={pack.altText} />
-        </>
-      )}
       <PreviewField label="Images" value={pack.imageMetadata} />
       <PreviewField label="Internal links" value={pack.internalLinks} />
-      <PreviewField label="External / backlinks" value={pack.externalLinks ?? pack.suggestedLinks} />
+      <PreviewField label="External links" value={pack.externalLinks ?? pack.suggestedLinks} />
     </div>
   );
 }
 
 export function ContentLibraryPage() {
   const { projectId = '' } = useParams();
-  const [searchParams, setSearchParams] = useSearchParams();
   const { request } = useApi();
   const queryClient = useQueryClient();
   const { continueHref } = useWorkflow(projectId);
@@ -176,18 +106,6 @@ export function ContentLibraryPage() {
     failed,
   } = useCampaignAiStatus(projectId);
 
-  const approvedQ = useApprovedOpportunities(projectId);
-  const approvedOpps = approvedQ.data?.data ?? [];
-
-  const laneFromUrl = searchParams.get('lane');
-  const initialLane: ContentLane =
-    laneFromUrl === 'web2' || laneFromUrl === 'listing'
-      ? laneFromUrl
-      : (readStoredContentLane(projectId) ?? 'web2');
-
-  const [contentLane, setContentLaneState] = useState<ContentLane>(initialLane);
-  const [web2Option, setWeb2Option] = useState<'blog' | 'internal_links'>('blog');
-  const [internalLinks, setInternalLinks] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showTechnical, setShowTechnical] = useState(false);
@@ -195,52 +113,6 @@ export function ContentLibraryPage() {
   const [showAssets, setShowAssets] = useState(false);
   const [showCelebration, setShowCelebration] = useState(false);
   const wasRunning = useRef(false);
-
-  const setContentLane = (lane: ContentLane) => {
-    setContentLaneState(lane);
-    writeStoredContentLane(projectId, lane);
-    const next = new URLSearchParams(searchParams);
-    next.set('lane', lane);
-    setSearchParams(next, { replace: true });
-  };
-
-  const web2Opps = useMemo(() => approvedOpps.filter(isWeb2Opp), [approvedOpps]);
-  const listingOpps = useMemo(() => approvedOpps.filter((o) => !isWeb2Opp(o)), [approvedOpps]);
-
-  // Restore saved/URL lane when project changes; only auto-switch if current lane is empty.
-  useEffect(() => {
-    const fromUrl = searchParams.get('lane');
-    const stored = readStoredContentLane(projectId);
-    const preferred: ContentLane | null =
-      fromUrl === 'web2' || fromUrl === 'listing'
-        ? fromUrl
-        : stored;
-
-    if (preferred) {
-      const preferredEmpty =
-        (preferred === 'web2' && web2Opps.length === 0 && listingOpps.length > 0) ||
-        (preferred === 'listing' && listingOpps.length === 0 && web2Opps.length > 0);
-      if (!preferredEmpty) {
-        if (preferred !== contentLane) setContentLaneState(preferred);
-        if (fromUrl !== preferred) {
-          const next = new URLSearchParams(searchParams);
-          next.set('lane', preferred);
-          setSearchParams(next, { replace: true });
-        }
-        return;
-      }
-    }
-
-    if (web2Opps.length === 0 && listingOpps.length > 0) setContentLane('listing');
-    else if (listingOpps.length === 0 && web2Opps.length > 0) setContentLane('web2');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, web2Opps.length, listingOpps.length]);
-
-  const laneOpps = contentLane === 'web2' ? web2Opps : listingOpps;
-  const laneItemIds = useMemo(
-    () => laneOpps.map((o) => o.id).filter(Boolean),
-    [laneOpps]
-  );
 
   const packsQ = useQuery({
     queryKey: ['content-packs', projectId],
@@ -332,27 +204,9 @@ export function ContentLibraryPage() {
 
   const startGeneration = useMutation({
     mutationFn: async () => {
-      if (contentLane === 'web2' && web2Option === 'internal_links' && internalLinks.trim()) {
-        const keywords = internalLinks
-          .split(/[\n,]+/)
-          .map((s) => s.trim())
-          .filter(Boolean)
-          .slice(0, 40);
-        if (keywords.length) {
-          await request(`/v1/projects/${projectId}/backlink-builder/keywords/primary`, {
-            method: 'POST',
-            body: JSON.stringify({ keywords }),
-          });
-        }
-      }
       const res = await request<{ data: { message?: string } }>(
         `/v1/projects/${projectId}/backlink-builder/automation/content-generation/generate`,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            itemIds: laneItemIds.length ? laneItemIds : undefined,
-          }),
-        }
+        { method: 'POST', body: JSON.stringify({}) }
       );
       return res.data;
     },
@@ -525,106 +379,8 @@ export function ContentLibraryPage() {
         <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
           <Sparkles className="h-6 w-6" /> Generate Content
         </h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          One step for all approved sites — pick the content lane that matches what you imported
-        </p>
+        <p className="text-muted-foreground text-sm mt-1">AI Content Pipeline</p>
       </div>
-
-      <Card className="rounded-2xl border-border/40 shadow-sm">
-        <CardContent className="pt-4 space-y-3">
-          <p className="text-sm font-medium">Content lane</p>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <button
-              type="button"
-              onClick={() => setContentLane('web2')}
-              className={cn(
-                'rounded-lg border px-3 py-2.5 text-left',
-                contentLane === 'web2' ? 'border-primary bg-primary/10' : 'border-border/60'
-              )}
-            >
-              <p className="text-sm font-medium">Web 2.0 / Blog / Articles</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5 tabular-nums">
-                {web2Opps.length} approved · long-form pack → image → paste publish
-              </p>
-            </button>
-            <button
-              type="button"
-              onClick={() => setContentLane('listing')}
-              className={cn(
-                'rounded-lg border px-3 py-2.5 text-left',
-                contentLane === 'listing' ? 'border-primary bg-primary/10' : 'border-border/60'
-              )}
-            >
-              <p className="text-sm font-medium">Directories / Listings / Other</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5 tabular-nums">
-                {listingOpps.length} approved · form packs for Submit Backlinks
-              </p>
-            </button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {contentLane === 'web2' && generateState === 'idle' ? (
-        <Card className="rounded-2xl border-border/40 shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Web 2.0 / article content</CardTitle>
-            <CardDescription>
-              Option 1: generate blog packs · Option 2: add keywords / internal links first
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            <div className="grid gap-2 sm:grid-cols-2">
-              <button
-                type="button"
-                onClick={() => setWeb2Option('blog')}
-                className={cn(
-                  'rounded-lg border px-3 py-2 text-left',
-                  web2Option === 'blog' ? 'border-primary bg-primary/10' : 'border-border/60'
-                )}
-              >
-                <p className="font-medium text-foreground">Option 1 — Generate blog content</p>
-              </button>
-              <button
-                type="button"
-                onClick={() => setWeb2Option('internal_links')}
-                className={cn(
-                  'rounded-lg border px-3 py-2 text-left',
-                  web2Option === 'internal_links'
-                    ? 'border-primary bg-primary/10'
-                    : 'border-border/60'
-                )}
-              >
-                <p className="font-medium text-foreground">Option 2 — Keywords / internal links</p>
-              </button>
-            </div>
-            {web2Option === 'internal_links' ? (
-              <textarea
-                className="flex min-h-[100px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm font-mono"
-                placeholder={'keyword one\nhttps://yoursite.com/page\nanother keyword'}
-                value={internalLinks}
-                onChange={(e) => setInternalLinks(e.target.value)}
-              />
-            ) : null}
-            <p className="text-xs text-muted-foreground tabular-nums">
-              {laneItemIds.length} site{laneItemIds.length === 1 ? '' : 's'}
-              {estimates?.durationLabel ? ` · ${estimates.durationLabel}` : ''}
-            </p>
-            <Button
-              size="lg"
-              disabled={
-                startGeneration.isPending ||
-                laneItemIds.length === 0 ||
-                (web2Option === 'internal_links' && !internalLinks.trim())
-              }
-              onClick={() => startGeneration.mutate()}
-            >
-              {web2Option === 'internal_links'
-                ? 'Save links & generate'
-                : 'Generate blog content'}
-            </Button>
-          </CardContent>
-        </Card>
-      ) : null}
 
       {boardLoading ? <AiLoadingState message="Loading…" /> : null}
 
@@ -653,32 +409,50 @@ export function ContentLibraryPage() {
       {/* —— State C: Complete —— */}
       {generateState === 'complete' ? (
         <>
-          <Card className="rounded-2xl border-border/40 shadow-sm">
-            <CardContent className="pt-5 space-y-3">
-              <p className="font-medium text-sm">Generation complete</p>
-              <p className="text-sm text-muted-foreground tabular-nums">
-                {pkgCount} packages · {imgCount} images · {metaCount} metadata
-              </p>
-              {needsReview > 0 || failed > 0 ? (
+          {showCelebration ? (
+            <Card className="rounded-2xl border-emerald-500/30 bg-emerald-500/5 shadow-sm">
+              <CardContent className="pt-5 space-y-3">
+                <p className="font-medium">AI completed content generation.</p>
+                <p className="text-sm text-muted-foreground">
+                  {pkgCount} packages created. Everything is ready.
+                </p>
+                {(needsReview > 0 || failed > 0) ? null : (
+                  <Button asChild>
+                    <Link to={continueHref}>Continue →</Link>
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="rounded-2xl border-border/40 shadow-sm">
+              <CardContent className="pt-5 space-y-3">
+                <p className="font-medium text-sm">Generation Complete</p>
+                <p className="text-sm text-muted-foreground tabular-nums">
+                  {pkgCount} packages · {imgCount} images · {metaCount} metadata · {videoCount}{' '}
+                  video metadata
+                </p>
                 <ExceptionChip projectId={projectId}>{reviewPanel}</ExceptionChip>
-              ) : (
-                <Button asChild>
-                  <Link to={continueHref}>Continue →</Link>
-                </Button>
-              )}
-            </CardContent>
-          </Card>
+                {needsReview === 0 && failed === 0 ? (
+                  <Button asChild>
+                    <Link to={continueHref}>Continue →</Link>
+                  </Button>
+                ) : null}
+              </CardContent>
+            </Card>
+          )}
+          {showCelebration && (needsReview > 0 || failed > 0) ? (
+            <ExceptionChip projectId={projectId}>{reviewPanel}</ExceptionChip>
+          ) : null}
         </>
       ) : null}
 
-      {/* —— State A: Not started (listing lane) —— */}
-      {generateState === 'idle' && contentLane === 'listing' ? (
+      {/* —— State A: Not started —— */}
+      {generateState === 'idle' ? (
         <Card className="rounded-2xl border-border/40 shadow-sm">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Directory / listing packs</CardTitle>
+            <CardTitle className="text-base">Generate Content</CardTitle>
             <CardDescription className="tabular-nums">
-              {laneItemIds.length} website{laneItemIds.length === 1 ? '' : 's'} in this lane
-              {approvedCount > 0 ? ` · ${approvedCount} total approved` : ''}
+              {approvedCount} website{approvedCount === 1 ? '' : 's'} approved
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -720,7 +494,7 @@ export function ContentLibraryPage() {
             </div>
             <Button
               size="lg"
-              disabled={startGeneration.isPending || laneItemIds.length === 0}
+              disabled={startGeneration.isPending || approvedCount === 0}
               onClick={() => startGeneration.mutate()}
             >
               Start AI Generation

@@ -35,7 +35,8 @@ export function createImageProviderRegistry(defaultKey = 'flux'): ImageProviderR
         configured: Boolean(
           (p.key === 'flux' && process.env.IMAGE_FLUX_URL) ||
             (p.key === 'sdxl' && process.env.IMAGE_SDXL_URL) ||
-            (p.key === 'comfy' && process.env.IMAGE_COMFY_URL)
+            (p.key === 'comfy' && process.env.IMAGE_COMFY_URL) ||
+            p.capabilities().freeDefault
         ),
       }));
     },

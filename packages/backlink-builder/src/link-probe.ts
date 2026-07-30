@@ -13,7 +13,6 @@ import {
 import { htmlHasFormElement, looksLikeSpaShell } from './form-unavailable.js';
 import { selectTargetForm } from './target-form.js';
 import { resolveListingPricing, type ListingPricingKind } from './listing-pricing.js';
-import { analyzeWeb2Platform, web2ProbeOverlay, type Web2Intelligence } from './web2-intelligence.js';
 
 export const LINK_PROBE_BANDS = [
   'ready',
@@ -48,8 +47,6 @@ export type LinkProbeResult = {
   probedAt: string;
   /** Free-word rule on form/payment HTML. */
   listingPricing: ListingPricingKind;
-  /** Web 2.0 / article platform (public study + curated publish recipe). */
-  web2?: Web2Intelligence | null;
 };
 
 export type ProbePageInput = {
@@ -118,55 +115,6 @@ function scoreFromForm(page: FormPageScore, multiStep: boolean, gates: string[])
   return Math.max(0, Math.min(100, Math.round(score)));
 }
 
-function applyWeb2IfDetected(
-  input: ProbePageInput,
-  base: LinkProbeResult
-): LinkProbeResult {
-  const web2 = analyzeWeb2Platform({
-    url: input.url,
-    html: input.html,
-    httpStatus: input.httpStatus,
-  });
-  if (!web2.detected) return { ...base, web2: null };
-  const overlay = web2ProbeOverlay(web2);
-  if (!overlay) return { ...base, web2 };
-  // Host recipe wins over dead/no_form for known Web 2.0 platforms
-  if (base.band === 'dead' || base.band === 'no_form' || base.band === 'unprobed') {
-    return emptyResult({
-      ...base,
-      band: overlay.band,
-      score: overlay.score,
-      alive: true,
-      formFound: overlay.formFound,
-      formUrl: input.url,
-      formScore: overlay.fieldCount,
-      fieldCount: overlay.fieldCount,
-      hasUrl: overlay.hasUrl,
-      hasTitle: overlay.hasTitle,
-      hasDesc: overlay.hasDesc,
-      hasEmail: overlay.hasEmail,
-      gates: [...new Set([...(base.gates ?? []), ...overlay.gates])],
-      reasons: overlay.reasons,
-      web2,
-      listingPricing: 'free',
-    });
-  }
-  // Comment-only public forms on Web 2.0 → treat as login publish, not directory ready
-  if (web2.commentOnlyPublicForm || base.band === 'ready') {
-    return {
-      ...base,
-      band: overlay.band,
-      score: Math.min(base.score || 50, overlay.score),
-      formFound: true,
-      gates: [...new Set([...(base.gates ?? []), ...overlay.gates])],
-      reasons: [...new Set([...(base.reasons ?? []), ...overlay.reasons])],
-      web2,
-      listingPricing: base.listingPricing === 'paid' ? 'paid' : 'free',
-    };
-  }
-  return { ...base, web2, reasons: [...base.reasons, ...overlay.reasons] };
-}
-
 /**
  * Classify a single fetched page (entry or discovered form URL).
  */
@@ -176,45 +124,36 @@ export function classifyProbedPage(input: ProbePageInput): LinkProbeResult {
   const html = input.html;
 
   if (input.fetchError && !html) {
-    return applyWeb2IfDetected(
-      input,
-      emptyResult({
-        band: 'dead',
-        alive: false,
-        httpStatus: status,
-        reasons: [input.fetchError],
-        pagesChecked: 1,
-        probedAt,
-      })
-    );
+    return emptyResult({
+      band: 'dead',
+      alive: false,
+      httpStatus: status,
+      reasons: [input.fetchError],
+      pagesChecked: 1,
+      probedAt,
+    });
   }
 
   if (status != null && status >= 400) {
-    return applyWeb2IfDetected(
-      input,
-      emptyResult({
-        band: 'dead',
-        alive: false,
-        httpStatus: status,
-        reasons: [`HTTP ${status}`],
-        pagesChecked: 1,
-        probedAt,
-      })
-    );
+    return emptyResult({
+      band: 'dead',
+      alive: false,
+      httpStatus: status,
+      reasons: [`HTTP ${status}`],
+      pagesChecked: 1,
+      probedAt,
+    });
   }
 
   if (!html || !html.trim()) {
-    return applyWeb2IfDetected(
-      input,
-      emptyResult({
-        band: 'dead',
-        alive: false,
-        httpStatus: status,
-        reasons: ['Empty response'],
-        pagesChecked: 1,
-        probedAt,
-      })
-    );
+    return emptyResult({
+      band: 'dead',
+      alive: false,
+      httpStatus: status,
+      reasons: ['Empty response'],
+      pagesChecked: 1,
+      probedAt,
+    });
   }
 
   const spaShell = looksLikeSpaShell(html);
@@ -225,61 +164,46 @@ export function classifyProbedPage(input: ProbePageInput): LinkProbeResult {
   const hardGates = gates.filter((g) => HARD_GATES.has(g));
   const target = selectTargetForm(html, { minScore: 2 });
   const listingPricing = resolveListingPricing({ html });
-  const web2Early = analyzeWeb2Platform({ url: input.url, html, httpStatus: status });
-
-  // Comment forms on Web 2.0 articles are NOT directory listing forms
-  const commentOnlyWeb2 = web2Early.detected && web2Early.commentOnlyPublicForm;
 
   const formFound =
-    !commentOnlyWeb2 &&
-    (Boolean(target.formFound) ||
-      (!pageScore.ignorable && pageScore.score >= FORM_DISCOVERY_DEFAULTS.minFormScore) ||
-      (hasFormEl && pageScore.fieldCount >= 2 && !pageScore.ignorable));
+    Boolean(target.formFound) ||
+    (!pageScore.ignorable && pageScore.score >= FORM_DISCOVERY_DEFAULTS.minFormScore) ||
+    (hasFormEl && pageScore.fieldCount >= 2 && !pageScore.ignorable);
 
   if (spaShell && !hasFormEl && !formFound) {
-    return applyWeb2IfDetected(
-      input,
-      emptyResult({
-        band: 'no_form',
-        alive: true,
-        httpStatus: status,
-        spaShell: true,
-        formUrl: input.url,
-        pagesChecked: 1,
-        reasons: ['SPA shell without form HTML'],
-        listingPricing,
-        probedAt,
-      })
-    );
+    return emptyResult({
+      band: 'no_form',
+      alive: true,
+      httpStatus: status,
+      spaShell: true,
+      formUrl: input.url,
+      pagesChecked: 1,
+      reasons: ['SPA shell without form HTML'],
+      listingPricing,
+      probedAt,
+    });
   }
 
   if (!formFound) {
-    return applyWeb2IfDetected(
-      input,
-      emptyResult({
-        band: 'no_form',
-        alive: true,
-        httpStatus: status,
-        spaShell,
-        formUrl: input.url,
-        formScore: pageScore.score,
-        fieldCount: pageScore.fieldCount,
-        hasUrl: pageScore.hasUrl,
-        hasTitle: pageScore.hasTitle,
-        hasDesc: pageScore.hasDesc,
-        hasEmail: pageScore.hasEmail,
-        multiStep,
-        gates,
-        pagesChecked: 1,
-        reasons: [
-          commentOnlyWeb2
-            ? 'Comment form only — Web 2.0 publish requires login'
-            : pageScore.reason || 'No submission form detected',
-        ],
-        listingPricing,
-        probedAt,
-      })
-    );
+    return emptyResult({
+      band: 'no_form',
+      alive: true,
+      httpStatus: status,
+      spaShell,
+      formUrl: input.url,
+      formScore: pageScore.score,
+      fieldCount: pageScore.fieldCount,
+      hasUrl: pageScore.hasUrl,
+      hasTitle: pageScore.hasTitle,
+      hasDesc: pageScore.hasDesc,
+      hasEmail: pageScore.hasEmail,
+      multiStep,
+      gates,
+      pagesChecked: 1,
+      reasons: [pageScore.reason || 'No submission form detected'],
+      listingPricing,
+      probedAt,
+    });
   }
 
   const composite = scoreFromForm(pageScore, multiStep, gates);
@@ -294,68 +218,9 @@ export function classifyProbedPage(input: ProbePageInput): LinkProbeResult {
   const paidBand = listingPricing === 'paid';
 
   if (hardGates.length) {
-    return applyWeb2IfDetected(
-      input,
-      emptyResult({
-        band: 'blocked',
-        score: Math.min(composite, 35),
-        alive: true,
-        httpStatus: status,
-        formFound: true,
-        formUrl: input.url,
-        formScore: pageScore.score,
-        fieldCount: pageScore.fieldCount,
-        hasUrl: pageScore.hasUrl,
-        hasTitle: pageScore.hasTitle,
-        hasDesc: pageScore.hasDesc,
-        hasEmail: pageScore.hasEmail,
-        multiStep,
-        spaShell,
-        gates,
-        reasons,
-        pagesChecked: 1,
-        listingPricing,
-        probedAt,
-      })
-    );
-  }
-
-  if (paidBand || multiStep || composite < 55 || !pageScore.hasUrl) {
-    return applyWeb2IfDetected(
-      input,
-      emptyResult({
-        band: 'check',
-        score: paidBand ? Math.min(composite, 40) : composite,
-        alive: true,
-        httpStatus: status,
-        formFound: true,
-        formUrl: input.url,
-        formScore: pageScore.score,
-        fieldCount: pageScore.fieldCount,
-        hasUrl: pageScore.hasUrl,
-        hasTitle: pageScore.hasTitle,
-        hasDesc: pageScore.hasDesc,
-        hasEmail: pageScore.hasEmail,
-        multiStep,
-        spaShell,
-        gates,
-        reasons: reasons.length
-          ? reasons
-          : paidBand
-            ? ['Paid — no free word in form/payment']
-            : ['Needs field / step review'],
-        pagesChecked: 1,
-        listingPricing,
-        probedAt,
-      })
-    );
-  }
-
-  return applyWeb2IfDetected(
-    input,
-    emptyResult({
-      band: 'ready',
-      score: Math.max(composite, 70),
+    return emptyResult({
+      band: 'blocked',
+      score: Math.min(composite, 35),
       alive: true,
       httpStatus: status,
       formFound: true,
@@ -366,15 +231,65 @@ export function classifyProbedPage(input: ProbePageInput): LinkProbeResult {
       hasTitle: pageScore.hasTitle,
       hasDesc: pageScore.hasDesc,
       hasEmail: pageScore.hasEmail,
-      multiStep: false,
+      multiStep,
       spaShell,
       gates,
-      reasons: reasons.length ? reasons : ['Single-step form with fillable fields'],
+      reasons,
       pagesChecked: 1,
       listingPricing,
       probedAt,
-    })
-  );
+    });
+  }
+
+  if (paidBand || multiStep || composite < 55 || !pageScore.hasUrl) {
+    return emptyResult({
+      band: paidBand ? 'check' : 'check',
+      score: paidBand ? Math.min(composite, 40) : composite,
+      alive: true,
+      httpStatus: status,
+      formFound: true,
+      formUrl: input.url,
+      formScore: pageScore.score,
+      fieldCount: pageScore.fieldCount,
+      hasUrl: pageScore.hasUrl,
+      hasTitle: pageScore.hasTitle,
+      hasDesc: pageScore.hasDesc,
+      hasEmail: pageScore.hasEmail,
+      multiStep,
+      spaShell,
+      gates,
+      reasons: reasons.length
+        ? reasons
+        : paidBand
+          ? ['Paid — no free word in form/payment']
+          : ['Needs field / step review'],
+      pagesChecked: 1,
+      listingPricing,
+      probedAt,
+    });
+  }
+
+  return emptyResult({
+    band: 'ready',
+    score: Math.max(composite, 70),
+    alive: true,
+    httpStatus: status,
+    formFound: true,
+    formUrl: input.url,
+    formScore: pageScore.score,
+    fieldCount: pageScore.fieldCount,
+    hasUrl: pageScore.hasUrl,
+    hasTitle: pageScore.hasTitle,
+    hasDesc: pageScore.hasDesc,
+    hasEmail: pageScore.hasEmail,
+    multiStep: false,
+    spaShell,
+    gates,
+    reasons: reasons.length ? reasons : ['Single-step form with fillable fields'],
+    pagesChecked: 1,
+    listingPricing,
+    probedAt,
+  });
 }
 
 /**
@@ -411,7 +326,6 @@ export function mergeProbeResults(
     ...best,
     pagesChecked,
     probedAt: new Date().toISOString(),
-    web2: best.web2 ?? entry.web2 ?? candidates.find((c) => c.web2?.detected)?.web2 ?? null,
     // Prefer free if any candidate found free; else keep best's pricing
     listingPricing:
       all.some((r) => r.listingPricing === 'free')
