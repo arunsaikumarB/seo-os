@@ -8,6 +8,10 @@ import {
   isAiReviewTerminal,
   metadataDisqualifiesSubmission,
   canApproveAfterProbe,
+  looksLikeDirectorySubmitPath,
+  domainLooksLikeDirectory,
+  looksLikePostSubmitConfirmPath,
+  getClassificationLabel,
   type ApprovedBy,
   type ReviewDecision,
   type ReviewTier,
@@ -102,6 +106,116 @@ export async function healUnreachableApprovedSites(
   return { checked: candidates.length, markedDead, samples };
 }
 
+/**
+ * Re-label forum_posting → directory_submission when URL/domain is clearly a directory submit page.
+ * Also park post-submit confirmation URLs as Unsupported.
+ */
+export async function healMisclassifiedDirectoryForums(
+  workspaceId: string,
+  opts: { limit?: number } = {}
+): Promise<{ checked: number; fixed: number; samples: string[] }> {
+  const limit = opts.limit ?? 80;
+  const items = await listCampaignItems(workspaceId, { includeDeleted: false });
+  let fixed = 0;
+  const samples: string[] = [];
+  let checked = 0;
+
+  for (const item of items) {
+    if (checked >= limit) break;
+    const url = String(item.websiteUrl ?? '').trim();
+    const domain = String(item.domain ?? '').trim();
+    if (!url && !domain) continue;
+
+    const classId = String(item.classification ?? '').toLowerCase();
+    const isForumish = classId === 'forum_posting' || classId === 'forum' || classId === 'community';
+    const isSponsorish = classId === 'sponsorship';
+    const confirm = looksLikePostSubmitConfirmPath(url);
+    const dirLike =
+      looksLikeDirectorySubmitPath(url) || domainLooksLikeDirectory(domain);
+
+    if (confirm) {
+      checked++;
+      if (
+        item.reviewDecision === 'Unsupported' &&
+        item.currentStatus === 'Ignored'
+      ) {
+        continue;
+      }
+      await updateCampaignItem(workspaceId, item.id, {
+        classification: 'outreach_required',
+        currentStatus: 'Ignored',
+        reviewDecision: 'Unsupported',
+        reviewTier: 'needs_classification',
+        approvedBy: null,
+        approval: 'rejected',
+        lastError:
+          'Post-submit confirmation URL — not a live listing form (use the real /submit page)',
+        force: true,
+      });
+      fixed++;
+      if (samples.length < 12) samples.push(`${domain || url}: confirm→unsupported`);
+      continue;
+    }
+
+    if (!isForumish && !(isSponsorish && dirLike)) continue;
+    if (!dirLike) continue;
+    checked++;
+
+    await updateCampaignItem(workspaceId, item.id, {
+      classification: 'directory_submission',
+      currentStatus:
+        item.currentStatus === 'Approved' || item.reviewDecision === 'Approved'
+          ? item.currentStatus
+          : 'Classified',
+      reviewDecision:
+        item.reviewDecision === 'Approved'
+          ? 'Approved'
+          : item.reviewDecision === 'Rejected'
+            ? 'Rejected'
+            : 'Pending',
+      reviewTier:
+        (item.confidenceScore ?? 0) > 90 ? 'auto_approved' : 'recommended',
+      lastError: null,
+      force: true,
+    });
+
+    // Patch metadata.classification label for UI
+    try {
+      const meta =
+        typeof item.raw.metadata === 'object' && item.raw.metadata
+          ? { ...(item.raw.metadata as Record<string, unknown>) }
+          : {};
+      const prevClass =
+        typeof meta.classification === 'object' && meta.classification
+          ? (meta.classification as Record<string, unknown>)
+          : {};
+      meta.classification = {
+        ...prevClass,
+        id: 'directory_submission',
+        displayName: getClassificationLabel('directory_submission'),
+        reason: 'Reclassified: directory submit path/domain (not forum)',
+        healedFrom: classId || 'unknown',
+      };
+      await getSupabaseAdmin()
+        .from('opportunities')
+        .update({
+          opportunity_type: 'directory',
+          metadata: meta,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', item.id)
+        .eq('workspace_id', workspaceId);
+    } catch {
+      /* best-effort metadata patch */
+    }
+
+    fixed++;
+    if (samples.length < 12) samples.push(`${domain || url}: ${classId}→directory_submission`);
+  }
+
+  return { checked, fixed, samples };
+}
+
 export type AiReviewItem = {
   id: string;
   website: string;
@@ -179,6 +293,13 @@ export async function getAiReviewBoard(workspaceId: string) {
     await healUnreachableApprovedSites(workspaceId, { limit: 20, concurrency: 8 });
   } catch (e) {
     console.warn('[AI Review] reachability heal failed', e);
+  }
+
+  // Fix phpLD directories mislabeled Forum from category dropdown "Chats and Forums"
+  try {
+    await healMisclassifiedDirectoryForums(workspaceId, { limit: 80 });
+  } catch (e) {
+    console.warn('[AI Review] directory reclassify heal failed', e);
   }
 
   const items = await listCampaignItems(workspaceId, { includeDeleted: false });

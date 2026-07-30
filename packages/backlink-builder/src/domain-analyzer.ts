@@ -257,11 +257,21 @@ export async function analyzeDomainLive(
           base.primaryType = 'guest_post';
         }
       }
-      if (html.includes('directory') || html.includes('submit listing') || html.includes('add business')) {
+      if (
+        html.includes('directory') ||
+        html.includes('submit listing') ||
+        html.includes('add business') ||
+        html.includes('submit link') ||
+        html.includes('add site') ||
+        html.includes('php link directory')
+      ) {
         meta.directoryPathConfirmed = true;
         base.detectedPages.directory = `${origin}/submit`;
       }
-      if (html.includes('forum') || html.includes('community')) {
+      if (
+        /phpbb|discourse|bbpress|vbulletin|xenforo|flarum|discussion board/.test(html) ||
+        /href=["'][^"']*\/forums?\b/.test(html)
+      ) {
         meta.forumPathConfirmed = true;
         base.detectedPages.forum = `${origin}/forum`;
       }
@@ -320,6 +330,7 @@ export async function analyzeDomainLive(
     robotsOk: robotsTxtStatus === 'found',
     sitemapFound,
     fetchOk,
+    pageUrl: url ?? origin,
   });
   meta.websiteSignals = {
     ...websiteSignals,
@@ -330,6 +341,7 @@ export async function analyzeDomainLive(
     learning: opts.learning,
     domain: base.domain,
     fallbackType: base.primaryType,
+    pageUrl: url ?? origin,
   });
   base.primaryType = classificationDecision.backlinkType;
   base.opportunityTypes = [

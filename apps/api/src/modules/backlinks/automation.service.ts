@@ -292,7 +292,43 @@ export async function listImports(workspaceId: string, limit = 20) {
     .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false })
     .limit(limit);
-  return data ?? [];
+  const rows = data ?? [];
+
+  // Heal stuck "AI reviewing" rows when classification already finished
+  for (const imp of rows) {
+    const status = String(imp.status ?? '');
+    if (!['analyzing', 'generating', 'queued', 'running'].includes(status)) continue;
+    const meta = (imp.metadata as Record<string, unknown> | null) ?? {};
+    const summary = meta.classificationSummary as
+      | { classified?: number; imported?: number }
+      | undefined;
+    const classified = Number(summary?.classified ?? 0);
+    const imported = Number(summary?.imported ?? imp.valid_rows ?? 0);
+    if (classified <= 0 || classified < Math.min(imported, Number(imp.valid_rows ?? 0))) {
+      continue;
+    }
+
+    const { count } = await getSupabaseAdmin()
+      .from('opportunities')
+      .select('id', { count: 'exact', head: true })
+      .eq('workspace_id', workspaceId)
+      .eq('import_id', imp.id);
+
+    const oppCount = count ?? Number(imp.opportunities_created ?? 0);
+    await getSupabaseAdmin()
+      .from('backlink_imports')
+      .update({
+        status: 'completed',
+        opportunities_created: oppCount,
+        completed_at: new Date().toISOString(),
+      })
+      .eq('id', imp.id);
+
+    imp.status = 'completed';
+    imp.opportunities_created = oppCount;
+  }
+
+  return rows;
 }
 
 export async function getImportDetail(importId: string, workspaceId: string) {
@@ -811,6 +847,9 @@ export async function runAutomationPipeline(
       await bump('analyze', 'classify');
       await bump('classify', 'score');
       await bump('score', 'generate');
+      await updateImportStatus(importId, 'analyzing', {
+        opportunities_created: opportunitiesCreated,
+      });
       await updateRun(runId, {
         stats: {
           opportunitiesCreated,

@@ -53,6 +53,57 @@ describe('opportunity classification engine', () => {
     expect(decision.assignedAgent).toBe('video_agent');
   });
 
+  it('classifies phpLD Submit Link pages as Directory — not Forum from category text', () => {
+    const html = `
+      <html><head>
+        <title>Ask Directory .com - Submit Link</title>
+        <meta name="generator" content="Ask Directory .com Running on PHP Link Directory 2.2.0" />
+      </head><body>
+        <ul id="menu">
+          <li><a href="/">Home</a></li>
+          <li><a href="/submit.php" title="Submit your link to the directory">Add Site</a></li>
+        </ul>
+        <h1>Submit Link</h1>
+        <form action="/submit.php" method="post">
+          <label>URL</label><input name="url" />
+          <label>Title</label><input name="title" />
+          <select name="c">
+            <option>Arts</option>
+            <option>Chats and Forums</option>
+            <option>Business</option>
+          </select>
+          <input type="submit" value="Submit Link" />
+        </form>
+      </body></html>`;
+    const signals = extractWebsiteSignals(html, {
+      fetchOk: true,
+      pageUrl: 'https://ask-directory.com/submit.php',
+    });
+    expect(signals.hasForum).toBe(false);
+    expect(signals.hasSubmitListing).toBe(true);
+    const decision = classifyFromWebsiteInspection(signals, {
+      domain: 'ask-directory.com',
+      pageUrl: 'https://ask-directory.com/submit.php',
+      fallbackType: 'directory',
+    });
+    expect(decision.classificationId).toBe('directory_submission');
+    expect(decision.workflowQueue).toBe('directory');
+    expect(decision.confidence).toBeGreaterThanOrEqual(70);
+  });
+
+  it('rejects post-submit confirmation URLs as non-actionable', () => {
+    const signals = extractWebsiteSignals('<html><body>thanks</body></html>', {
+      fetchOk: true,
+      pageUrl: 'https://www.activesearchresults.com/urladdedconfirm.php',
+    });
+    const decision = classifyFromWebsiteInspection(signals, {
+      domain: 'activesearchresults.com',
+      pageUrl: 'https://www.activesearchresults.com/urladdedconfirm.php',
+    });
+    expect(decision.classificationId).toBe('outreach_required');
+    expect(decision.reason.toLowerCase()).toMatch(/confirm|not a live/);
+  });
+
   it('summarizes categorized counts', () => {
     const summary = summarizeClassificationCounts([
       { classificationId: 'guest_post', displayName: 'Guest Post' },

@@ -177,6 +177,108 @@ function includesAny(hay: string, needles: string[]): boolean {
   return needles.some((n) => hay.includes(n));
 }
 
+/** Classic phpLD / directory submit CTAs — not only "submit listing". */
+const DIRECTORY_SUBMIT_PHRASES = [
+  'submit listing',
+  'add listing',
+  'submit your listing',
+  'directory submission',
+  'submit link',
+  'submit your link',
+  'submit a link',
+  'submit url',
+  'submit your url',
+  'submit site',
+  'submit your site',
+  'add site',
+  'add your site',
+  'add url',
+  'add your url',
+  'suggest url',
+  'suggest a site',
+  'suggest your site',
+  'php link directory',
+];
+
+/** True forum platforms / structural paths — never bare "forum" in category dropdowns. */
+const FORUM_PLATFORM_MARKERS = [
+  'phpbb',
+  'discourse',
+  'bbpress',
+  'vbulletin',
+  'xenforo',
+  'flarum',
+  'discussionforumposting',
+  'discussion board',
+];
+
+export function looksLikeDirectorySubmitPath(pageUrl?: string | null): boolean {
+  const u = String(pageUrl ?? '').toLowerCase();
+  if (!u) return false;
+  return (
+    /\/submit(_article)?\.php(\?|$|#)/.test(u) ||
+    /\/submit(\?|$|#)/.test(u) ||
+    /\/add\.php(\?|$|#)/.test(u) ||
+    /\/add-url\.php(\?|$|#)/.test(u) ||
+    /\/addurl\.php(\?|$|#)/.test(u) ||
+    /\/submit_link\.php(\?|$|#)/.test(u)
+  );
+}
+
+/** Confirmation / post-submit dead-ends — not actionable submit forms. */
+export function looksLikePostSubmitConfirmPath(pageUrl?: string | null): boolean {
+  const u = String(pageUrl ?? '').toLowerCase();
+  if (!u) return false;
+  return /urladdedconfirm|thank[-_]?you|submission[-_]?success|already[-_]?added|link[-_]?added|confirm\.php/.test(
+    u
+  );
+}
+
+export function domainLooksLikeDirectory(domain?: string | null): boolean {
+  const d = String(domain ?? '')
+    .toLowerCase()
+    .replace(/^www\./, '');
+  if (!d) return false;
+  return (
+    d.includes('directory') ||
+    d.includes('listings') ||
+    d.includes('webdir') ||
+    /(^|\.)[\w-]*dir\./.test(d) ||
+    d.includes('aweblist') ||
+    d.includes('freeseolink')
+  );
+}
+
+/**
+ * Forum signal must be structural — category option text like "Chats and Forums"
+ * on phpLD directories must NOT trigger forum_posting.
+ */
+export function detectStructuralForum(
+  html: string,
+  signals: Pick<WebsiteInspectionSignals, 'navTexts' | 'schemaTypes' | 'formActions' | 'h1' | 'title'>
+): boolean {
+  const lower = html.toLowerCase();
+  if (includesAny(lower, FORUM_PLATFORM_MARKERS)) return true;
+  if (signals.schemaTypes.some((t) => /discussionforum|discussionboard/i.test(t))) return true;
+  const structural = lowerJoin([
+    ...(signals.navTexts ?? []),
+    ...(signals.formActions ?? []),
+    ...(signals.h1 ?? []),
+    signals.title ?? '',
+  ]);
+  if (includesAny(structural, ['/forum', '/forums', 'phpbb', 'discourse', 'discussion board'])) {
+    return true;
+  }
+  // Nav/title that is clearly a forum site (not a directory category label)
+  if (
+    /\b(forum|forums|discussion board)\b/.test(structural) &&
+    !/\b(directory|submit link|add site|submit url)\b/.test(structural)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 const RULES: SignalRule[] = [
   {
     id: 'guest_post',
@@ -226,11 +328,8 @@ const RULES: SignalRule[] = [
     match: (s) => {
       const hit =
         s.hasSubmitListing ||
-        includesAny(lowerJoin([...s.navTexts, ...s.buttonTexts, ...s.formLabels]), [
-          'submit listing',
-          'add listing',
-          'submit directory',
-          'directory submission',
+        includesAny(lowerJoin([...s.navTexts, ...s.buttonTexts, ...s.formLabels, ...(s.h1 ?? []), s.title ?? '']), [
+          ...DIRECTORY_SUBMIT_PHRASES,
         ]);
       return { hit, evidence: hit ? ['Detected directory listing submission'] : [] };
     },
@@ -351,14 +450,16 @@ const RULES: SignalRule[] = [
   {
     id: 'forum_posting',
     weight: 36,
-    match: (s) => {
+    match: (s, html) => {
       const hit =
         s.hasForum ||
+        detectStructuralForum(html, s) ||
         includesAny(lowerJoin([...s.navTexts, ...s.schemaTypes]), [
-          'forum',
           'discussion board',
           'phpbb',
           'discourse',
+          '/forum',
+          '/forums',
         ]);
       return { hit, evidence: hit ? ['Detected forum / discussion structure'] : [] };
     },
@@ -590,9 +691,9 @@ const RULES: SignalRule[] = [
       const hit =
         s.hasSponsor ||
         includesAny(lowerJoin([...s.navTexts, ...s.buttonTexts]), [
-          'sponsor',
-          'sponsorship',
           'become a sponsor',
+          'sponsorship packages',
+          'sponsor us',
         ]);
       return { hit, evidence: hit ? ['Detected sponsorship page'] : [] };
     },
@@ -793,7 +894,12 @@ function typeMeta(id: string) {
 /** Extract structural signals from HTML — never classify from domain alone. */
 export function extractWebsiteSignals(
   htmlRaw: string,
-  opts: { robotsOk?: boolean; sitemapFound?: boolean; fetchOk?: boolean } = {}
+  opts: {
+    robotsOk?: boolean;
+    sitemapFound?: boolean;
+    fetchOk?: boolean;
+    pageUrl?: string;
+  } = {}
 ): WebsiteInspectionSignals {
   const html = htmlRaw.slice(0, 120_000).toLowerCase();
   const pick = (re: RegExp, limit = 20): string[] => {
@@ -820,10 +926,13 @@ export function extractWebsiteSignals(
   const navBlock = html.match(/<nav[\s\S]{0,12000}?<\/nav>/gi)?.join(' ') ?? '';
   const footerBlock = html.match(/<footer[\s\S]{0,12000}?<\/footer>/gi)?.join(' ') ?? '';
   const headerBlock = html.match(/<header[\s\S]{0,8000}?<\/header>/gi)?.join(' ') ?? '';
-  const navCombined = `${navBlock} ${headerBlock}`;
+  // phpLD menus are often <ul id="menu">, not <nav>
+  const menuBlock =
+    html.match(/<ul[^>]*id=["']menu["'][\s\S]{0,8000}?<\/ul>/gi)?.join(' ') ?? '';
+  const navCombined = `${navBlock} ${headerBlock} ${menuBlock}`;
 
   const navTexts = pick(/>([a-z0-9][^<]{2,60})</i, 40).filter((t) =>
-    /write|submit|add|join|upload|directory|forum|community|resource|press|job|review|sponsor|profile|business|listing|article|blog|video|image|podcast|marketplace|coupon|event|scholarship|wiki|qa|question/.test(
+    /write|submit|add|join|upload|directory|forum|community|resource|press|job|review|sponsor|profile|business|listing|article|blog|video|image|podcast|marketplace|coupon|event|scholarship|wiki|qa|question|site/.test(
       t
     )
   );
@@ -844,9 +953,20 @@ export function extractWebsiteSignals(
   const schemaTypes = pick(/"@type"\s*:\s*"([^"]+)"/i, 20);
   const footerTexts = pick(/>([a-z0-9][^<]{2,50})</i, 15);
 
+  // Chrome + CTAs for directory phrases — avoid category <option> dumps ("Chats and Forums")
+  const signalBlob = lowerJoin([
+    title ?? '',
+    metaDescription ?? '',
+    ...h1,
+    ...navTexts,
+    ...buttonTexts,
+    ...formLabels,
+    ...anchorTexts.slice(0, 25),
+    navCombined.slice(0, 6000),
+  ]);
   const blob = `${html} ${navCombined} ${footerBlock}`;
 
-  return {
+  const draft = {
     title,
     metaDescription,
     metaKeywords,
@@ -861,6 +981,10 @@ export function extractWebsiteSignals(
     formLabels: formLabels.map((t) => t.trim()).filter(Boolean).slice(0, 40),
     anchorTexts: anchorTexts.map((t) => t.trim()).filter(Boolean).slice(0, 60),
     schemaTypes,
+  };
+
+  return {
+    ...draft,
     hasWriteForUs: includesAny(blob, [
       'write for us',
       'guest post',
@@ -868,12 +992,10 @@ export function extractWebsiteSignals(
       'become a writer',
       'contributor guidelines',
     ]),
-    hasSubmitListing: includesAny(blob, [
-      'submit listing',
-      'add listing',
-      'submit your listing',
-      'directory submission',
-    ]),
+    hasSubmitListing:
+      includesAny(signalBlob, DIRECTORY_SUBMIT_PHRASES) ||
+      includesAny(blob, ['php link directory', 'submit link', 'add site']) ||
+      looksLikeDirectorySubmitPath(opts.pageUrl),
     hasAddBusiness: includesAny(blob, [
       'add business',
       'add your business',
@@ -886,7 +1008,7 @@ export function extractWebsiteSignals(
       'complete your profile',
     ]),
     hasUpload: includesAny(blob, ['type="file"', 'upload', 'dropzone', 'drag and drop']),
-    hasForum: includesAny(blob, ['forum', 'discussion board', 'phpbb', 'discourse']),
+    hasForum: detectStructuralForum(html, draft),
     hasQa: includesAny(blob, ['ask a question', 'q&a', 'answered', 'stackoverflow', 'quora']),
     hasMarketplace: includesAny(blob, ['marketplace', 'sell your', 'vendor portal']),
     hasVideoUpload: includesAny(blob, ['upload video', 'submit video', 'video submission']),
@@ -905,7 +1027,12 @@ export function extractWebsiteSignals(
     hasWiki: includesAny(blob, ['mediawiki', 'edit this page', 'wiki']),
     hasReview: includesAny(blob, ['write a review', 'aggregaterating', 'leave a review']),
     hasScholarship: includesAny(blob, ['scholarship', 'scholarships']),
-    hasSponsor: includesAny(blob, ['sponsorship', 'become a sponsor', 'sponsor us']),
+    hasSponsor: includesAny(signalBlob, [
+      'sponsorship packages',
+      'become a sponsor',
+      'sponsor us',
+      'sponsor this',
+    ]),
     robotsAllowsCrawl: opts.robotsOk !== false,
     sitemapFound: Boolean(opts.sitemapFound),
     fetchOk: opts.fetchOk !== false,
@@ -919,10 +1046,32 @@ export function classifyFromWebsiteInspection(
     learning?: LearningPattern[];
     domain?: string;
     fallbackType?: BacklinkTypeId;
+    pageUrl?: string;
   } = {}
 ): ClassificationDecision {
   const html = (signals.rawSnippet ?? '').toLowerCase();
+  const pageUrl = String(opts.pageUrl ?? '').toLowerCase();
+  const domain = String(opts.domain ?? '')
+    .toLowerCase()
+    .replace(/^www\./, '');
   const scores = new Map<string, { score: number; evidence: string[] }>();
+
+  // Post-submit confirmation pages are not actionable listing forms
+  if (looksLikePostSubmitConfirmPath(pageUrl)) {
+    const meta = typeMeta('outreach_required')!;
+    return {
+      classificationId: 'outreach_required',
+      displayName: meta.displayName,
+      backlinkType: meta.storageType as BacklinkTypeId,
+      confidence: 88,
+      reason:
+        'Post-submit confirmation URL — not a live listing form (use the real /submit page)',
+      evidence: [`Confirm path: ${pageUrl.slice(0, 120)}`],
+      workflowQueue: meta.queue,
+      assignedAgent: meta.agent,
+      alternatives: [],
+    };
+  }
 
   for (const rule of RULES) {
     const { hit, evidence } = rule.match(signals, html);
@@ -971,6 +1120,42 @@ export function classifyFromWebsiteInspection(
     prev.score += 6;
     prev.evidence.push(`Schema.org type hint: ${signals.schemaTypes.slice(0, 3).join(', ')}`);
     scores.set(id, prev);
+  }
+
+  // Path + domain boosts for classic directory submit URLs (phpLD /submit.php etc.)
+  const dirPath = looksLikeDirectorySubmitPath(pageUrl);
+  const dirDomain = domainLooksLikeDirectory(domain);
+  if (dirPath || dirDomain || signals.hasSubmitListing) {
+    const id = 'directory_submission';
+    const prev = scores.get(id) ?? { score: 0, evidence: [] };
+    if (dirPath) {
+      prev.score += 30;
+      prev.evidence.push('Detected directory submit path (/submit.php, /add.php, …)');
+    }
+    if (dirDomain) {
+      prev.score += 18;
+      prev.evidence.push(`Directory domain hint: ${domain}`);
+    }
+    if (signals.hasSubmitListing && !dirPath) {
+      prev.score += 8;
+    }
+    scores.set(id, prev);
+  }
+
+  if (opts.fallbackType === 'directory' || (opts.fallbackType === 'resource_page' && dirDomain)) {
+    const id = 'directory_submission';
+    const prev = scores.get(id) ?? { score: 0, evidence: [] };
+    prev.score += 14;
+    prev.evidence.push(`Domain category fallback: ${opts.fallbackType}`);
+    scores.set(id, prev);
+  }
+
+  // Never let category-dropdown "forum" beat a real directory submit page
+  if (
+    scores.has('forum_posting') &&
+    (scores.has('directory_submission') || dirPath || dirDomain || signals.hasSubmitListing)
+  ) {
+    scores.delete('forum_posting');
   }
 
   const ranked = [...scores.entries()]
