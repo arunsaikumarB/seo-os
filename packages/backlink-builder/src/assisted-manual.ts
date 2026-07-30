@@ -826,7 +826,12 @@ export function detectGateFromHtml(html: string): AssistedGate {
   if (detectMultiStepForm(html) && !htmlHasCoreContentFields(html)) {
     return 'multi_step';
   }
-  if (/cloudflare|cf-challenge|cf-turnstile|attention required|checking your browser/i.test(h)) {
+  // Cloudflare interstitial / Turnstile / 5xx challenge shells (often NO <form>)
+  if (
+    /cloudflare|cf-challenge|cf-turnstile|cf-browser-verification|challenge-platform|cdn-cgi\/challenge|attention required|checking your browser|just a moment|enable javascript and cookies|ddos-guard|error code 522|error code 521|error code 523/i.test(
+      h
+    )
+  ) {
     return 'cloudflare';
   }
   if (/recaptcha|hcaptcha|g-recaptcha|captcha|security.?code|enter the code/i.test(h)) {
@@ -1539,20 +1544,25 @@ export function buildSiteRecipe(input: {
     looksLikeWizard ||
     Boolean(input.wizardSteps?.length) ||
     Boolean(input.existing?.multiStep && !wizardReachedForm);
-  // Cloudflare can be page-level; other gates come from the target form only
+  // Cloudflare / CAPTCHA / login can be page-level with NO submission form.
+  // Never force gate to 'none' just because formFound is false — that hid Cloudflare.
   const pageGate = detectGateFromHtml(input.html);
   const formGate = detectGateFromHtml(gateSource);
-  // When no submission form qualifies, do not inherit login gate from a sibling widget
-  const baseGate =
-    !target.formFound
-      ? 'none'
-      : pageGate === 'cloudflare'
-        ? 'cloudflare'
-        : formGate !== 'none'
-          ? formGate
-          : pageGate === 'captcha'
-            ? 'captcha'
-            : 'none';
+  let baseGate: AssistedGate;
+  if (pageGate === 'cloudflare' || pageGate === 'captcha') {
+    baseGate = pageGate;
+  } else if (!target.formFound) {
+    baseGate =
+      pageGate === 'login' || pageGate === 'registration' || pageGate === 'manual_review'
+        ? pageGate
+        : 'none';
+  } else if (formGate !== 'none') {
+    baseGate = formGate;
+  } else if (pageGate === 'login' || pageGate === 'registration' || pageGate === 'manual_review') {
+    baseGate = pageGate;
+  } else {
+    baseGate = 'none';
+  }
   // Intermediate wizard only — never force multi_step once content form is reached
   const gate: AssistedGate =
     multiStep && !wizardReachedForm
@@ -2006,6 +2016,10 @@ export function assignAssistedBucket(input: {
   if (pricing === 'paid' || input.recipe.wizardWalkStatus === 'paid_only') {
     return 'paid_aside';
   }
+  // Hard gates first — Cloudflare/login/captcha pages often have no listing form
+  if (gateRequiresPerson(input.recipe.gate)) {
+    return 'needs_person';
+  }
   // No listing form: multi-step wizards still need a person; content pages → no_form park
   if (!input.formFound) {
     if (
@@ -2020,11 +2034,7 @@ export function assignAssistedBucket(input: {
   if (input.fingerprintStatus === 'changed' || input.fingerprintStatus === 'stale') {
     return 'needs_person';
   }
-  // Hard gates (login/captcha/cloudflare/registration) → Needs a person
   // Multi-step only blocks when we did NOT reach the real form (Phase 14).
-  if (gateRequiresPerson(input.recipe.gate)) {
-    return 'needs_person';
-  }
   if (input.recipe.multiStep && !input.recipe.wizardReachedForm) {
     return 'needs_person';
   }

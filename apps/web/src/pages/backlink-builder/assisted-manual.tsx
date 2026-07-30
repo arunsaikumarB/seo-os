@@ -120,6 +120,23 @@ const BUCKET_LABEL: Record<string, string> = {
   no_form: 'No form (set aside)',
 };
 
+const GATE_LABEL: Record<string, string> = {
+  cloudflare: 'Cloudflare',
+  captcha: 'CAPTCHA',
+  login: 'Login required',
+  registration: 'Registration',
+  manual_review: 'Manual review',
+  otp_email: 'Email OTP',
+  otp_phone: 'SMS OTP',
+  multi_step: 'Multi-step',
+};
+
+function gateLabel(gate: string | null | undefined): string | null {
+  const g = String(gate ?? '').trim();
+  if (!g || g === 'none' || g === 'multi_step') return null;
+  return GATE_LABEL[g] ?? g;
+}
+
 /** Role → Companion ActivePackage field key (fill engine). */
 const ROLE_TO_ACTIVE_KEY: Record<string, string> = {
   title: 'title',
@@ -787,8 +804,17 @@ export function AssistedManualPage() {
                             Multi-step
                           </Badge>
                         ) : null}
-                        {pkg.gate && pkg.gate !== 'none' && pkg.gate !== 'multi_step' && !visual.badgeLabel ? (
-                          <Badge className="text-[10px] shrink-0 opacity-80">{pkg.gate}</Badge>
+                        {gateLabel(pkg.gate) && !visual.badgeLabel ? (
+                          <Badge
+                            className={cn(
+                              'text-[10px] shrink-0',
+                              pkg.gate === 'cloudflare' || pkg.gate === 'captcha'
+                                ? 'border-amber-500/50 text-amber-900 bg-amber-500/10'
+                                : 'opacity-80'
+                            )}
+                          >
+                            {gateLabel(pkg.gate)}
+                          </Badge>
                         ) : null}
                         {visual.badgeLabel ? (
                           <Badge className="text-[10px] shrink-0 border-emerald-500/40 text-emerald-700">

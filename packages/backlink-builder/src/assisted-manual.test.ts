@@ -646,11 +646,35 @@ describe('Phase 7 Assisted Manual', () => {
     );
     expect(detectGateFromHtml('<div class="g-recaptcha"></div><form></form>')).toBe('captcha');
     expect(detectGateFromHtml('<div>Checking your browser — Cloudflare</div>')).toBe('cloudflare');
+    expect(detectGateFromHtml('<title>Just a moment...</title><div id="cf-challenge"></div>')).toBe(
+      'cloudflare'
+    );
+    expect(detectGateFromHtml('<h1>Error code 522</h1><p>Connection timed out</p>')).toBe(
+      'cloudflare'
+    );
     expect(
       detectGateFromHtml('<form><input type="password"/><button>Create account</button></form>')
     ).toBe('registration');
     expect(gateBlocksReady('login')).toBe(true);
     expect(gateBlocksReady('none')).toBe(false);
+  });
+
+  it('Cloudflare challenge with no listing form → needs_person (not no_form)', () => {
+    const recipe = buildSiteRecipe({
+      domain: '2wdirectory.com',
+      entryUrl: 'https://2wdirectory.com/submit',
+      html: '<html><title>Just a moment...</title><div>Checking your browser Cloudflare</div></html>',
+    });
+    expect(recipe.gate).toBe('cloudflare');
+    expect(recipe.formFound).toBe(false);
+    expect(
+      assignAssistedBucket({
+        recipe,
+        fields: [],
+        fingerprintStatus: 'fresh',
+        formFound: false,
+      })
+    ).toBe('needs_person');
   });
 
   it('detects ≥0.80 similarity pairs (Phase 12)', () => {

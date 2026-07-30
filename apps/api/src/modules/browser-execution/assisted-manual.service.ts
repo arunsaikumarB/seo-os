@@ -2292,8 +2292,8 @@ async function healReadyPackagesWithBlockingGates(workspaceId: string) {
     .from('assisted_packages')
     .select('id, gate, bucket, payload, failure_reason')
     .eq('workspace_id', workspaceId)
-    .in('bucket', ['ready', 'needs_person'])
-    .limit(100);
+    .in('bucket', ['ready', 'needs_person', 'no_form'])
+    .limit(150);
   if (!rows?.length) return;
 
   for (const row of rows) {
@@ -2326,6 +2326,18 @@ async function healReadyPackagesWithBlockingGates(workspaceId: string) {
               : gate === 'registration'
                 ? 'Registration required — create an account yourself; the app will not sign up.'
                 : `Gate: ${gate} — needs a person.`;
+    } else if (
+      bucket === 'no_form' &&
+      (gateRequiresPerson(gate) ||
+        /cloudflare|cf-challenge|just a moment|checking your browser|cf-turnstile|error code 522/i.test(
+          `${row.failure_reason ?? ''} ${String((row.payload as AssistedPackagePayload)?.gateNotes ?? '')}`
+        ))
+    ) {
+      // CF challenge pages have no listing form — were wrongly parked as No form
+      nextBucket = 'needs_person';
+      failureReason =
+        'Cloudflare / anti-bot challenge — clear it yourself; the app will not bypass it.';
+      gateNotes = failureReason;
     }
 
     if (!nextBucket) continue;
@@ -2335,11 +2347,17 @@ async function healReadyPackagesWithBlockingGates(workspaceId: string) {
       bucket: nextBucket,
       failureReason: failureReason ?? row.failure_reason,
       ...(gateNotes ? { gateNotes } : {}),
+      ...(bucket === 'no_form' && nextBucket === 'needs_person'
+        ? { gate: gateRequiresPerson(gate) ? gate : 'cloudflare' }
+        : {}),
     };
     await admin()
       .from('assisted_packages')
       .update({
         bucket: nextBucket,
+        ...(bucket === 'no_form' && nextBucket === 'needs_person'
+          ? { gate: gateRequiresPerson(gate) ? gate : 'cloudflare' }
+          : {}),
         failure_reason: payload.failureReason,
         payload,
         updated_at: new Date().toISOString(),
