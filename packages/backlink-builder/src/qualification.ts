@@ -1,6 +1,7 @@
 /** Qualify classified domains before opportunity persistence */
 
 import type { DomainAnalysisResult } from './domain-analyzer.js';
+import { isDeadWebsiteAnalysis } from './domain-analyzer.js';
 import type { ClassificationResult } from './classification.js';
 import { getScoreTier } from './scoring.js';
 import { getTypeLabel, type BacklinkTypeId } from './backlink-types.js';
@@ -64,15 +65,8 @@ function hasPublicSubmissionPath(analysis: DomainAnalysisResult): boolean {
     }
   }
   const classification = meta.classification as { confidence?: number; id?: string } | undefined;
-  if (
-    classification &&
-    Number(classification.confidence ?? 0) >= 70 &&
-    classification.id &&
-    classification.id !== 'unknown' &&
-    classification.id !== 'outreach_required'
-  ) {
-    return true;
-  }
+  // Never invent a submission path from confidence alone — that approved dead sites.
+  void classification;
   return false;
 }
 
@@ -82,7 +76,12 @@ function hasPublicSubmissionPath(analysis: DomainAnalysisResult): boolean {
  */
 export function qualifyOpportunity(
   analysis: DomainAnalysisResult,
-  classification: ClassificationResult
+  classification: ClassificationResult,
+  opts: {
+    targetStorageTypes?: string[];
+    targetFamilyIds?: string[];
+    unrelatedReason?: string;
+  } = {}
 ): QualificationResult {
   const scoreTier = getScoreTier(classification.opportunityScore);
   const spamRisk = classification.spamRisk;
@@ -106,6 +105,31 @@ export function qualifyOpportunity(
     scoreTier,
     signals,
   };
+
+  const targets = opts.targetStorageTypes;
+  if (targets?.length && !targets.includes(classification.backlinkType)) {
+    return {
+      ...base,
+      qualified: false,
+      reason:
+        opts.unrelatedReason ??
+        `Unrelated to this import — classified as ${label}, not in selected types`,
+    };
+  }
+
+  if (isDeadWebsiteAnalysis(analysis)) {
+    const code = analysis.fetchStatusCode;
+    const err = String(analysis.metadata?.homepageFetchError ?? '');
+    return {
+      ...base,
+      qualified: false,
+      reason: code
+        ? `Homepage unreachable (HTTP ${code})`
+        : err
+          ? `Homepage unreachable (${err})`
+          : 'Homepage unreachable (timeout, DNS, or connection failure)',
+    };
+  }
 
   if (classification.opportunityScore < MIN_QUALIFY_SCORE) {
     return {
@@ -131,8 +155,8 @@ export function qualifyOpportunity(
     };
   }
 
-  // Existing high tier (75+) with live reachability — escalate for manual path confirmation
-  if (classification.opportunityScore >= 75 && analysis.metricsSource === 'live') {
+  // High score only qualifies when homepage was actually live (not robots-only)
+  if (classification.opportunityScore >= 75 && analysis.metricsSource === 'live' && analysis.homepageReachable === true) {
     return {
       ...base,
       qualified: true,

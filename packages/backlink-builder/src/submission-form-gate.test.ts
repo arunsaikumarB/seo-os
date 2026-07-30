@@ -43,7 +43,7 @@ describe('submission-form-gate', () => {
     expect(g.reason).toMatch(/No submission form/);
   });
 
-  it('blocks approve when unprobed or no_form in metadata', () => {
+  it('blocks approve when unprobed, no_form, or paid in metadata', () => {
     expect(canApproveAfterProbe({}).ok).toBe(false);
     expect(
       canApproveAfterProbe({
@@ -52,9 +52,33 @@ describe('submission-form-gate', () => {
     ).toBe(false);
     expect(
       canApproveAfterProbe({
-        linkProbe: { band: 'ready', formFound: true, alive: true, probedAt: 'x' },
+        linkProbe: {
+          band: 'check',
+          formFound: true,
+          alive: true,
+          listingPricing: 'paid',
+          probedAt: 'x',
+        },
+      }).ok
+    ).toBe(false);
+    expect(
+      canApproveAfterProbe({
+        linkProbe: { band: 'ready', formFound: true, alive: true, listingPricing: 'free', probedAt: 'x' },
       }).ok
     ).toBe(true);
+  });
+
+  it('maps paid listing to Unsupported', () => {
+    const g = evaluateSubmissionProbeGate({
+      band: 'check',
+      formFound: true,
+      alive: true,
+      listingPricing: 'paid',
+      reasons: ['paid_no_free_word'],
+    });
+    expect(g.disqualified).toBe(true);
+    expect(g.reviewDecision).toBe('Unsupported');
+    expect(g.reason).toMatch(/Paid listing/);
   });
 
   it('metadataDisqualifiesSubmission reads linkProbe', () => {
@@ -63,8 +87,15 @@ describe('submission-form-gate', () => {
         linkProbe: { band: 'no_form', formFound: false, alive: true },
       })
     ).toBe(true);
-    expect(metadataDisqualifiesSubmission({ linkProbe: { band: 'ready', formFound: true, alive: true } })).toBe(
-      false
-    );
+    expect(
+      metadataDisqualifiesSubmission({
+        linkProbe: { band: 'ready', formFound: true, alive: true, listingPricing: 'paid' },
+      })
+    ).toBe(true);
+    expect(
+      metadataDisqualifiesSubmission({
+        linkProbe: { band: 'ready', formFound: true, alive: true, listingPricing: 'free' },
+      })
+    ).toBe(false);
   });
 });

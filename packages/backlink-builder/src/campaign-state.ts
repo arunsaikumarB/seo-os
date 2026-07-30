@@ -886,12 +886,23 @@ export function computeAiReviewSummary(items: CampaignItemInput[]): AiReviewSumm
 /**
  * Decide review outcome right after analysis.
  * Does not mutate — caller writes through updateCampaignItem.
+ *
+ * STRICT: never auto-approve without an honest live homepage + submission form.
+ * Dead / no-form / paid never become Approved.
  */
 export function decideAfterAnalysis(input: {
   confidenceScore: number;
   classificationId?: string | null;
   deadWebsite?: boolean;
   duplicateOfId?: string | null;
+  /** Homepage GET succeeded (2xx). Required for auto-approve. */
+  homepageReachable?: boolean | null;
+  /** Live probe found a real listing form (or confirmed public submit path). */
+  formConfirmed?: boolean | null;
+  /** Paid listing / paid_only — never Approved for free submit. */
+  paidListing?: boolean | null;
+  /** Qualification failed (no path / unrelated / spam). */
+  notQualified?: boolean | null;
 }): {
   confidenceScore: number;
   reviewTier: ReviewTier;
@@ -911,24 +922,64 @@ export function decideAfterAnalysis(input: {
       duplicateOfId: input.duplicateOfId,
     };
   }
-  if (input.deadWebsite) {
+  if (input.deadWebsite || input.homepageReachable === false) {
     return {
       confidenceScore: input.confidenceScore,
       reviewTier: 'needs_classification',
       reviewDecision: 'Dead Website',
       approvedBy: null,
       lifecycle: 'Failed',
-      lastError: 'Dead website — unreachable',
+      lastError: 'Dead website — unreachable (timeout, DNS, or HTTP error)',
+    };
+  }
+  if (input.paidListing === true) {
+    return {
+      confidenceScore: input.confidenceScore,
+      reviewTier: 'needs_classification',
+      reviewDecision: 'Unsupported',
+      approvedBy: null,
+      lifecycle: 'Ignored',
+      lastError: 'Paid listing — not eligible for free Assisted Submit',
+    };
+  }
+  if (input.formConfirmed === false || input.notQualified === true) {
+    return {
+      confidenceScore: input.confidenceScore,
+      reviewTier: 'needs_classification',
+      reviewDecision: 'Unsupported',
+      approvedBy: null,
+      lifecycle: 'Ignored',
+      lastError:
+        input.formConfirmed === false
+          ? 'No submission form found — cannot approve for backlink submit'
+          : 'Not qualified — missing live submission evidence',
     };
   }
   const tier = assignReviewTier(input.confidenceScore, input.classificationId);
-  if (tier === 'auto_approved') {
+  // Auto-approve only with explicit live homepage + form confirmation
+  if (
+    tier === 'auto_approved' &&
+    input.homepageReachable === true &&
+    input.formConfirmed === true
+  ) {
     return {
       confidenceScore: input.confidenceScore,
       reviewTier: tier,
       reviewDecision: 'Approved',
       approvedBy: 'auto',
       lifecycle: 'Approved',
+    };
+  }
+  // High confidence without form/reachability proof → needs human, never silent Approve
+  if (tier === 'auto_approved') {
+    return {
+      confidenceScore: input.confidenceScore,
+      reviewTier: 'recommended',
+      reviewDecision: 'Pending',
+      approvedBy: null,
+      lifecycle: 'Classified',
+      lastError:
+        'High confidence but missing live form/reachability proof — confirm in AI Review',
     };
   }
   if (tier === 'needs_classification') {

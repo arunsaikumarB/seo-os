@@ -284,6 +284,14 @@ export async function getContentGenerationBoard(
   workspaceId: string,
   opts?: { preloadedItems?: Awaited<ReturnType<typeof listCampaignItems>> }
 ) {
+  if (!opts?.preloadedItems) {
+    try {
+      const { healUnreachableApprovedSites } = await import('./ai-review.service.js');
+      await healUnreachableApprovedSites(workspaceId, { limit: 40, concurrency: 6 });
+    } catch (e) {
+      console.warn('[content-gen] reachability heal failed', e);
+    }
+  }
   const items =
     opts?.preloadedItems ??
     (await listCampaignItems(workspaceId, { includeDeleted: false }));

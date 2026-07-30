@@ -131,17 +131,35 @@ async function probeUrl(
     fetchError: http.error,
   });
 
-  // Escalate SPA shells once if budget remains
+  // Escalate SPA shells once if budget remains — never override a hard transport/HTTP death
   if (
-    (result.band === 'no_form' && result.spaShell) ||
-    (result.band === 'dead' && !html && browserBudget.used < browserBudget.max)
+    result.band === 'no_form' &&
+    result.spaShell &&
+    browserBudget.used < browserBudget.max
   ) {
     const rendered = await maybeRender(url, browserBudget);
     if (rendered) {
       result = classifyProbedPage({
         url,
         html: rendered,
-        httpStatus: http.status ?? 200,
+        httpStatus: http.status ?? null,
+        fetchError: http.error,
+      });
+    }
+  } else if (
+    result.band === 'dead' &&
+    !html &&
+    !http.error &&
+    http.status != null &&
+    http.status < 400 &&
+    browserBudget.used < browserBudget.max
+  ) {
+    const rendered = await maybeRender(url, browserBudget);
+    if (rendered) {
+      result = classifyProbedPage({
+        url,
+        html: rendered,
+        httpStatus: http.status,
         fetchError: null,
       });
     }
@@ -227,8 +245,8 @@ async function saveProbe(opportunityId: string, meta: Record<string, unknown>, p
 }
 
 /**
- * Permanent gate: no_form / dead probes revoke Approved and park the site.
- * Never leave a content/blog homepage in the submit / Approved cohort.
+ * Permanent gate: no_form / dead / paid probes revoke Approved and park the site.
+ * Never leave a content/blog homepage or paid listing in the free submit cohort.
  */
 async function applyProbeSubmissionGate(
   workspaceId: string,
@@ -236,13 +254,19 @@ async function applyProbeSubmissionGate(
   probe: LinkProbeResult
 ): Promise<void> {
   const gate = evaluateSubmissionProbeGate(probe);
-  if (!gate.disqualified || !gate.reviewDecision) return;
+  if (!gate.disqualified || !gate.reviewDecision) {
+    await maybePromoteAfterHonestProbe(workspaceId, opportunityId, probe);
+    return;
+  }
+
+  const paid = probe.listingPricing === 'paid';
+  const parkBucket = paid ? 'paid_aside' : 'no_form';
 
   try {
     await updateCampaignItem(workspaceId, opportunityId, {
       currentStatus: gate.reviewDecision === 'Dead Website' ? 'Failed' : 'Ignored',
       reviewDecision: gate.reviewDecision,
-      reviewTier: null,
+      reviewTier: 'needs_classification',
       approvedBy: null,
       approval: 'rejected',
       lastError: gate.reason,
@@ -260,15 +284,15 @@ async function applyProbeSubmissionGate(
       if (String(row.status) === 'done') continue;
       const payload = {
         ...((row.payload as Record<string, unknown>) ?? {}),
-        bucket: 'no_form',
-        formUnavailable: true,
+        bucket: parkBucket,
+        formUnavailable: !paid,
         failureReason: gate.reason,
-        listingPricing: (row.payload as { listingPricing?: string } | null)?.listingPricing ?? null,
+        listingPricing: probe.listingPricing ?? (row.payload as { listingPricing?: string } | null)?.listingPricing ?? null,
       };
       await getSupabaseAdmin()
         .from('assisted_packages')
         .update({
-          bucket: 'no_form',
+          bucket: parkBucket,
           status: 'skipped',
           failure_reason: gate.reason,
           payload,
@@ -277,11 +301,83 @@ async function applyProbeSubmissionGate(
         .eq('id', row.id);
     }
     logger.info(
-      { workspaceId, opportunityId, band: probe.band, decision: gate.reviewDecision },
-      'link-probe: revoked Approved — no submission form / dead'
+      { workspaceId, opportunityId, band: probe.band, decision: gate.reviewDecision, paid },
+      'link-probe: revoked — no form / dead / paid'
     );
   } catch (err) {
     logger.warn({ err, opportunityId }, 'link-probe: submission gate apply failed');
+  }
+}
+
+/**
+ * Only after a live free form is confirmed may high-confidence sites auto-approve.
+ * Confidence alone never promotes.
+ */
+async function maybePromoteAfterHonestProbe(
+  workspaceId: string,
+  opportunityId: string,
+  probe: LinkProbeResult
+): Promise<void> {
+  if (probe.band !== 'ready' || probe.formFound !== true || probe.alive !== true) return;
+  if (probe.listingPricing === 'paid') return;
+  // Require explicit free signal — unknown can hide paid walls
+  if (probe.listingPricing !== 'free') return;
+
+  try {
+    const { data: row } = await getSupabaseAdmin()
+      .from('opportunities')
+      .select('id, confidence_score, opportunity_type, campaign_lifecycle, review_decision, metadata')
+      .eq('workspace_id', workspaceId)
+      .eq('id', opportunityId)
+      .maybeSingle();
+    if (!row) return;
+
+    const life = String(row.campaign_lifecycle ?? '');
+    const decision = String(row.review_decision ?? '');
+    if (life === 'Approved' || decision === 'Approved') return;
+    if (
+      life === 'Rejected' ||
+      life === 'Deleted' ||
+      life === 'Ignored' ||
+      life === 'Failed' ||
+      life === 'Skipped' ||
+      decision === 'Dead Website' ||
+      decision === 'Unsupported' ||
+      decision === 'Duplicate' ||
+      decision === 'Rejected'
+    ) {
+      return;
+    }
+
+    const meta =
+      row.metadata && typeof row.metadata === 'object'
+        ? (row.metadata as Record<string, unknown>)
+        : {};
+    const classObj =
+      meta.classification && typeof meta.classification === 'object'
+        ? (meta.classification as Record<string, unknown>)
+        : {};
+    const conf = Number(row.confidence_score ?? classObj.confidence ?? 0);
+    const classId = String(classObj.id ?? row.opportunity_type ?? '')
+      .toLowerCase()
+      .trim();
+    if (conf <= 90 || !classId || classId === 'unknown') return;
+
+    await updateCampaignItem(workspaceId, opportunityId, {
+      currentStatus: 'Approved',
+      reviewDecision: 'Approved',
+      reviewTier: 'auto_approved',
+      approvedBy: 'auto',
+      approval: 'approved',
+      lastError: null,
+      force: true,
+    });
+    logger.info(
+      { workspaceId, opportunityId, conf, band: probe.band },
+      'link-probe: promoted to Approved after free ready form'
+    );
+  } catch (err) {
+    logger.warn({ err, opportunityId }, 'link-probe: honest promote failed');
   }
 }
 

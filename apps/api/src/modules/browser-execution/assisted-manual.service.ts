@@ -50,6 +50,7 @@ import {
   resolveListingPricing,
   metadataDisqualifiesSubmission,
   NO_FORM_REJECT_REASON,
+  evaluateSubmissionProbeGate,
   type AssistedPackagePayload,
   type FieldRole,
   type FormDiscoverySource,
@@ -2057,7 +2058,7 @@ export async function updateAssistedPackageStatus(
 }
 
 /**
- * When linkProbe already marked no_form/dead, park Assisted packages and leave worklist.
+ * When linkProbe already marked no_form/dead/paid, park Assisted packages and leave worklist.
  */
 async function healNoFormFromProbeMetadata(workspaceId: string) {
   const { data: opps } = await admin()
@@ -2065,13 +2066,30 @@ async function healNoFormFromProbeMetadata(workspaceId: string) {
     .select('id, metadata')
     .eq('workspace_id', workspaceId)
     .limit(500);
-  const badIds: string[] = [];
+  const bad: Array<{
+    id: string;
+    reviewDecision: 'Unsupported' | 'Dead Website';
+    reason: string;
+    bucket: 'no_form' | 'paid_aside';
+  }> = [];
   for (const o of opps ?? []) {
-    if (metadataDisqualifiesSubmission((o.metadata as Record<string, unknown>) ?? {})) {
-      badIds.push(String(o.id));
-    }
+    const meta = (o.metadata as Record<string, unknown>) ?? {};
+    const lp = meta.linkProbe;
+    if (!lp || typeof lp !== 'object') continue;
+    const gate = evaluateSubmissionProbeGate(lp as Parameters<typeof evaluateSubmissionProbeGate>[0]);
+    if (!gate.disqualified || !gate.reviewDecision) continue;
+    const paid = (lp as { listingPricing?: string }).listingPricing === 'paid';
+    bad.push({
+      id: String(o.id),
+      reviewDecision: gate.reviewDecision,
+      reason: gate.reason ?? NO_FORM_REJECT_REASON,
+      bucket: paid ? 'paid_aside' : 'no_form',
+    });
   }
-  if (!badIds.length) return;
+  if (!bad.length) return;
+
+  const badIds = bad.map((b) => b.id);
+  const byId = new Map(bad.map((b) => [b.id, b]));
 
   const { data: pkgs } = await admin()
     .from('assisted_packages')
@@ -2082,38 +2100,40 @@ async function healNoFormFromProbeMetadata(workspaceId: string) {
 
   for (const row of pkgs ?? []) {
     if (String(row.status) === 'done') continue;
-    if (String(row.bucket) === 'no_form' && String(row.status) === 'skipped') continue;
+    const info = byId.get(String(row.opportunity_id));
+    if (!info) continue;
+    if (String(row.bucket) === info.bucket && String(row.status) === 'skipped') continue;
     const payload = {
       ...((row.payload as AssistedPackagePayload) ?? {}),
-      bucket: 'no_form' as const,
-      formUnavailable: true,
-      failureReason: NO_FORM_REJECT_REASON,
+      bucket: info.bucket,
+      formUnavailable: info.bucket === 'no_form',
+      failureReason: info.reason,
       status: 'skipped' as const,
     };
     await admin()
       .from('assisted_packages')
       .update({
-        bucket: 'no_form',
+        bucket: info.bucket,
         status: 'skipped',
-        failure_reason: NO_FORM_REJECT_REASON,
+        failure_reason: info.reason,
         payload,
         updated_at: new Date().toISOString(),
       })
       .eq('id', row.id);
   }
 
-  // Also revoke lifecycle for still-Approved no-form sites
+  // Also revoke lifecycle for still-Approved dead/no-form/paid sites
   const { updateCampaignItem } = await import('../campaigns/campaign-state.service.js');
-  for (const opportunityId of badIds.slice(0, 80)) {
+  for (const info of bad.slice(0, 80)) {
     try {
-      await updateCampaignItem(workspaceId, opportunityId, {
-        currentStatus: 'Ignored',
-        reviewDecision: 'Unsupported',
-        reviewTier: null,
+      await updateCampaignItem(workspaceId, info.id, {
+        currentStatus: info.reviewDecision === 'Dead Website' ? 'Failed' : 'Ignored',
+        reviewDecision: info.reviewDecision,
+        reviewTier: 'needs_classification',
         approvedBy: null,
         approval: 'rejected',
-        lastError: NO_FORM_REJECT_REASON,
-        blockerReason: NO_FORM_REJECT_REASON,
+        lastError: info.reason,
+        blockerReason: info.reason,
         force: true,
       });
     } catch {

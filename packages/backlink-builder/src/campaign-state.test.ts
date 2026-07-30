@@ -74,14 +74,25 @@ describe('campaign state manager', () => {
     expect(assignReviewTier(99, 'unknown')).toBe('needs_classification');
   });
 
-  it('auto-approves only above 90', () => {
+  it('auto-approves only above 90 with live homepage + free form proof', () => {
     const auto = decideAfterAnalysis({
       confidenceScore: 95,
       classificationId: 'directory',
+      homepageReachable: true,
+      formConfirmed: true,
     });
     expect(auto.reviewDecision).toBe('Approved');
     expect(auto.approvedBy).toBe('auto');
     expect(auto.lifecycle).toBe('Approved');
+
+    const missingForm = decideAfterAnalysis({
+      confidenceScore: 95,
+      classificationId: 'directory',
+      homepageReachable: true,
+    });
+    expect(missingForm.reviewDecision).toBe('Pending');
+    expect(missingForm.approvedBy).toBeNull();
+    expect(missingForm.lifecycle).toBe('Classified');
 
     const rec = decideAfterAnalysis({
       confidenceScore: 85,
@@ -89,6 +100,26 @@ describe('campaign state manager', () => {
     });
     expect(rec.reviewDecision).toBe('Pending');
     expect(rec.lifecycle).toBe('Classified');
+  });
+
+  it('never auto-approves paid or no-form sites', () => {
+    const paid = decideAfterAnalysis({
+      confidenceScore: 99,
+      classificationId: 'directory',
+      homepageReachable: true,
+      formConfirmed: true,
+      paidListing: true,
+    });
+    expect(paid.reviewDecision).toBe('Unsupported');
+    expect(paid.lifecycle).toBe('Ignored');
+
+    const noForm = decideAfterAnalysis({
+      confidenceScore: 99,
+      classificationId: 'directory',
+      homepageReachable: true,
+      formConfirmed: false,
+    });
+    expect(noForm.reviewDecision).toBe('Unsupported');
   });
 
   it('AI Review summary invariant holds', () => {

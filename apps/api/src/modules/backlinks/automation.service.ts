@@ -7,6 +7,7 @@ import {
   classifyOpportunity,
   qualifyOpportunity,
   formatQualificationReport,
+  isDeadWebsiteAnalysis,
   contentTypesForOpportunity,
   deduplicateAndValidate,
   extractUrlsFromCsv,
@@ -547,9 +548,7 @@ export async function runAutomationPipeline(
               const existingId = await import('../campaigns/ai-review.service.js').then((m) =>
                 m.findExistingByDomain(workspaceId, domain)
               );
-              const deadWebsite =
-                (analysis.fetchStatusCode != null && analysis.fetchStatusCode >= 400) ||
-                analysis.robotsTxtStatus === 'unreachable';
+              const deadWebsite = isDeadWebsiteAnalysis(analysis);
               await getSupabaseAdmin()
                 .from('opportunities')
                 .insert({
@@ -602,6 +601,9 @@ export async function runAutomationPipeline(
                   confidenceScore: classification.confidence,
                   classificationId: classification.classificationId,
                   deadWebsite,
+                  homepageReachable: analysis.homepageReachable ?? null,
+                  formConfirmed: false,
+                  notQualified: true,
                   duplicateOfId: existingId,
                 });
               } catch (e) {
@@ -632,9 +634,7 @@ export async function runAutomationPipeline(
             const existingId = await import('../campaigns/ai-review.service.js').then((m) =>
               m.findExistingByDomain(workspaceId, domain)
             );
-            const deadWebsite =
-              (analysis.fetchStatusCode != null && analysis.fetchStatusCode >= 400) ||
-              analysis.robotsTxtStatus === 'unreachable';
+            const deadWebsite = isDeadWebsiteAnalysis(analysis);
 
             const oppId = randomUUID();
             const oppInsert = await getSupabaseAdmin().from('opportunities').insert({
@@ -726,13 +726,16 @@ export async function runAutomationPipeline(
               const { applyAnalysisToCampaignItem } = await import(
                 '../campaigns/ai-review.service.js'
               );
+              // Never auto-Approve until link probe confirms a live free form.
+              // High confidence alone is not enough — formConfirmed stays unset here.
               await applyAnalysisToCampaignItem(workspaceId, oppId, {
                 confidenceScore: classification.confidence,
                 classificationId: classification.classificationId,
                 deadWebsite,
+                homepageReachable: analysis.homepageReachable ?? null,
                 duplicateOfId: existingId && existingId !== oppId ? existingId : null,
               });
-              // Probe ASAP — no_form / dead revokes Approved forever
+              // Probe ASAP — ready+free may promote; no_form/dead/paid revoke forever
               try {
                 const { enqueueLinkProbe } = await import('./link-probe.service.js');
                 await enqueueLinkProbe({

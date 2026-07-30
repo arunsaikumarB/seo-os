@@ -1,7 +1,7 @@
 /**
  * Hard gate: never approve / never submit without a real listing form.
- * Content blogs, guide hubs, and marketing homepages (e.g. w3catalog) must
- * never stay Approved for backlink submission.
+ * Content blogs, guide hubs, marketing homepages, paid listings, and
+ * unprobed sites must never stay Approved for free backlink submission.
  */
 import type { LinkProbeBand, LinkProbeResult } from './link-probe.js';
 
@@ -11,6 +11,9 @@ export const NO_FORM_REJECT_REASON =
 export const DEAD_SITE_REJECT_REASON =
   'Dead / unreachable — no submission possible';
 
+export const PAID_LISTING_REJECT_REASON =
+  'Paid listing — not eligible for free Assisted Submit';
+
 export type SubmissionProbeGate = {
   /** True when this site must leave Approved / submit worklists */
   disqualified: boolean;
@@ -19,13 +22,19 @@ export type SubmissionProbeGate = {
   reviewDecision: 'Unsupported' | 'Dead Website' | null;
 };
 
+type ProbeGateInput = Pick<
+  LinkProbeResult,
+  'band' | 'formFound' | 'alive' | 'reasons' | 'listingPricing'
+>;
+
 /**
- * Probe bands that prove there is nothing to submit.
+ * Probe bands that prove there is nothing to submit (or paid-only).
  */
 export function probeDisqualifiesSubmission(
-  probe: Pick<LinkProbeResult, 'band' | 'formFound' | 'alive'> | null | undefined
+  probe: Partial<ProbeGateInput> | null | undefined
 ): boolean {
   if (!probe) return false;
+  if (probe.listingPricing === 'paid') return true;
   if (probe.band === 'dead' || probe.alive === false) return true;
   if (probe.band === 'no_form') return true;
   if (probe.formFound === false && probe.band !== 'blocked' && probe.band !== 'check') {
@@ -36,7 +45,7 @@ export function probeDisqualifiesSubmission(
 }
 
 export function evaluateSubmissionProbeGate(
-  probe: Pick<LinkProbeResult, 'band' | 'formFound' | 'alive' | 'reasons'> | null | undefined
+  probe: Partial<ProbeGateInput> | null | undefined
 ): SubmissionProbeGate {
   if (!probe) {
     return { disqualified: false, reason: null, reviewDecision: null };
@@ -46,6 +55,13 @@ export function evaluateSubmissionProbeGate(
       disqualified: true,
       reason: DEAD_SITE_REJECT_REASON,
       reviewDecision: 'Dead Website',
+    };
+  }
+  if (probe.listingPricing === 'paid') {
+    return {
+      disqualified: true,
+      reason: PAID_LISTING_REJECT_REASON,
+      reviewDecision: 'Unsupported',
     };
   }
   if (probe.band === 'no_form' || (probe.formFound === false && probe.band !== 'blocked' && probe.band !== 'check')) {
@@ -76,7 +92,8 @@ export function bandsThatAllowApprove(): LinkProbeBand[] {
 
 /**
  * User/manual approve may proceed only when probe found a form
- * (ready / check / blocked). Unprobed → block with clear reason.
+ * (ready / check / blocked) and listing is not paid.
+ * Unprobed → block with clear reason.
  */
 export function canApproveAfterProbe(
   metadata: Record<string, unknown> | null | undefined
@@ -91,7 +108,10 @@ export function canApproveAfterProbe(
   }
   const gate = evaluateSubmissionProbeGate(lp as LinkProbeResult);
   if (gate.disqualified) {
-    return { ok: false, reason: gate.reason ?? NO_FORM_REJECT_REASON };
+    return {
+      ok: false,
+      reason: gate.reason ?? NO_FORM_REJECT_REASON,
+    };
   }
   if (!bandsThatAllowApprove().includes(lp.band as LinkProbeBand)) {
     return {
