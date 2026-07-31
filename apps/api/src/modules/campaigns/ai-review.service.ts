@@ -133,11 +133,21 @@ export async function healMisclassifiedDirectoryForums(
     const dirLike =
       looksLikeDirectorySubmitPath(url) || domainLooksLikeDirectory(domain);
 
+    const meta =
+      typeof item.raw.metadata === 'object' && item.raw.metadata
+        ? (item.raw.metadata as Record<string, unknown>)
+        : {};
+    // Never undo a user "Move to Recommended" override
+    if (meta.userMovedToRecommended === true) continue;
+
     if (confirm) {
       checked++;
+      // Already parked, or user revived to Recommended / Approved — leave alone
       if (
-        item.reviewDecision === 'Unsupported' &&
-        item.currentStatus === 'Ignored'
+        (item.reviewDecision === 'Unsupported' && item.currentStatus === 'Ignored') ||
+        item.reviewDecision === 'Pending' ||
+        item.reviewDecision === 'Approved' ||
+        item.reviewTier === 'recommended'
       ) {
         continue;
       }
@@ -427,10 +437,10 @@ const REVIVE_TO_RECOMMENDED = new Set([
 ]);
 
 /**
- * Clear stale dead/no_form/paid probe stamps so revived rows stay in Recommended
- * until a fresh probe runs.
+ * Stamp user override + clear stale dead/no_form/paid probe so heals cannot
+ * immediately park the row back into Unsupported / Dead.
  */
-async function clearDisqualifyingProbeMetadata(
+async function stampMovedToRecommendedMetadata(
   workspaceId: string,
   opportunityId: string,
   meta: Record<string, unknown>
@@ -439,14 +449,21 @@ async function clearDisqualifyingProbeMetadata(
     meta.linkProbe && typeof meta.linkProbe === 'object'
       ? { ...(meta.linkProbe as Record<string, unknown>) }
       : null;
-  if (!lp) return;
-  const band = String(lp.band ?? '');
-  if (band !== 'dead' && band !== 'no_form' && lp.listingPricing !== 'paid' && lp.alive !== false) {
-    return;
-  }
-  const nextMeta = {
+  const band = lp ? String(lp.band ?? '') : '';
+  const clearProbe =
+    Boolean(lp) &&
+    (band === 'dead' ||
+      band === 'no_form' ||
+      lp?.listingPricing === 'paid' ||
+      lp?.alive === false);
+
+  const nextMeta: Record<string, unknown> = {
     ...meta,
-    linkProbe: {
+    userMovedToRecommended: true,
+    userMovedToRecommendedAt: new Date().toISOString(),
+  };
+  if (clearProbe && lp) {
+    nextMeta.linkProbe = {
       ...lp,
       band: 'unprobed',
       alive: null,
@@ -454,8 +471,9 @@ async function clearDisqualifyingProbeMetadata(
       listingPricing: 'unknown',
       reasons: ['cleared_on_move_to_recommended'],
       probedAt: new Date().toISOString(),
-    },
-  };
+    };
+  }
+
   await getSupabaseAdmin()
     .from('opportunities')
     .update({ metadata: nextMeta, updated_at: new Date().toISOString() })
@@ -468,6 +486,8 @@ async function moveItemToRecommended(
   itemId: string,
   meta: Record<string, unknown>
 ) {
+  // Stamp first so any board heal that runs mid-write respects the override
+  await stampMovedToRecommendedMetadata(workspaceId, itemId, meta);
   await updateCampaignItem(workspaceId, itemId, {
     currentStatus: 'Classified',
     reviewDecision: 'Pending',
@@ -478,7 +498,6 @@ async function moveItemToRecommended(
     blockerReason: null,
     force: true,
   });
-  await clearDisqualifyingProbeMetadata(workspaceId, itemId, meta);
 }
 
 export async function bulkAiReviewAction(
