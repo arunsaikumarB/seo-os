@@ -138,6 +138,7 @@ export function ClassificationDashboardPage() {
         data: {
           succeeded: number;
           skipped: number;
+          movedToRecommended?: number;
           skipReasons: string[];
           errors: string[];
           board?: AiReviewBoard;
@@ -148,7 +149,18 @@ export function ClassificationDashboardPage() {
       }),
     onSuccess: (res, vars) => {
       const d = res.data;
-      const parts = [`${d.succeeded} ${vars.action === 'approve' ? 'approved' : vars.action}`];
+      const moved = d.movedToRecommended ?? 0;
+      const parts: string[] = [];
+      if (vars.action === 'approve' && moved > 0 && moved === d.succeeded) {
+        parts.push(`Moved ${moved} to Recommended`);
+      } else if (vars.action === 'approve' && moved > 0) {
+        parts.push(
+          `${d.succeeded - moved} approved`,
+          `${moved} moved to Recommended`
+        );
+      } else {
+        parts.push(`${d.succeeded} ${vars.action === 'approve' ? 'approved' : vars.action}`);
+      }
       if (d.skipped) {
         parts.push(
           `${d.skipped} skipped${
@@ -161,6 +173,7 @@ export function ClassificationDashboardPage() {
       if (d.errors.length) parts.push(`${d.errors.length} errors`);
       toast.success(parts.join(', '));
       setSelected(new Set());
+      if (moved > 0) setFilter('recommended');
       if (d.board) applyBoard(d.board);
       void qc.invalidateQueries({ queryKey: ['ai-review', projectId] });
       invalidateSide();
@@ -466,7 +479,12 @@ export function ClassificationDashboardPage() {
                     bulk.mutate({ action: 'approve', itemIds: [...selected] })
                   }
                 >
-                  Approve Selected
+                  {filter === 'dead' ||
+                  filter === 'unsupported' ||
+                  filter === 'duplicate' ||
+                  filter === 'rejected'
+                    ? 'Move to Recommended'
+                    : 'Approve Selected'}
                 </Button>
                 <Button
                   size="sm"

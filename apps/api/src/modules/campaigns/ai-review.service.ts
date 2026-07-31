@@ -418,6 +418,69 @@ export type AiReviewBulkAction =
   | 'outreach'
   | 'retry_analysis';
 
+/** Terminal buckets — bulk Approve moves these into Recommended (not final Approve). */
+const REVIVE_TO_RECOMMENDED = new Set([
+  'Dead Website',
+  'Unsupported',
+  'Duplicate',
+  'Rejected',
+]);
+
+/**
+ * Clear stale dead/no_form/paid probe stamps so revived rows stay in Recommended
+ * until a fresh probe runs.
+ */
+async function clearDisqualifyingProbeMetadata(
+  workspaceId: string,
+  opportunityId: string,
+  meta: Record<string, unknown>
+) {
+  const lp =
+    meta.linkProbe && typeof meta.linkProbe === 'object'
+      ? { ...(meta.linkProbe as Record<string, unknown>) }
+      : null;
+  if (!lp) return;
+  const band = String(lp.band ?? '');
+  if (band !== 'dead' && band !== 'no_form' && lp.listingPricing !== 'paid' && lp.alive !== false) {
+    return;
+  }
+  const nextMeta = {
+    ...meta,
+    linkProbe: {
+      ...lp,
+      band: 'unprobed',
+      alive: null,
+      formFound: null,
+      listingPricing: 'unknown',
+      reasons: ['cleared_on_move_to_recommended'],
+      probedAt: new Date().toISOString(),
+    },
+  };
+  await getSupabaseAdmin()
+    .from('opportunities')
+    .update({ metadata: nextMeta, updated_at: new Date().toISOString() })
+    .eq('id', opportunityId)
+    .eq('workspace_id', workspaceId);
+}
+
+async function moveItemToRecommended(
+  workspaceId: string,
+  itemId: string,
+  meta: Record<string, unknown>
+) {
+  await updateCampaignItem(workspaceId, itemId, {
+    currentStatus: 'Classified',
+    reviewDecision: 'Pending',
+    reviewTier: 'recommended',
+    approvedBy: null,
+    approval: 'pending',
+    lastError: null,
+    blockerReason: null,
+    force: true,
+  });
+  await clearDisqualifyingProbeMetadata(workspaceId, itemId, meta);
+}
+
 export async function bulkAiReviewAction(
   workspaceId: string,
   action: AiReviewBulkAction,
@@ -429,6 +492,7 @@ export async function bulkAiReviewAction(
   const byFull = new Map(fullItems.map((i) => [i.id, i]));
   let succeeded = 0;
   let skipped = 0;
+  let movedToRecommended = 0;
   const skipReasons: string[] = [];
   const errors: string[] = [];
 
@@ -447,31 +511,53 @@ export async function bulkAiReviewAction(
           succeeded++;
           continue;
         }
-        if (
-          item.reviewDecision === 'Needs Classification' ||
-          item.reviewTier === 'needs_classification' ||
-          !item.canApprove
-        ) {
-          skipped++;
-          skipReasons.push(
-            `${item.website}: ${item.reason?.includes('No submission form') ? item.reason : 'need classification first'}`
-          );
-          continue;
-        }
-        if (
-          item.reviewDecision === 'Unsupported' ||
-          item.reviewDecision === 'Duplicate' ||
-          item.reviewDecision === 'Dead Website'
-        ) {
-          skipped++;
-          skipReasons.push(`${item.website}: ${item.reviewDecision}`);
-          continue;
-        }
+
         const full = byFull.get(id);
         const meta =
           full && typeof full.raw?.metadata === 'object' && full.raw.metadata
             ? (full.raw.metadata as Record<string, unknown>)
             : {};
+
+        // Dead / Unsupported / Duplicate / Rejected → Recommended (user override)
+        if (
+          REVIVE_TO_RECOMMENDED.has(String(item.reviewDecision ?? '')) ||
+          item.currentStatus === 'Rejected' ||
+          item.currentStatus === 'Ignored' ||
+          item.currentStatus === 'Failed' ||
+          item.currentStatus === 'Skipped'
+        ) {
+          await moveItemToRecommended(workspaceId, id, meta);
+          succeeded++;
+          movedToRecommended++;
+          continue;
+        }
+
+        if (
+          item.reviewDecision === 'Needs Classification' ||
+          item.reviewTier === 'needs_classification'
+        ) {
+          const classified =
+            Boolean(item.classification) &&
+            String(item.classification).toLowerCase() !== 'unknown';
+          if (!classified) {
+            skipped++;
+            skipReasons.push(`${item.website}: need classification first`);
+            continue;
+          }
+          await moveItemToRecommended(workspaceId, id, meta);
+          succeeded++;
+          movedToRecommended++;
+          continue;
+        }
+
+        if (!item.canApprove) {
+          skipped++;
+          skipReasons.push(
+            `${item.website}: ${item.reason ?? 'cannot approve yet — run link probe / classify first'}`
+          );
+          continue;
+        }
+
         const probeOk = canApproveAfterProbe(meta);
         if (!probeOk.ok) {
           skipped++;
@@ -559,7 +645,9 @@ export async function bulkAiReviewAction(
         summary:
           errors.length > 0
             ? `${action}: ${succeeded} succeeded · ${errors.length} failed · ${skipped} skipped`
-            : `${action}: ${succeeded} sites · ${pending} still pending · ${approved} approved`,
+            : movedToRecommended > 0 && movedToRecommended === succeeded
+              ? `Moved ${movedToRecommended} to Recommended`
+              : `${action}: ${succeeded} sites · ${pending} still pending · ${approved} approved`,
         outcome: errors.length > 0 ? 'partial' : 'success',
         href: `/projects/${workspaceId}/content/library`,
         payload: {
@@ -567,6 +655,7 @@ export async function bulkAiReviewAction(
           action,
           succeeded,
           skipped,
+          movedToRecommended,
           failed: errors.length,
         },
       });
@@ -579,6 +668,7 @@ export async function bulkAiReviewAction(
     action,
     succeeded,
     skipped,
+    movedToRecommended,
     skipReasons: skipReasons.slice(0, 20),
     errors: errors.slice(0, 20),
     summary,
