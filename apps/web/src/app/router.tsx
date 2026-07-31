@@ -120,11 +120,6 @@ const AssistedManualPage = lazy(() =>
     default: m.AssistedManualPage,
   }))
 );
-const RankedSubmitQueuePage = lazy(() =>
-  import('@/pages/backlink-builder/ranked-submit-queue').then((m) => ({
-    default: m.RankedSubmitQueuePage,
-  }))
-);
 const BacklinkAuditPage = lazy(() =>
   import('@/pages/backlink-builder/audit').then((m) => ({ default: m.BacklinkAuditPage }))
 );
@@ -438,10 +433,6 @@ export function AppRouter() {
                     <Route
                       path="backlink-builder/assisted-manual"
                       element={lazyEl(AssistedManualPage)}
-                    />
-                    <Route
-                      path="backlink-builder/submit-queue"
-                      element={lazyEl(RankedSubmitQueuePage)}
                     />
                     <Route
                       path="backlink-builder/verification"
