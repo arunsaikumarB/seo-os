@@ -212,16 +212,41 @@ export async function analyzeDomainLive(
   let htmlRaw = '';
 
   try {
-    const homeRes = await fetchImpl(url ?? origin, {
-      method: 'GET',
-      redirect: 'follow',
-      signal: AbortSignal.timeout(12_000),
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (compatible; SEO-OS-BacklinkBuilder/1.0; +https://seo-os.app)',
-        Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
-      },
-    });
+    const fetchTargets = [url ?? origin];
+    try {
+      const u = new URL(url ?? origin);
+      const host = u.hostname.replace(/^www\./, '');
+      for (const h of [`https://${host}${u.pathname}${u.search}`, `https://www.${host}${u.pathname}${u.search}`]) {
+        if (!fetchTargets.includes(h)) fetchTargets.push(h);
+      }
+    } catch {
+      /* ignore */
+    }
+
+    let homeRes: Response | null = null;
+    let lastFetchErr: unknown = null;
+    for (const target of fetchTargets) {
+      try {
+        homeRes = await fetchImpl(target, {
+          method: 'GET',
+          redirect: 'follow',
+          signal: AbortSignal.timeout(15_000),
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+          },
+        });
+        if (homeRes.ok) break;
+      } catch (err) {
+        lastFetchErr = err;
+        homeRes = null;
+      }
+    }
+    if (!homeRes) {
+      throw lastFetchErr instanceof Error ? lastFetchErr : new Error('fetch_failed');
+    }
     fetchStatusCode = homeRes.status;
     if (homeRes.ok) {
       homepageReachable = true;

@@ -23,31 +23,58 @@ import {
 } from './campaign-state.service.js';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 
+const BROWSER_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+function reachabilityCandidates(url: string): string[] {
+  const raw = String(url ?? '').trim();
+  if (!raw) return [];
+  const out: string[] = [];
+  const push = (u: string) => {
+    if (u && !out.includes(u)) out.push(u);
+  };
+  push(raw);
+  try {
+    const u = new URL(raw.includes('://') ? raw : `https://${raw}`);
+    const host = u.hostname.replace(/^www\./, '');
+    push(`https://${host}${u.pathname}${u.search}`);
+    push(`https://www.${host}${u.pathname}${u.search}`);
+    push(`http://${host}${u.pathname}${u.search}`);
+  } catch {
+    /* keep raw only */
+  }
+  return out;
+}
+
 async function probeHomepageAlive(
   url: string
 ): Promise<{ ok: boolean; detail: string; status: number | null }> {
-  try {
-    const res = await fetch(url, {
-      method: 'GET',
-      redirect: 'follow',
-      signal: AbortSignal.timeout(6_000),
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (compatible; SEO-OS-BacklinkBuilder/1.0; +https://seo-os.app)',
-        Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
-      },
-    });
-    if (!res.ok) {
-      return { ok: false, detail: `http_${res.status}`, status: res.status };
+  const candidates = reachabilityCandidates(url);
+  let lastDetail = 'fetch_failed';
+  let lastStatus: number | null = null;
+  for (const candidate of candidates) {
+    try {
+      const res = await fetch(candidate, {
+        method: 'GET',
+        redirect: 'follow',
+        signal: AbortSignal.timeout(12_000),
+        headers: {
+          'User-Agent': BROWSER_UA,
+          Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+      });
+      lastStatus = res.status;
+      if (res.ok) {
+        return { ok: true, detail: 'ok', status: res.status };
+      }
+      lastDetail = `http_${res.status}`;
+    } catch (err) {
+      lastDetail = err instanceof Error ? err.message : 'fetch_failed';
+      lastStatus = null;
     }
-    return { ok: true, detail: 'ok', status: res.status };
-  } catch (err) {
-    return {
-      ok: false,
-      detail: err instanceof Error ? err.message : 'fetch_failed',
-      status: null,
-    };
   }
+  return { ok: false, detail: lastDetail, status: lastStatus };
 }
 
 /**
@@ -104,6 +131,88 @@ export async function healUnreachableApprovedSites(
   }
 
   return { checked: candidates.length, markedDead, samples };
+}
+
+/**
+ * Re-check Dead Website rows; revive to Recommended when the URL is actually reachable.
+ * Fixes sticky false-deads from bot UA / transient TLS failures.
+ */
+export async function healFalseDeadSites(
+  workspaceId: string,
+  opts: { limit?: number; concurrency?: number } = {}
+): Promise<{ checked: number; revived: number; samples: string[] }> {
+  const limit = opts.limit ?? 30;
+  const concurrency = opts.concurrency ?? 6;
+  const items = await listCampaignItems(workspaceId, { includeDeleted: false });
+  const candidates = items
+    .filter(
+      (i) =>
+        i.reviewDecision === 'Dead Website' && Boolean(String(i.websiteUrl ?? '').trim())
+    )
+    .slice(0, limit);
+
+  let revived = 0;
+  const samples: string[] = [];
+
+  for (let i = 0; i < candidates.length; i += concurrency) {
+    const batch = candidates.slice(i, i + concurrency);
+    await Promise.all(
+      batch.map(async (item) => {
+        const url = String(item.websiteUrl ?? '').trim();
+        if (!url) return;
+        const probe = await probeHomepageAlive(url);
+        if (!probe.ok) return;
+
+        const meta =
+          typeof item.raw.metadata === 'object' && item.raw.metadata
+            ? { ...(item.raw.metadata as Record<string, unknown>) }
+            : {};
+        meta.userMovedToRecommended = true;
+        meta.userMovedToRecommendedAt = new Date().toISOString();
+        meta.falseDeadHealed = {
+          at: new Date().toISOString(),
+          detail: probe.detail,
+          status: probe.status,
+        };
+        if (meta.linkProbe && typeof meta.linkProbe === 'object') {
+          const lp = { ...(meta.linkProbe as Record<string, unknown>) };
+          if (lp.band === 'dead' || lp.alive === false) {
+            meta.linkProbe = {
+              ...lp,
+              band: 'unprobed',
+              alive: null,
+              formFound: null,
+              reasons: ['cleared_false_dead_heal'],
+              probedAt: new Date().toISOString(),
+            };
+          }
+        }
+
+        await getSupabaseAdmin()
+          .from('opportunities')
+          .update({ metadata: meta, updated_at: new Date().toISOString() })
+          .eq('id', item.id)
+          .eq('workspace_id', workspaceId);
+
+        await updateCampaignItem(workspaceId, item.id, {
+          currentStatus: 'Classified',
+          reviewDecision: 'Pending',
+          reviewTier: 'recommended',
+          approvedBy: null,
+          approval: 'pending',
+          lastError: null,
+          blockerReason: null,
+          force: true,
+        });
+        revived++;
+        if (samples.length < 12) {
+          samples.push(`${item.domain ?? url}: revived`);
+        }
+      })
+    );
+  }
+
+  return { checked: candidates.length, revived, samples };
 }
 
 /**
@@ -262,9 +371,18 @@ function toReviewItem(i: CampaignItemRow): AiReviewItem {
   const noForm = metadataDisqualifiesSubmission(meta);
 
   let reason: string | null = null;
-  if (!probeGate.ok) reason = probeGate.reason ?? null;
-  else if (noForm) reason = 'No submission form — cannot approve for backlink submit';
-  else if (
+  // Dead / Unsupported: show the real park reason, not "Run Link Probe first"
+  if (decision === 'Dead Website') {
+    reason =
+      i.lastError ||
+      'Server could not open this URL (timeout / TLS / bot block). Browser may still work — Move to Recommended to override.';
+  } else if (decision === 'Unsupported') {
+    reason = i.lastError || 'Unsupported for free submit';
+  } else if (!probeGate.ok) {
+    reason = probeGate.reason ?? null;
+  } else if (noForm) {
+    reason = 'No submission form — cannot approve for backlink submit';
+  } else if (
     typeof i.raw.metadata === 'object' &&
     i.raw.metadata &&
     typeof (i.raw.metadata as Record<string, unknown>).classification === 'object'
@@ -303,6 +421,13 @@ export async function getAiReviewBoard(workspaceId: string) {
     await healUnreachableApprovedSites(workspaceId, { limit: 20, concurrency: 8 });
   } catch (e) {
     console.warn('[AI Review] reachability heal failed', e);
+  }
+
+  // Revive sticky false-deads when the URL responds 2xx on recheck
+  try {
+    await healFalseDeadSites(workspaceId, { limit: 30, concurrency: 6 });
+  } catch (e) {
+    console.warn('[AI Review] false-dead heal failed', e);
   }
 
   // Fix phpLD directories mislabeled Forum from category dropdown "Chats and Forums"
