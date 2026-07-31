@@ -16,7 +16,6 @@ import {
   Search,
   Sparkles,
   Target,
-  FileText,
   ClipboardList,
   Handshake,
   CheckCircle2,
@@ -92,7 +91,6 @@ export const projectNav: NavItem[] = [
     icon: Target,
     featureFlag: 'backlink_builder',
   },
-  { label: 'Generate Content', href: 'content/library', icon: FileText },
   { label: 'Providers', href: 'providers', icon: Plug, featureFlag: 'integrations' },
   { label: 'Diagnostics', href: 'diagnostics', icon: HeartPulse },
   {

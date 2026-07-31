@@ -1,6 +1,9 @@
 /**
  * Phase 13 — Guided workflow stepper state from Campaign State Manager.
  * Never derive done/current from page visits or localStorage.
+ *
+ * Primary path: Create → Import → AI Review → Submit → Results → Reports.
+ * Generate Content is Advanced-only (Assisted Manual uses brand + optional packs).
  */
 import {
   computeAiReviewSummary,
@@ -12,13 +15,15 @@ export const GUIDED_WORKFLOW_STEP_IDS = [
   'create-project',
   'import-websites',
   'ai-review',
-  'generate-content',
   'submit-backlinks',
   'track-results',
   'reports-analytics',
 ] as const;
 
 export type GuidedWorkflowStepId = (typeof GUIDED_WORKFLOW_STEP_IDS)[number];
+
+/** Kept for older progress payloads / Advanced Generate Content tools. */
+export type LegacyGuidedWorkflowStepId = GuidedWorkflowStepId | 'generate-content';
 
 export type WorkflowStepState = 'done' | 'current' | 'upcoming';
 
@@ -69,6 +74,7 @@ export type WorkflowProgress = {
     createDone: boolean;
     importDone: boolean;
     aiReviewDone: boolean;
+    /** Always true on primary path — Generate Content is Advanced-only */
     generateDone: boolean;
     submitDone: boolean;
     trackResultsDone: boolean;
@@ -112,16 +118,14 @@ function stepDoneFlags(input: WorkflowProgressInput) {
   const createDone = Boolean(input.projectReady);
   const importDone = createDone && input.importedCount >= 1;
   const aiReviewDone = importDone && input.aiReviewPending === 0;
-  const generateDone =
+  // Generate Content is not on the primary path — never blocks Submit
+  const generateDone = true;
+  // Submit done when nothing approved, or every content-ready package left the open lane.
+  // Approved-but-not-prepared stays on Submit (contentReadyCount === 0 → not done).
+  const submitDone =
     aiReviewDone &&
     (input.approvedCount === 0 ||
-      (input.generatedPackages >= input.approvedCount &&
-        input.pendingGeneration === 0 &&
-        input.failedGeneration === 0));
-  const submitDone =
-    generateDone &&
-    (input.contentReadyCount === 0 || input.submitOpenCount === 0);
-  // Track Results: informational — done only when real results exist (never on visit)
+      (input.contentReadyCount > 0 && input.submitOpenCount === 0));
   const trackResultsDone = submitDone && input.hasTrackedResults;
   const reportsDone = trackResultsDone && input.hasReport;
   return {
@@ -146,7 +150,6 @@ export function getWorkflowProgress(input: WorkflowProgressInput): WorkflowProgr
     'create-project': flags.createDone,
     'import-websites': flags.importDone,
     'ai-review': flags.aiReviewDone,
-    'generate-content': flags.generateDone,
     'submit-backlinks': flags.submitDone,
     'track-results': flags.trackResultsDone,
     'reports-analytics': flags.reportsDone,
@@ -158,6 +161,16 @@ export function getWorkflowProgress(input: WorkflowProgressInput): WorkflowProgr
       currentStepId = id;
       break;
     }
+  }
+
+  // Approved sites waiting for Assisted prepare → Submit is current
+  if (
+    flags.aiReviewDone &&
+    !flags.submitDone &&
+    input.approvedCount > 0 &&
+    input.contentReadyCount === 0
+  ) {
+    currentStepId = 'submit-backlinks';
   }
 
   const steps: WorkflowStepProgress[] = GUIDED_WORKFLOW_STEP_IDS.map((id, index) => {
@@ -223,15 +236,11 @@ export function deriveWorkflowProgressInput(opts: {
       ) {
         generatedPackages++;
       } else {
-        // Idle / Queued / Generating / null — not yet a finished package
         pendingGeneration++;
       }
     }
 
-    if (
-      SUBMIT_OPEN.includes(status) ||
-      SUBMIT_TERMINAL.includes(status)
-    ) {
+    if (SUBMIT_OPEN.includes(status) || SUBMIT_TERMINAL.includes(status)) {
       contentReadyCount++;
       if (SUBMIT_OPEN.includes(status)) submitOpenCount++;
     }

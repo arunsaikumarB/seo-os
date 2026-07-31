@@ -694,7 +694,6 @@ export function currentStepForLifecycle(status: CampaignLifecycleStatus): string
       return 'approve';
     case 'Package Generated':
     case 'Ready':
-      return 'generate-content';
     case 'Submitting':
     case 'Waiting Human':
     case 'Retrying':

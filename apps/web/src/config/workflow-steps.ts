@@ -13,8 +13,8 @@ export interface WorkflowStep {
 }
 
 /**
- * Guided backlink pipeline — 7 steps (Approve removed; Submit = Assisted Manual).
- * Single manual lane end-to-end; browser auto-submit is not in the product flow.
+ * Guided backlink pipeline — Generate Content lives under Advanced Tools.
+ * Assisted Manual fills from brand profile + optional content packs.
  */
 export const WORKFLOW_STEPS: WorkflowStep[] = [
   {
@@ -51,32 +51,21 @@ export const WORKFLOW_STEPS: WorkflowStep[] = [
     difficulty: 'Easy',
   },
   {
-    id: 'generate-content',
+    id: 'submit-backlinks',
     number: 4,
     emoji: '④',
-    title: 'Generate Content',
-    purpose: 'AI creates articles, listings, forum replies, images, and video metadata.',
-    aiTip: 'No manual format picking — AI builds the right package for each site.',
-    route: 'content/library',
-    estimatedMinutes: 10,
-    difficulty: 'Easy',
-  },
-  {
-    id: 'submit-backlinks',
-    number: 5,
-    emoji: '⑤',
     title: 'Submit Backlinks',
     purpose:
       'Open each prepared package, paste fields, clear login/CAPTCHA yourself, and submit on the site.',
-    aiTip: 'Assisted Manual — open, paste, clear gates yourself. The app never auto-submits.',
+    aiTip: 'Copy comes from your project brand (and optional Advanced → Generate Content packs).',
     route: 'backlink-builder/assisted-manual',
     estimatedMinutes: 15,
     difficulty: 'Easy',
   },
   {
     id: 'track-results',
-    number: 6,
-    emoji: '⑥',
+    number: 5,
+    emoji: '⑤',
     title: 'Track Results',
     purpose: 'See submitted, pending, approved, verified, and estimated impact.',
     route: 'backlink-builder/track-results',
@@ -85,8 +74,8 @@ export const WORKFLOW_STEPS: WorkflowStep[] = [
   },
   {
     id: 'reports-analytics',
-    number: 7,
-    emoji: '⑦',
+    number: 6,
+    emoji: '⑥',
     title: 'Reports & Analytics',
     purpose: 'Download executive, campaign, and period reports as Excel, CSV, or PDF.',
     route: 'reports/library',
@@ -100,8 +89,7 @@ export const TOTAL_WORKFLOW_STEPS = WORKFLOW_STEPS.length;
 /** Older step ids still stored in local progress */
 export const WORKFLOW_STEP_ALIASES: Record<string, string[]> = {
   'ai-review': ['ai-discovery', 'approve-opportunities', 'opportunity-review'],
-  'generate-content': ['content-studio'],
-  'submit-backlinks': ['browser-execution', 'assisted-manual'],
+  'submit-backlinks': ['browser-execution', 'assisted-manual', 'generate-content', 'content-studio'],
   'track-results': ['verification'],
   'reports-analytics': ['reports'],
 };
@@ -111,7 +99,6 @@ export const WORKFLOW_PIPELINE_LABELS: Array<{ id: string; label: string }> = [
   { id: 'create-project', label: 'Create' },
   { id: 'import-websites', label: 'Import' },
   { id: 'ai-review', label: 'AI Review' },
-  { id: 'generate-content', label: 'Generate' },
   { id: 'submit-backlinks', label: 'Submit' },
   { id: 'track-results', label: 'Results' },
   { id: 'reports-analytics', label: 'Reports' },

@@ -73,32 +73,25 @@ export const workflowNavSections: WorkflowNavSection[] = [
         stepNumber: 3,
       },
       {
-        label: 'Generate Content',
-        href: 'content/library',
-        icon: FileText,
-        featureFlag: 'v11_content_studio_v2',
-        stepNumber: 4,
-      },
-      {
         label: 'Submit Backlinks',
         href: 'backlink-builder/assisted-manual',
         icon: ClipboardList,
         featureFlag: 'backlink_builder',
-        stepNumber: 5,
+        stepNumber: 4,
       },
       {
         label: 'Track Results',
         href: 'backlink-builder/track-results',
         icon: CheckCircle2,
         featureFlag: 'backlink_builder',
-        stepNumber: 6,
+        stepNumber: 5,
       },
       {
         label: 'Reports',
         href: 'reports/library',
         icon: FileBarChart,
         featureFlag: 'reports',
-        stepNumber: 7,
+        stepNumber: 6,
       },
     ],
   },
@@ -107,6 +100,12 @@ export const workflowNavSections: WorkflowNavSection[] = [
     label: 'Advanced Tools',
     advanced: true,
     items: [
+      {
+        label: 'Generate Content',
+        href: 'content/library',
+        icon: FileText,
+        featureFlag: 'v11_content_studio_v2',
+      },
       { label: 'Campaigns', href: 'campaigns', icon: Target, featureFlag: 'backlink_builder' },
       { label: 'Relationship Hub', href: 'relationships', icon: Handshake },
       {
