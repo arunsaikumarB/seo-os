@@ -1079,24 +1079,25 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
   if (m.includes('/backlink-builder/workflow-progress')) {
     return {
       data: {
-        currentStepId: 'submit-backlinks',
+        currentStepId: 'generate-content',
         completedCount: 3,
-        totalSteps: 6,
-        progressPercent: 50,
+        totalSteps: 7,
+        progressPercent: 43,
         allComplete: false,
         steps: [
           { id: 'create-project', number: 1, state: 'done' },
           { id: 'import-websites', number: 2, state: 'done' },
           { id: 'ai-review', number: 3, state: 'done' },
-          { id: 'submit-backlinks', number: 4, state: 'current' },
-          { id: 'track-results', number: 5, state: 'upcoming' },
-          { id: 'reports-analytics', number: 6, state: 'upcoming' },
+          { id: 'generate-content', number: 4, state: 'current' },
+          { id: 'submit-backlinks', number: 5, state: 'upcoming' },
+          { id: 'track-results', number: 6, state: 'upcoming' },
+          { id: 'reports-analytics', number: 7, state: 'upcoming' },
         ],
         flags: {
           createDone: true,
           importDone: true,
           aiReviewDone: true,
-          generateDone: true,
+          generateDone: false,
           submitDone: false,
           trackResultsDone: false,
           reportsDone: false,

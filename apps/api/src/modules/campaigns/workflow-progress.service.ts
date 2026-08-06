@@ -38,6 +38,7 @@ const ESTIMATE_MINUTES: Record<GuidedWorkflowStepId, number> = {
   'create-project': 2,
   'import-websites': 5,
   'ai-review': 5,
+  'generate-content': 10,
   'submit-backlinks': 15,
   'track-results': 5,
   'reports-analytics': 5,
@@ -210,14 +211,16 @@ async function computeStepTimings(
     if (row?.state === 'done') return 'done';
     if (id === 'import-websites' && pipelineBusy) return 'running';
     if (id === 'ai-review' && pipelineBusy && !flags.aiReviewDone) return 'running';
-    if (id === 'submit-backlinks' && (submitBusy || genBusy)) return 'running';
+    if (id === 'generate-content' && genBusy) return 'running';
+    if (id === 'submit-backlinks' && submitBusy) return 'running';
     return 'idle';
   };
 
   const startedAtFor = (id: GuidedWorkflowStepId, phase: StepTimingDto['phase']): string | null => {
     if (phase !== 'running') return null;
     if (id === 'import-websites' || id === 'ai-review') return pipelineStart;
-    if (id === 'submit-backlinks') return submitStartedAt ?? genStartedAt;
+    if (id === 'generate-content') return genStartedAt;
+    if (id === 'submit-backlinks') return submitStartedAt;
     return null;
   };
 
@@ -229,10 +232,10 @@ async function computeStepTimings(
         return importElapsed;
       case 'ai-review':
         return flags.aiReviewDone || pipelineBusy ? importElapsed : null;
+      case 'generate-content':
+        return flags.generateDone || genBusy ? genElapsed : null;
       case 'submit-backlinks':
-        return flags.submitDone || submitBusy || genBusy
-          ? (submitElapsed ?? genElapsed)
-          : null;
+        return flags.submitDone || submitBusy ? submitElapsed : null;
       case 'track-results':
         return flags.trackResultsDone ? trackElapsed : null;
       case 'reports-analytics':

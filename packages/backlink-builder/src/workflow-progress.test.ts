@@ -6,10 +6,7 @@ import {
 } from './workflow-progress.js';
 
 function item(
-  partial: Partial<CampaignItemInput> & {
-    id: string;
-    currentStatus: CampaignItemInput['currentStatus'];
-  }
+  partial: Partial<CampaignItemInput> & { id: string; currentStatus: CampaignItemInput['currentStatus'] }
 ): CampaignItemInput {
   return {
     websiteUrl: `${partial.id}.example`,
@@ -18,8 +15,8 @@ function item(
   };
 }
 
-describe('getWorkflowProgress (primary path without Generate)', () => {
-  it('6 approved + 0 generated → Submit is current (Generate skipped)', () => {
+describe('getWorkflowProgress (Phase 13)', () => {
+  it('6 approved + 0 generated → Create/Import/AI Review done, Generate current, Submit+ upcoming', () => {
     const items: CampaignItemInput[] = Array.from({ length: 6 }, (_, i) =>
       item({
         id: `a${i}`,
@@ -37,21 +34,28 @@ describe('getWorkflowProgress (primary path without Generate)', () => {
     expect(input.importedCount).toBe(6);
     expect(input.aiReviewPending).toBe(0);
     expect(input.approvedCount).toBe(6);
+    expect(input.generatedPackages).toBe(0);
+    expect(input.pendingGeneration).toBe(6);
+    expect(input.failedGeneration).toBe(0);
 
     const progress = getWorkflowProgress(input);
     expect(progress.flags.createDone).toBe(true);
     expect(progress.flags.importDone).toBe(true);
     expect(progress.flags.aiReviewDone).toBe(true);
-    expect(progress.flags.generateDone).toBe(true);
+    expect(progress.flags.generateDone).toBe(false);
     expect(progress.flags.submitDone).toBe(false);
-    expect(progress.currentStepId).toBe('submit-backlinks');
-    expect(progress.totalSteps).toBe(6);
+    expect(progress.currentStepId).toBe('generate-content');
     expect(progress.completedCount).toBe(3);
-    expect(progress.steps.find((s) => s.id === 'submit-backlinks')?.state).toBe('current');
-    expect(progress.steps.some((s) => (s.id as string) === 'generate-content')).toBe(false);
+    expect(progress.steps.find((s) => s.id === 'create-project')?.state).toBe('done');
+    expect(progress.steps.find((s) => s.id === 'import-websites')?.state).toBe('done');
+    expect(progress.steps.find((s) => s.id === 'ai-review')?.state).toBe('done');
+    expect(progress.steps.find((s) => s.id === 'generate-content')?.state).toBe('current');
+    expect(progress.steps.find((s) => s.id === 'submit-backlinks')?.state).toBe('upcoming');
+    expect(progress.steps.find((s) => s.id === 'track-results')?.state).toBe('upcoming');
+    expect(progress.steps.find((s) => s.id === 'reports-analytics')?.state).toBe('upcoming');
   });
 
-  it('flips Submit current when packages exist and some are still open', () => {
+  it('does not mark Generate done when packages exist but generation still pending', () => {
     const progress = getWorkflowProgress({
       projectReady: true,
       importedCount: 2,
@@ -65,30 +69,26 @@ describe('getWorkflowProgress (primary path without Generate)', () => {
       hasTrackedResults: false,
       hasReport: false,
     });
-    expect(progress.flags.submitDone).toBe(false);
-    expect(progress.currentStepId).toBe('submit-backlinks');
+    expect(progress.flags.generateDone).toBe(false);
+    expect(progress.currentStepId).toBe('generate-content');
   });
 
-  it('marks Submit done when every content-ready item is terminal', () => {
-    const items: CampaignItemInput[] = [
+  it('flips Generate done and Submit current when all packages complete', () => {
+    const items: CampaignItemInput[] = Array.from({ length: 6 }, (_, i) =>
       item({
-        id: '1',
-        currentStatus: 'Submitted',
-        reviewDecision: 'Approved',
-        generationStatus: 'Completed',
-      }),
-      item({
-        id: '2',
+        id: `g${i}`,
         currentStatus: 'Ready',
         reviewDecision: 'Approved',
         generationStatus: 'Completed',
-      }),
-    ];
+      })
+    );
     const progress = getWorkflowProgress(
       deriveWorkflowProgressInput({ projectReady: true, items })
     );
+    expect(progress.flags.generateDone).toBe(true);
     expect(progress.flags.submitDone).toBe(false);
     expect(progress.currentStepId).toBe('submit-backlinks');
+    expect(progress.completedCount).toBe(4);
   });
 
   it('never marks later steps done from empty visitation-style input', () => {
@@ -108,6 +108,7 @@ describe('getWorkflowProgress (primary path without Generate)', () => {
     expect(progress.currentStepId).toBe('import-websites');
     expect(progress.completedCount).toBe(1);
     expect(progress.flags.aiReviewDone).toBe(false);
+    expect(progress.flags.generateDone).toBe(false);
     expect(progress.flags.submitDone).toBe(false);
   });
 
@@ -142,7 +143,7 @@ describe('getWorkflowProgress (primary path without Generate)', () => {
       }),
       item({
         id: '2',
-        currentStatus: 'Verified',
+        currentStatus: 'Ready',
         reviewDecision: 'Approved',
         generationStatus: 'Completed',
       }),
@@ -150,8 +151,8 @@ describe('getWorkflowProgress (primary path without Generate)', () => {
     const progress = getWorkflowProgress(
       deriveWorkflowProgressInput({ projectReady: true, items })
     );
-    expect(progress.flags.submitDone).toBe(true);
-    expect(progress.flags.trackResultsDone).toBe(true);
-    expect(progress.currentStepId).toBe('reports-analytics');
+    expect(progress.flags.generateDone).toBe(true);
+    expect(progress.flags.submitDone).toBe(false);
+    expect(progress.currentStepId).toBe('submit-backlinks');
   });
 });
