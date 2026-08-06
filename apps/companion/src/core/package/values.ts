@@ -7,6 +7,9 @@ const ROLE_TO_PACKAGE: Record<FillableRole, keyof OpportunityPackageFields> = {
   phone: 'phone',
   title: 'title',
   description: 'description',
+  further_info: 'furtherCompanyInfo',
+  article: 'article',
+  keywords: 'keywords',
   address: 'address',
   city: 'city',
   state: 'state',
@@ -24,6 +27,12 @@ export function packageValueForRole(
 ): string {
   if (role === 'description') {
     return String(pkg.description || pkg.shortDescription || '').trim();
+  }
+  if (role === 'further_info') {
+    return String(pkg.furtherCompanyInfo || pkg.article || pkg.description || '').trim();
+  }
+  if (role === 'article') {
+    return String(pkg.article || pkg.furtherCompanyInfo || pkg.description || '').trim();
   }
   const key = ROLE_TO_PACKAGE[role];
   return String(pkg[key] ?? '').trim();

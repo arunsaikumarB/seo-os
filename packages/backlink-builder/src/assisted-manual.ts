@@ -70,6 +70,12 @@ export type FieldRole =
   | 'title'
   | 'short_desc'
   | 'long_desc'
+  /** Further Company / Product / Service Information (~1500 chars). */
+  | 'further_info'
+  /** Full article / guest-post body. */
+  | 'article'
+  /** Listing meta keywords / tags (not site search). */
+  | 'keywords'
   | 'url'
   | 'email'
   | 'phone'
@@ -407,7 +413,17 @@ export {
 export const CATEGORY_PICK_YOURSELF_NOTE = 'Pick the category yourself on the site';
 
 export type PasteReadyContentItem = {
-  role: 'title' | 'short_desc' | 'long_desc' | 'url' | 'business_name' | 'email' | 'phone';
+  role:
+    | 'title'
+    | 'short_desc'
+    | 'long_desc'
+    | 'further_info'
+    | 'article'
+    | 'keywords'
+    | 'url'
+    | 'business_name'
+    | 'email'
+    | 'phone';
   label: string;
   value: string;
 };
@@ -940,7 +956,18 @@ function isLongTextControl(facts: FormFieldFacts): boolean {
   return false;
 }
 
-function descriptionRoleFromControl(facts: FormFieldFacts): 'short_desc' | 'long_desc' {
+function descriptionRoleFromControl(
+  facts: FormFieldFacts
+): 'short_desc' | 'long_desc' | 'further_info' | 'article' {
+  const blob = [facts.label, facts.ariaLabel, facts.placeholder, facts.name]
+    .filter(Boolean)
+    .join(' ');
+  if (/further\s+(company|product|service)/i.test(blob)) return 'further_info';
+  if (/\barticle\b/i.test(blob) && (facts.type === 'textarea' || isLongTextControl(facts))) {
+    return 'article';
+  }
+  // phpLD-style ~1500-char extended company/product fields (not ordinary ≤500 desc)
+  if (facts.maxlength != null && facts.maxlength >= 1000) return 'further_info';
   if (facts.type === 'textarea') return 'long_desc';
   if (facts.maxlength != null && facts.maxlength <= LONG_DESC_MAXLENGTH) return 'short_desc';
   if (facts.maxlength != null && facts.maxlength > LONG_DESC_MAXLENGTH) return 'long_desc';
@@ -1161,6 +1188,36 @@ const ROLE_HINTS: Array<{ role: FieldRole; patterns: RegExp[] }> = [
     ],
   },
   {
+    role: 'further_info',
+    patterns: [
+      /further\s+(company|product|service)/i,
+      /company\s*\/\s*product\s*\/\s*service/i,
+      /additional\s+(company|product|service|information)/i,
+      /extended\s+(description|information)/i,
+    ],
+  },
+  {
+    role: 'article',
+    patterns: [
+      /^article$/i,
+      /^article\s*(body|content|text)$/i,
+      /guest\s*post/i,
+      /^blog\s*(post|content)$/i,
+      /^full\s*(article|content)$/i,
+    ],
+  },
+  {
+    role: 'keywords',
+    patterns: [
+      /^keywords?$/i,
+      /^meta\s*keywords?$/i,
+      /^seo\s*keywords?$/i,
+      /^listing\s*keywords?$/i,
+      /^tags?$/i,
+      /^key\s*words?$/i,
+    ],
+  },
+  {
     role: 'long_desc',
     patterns: [
       /^desc/i,
@@ -1185,23 +1242,35 @@ export function isSearchOrNavField(f: FormFieldFacts): boolean {
   if (f.type === 'search') return true;
   const name = (f.name ?? '').toLowerCase();
   const id = (f.id ?? '').toLowerCase();
-  if (/^(q|query|search|searchbox|search_term|searchterm|keywords?|keyword)$/i.test(name)) {
+  const blob = [f.label, f.ariaLabel, f.placeholder, f.name, f.id, f.surroundingText]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  // Listing meta Keywords / Tags are real submission fields — not site search.
+  if (
+    /\b(meta\s*keywords?|seo\s*keywords?|listing\s*keywords?|key\s*words?|\btags?\b)\b/i.test(
+      blob
+    ) ||
+    /^(keywords?|tags?|meta_?keywords?)$/i.test(name) ||
+    /^(keywords?|tags?|meta_?keywords?)$/i.test(id)
+  ) {
+    return false;
+  }
+
+  if (/^(q|query|search|searchbox|search_term|searchterm)$/i.test(name)) {
     return true;
   }
   if (/^(q|query|search|searchbox)(-|_|$)/i.test(id) || /^(q|query|search|searchbox)$/i.test(id)) {
     return true;
   }
-  const blob = [f.label, f.ariaLabel, f.placeholder, f.name, f.id, f.surroundingText]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
   if (/\b(search\s+this\s+site|site\s+search|search\s+…|search\s+\.\.\.)\b/i.test(blob)) {
     return true;
   }
   if (/\bsearch\b/i.test(blob) && !/\b(website|web\s*site|homepage|listing\s*url)\b/i.test(blob)) {
     return true;
   }
-  if (/\b(find|query|keywords?)\b/i.test(blob) && !/\b(website|business|company|listing)\b/i.test(blob)) {
+  if (/\b(find|query)\b/i.test(blob) && !/\b(website|business|company|listing)\b/i.test(blob)) {
     return true;
   }
   if (/role=["']search["']/i.test(f.surroundingText ?? '')) return true;
@@ -1927,6 +1996,12 @@ export type ContentSource = {
   shortDescription?: string | null;
   longDescription?: string | null;
   metaDescription?: string | null;
+  /** Further Company / Product / Service Information (up to ~1500 chars). */
+  furtherCompanyInfo?: string | null;
+  /** Full article / guest-post body for Article fields. */
+  articleBody?: string | null;
+  /** Comma-separated listing keywords from SEO bank (KW1/KW2). */
+  keywords?: string | null;
   businessName?: string | null;
   /** Company / trading name for business_name fields */
   companyName?: string | null;
@@ -1970,6 +2045,19 @@ export function valueForRole(role: FieldRole, content: ContentSource): string {
           content.metaDescription ||
           ''
       ).trim();
+    case 'further_info':
+      return String(
+        content.furtherCompanyInfo ||
+          content.articleBody ||
+          content.longDescription ||
+          ''
+      ).trim();
+    case 'article':
+      return String(
+        content.articleBody || content.furtherCompanyInfo || content.longDescription || ''
+      ).trim();
+    case 'keywords':
+      return String(content.keywords ?? '').trim();
     case 'url':
       return String(content.url ?? '').trim();
     case 'anchor': {
@@ -1999,6 +2087,27 @@ export function valueForRole(role: FieldRole, content: ContentSource): string {
     default:
       return '';
   }
+}
+
+/** Prefer 1500-char further info when the form field is clearly an extended textarea. */
+export function valueForMappedField(
+  field: { role: FieldRole; label?: string | null; maxlength?: number | null },
+  content: ContentSource
+): string {
+  const label = String(field.label ?? '');
+  if (
+    field.role === 'long_desc' &&
+    (/further\s+(company|product|service)/i.test(label) ||
+      (field.maxlength != null && field.maxlength >= 1000))
+  ) {
+    const extended = valueForRole('further_info', content);
+    if (extended) return extended;
+  }
+  if (field.role === 'long_desc' && /\barticle\b/i.test(label)) {
+    const article = valueForRole('article', content);
+    if (article) return article;
+  }
+  return valueForRole(field.role, content);
 }
 
 export function assignAssistedBucket(input: {
@@ -2138,6 +2247,21 @@ export function buildPasteReadyContent(
         content.longDescription || content.shortDescription || content.metaDescription || ''
       ).trim(),
     },
+    {
+      role: 'further_info',
+      label: 'Further company / product / service information',
+      value: String(content.furtherCompanyInfo ?? '').trim(),
+    },
+    {
+      role: 'article',
+      label: 'Article',
+      value: String(content.articleBody ?? '').trim(),
+    },
+    {
+      role: 'keywords',
+      label: 'Keywords',
+      value: String(content.keywords ?? '').trim(),
+    },
     { role: 'url', label: 'URL', value: String(content.url ?? '').trim() },
     { role: 'email', label: 'Email', value: String(content.email ?? '').trim() },
     { role: 'phone', label: 'Phone', value: String(content.phone ?? '').trim() },
@@ -2187,7 +2311,15 @@ export function buildAssistedPackage(input: {
     input.recipe.entryUrl;
 
   const PROFILE_ROLES = new Set(['url', 'email', 'phone', 'name', 'business_name', 'address']);
-  const CONTENT_ROLES = new Set(['title', 'short_desc', 'long_desc', 'anchor']);
+  const CONTENT_ROLES = new Set([
+    'title',
+    'short_desc',
+    'long_desc',
+    'further_info',
+    'article',
+    'keywords',
+    'anchor',
+  ]);
   const usedTitles = new Set<string>();
   const usedDescs = new Set<string>();
   const otherFields: NonNullable<AssistedPackagePayload['otherFields']> = [];
@@ -2257,7 +2389,7 @@ export function buildAssistedPackage(input: {
       continue;
     }
 
-    let raw = valueForRole(rf.role, input.content);
+    let raw = valueForMappedField(rf, input.content);
     // Phase 15 — reciprocal URL fields use campaign reciprocal setting when present
     if (
       rf.role === 'url' &&

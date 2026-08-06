@@ -10,6 +10,11 @@ import {
   dedupeContentFields,
   fitDescriptionToCap,
   fitMetaDescription,
+  fitFurtherCompanyInfo,
+  FURTHER_COMPANY_INFO_MAX,
+  pickKeywordsForOpportunity,
+  pickTitleDescriptionBlock,
+  listBankKeywordSamples,
   type BrandContext,
   type OpportunityAiContext,
 } from '@seo-os/backlink-builder';
@@ -51,6 +56,18 @@ function buildPrompt(params: {
   const brandUrl =
     params.brand.projectUrl ||
     (params.brand.projectDomain ? `https://${params.brand.projectDomain}` : '');
+  const seed = `${params.opp.domain ?? ''}:${params.opp.title ?? ''}:${params.storageType}`;
+  const bankBlock = pickTitleDescriptionBlock(seed);
+  const bankKeywords = pickKeywordsForOpportunity(seed, { maxKeywords: 8, maxChars: 220 });
+  const keywordSamples = listBankKeywordSamples(24).join('; ');
+  const bankSeedBlock = `
+SEO EXPERT BANK (must use — from approved KW1/KW2 + title-description sheet):
+- Preferred title seed: ${bankBlock?.title || '(pick a unique ChefGaa restaurant POS title)'}
+- Preferred H1 seed: ${bankBlock?.h1 || '(match title)'}
+- Preferred short description seed: ${bankBlock?.description || '(write a unique ≤200 char blurb)'}
+- Keywords for THIS listing (use exactly, comma-separated): ${bankKeywords || keywordSamples}
+- Other approved keyword ideas (do not dump all — stay on-theme): ${keywordSamples}
+`;
   const avoidBlock =
     params.avoidTexts && params.avoidTexts.length > 0
       ? `
@@ -92,19 +109,21 @@ TARGET SITE:
 - Backlink / storage type: ${params.storageType}
 - Classification: ${params.classificationLabel ?? params.storageType}
 - Analysis reason: ${params.reason ?? 'n/a'}
-${angleBlock}${avoidBlock}
+${bankSeedBlock}${angleBlock}${avoidBlock}
 Write ORIGINAL content tailored to this site type (directory blurb, forum reply, guest post, profile, Q&A, etc.).
 This package is for THIS site only — never reuse copy from another listing.
 
 Return ONLY a JSON object with:
 {
-  "seoTitle": string (45-60 chars, must include brand or product naturally),
+  "seoTitle": string (45-60 chars, must include brand or product naturally — prefer the bank title seed, lightly adapted),
   "metaDescription": string (120-155 chars, HARD MAX 160),
   "h1": string,
   "h2": string[3-5],
-  "body": string (markdown; guest_post 350-900 words; directory/forum/profile shorter),
-  "shortDescription": string (ONE sentence, 180-195 chars, HARD MAX 200 — never longer),
+  "body": string (markdown ARTICLE for article/guest_post forms: 350-900 words; for directory/forum/profile write a shorter useful article 120-250 words),
+  "shortDescription": string (ONE sentence, 180-195 chars, HARD MAX 200 — never longer; prefer bank description seed, rewritten uniquely),
   "longDescription": string (distinct from shortDescription, 180-195 chars, HARD MAX 200 — never longer),
+  "furtherCompanyInfo": string (Further Company / Product / Service Information — ${Math.floor(FURTHER_COMPANY_INFO_MAX * 0.75)}-${FURTHER_COMPANY_INFO_MAX} characters, HARD MAX ${FURTHER_COMPANY_INFO_MAX}. Detailed product/service overview for directory forms. Must be longer and richer than longDescription.),
+  "keywords": string (comma-separated; use the Keywords for THIS listing from the bank — do not invent unrelated terms),
   "businessDescription": string (≤200 chars, same rules),
   "businessName": string (exact brand name),
   "faq": [{"question": string, "answer": string}],
@@ -118,6 +137,9 @@ Rules:
 - Mention ${params.brand.brandName} and ${params.brand.projectDomain ?? brandUrl} naturally.
 - Base claims ONLY on the grounded website facts above. If features are empty, write a cautious, general description — NEVER invent third-party integrations (QuickBooks, Shopify, etc.) that are not listed.
 - shortDescription, longDescription, metaDescription, and excerpt must each be UNIQUE — title ≠ short ≠ long ≠ meta. Do not paste the same paragraph into multiple fields.
+- furtherCompanyInfo MUST be a distinct, longer block (up to ${FURTHER_COMPANY_INFO_MAX} chars) covering product/service details — not a copy of shortDescription.
+- body is the Article content — useful, original, on-brand.
+- keywords must come from the SEO expert bank list above.
 - Never use placeholders: "Our Brand", "Insight 1", "example.com", "{{", "Key Takeaways" scaffold lists.
 - Links must use https://${params.brand.projectDomain ?? 'the brand domain'} — never example.com.
 - Tone matches the site type (${params.storageType}).`;
@@ -180,7 +202,25 @@ export async function generateLiveContentPack(params: {
         reason: params.reason,
       }
     ) as unknown as Record<string, unknown>;
+    const seed = `${params.opp.domain ?? ''}:${params.opp.title ?? ''}:${params.storageType}`;
+    const bankBlock = pickTitleDescriptionBlock(seed);
+    const bankKeywords = pickKeywordsForOpportunity(seed);
+    if (bankBlock?.title) pack.seoTitle = bankBlock.title;
+    if (bankBlock?.description) {
+      pack.shortDescription = fitDescriptionToCap(bankBlock.description).value;
+      pack.metaDescription = fitMetaDescription(bankBlock.description);
+    }
+    pack.keywords = bankKeywords;
+    pack.furtherCompanyInfo = fitFurtherCompanyInfo(
+      String(pack.body ?? pack.longDescription ?? bankBlock?.description ?? '')
+    ).value;
+    pack.articleBody = String(pack.body ?? '');
     pack.generatedBy = 'mock_template';
+    pack.seoBankSeed = {
+      title: bankBlock?.title ?? null,
+      keywords: bankKeywords,
+      section: bankBlock?.section ?? null,
+    };
     return pack;
   }
 
@@ -229,20 +269,29 @@ export async function generateLiveContentPack(params: {
       const body = String(llm.body ?? '');
       const longFromLlm = String(llm.longDescription ?? '').trim();
       const shortFromLlm = String(llm.shortDescription ?? '').trim();
+      const seed = `${params.opp.domain ?? ''}:${params.opp.title ?? ''}:${params.storageType}`;
+      const bankBlock = pickTitleDescriptionBlock(seed);
+      const bankKeywords = pickKeywordsForOpportunity(seed);
+      const furtherRaw = String(
+        llm.furtherCompanyInfo ?? llm.businessDescription ?? body ?? ''
+      ).trim();
+      const keywordsRaw = String(llm.keywords ?? '').trim() || bankKeywords;
       const deduped = dedupeContentFields({
-        title: String(llm.seoTitle ?? ''),
-        shortDescription: shortFromLlm,
+        title: String(llm.seoTitle ?? bankBlock?.title ?? ''),
+        shortDescription: shortFromLlm || String(bankBlock?.description ?? ''),
         longDescription:
           longFromLlm || fitDescriptionToCap(body).value || shortFromLlm,
         metaDescription: String(llm.metaDescription ?? ''),
       });
+      const furtherCompanyInfo = fitFurtherCompanyInfo(furtherRaw).value;
       const pack: Record<string, unknown> = {
-        seoTitle: deduped.title,
+        seoTitle: deduped.title || bankBlock?.title || brandName,
         metaDescription: deduped.metaDescription || fitMetaDescription(deduped.shortDescription),
-        h1: String(llm.h1 ?? llm.seoTitle ?? ''),
+        h1: String(llm.h1 ?? bankBlock?.h1 ?? llm.seoTitle ?? ''),
         h2: Array.isArray(llm.h2) ? llm.h2.map(String) : [],
         slug,
         tags: [params.brand.industry ?? 'business', params.storageType].filter(Boolean),
+        keywords: keywordsRaw,
         faq: Array.isArray(llm.faq) ? llm.faq : [],
         schemaJsonLd: {
           '@context': 'https://schema.org',
@@ -257,8 +306,10 @@ export async function generateLiveContentPack(params: {
         suggestedImages: [],
         bodyOutline: body,
         body,
+        articleBody: body,
         shortDescription: deduped.shortDescription,
         longDescription: deduped.longDescription,
+        furtherCompanyInfo,
         businessDescription: fitDescriptionToCap(
           String(llm.businessDescription ?? deduped.longDescription)
         ).value,
@@ -272,6 +323,11 @@ export async function generateLiveContentPack(params: {
         imageMetadata: [],
         videoMetadata: [],
         backlinkType: params.storageType,
+        seoBankSeed: {
+          title: bankBlock?.title ?? null,
+          keywords: bankKeywords,
+          section: bankBlock?.section ?? null,
+        },
         generationStatus: {
           images: 'pending_provider',
           video: 'n/a',

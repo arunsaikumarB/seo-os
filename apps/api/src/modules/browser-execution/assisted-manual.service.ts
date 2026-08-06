@@ -23,6 +23,9 @@ import {
   extractTargetFormFieldFacts,
   fieldFactSnapshot,
   fitDescriptionToCap,
+  fitFurtherCompanyInfo,
+  pickKeywordsForOpportunity,
+  pickTitleDescriptionBlock,
   formUnavailableMessage,
   htmlHasFormElement,
   looksLikeSpaShell,
@@ -617,11 +620,20 @@ async function loadContentForOpportunity(workspaceId: string, opportunityId: str
     shortRaw ||
     String(brand.tagline ?? '').trim() ||
     longDesc.slice(0, 160);
+  const seed = `${opportunityId}:${String(p.seoTitle ?? '')}:${workspaceId}`;
+  const bankBlock = pickTitleDescriptionBlock(seed);
+  const bankKeywords = pickKeywordsForOpportunity(seed);
   const deduped = dedupeContentFields({
     title: String(
-      p.seoTitle ?? p.headline ?? p.businessName ?? brand.brandName ?? projectDomain ?? ''
+      p.seoTitle ??
+        p.headline ??
+        bankBlock?.title ??
+        p.businessName ??
+        brand.brandName ??
+        projectDomain ??
+        ''
     ),
-    shortDescription: shortDesc,
+    shortDescription: shortDesc || String(bankBlock?.description ?? ''),
     longDescription: longDesc,
     metaDescription: meta || shortDesc,
   });
@@ -639,11 +651,20 @@ async function loadContentForOpportunity(workspaceId: string, opportunityId: str
     resolveProjectListingUrl(p, projectDomain) ||
     (projectDomain ? `https://${projectDomain}` : '');
 
+  const articleBody = String(p.articleBody ?? p.body ?? '').trim();
+  const furtherCompanyInfo = fitFurtherCompanyInfo(
+    String(p.furtherCompanyInfo ?? articleBody ?? brandFallbackLong)
+  ).value;
+  const keywords = String(p.keywords ?? '').trim() || bankKeywords;
+
   return {
     title,
     shortDescription: fitDescriptionToCap(deduped.shortDescription || shortDesc).value,
     longDescription: fitDescriptionToCap(deduped.longDescription || longDesc).value,
     metaDescription: deduped.metaDescription || shortDesc,
+    furtherCompanyInfo,
+    articleBody: articleBody || furtherCompanyInfo,
+    keywords,
     businessName,
     companyName: String(
       brand.companyName || p.businessName || brand.brandName || businessName || ''
