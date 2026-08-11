@@ -56,7 +56,8 @@ SUPABASE_JWT_SECRET=<from: supabase status>
 DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres
 CORS_ORIGIN=http://localhost:5173
 PROVIDER_MODE=mvp
-ENABLE_WORKERS=false
+# true = Link Probe / submit queues run (required for AI Review → Approve)
+ENABLE_WORKERS=true
 ```
 
 ### `apps/web/.env`

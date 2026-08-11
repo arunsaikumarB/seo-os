@@ -630,10 +630,42 @@ export async function bulkAiReviewAction(
   action: AiReviewBulkAction,
   itemIds: string[]
 ) {
-  const before = await getAiReviewBoard(workspaceId);
-  const byId = new Map(before.items.map((i) => [i.id, i]));
-  const fullItems = await listCampaignItems(workspaceId, { includeDeleted: false });
-  const byFull = new Map(fullItems.map((i) => [i.id, i]));
+  let before = await getAiReviewBoard(workspaceId);
+  let byId = new Map(before.items.map((i) => [i.id, i]));
+  let fullItems = await listCampaignItems(workspaceId, { includeDeleted: false });
+  let byFull = new Map(fullItems.map((i) => [i.id, i]));
+
+  // Approve requires Link Probe. If workers were off during import, sites stay
+  // unprobed forever — run a sync batch for selected unprobed IDs first.
+  if (action === 'approve' && itemIds.length > 0) {
+    const needProbe = itemIds.filter((id) => {
+      const full = byFull.get(id);
+      if (!full) return false;
+      const meta =
+        typeof full.raw?.metadata === 'object' && full.raw.metadata
+          ? (full.raw.metadata as Record<string, unknown>)
+          : {};
+      return !canApproveAfterProbe(meta).ok && !metadataDisqualifiesSubmission(meta);
+    });
+    if (needProbe.length > 0) {
+      try {
+        const { runLinkProbeBatch } = await import('../backlinks/link-probe.service.js');
+        await runLinkProbeBatch({
+          workspaceId,
+          opportunityIds: needProbe,
+          limit: Math.min(needProbe.length, 50),
+          force: false,
+        });
+        before = await getAiReviewBoard(workspaceId);
+        byId = new Map(before.items.map((i) => [i.id, i]));
+        fullItems = await listCampaignItems(workspaceId, { includeDeleted: false });
+        byFull = new Map(fullItems.map((i) => [i.id, i]));
+      } catch (err) {
+        console.warn('[AI Review] sync link probe before approve failed', err);
+      }
+    }
+  }
+
   let succeeded = 0;
   let skipped = 0;
   let movedToRecommended = 0;

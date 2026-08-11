@@ -162,16 +162,15 @@ export function ClassificationDashboardPage() {
         parts.push(`${d.succeeded} ${vars.action === 'approve' ? 'approved' : vars.action}`);
       }
       if (d.skipped) {
-        parts.push(
-          `${d.skipped} skipped${
-            d.skipReasons[0]?.includes('classification')
-              ? ' — need classification first'
-              : ''
-          }`
-        );
+        const first = d.skipReasons[0]
+          ? ` — ${d.skipReasons[0].replace(/^[^:]+:\s*/, '')}`
+          : '';
+        parts.push(`${d.skipped} skipped${first}`);
       }
       if (d.errors.length) parts.push(`${d.errors.length} errors`);
-      toast.success(parts.join(', '));
+      const msg = parts.join(', ');
+      if (d.succeeded === 0 && d.skipped > 0) toast.error(msg);
+      else toast.success(msg);
       setSelected(new Set());
       if (moved > 0) setFilter('recommended');
       if (d.board) applyBoard(d.board);
@@ -406,6 +405,14 @@ export function ClassificationDashboardPage() {
               <span>Pending Analysis: {summary.pending}</span>
             </CardContent>
           </Card>
+
+          {(summary.pending ?? 0) > 0 ? (
+            <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-100">
+              <strong>Pending Analysis ({summary.pending}):</strong> Approve stays locked until Link
+              Probe checks each site for a free submission form. Select rows →{' '}
+              <strong>Approve Selected</strong> (runs probe first), or wait for background workers.
+            </div>
+          ) : null}
 
           <div className="flex flex-wrap gap-2">
             {(
