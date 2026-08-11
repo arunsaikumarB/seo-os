@@ -57,15 +57,16 @@ export function generateDirectoryDescription(
   brand: BrandContext
 ): string {
   const site = ctx.website_name ?? ctx.domain ?? 'this directory';
+  const topic = ctx.title || brand.industry || 'business tools';
   return `${voicePrefix(brand)}
 
-${brand.brandName} — ${brand.industry ?? 'Industry leader'} offering trusted solutions.
+${brand.brandName} — ${brand.industry ?? 'Industry leader'} for the ${site} directory.
 
 Short description (150 chars):
-${brand.brandName} provides expert ${brand.industry ?? 'services'} for ${site} readers.
+${brand.brandName} helps ${site} visitors evaluate ${topic} with clear ${brand.industry ?? 'service'} value.
 
 Long description:
-${brand.brandName} is a recognized name in ${brand.industry ?? 'the industry'}, serving customers through ${brand.projectDomain ?? 'our website'}. We welcome directory listings that help users discover quality resources.${knowledgeBlock(brand)}`;
+${brand.brandName} is listing on ${site} (${ctx.domain ?? 'n/a'}) so ${brand.industry ?? 'industry'} buyers can discover practical solutions at ${brand.projectDomain ?? 'our website'}. Copy is written for this directory form, not a generic blurb reused across sites.${knowledgeBlock(brand)}`;
 }
 
 export function generateProfileDescription(ctx: OpportunityAiContext, brand: BrandContext): string {

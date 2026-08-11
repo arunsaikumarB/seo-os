@@ -15,6 +15,9 @@ import {
   pickKeywordsForOpportunity,
   pickTitleDescriptionBlock,
   listBankKeywordSamples,
+  pickBankIndex,
+  textSimilarity,
+  CONTENT_SIMILARITY_THRESHOLD,
   type BrandContext,
   type OpportunityAiContext,
 } from '@seo-os/backlink-builder';
@@ -51,15 +54,21 @@ function buildPrompt(params: {
   /** Concrete feature/fact this site's copy must lead with (rotated per opportunity). */
   featureEmphasis?: string | null;
   openingAngle?: string | null;
+  websiteUrl?: string | null;
+  requiredFields?: string[];
+  formHints?: string | null;
 }): string {
   const site = params.opp.website_name || params.opp.domain || 'the target site';
   const brandUrl =
     params.brand.projectUrl ||
     (params.brand.projectDomain ? `https://${params.brand.projectDomain}` : '');
-  const seed = `${params.opp.domain ?? ''}:${params.opp.title ?? ''}:${params.storageType}`;
+  const seed = `${params.opp.domain ?? ''}:${params.websiteUrl ?? ''}:${params.opp.title ?? ''}:${params.storageType}`;
   const bankBlock = pickTitleDescriptionBlock(seed);
   const bankKeywords = pickKeywordsForOpportunity(seed, { maxKeywords: 8, maxChars: 220 });
   const keywordSamples = listBankKeywordSamples(24).join('; ');
+  const fields =
+    params.requiredFields?.filter(Boolean).slice(0, 20).join(', ') ||
+    'title, description, url, keywords, email';
   const bankSeedBlock = `
 SEO EXPERT BANK (must use — from approved KW1/KW2 + title-description sheet):
 - Preferred title seed: ${bankBlock?.title || '(pick a unique ChefGaa restaurant POS title)'}
@@ -67,6 +76,15 @@ SEO EXPERT BANK (must use — from approved KW1/KW2 + title-description sheet):
 - Preferred short description seed: ${bankBlock?.description || '(write a unique ≤200 char blurb)'}
 - Keywords for THIS listing (use exactly, comma-separated): ${bankKeywords || keywordSamples}
 - Other approved keyword ideas (do not dump all — stay on-theme): ${keywordSamples}
+`;
+  const formBlock = `
+TARGET FORM (study and write fields for THIS site only — not a generic blurb):
+- Submit URL: ${params.websiteUrl || params.opp.domain || 'unknown'}
+- Site name: ${site}
+- Detected / required form fields: ${fields}
+- Form / site hints: ${params.formHints || params.reason || 'n/a'}
+- Match tone to a ${params.classificationLabel ?? params.storageType} submission (directory vs guest post vs profile vs forum).
+- shortDescription / longDescription / furtherCompanyInfo must map cleanly onto typical Title / Description / Further Info fields on this form.
 `;
   const avoidBlock =
     params.avoidTexts && params.avoidTexts.length > 0
@@ -83,6 +101,7 @@ PER-SITE ANGLE (mandatory — this package must not read like any other listing)
 - Target site type: ${params.classificationLabel ?? params.storageType}
 - Lead with this real website fact/feature: ${params.featureEmphasis || '(use a different grounded topic than other listings)'}
 - Opening approach: ${params.openingAngle || 'different problem → capability framing'}
+- Name the target site (${site}) naturally so the listing is clearly written for that form.
 - Different opening sentence, different feature emphasis, different phrasing from every other site.
 `;
   return `You are writing backlink submission content for a real marketing campaign.
@@ -105,12 +124,13 @@ GROUNDED FACTS FROM THE REAL WEBSITE (must drive titles/descriptions — do not 
 TARGET SITE:
 - Name: ${site}
 - Domain: ${params.opp.domain ?? 'unknown'}
+- Submit URL: ${params.websiteUrl || 'unknown'}
 - Opportunity title: ${params.opp.title}
 - Backlink / storage type: ${params.storageType}
 - Classification: ${params.classificationLabel ?? params.storageType}
 - Analysis reason: ${params.reason ?? 'n/a'}
-${bankSeedBlock}${angleBlock}${avoidBlock}
-Write ORIGINAL content tailored to this site type (directory blurb, forum reply, guest post, profile, Q&A, etc.).
+${formBlock}${bankSeedBlock}${angleBlock}${avoidBlock}
+Write ORIGINAL content tailored to this site's form and type (directory blurb, forum reply, guest post, profile, Q&A, etc.).
 This package is for THIS site only — never reuse copy from another listing.
 
 Return ONLY a JSON object with:
@@ -183,8 +203,13 @@ type LiveGenParams = {
   uniquenessAttempt?: number;
   featureEmphasis?: string | null;
   openingAngle?: string | null;
+  opportunityId?: string | null;
+  websiteUrl?: string | null;
+  requiredFields?: string[];
+  formHints?: string | null;
 };
 
+/** Local/mvp path: unique per target URL + form fields (not one shared brand blurb). */
 function buildMockContentPack(params: LiveGenParams): Record<string, unknown> {
   const pack = generateContentPack(
     params.storageType,
@@ -197,25 +222,129 @@ function buildMockContentPack(params: LiveGenParams): Record<string, unknown> {
       allowMockFallback: true,
     }
   ) as unknown as Record<string, unknown>;
-  const seed = `${params.opp.domain ?? ''}:${params.opp.title ?? ''}:${params.storageType}`;
-  const bankBlock = pickTitleDescriptionBlock(seed);
-  const bankKeywords = pickKeywordsForOpportunity(seed);
-  if (bankBlock?.title) pack.seoTitle = bankBlock.title;
-  if (bankBlock?.description) {
-    pack.shortDescription = fitDescriptionToCap(bankBlock.description).value;
-    pack.metaDescription = fitMetaDescription(bankBlock.description);
+
+  const site = String(params.opp.website_name || params.opp.domain || 'this listing site');
+  const domain = String(params.opp.domain || 'unknown').replace(/^www\./, '');
+  const submitUrl = String(params.websiteUrl || (domain !== 'unknown' ? `https://${domain}` : ''));
+  const brandName = String(params.brand.brandName || 'Our company');
+  const brandDomain = String(params.brand.projectDomain || 'example.com');
+  const industry = String(params.brand.industry || 'professional services');
+  const typeLabel = String(params.classificationLabel || params.storageType || 'directory');
+  const fields =
+    params.requiredFields?.filter(Boolean).slice(0, 16) ??
+    ['title', 'description', 'url', 'keywords', 'email'];
+  const features = (params.brand.keyFeatures ?? []).map(String).filter(Boolean);
+  const attempt = params.uniquenessAttempt ?? 1;
+  const avoid = params.avoidTexts ?? [];
+
+  let bankBlock = pickTitleDescriptionBlock(`${domain}:${submitUrl}`);
+  let bankKeywords = '';
+  let seoTitle = '';
+  let shortDescription = '';
+  let longDescription = '';
+  let furtherCompanyInfo = '';
+  let body = '';
+  let metaDescription = '';
+
+  for (let offset = 0; offset < 28; offset++) {
+    const seed = `${params.opportunityId ?? ''}:${domain}:${submitUrl}:${typeLabel}:a${attempt}:o${offset}`;
+    bankBlock = pickTitleDescriptionBlock(seed);
+    bankKeywords = pickKeywordsForOpportunity(seed, { maxKeywords: 8, maxChars: 220 });
+
+    const feature =
+      params.featureEmphasis ||
+      (features.length ? features[pickBankIndex(`${seed}:feat`, features.length)]! : `${industry} solutions`);
+    const angle = params.openingAngle || 'problem-solution';
+    const openers = [
+      `Built for operators discovering ${brandName} on ${site}`,
+      `${site} readers evaluating ${industry} tools get a clear fit with ${brandName}`,
+      `Listing on ${site}: ${brandName} leads with ${feature}`,
+      `${brandName} is a practical ${industry} pick for the ${site} audience`,
+      `For this ${typeLabel} form on ${domain}, ${brandName} highlights ${feature}`,
+      `Submit-ready for ${site} — ${brandName} focuses on ${feature}`,
+    ];
+    const opener = openers[pickBankIndex(`${seed}:opener`, openers.length)]!;
+
+    seoTitle = `${bankBlock?.title || `${brandName} — ${feature}`} · ${site}`.slice(0, 70);
+    shortDescription = fitDescriptionToCap(
+      `${opener}. ${bankBlock?.description || `${brandName} helps growing ${industry} teams.`}`.trim()
+    ).value;
+    longDescription = fitDescriptionToCap(
+      `${brandName} (https://${brandDomain}) — ${feature}. Written for the ${typeLabel} submission on ${domain} using a ${angle.replace(/-/g, ' ')} angle.`.trim()
+    ).value;
+    if (textSimilarity(shortDescription, longDescription) >= 0.75) {
+      longDescription = fitDescriptionToCap(
+        `Why ${site}? ${brandName} brings ${feature} to ${industry} teams who need reliable day-to-day results at https://${brandDomain}.`
+      ).value;
+    }
+    metaDescription = fitMetaDescription(
+      `${brandName} on ${site}: ${feature}. ${industry} teams — https://${brandDomain}`
+    );
+
+    furtherCompanyInfo = fitFurtherCompanyInfo(
+      [
+        `${brandName} is preparing a unique ${typeLabel} package for ${site} (${submitUrl || domain}).`,
+        `Form fields covered: ${fields.join(', ')}.`,
+        `Lead feature: ${feature}. Opening style: ${angle.replace(/-/g, ' ')}.`,
+        params.formHints || params.reason || '',
+        bankBlock?.description || '',
+        ...features.slice(0, 5).map((f) => `Capability: ${f}.`),
+        `Product URL: https://${brandDomain}. This copy is specific to ${domain} and must not match other campaign listings.`,
+      ]
+        .filter(Boolean)
+        .join(' ')
+    ).value;
+
+    body = [
+      `# ${seoTitle}`,
+      ``,
+      `## Why this fits ${site}`,
+      `${opener}. This ${typeLabel} listing is written for the form at ${submitUrl || domain}.`,
+      ``,
+      `## What ${brandName} offers`,
+      ...(features.slice(0, 5).length
+        ? features.slice(0, 5).map((f, i) => `${i + 1}. ${f}`)
+        : [`1. Practical ${industry} capabilities for growing teams.`]),
+      ``,
+      `## Form-ready details`,
+      `Prepared fields: ${fields.join(', ')}.`,
+      `Keywords: ${bankKeywords}.`,
+      ``,
+      `Visit https://${brandDomain} for full product context.`,
+    ].join('\n');
+
+    const candidate = longDescription || shortDescription;
+    const tooClose = avoid.some(
+      (prev) => textSimilarity(candidate, prev) >= CONTENT_SIMILARITY_THRESHOLD
+    );
+    if (!tooClose) break;
   }
-  pack.keywords = bankKeywords;
-  pack.furtherCompanyInfo = fitFurtherCompanyInfo(
-    String(pack.body ?? pack.longDescription ?? bankBlock?.description ?? '')
+
+  pack.seoTitle = seoTitle;
+  pack.h1 = bankBlock?.h1 || seoTitle;
+  pack.shortDescription = shortDescription;
+  pack.longDescription = longDescription;
+  pack.metaDescription = metaDescription;
+  pack.businessDescription = fitDescriptionToCap(
+    `${brandName} for ${site}: ${params.featureEmphasis || industry} at https://${brandDomain}.`
   ).value;
-  pack.articleBody = String(pack.body ?? '');
-  pack.generatedBy = 'mock_template';
+  pack.keywords = bankKeywords;
+  pack.furtherCompanyInfo = furtherCompanyInfo;
+  pack.body = body;
+  pack.articleBody = body;
+  pack.bodyOutline = body;
+  pack.excerpt = shortDescription;
+  pack.targetSite = site;
+  pack.targetDomain = domain;
+  pack.targetUrl = submitUrl;
+  pack.formFields = fields;
+  pack.generatedBy = 'mock_template_unique';
   pack.seoBankSeed = {
     title: bankBlock?.title ?? null,
     keywords: bankKeywords,
     section: bankBlock?.section ?? null,
   };
+  pack.quality = scoreLivePack(pack, brandName);
   return pack;
 }
 
@@ -249,6 +378,9 @@ export async function generateLiveContentPack(
     uniquenessAttempt: params.uniquenessAttempt,
     featureEmphasis: params.featureEmphasis,
     openingAngle: params.openingAngle,
+    websiteUrl: params.websiteUrl,
+    requiredFields: params.requiredFields,
+    formHints: params.formHints,
   });
 
   const messages = [

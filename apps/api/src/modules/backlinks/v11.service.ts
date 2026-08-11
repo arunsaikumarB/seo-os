@@ -441,9 +441,33 @@ export async function createContentPack(
   let contentTooSimilar = false;
   let closest = 0;
   for (let attempt = 1; attempt <= CONTENT_SIMILARITY_MAX_ATTEMPTS; attempt++) {
+    const oppMeta =
+      typeof opp.metadata === 'object' && opp.metadata
+        ? (opp.metadata as Record<string, unknown>)
+        : {};
+    const linkProbe =
+      typeof oppMeta.linkProbe === 'object' && oppMeta.linkProbe
+        ? (oppMeta.linkProbe as Record<string, unknown>)
+        : {};
+    const probeFields = Array.isArray(linkProbe.formFields)
+      ? (linkProbe.formFields as unknown[]).map(String)
+      : Array.isArray(linkProbe.fields)
+        ? (linkProbe.fields as unknown[]).map(String)
+        : [];
+    const requiredFields = [
+      ...new Set([...(plan.requirements?.requiredFields ?? []), ...probeFields]),
+    ].filter(Boolean);
+
     pack = (await generateLiveContentPack({
       workspaceId,
       storageType,
+      opportunityId,
+      websiteUrl: String(opp.url ?? ''),
+      requiredFields,
+      formHints:
+        plan.reason ||
+        (typeof linkProbe.summary === 'string' ? linkProbe.summary : null) ||
+        (typeof linkProbe.band === 'string' ? `probe band: ${linkProbe.band}` : null),
       opp: {
         title: String(opp.title),
         domain: opp.domain as string | null,
@@ -629,7 +653,7 @@ export async function enforceWorkspaceContentUniqueness(workspaceId: string): Pr
     const { featureEmphasis, openingAngle } = pickFeatureEmphasis(brand, later.opportunityId);
     const { data: opp } = await getSupabaseAdmin()
       .from('opportunities')
-      .select('title, domain, website_name, score, opportunity_type')
+      .select('title, domain, website_name, score, opportunity_type, url, metadata')
       .eq('id', later.opportunityId)
       .eq('workspace_id', workspaceId)
       .maybeSingle();
@@ -642,6 +666,9 @@ export async function enforceWorkspaceContentUniqueness(workspaceId: string): Pr
       nextPack = (await generateLiveContentPack({
         workspaceId,
         storageType: later.backlinkType,
+        opportunityId: later.opportunityId,
+        websiteUrl: String(opp.url ?? ''),
+        formHints: `uniqueness repair for ${opp.domain ?? later.opportunityId}`,
         opp: {
           title: String(opp.title),
           domain: opp.domain as string | null,
