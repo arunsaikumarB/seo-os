@@ -234,8 +234,66 @@ export function ContentLibraryPage() {
   const metaCount = generationAudit?.metadata.generated ?? pkgCount;
   const videoCount = generationAudit?.videoMetadata.generated ?? pkgCount;
 
+  const reviewSelectedCount = [...selected].filter((id) =>
+    reviewQueue.some((r) => r.id === id)
+  ).length;
+
   const reviewPanel = (
-    <div className="overflow-x-auto rounded-xl border border-border/40">
+    <div className="space-y-2">
+      {reviewSelectedCount > 0 ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border/40 bg-muted/20 px-3 py-2.5">
+          <span className="text-sm font-medium tabular-nums mr-1">
+            {reviewSelectedCount} selected
+          </span>
+          <Button
+            size="sm"
+            disabled={bulk.isPending}
+            onClick={() =>
+              bulk.mutate({
+                action: 'approve_selected',
+                itemIds: [...selected].filter((id) => reviewQueue.some((r) => r.id === id)),
+              })
+            }
+          >
+            Approve Selected
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={bulk.isPending}
+            onClick={() =>
+              bulk.mutate({
+                action: 'generate_selected',
+                itemIds: [...selected].filter((id) => reviewQueue.some((r) => r.id === id)),
+              })
+            }
+          >
+            Regenerate Selected
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={bulk.isPending}
+            onClick={() =>
+              bulk.mutate({
+                action: 'reject_selected',
+                itemIds: [...selected].filter((id) => reviewQueue.some((r) => r.id === id)),
+              })
+            }
+          >
+            Reject Selected
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={bulk.isPending}
+            onClick={() => setSelected(new Set())}
+          >
+            Clear
+          </Button>
+        </div>
+      ) : null}
+      <div className="overflow-x-auto rounded-xl border border-border/40">
       <table className="w-full text-sm">
         <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
           <tr>
@@ -370,6 +428,7 @@ export function ContentLibraryPage() {
           })}
         </tbody>
       </table>
+      </div>
     </div>
   );
 
