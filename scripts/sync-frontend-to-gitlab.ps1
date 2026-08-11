@@ -46,7 +46,7 @@ try {
 
   git checkout $srcCommit -- apps/web packages/shared package.json package-lock.json turbo.json tsconfig.base.json
   if ($LASTEXITCODE -ne 0) { throw "Failed to restore frontend paths from $srcCommit" }
-  if (-not (Test-Path "apps/web/package.json")) { throw "apps/web missing after checkout — aborting push" }
+  if (-not (Test-Path "apps/web/package.json")) { throw "apps/web missing after checkout; aborting push" }
 
   if (Test-Path apps/api) { Remove-Item -Recurse -Force apps/api }
   if (Test-Path apps/companion) { Remove-Item -Recurse -Force apps/companion }

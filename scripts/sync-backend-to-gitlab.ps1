@@ -58,8 +58,8 @@ try {
     turbo.json `
     tsconfig.base.json
   if ($LASTEXITCODE -ne 0) { throw "Failed to restore backend paths from $srcCommit" }
-  if (-not (Test-Path "apps/api/package.json")) { throw "apps/api missing after checkout — aborting push" }
-  if (-not (Test-Path "package.json")) { throw "package.json missing after checkout — aborting push" }
+  if (-not (Test-Path "apps/api/package.json")) { throw "apps/api missing after checkout; aborting push" }
+  if (-not (Test-Path "package.json")) { throw "package.json missing after checkout; aborting push" }
 
   if (Test-Path apps/web) { Remove-Item -Recurse -Force apps/web }
   if (Test-Path apps/companion) { Remove-Item -Recurse -Force apps/companion }
