@@ -67,9 +67,11 @@ export function generateContentPack(
     workflowQueue?: string | null;
     confidence?: number | null;
     reason?: string | null;
+    /** Explicit local/mvp fallback path — do not use for silent production defaults. */
+    allowMockFallback?: boolean;
   } = {}
 ): ContentPackPayload {
-  if (!isGenerationMockEnabled()) {
+  if (!isGenerationMockEnabled() && !opts.allowMockFallback) {
     throw new Error(
       'Silent template generateContentPack is disabled. Set GENERATION_MOCK=true for local mock only, or use LLM generation.'
     );

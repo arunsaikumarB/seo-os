@@ -1,6 +1,6 @@
 /**
  * Phase 5.6/5.8 — Real LLM content pack generation with provider selection + failover.
- * Templates are ONLY used when GENERATION_MOCK=true.
+ * Templates when GENERATION_MOCK=true, or as a local/mvp fallback when no LLM works.
  */
 import {
   generateContentPack,
@@ -171,10 +171,7 @@ function scoreLivePack(pack: Record<string, unknown>, brandName: string): Record
   };
 }
 
-/**
- * Generate a content pack via selected/failover LLM providers.
- */
-export async function generateLiveContentPack(params: {
+type LiveGenParams = {
   workspaceId: string;
   storageType: string;
   opp: OpportunityAiContext;
@@ -186,42 +183,60 @@ export async function generateLiveContentPack(params: {
   uniquenessAttempt?: number;
   featureEmphasis?: string | null;
   openingAngle?: string | null;
-}): Promise<Record<string, unknown>> {
+};
+
+function buildMockContentPack(params: LiveGenParams): Record<string, unknown> {
+  const pack = generateContentPack(
+    params.storageType,
+    params.opp,
+    params.brand,
+    {
+      classificationId: params.classificationId,
+      classificationLabel: params.classificationLabel,
+      reason: params.reason,
+      allowMockFallback: true,
+    }
+  ) as unknown as Record<string, unknown>;
+  const seed = `${params.opp.domain ?? ''}:${params.opp.title ?? ''}:${params.storageType}`;
+  const bankBlock = pickTitleDescriptionBlock(seed);
+  const bankKeywords = pickKeywordsForOpportunity(seed);
+  if (bankBlock?.title) pack.seoTitle = bankBlock.title;
+  if (bankBlock?.description) {
+    pack.shortDescription = fitDescriptionToCap(bankBlock.description).value;
+    pack.metaDescription = fitMetaDescription(bankBlock.description);
+  }
+  pack.keywords = bankKeywords;
+  pack.furtherCompanyInfo = fitFurtherCompanyInfo(
+    String(pack.body ?? pack.longDescription ?? bankBlock?.description ?? '')
+  ).value;
+  pack.articleBody = String(pack.body ?? '');
+  pack.generatedBy = 'mock_template';
+  pack.seoBankSeed = {
+    title: bankBlock?.title ?? null,
+    keywords: bankKeywords,
+    section: bankBlock?.section ?? null,
+  };
+  return pack;
+}
+
+function allowMockFallback(): boolean {
+  if (isGenerationMockEnabled()) return true;
+  if (String(process.env.PROVIDER_MODE ?? '').toLowerCase() === 'mvp') return true;
+  return String(process.env.NODE_ENV ?? '').toLowerCase() === 'development';
+}
+
+/**
+ * Generate a content pack via selected/failover LLM providers.
+ */
+export async function generateLiveContentPack(
+  params: LiveGenParams
+): Promise<Record<string, unknown>> {
   if (isGenerationMockEnabled()) {
     logger.warn(
       { workspaceId: params.workspaceId },
       'GENERATION_MOCK=true — using template path (NOT for production)'
     );
-    const pack = generateContentPack(
-      params.storageType,
-      params.opp,
-      params.brand,
-      {
-        classificationId: params.classificationId,
-        classificationLabel: params.classificationLabel,
-        reason: params.reason,
-      }
-    ) as unknown as Record<string, unknown>;
-    const seed = `${params.opp.domain ?? ''}:${params.opp.title ?? ''}:${params.storageType}`;
-    const bankBlock = pickTitleDescriptionBlock(seed);
-    const bankKeywords = pickKeywordsForOpportunity(seed);
-    if (bankBlock?.title) pack.seoTitle = bankBlock.title;
-    if (bankBlock?.description) {
-      pack.shortDescription = fitDescriptionToCap(bankBlock.description).value;
-      pack.metaDescription = fitMetaDescription(bankBlock.description);
-    }
-    pack.keywords = bankKeywords;
-    pack.furtherCompanyInfo = fitFurtherCompanyInfo(
-      String(pack.body ?? pack.longDescription ?? bankBlock?.description ?? '')
-    ).value;
-    pack.articleBody = String(pack.body ?? '');
-    pack.generatedBy = 'mock_template';
-    pack.seoBankSeed = {
-      title: bankBlock?.title ?? null,
-      keywords: bankKeywords,
-      section: bankBlock?.section ?? null,
-    };
-    return pack;
+    return buildMockContentPack(params);
   }
 
   const prompt = buildPrompt({
@@ -375,6 +390,18 @@ export async function generateLiveContentPack(params: {
   }
 
   const chainSuffix = lastChain ? ` [${lastChain}]` : '';
+  if (allowMockFallback()) {
+    logger.warn(
+      {
+        workspaceId: params.workspaceId,
+        err: lastErr?.message,
+        chain: lastChain || undefined,
+      },
+      'LLM unavailable — falling back to template content pack (local/mvp)'
+    );
+    return buildMockContentPack(params);
+  }
+
   throw Object.assign(
     new Error(
       lastErr?.message

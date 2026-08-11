@@ -12,7 +12,10 @@ export const apiEnvSchema = z.object({
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
   ENCRYPTION_KEY: z.string().optional(),
   GEMINI_API_KEY: z.string().optional(),
-  OLLAMA_BASE_URL: z.string().url().optional(),
+  OLLAMA_BASE_URL: z
+    .union([z.string().url(), z.literal('')])
+    .optional()
+    .transform((v) => (v ? v : undefined)),
   PROVIDER_MODE: z.enum(['mvp', 'free', 'paid']).default('mvp'),
   ENABLE_WORKERS: z
     .string()

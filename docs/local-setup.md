@@ -58,7 +58,13 @@ CORS_ORIGIN=http://localhost:5173
 PROVIDER_MODE=mvp
 # true = Link Probe / submit queues run (required for AI Review → Approve)
 ENABLE_WORKERS=true
+# true = Generate Content uses templates + keyword bank (no Gemini/Ollama needed)
+GENERATION_MOCK=true
+GEMINI_API_KEY=
+OLLAMA_ENABLED=false
+# OLLAMA_BASE_URL=http://localhost:11434
 ```
+
 
 ### `apps/web/.env`
 

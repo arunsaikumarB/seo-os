@@ -65,7 +65,12 @@ function envConfigured(providerKey: string): boolean {
     case 'llm.openai':
       return Boolean(process.env.OPENAI_API_KEY);
     case 'llm.ollama':
-      return Boolean(process.env.OLLAMA_BASE_URL);
+      // Require explicit enable — a stale OLLAMA_BASE_URL alone caused long timeouts
+      // when Ollama was not running locally.
+      return (
+        Boolean(process.env.OLLAMA_BASE_URL) &&
+        String(process.env.OLLAMA_ENABLED ?? '').toLowerCase() === 'true'
+      );
     case 'llm.deepseek':
       return Boolean(process.env.DEEPSEEK_API_KEY);
     case 'llm.openrouter':
