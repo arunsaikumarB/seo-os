@@ -15,16 +15,24 @@ Set-Location $RepoRoot
 
 $wt = Join-Path $env:TEMP "ba-frontend-push"
 if (Test-Path $wt) {
-  git worktree remove -f $wt 2>$null
+  $prevEap = $ErrorActionPreference
+  $ErrorActionPreference = "SilentlyContinue"
+  git worktree remove -f $wt | Out-Null
+  $ErrorActionPreference = $prevEap
   Remove-Item -Recurse -Force $wt -ErrorAction SilentlyContinue
 }
 
-  git worktree add --detach $wt HEAD
+git worktree add --detach $wt HEAD
 Push-Location $wt
 try {
-  git branch -D ba-frontend-sync 2>$null | Out-Null
+  $prevEap = $ErrorActionPreference
+  $ErrorActionPreference = "SilentlyContinue"
+  git branch -D ba-frontend-sync | Out-Null
+  $ErrorActionPreference = $prevEap
   git checkout --orphan ba-frontend-sync
-  git rm -rf --cached . 2>$null | Out-Null
+  $ErrorActionPreference = "SilentlyContinue"
+  git rm -rf --cached . | Out-Null
+  $ErrorActionPreference = $prevEap
   Get-ChildItem -Force | Where-Object { $_.Name -ne ".git" } | Remove-Item -Recurse -Force
 
   git checkout HEAD -- apps/web packages/shared package.json package-lock.json turbo.json tsconfig.base.json
@@ -66,7 +74,9 @@ npm run build   # -> apps/web/dist
 
   git add -A
   git commit -m $Message
-  git remote remove gitlab 2>$null
+  $ErrorActionPreference = "SilentlyContinue"
+  git remote remove gitlab | Out-Null
+  $ErrorActionPreference = $prevEap
   git remote add gitlab $GitLabUrl
   git push -u gitlab "HEAD:${Branch}" --force
   Write-Host "Synced to $GitLabUrl branch $Branch"
@@ -75,7 +85,10 @@ npm run build   # -> apps/web/dist
 finally {
   Pop-Location
   Set-Location $RepoRoot
-  git worktree remove -f $wt 2>$null
+  $prevEap = $ErrorActionPreference
+  $ErrorActionPreference = "SilentlyContinue"
+  git worktree remove -f $wt | Out-Null
   Remove-Item -Recurse -Force $wt -ErrorAction SilentlyContinue
-  git branch -D ba-frontend-sync 2>$null | Out-Null
+  git branch -D ba-frontend-sync | Out-Null
+  $ErrorActionPreference = $prevEap
 }
