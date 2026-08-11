@@ -318,7 +318,7 @@ export async function analyzeDomainLive(
     const robotsRes = await fetchImpl(`${origin}/robots.txt`, {
       method: 'GET',
       signal: AbortSignal.timeout(5000),
-      headers: { 'User-Agent': 'SEO-OS-BacklinkBuilder/1.0' },
+      headers: { 'User-Agent': 'BacklinkAgent-BacklinkBuilder/1.0' },
     });
     if (robotsRes.ok) {
       robotsTxtStatus = 'found';
@@ -338,7 +338,7 @@ export async function analyzeDomainLive(
       const sm = await fetchImpl(`${origin}/sitemap.xml`, {
         method: 'GET',
         signal: AbortSignal.timeout(5000),
-        headers: { 'User-Agent': 'SEO-OS-BacklinkBuilder/1.0' },
+        headers: { 'User-Agent': 'BacklinkAgent-BacklinkBuilder/1.0' },
       });
       if (sm.ok) {
         sitemapFound = true;

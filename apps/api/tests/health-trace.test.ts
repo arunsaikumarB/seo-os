@@ -28,7 +28,7 @@ describe('health routes', () => {
     };
     healthHandler({} as Request, res as unknown as Response);
     expect(res.statusCode).toBe(200);
-    expect(res.body).toMatchObject({ status: 'ok', service: 'seo-os-api' });
+    expect(res.body).toMatchObject({ status: 'ok', service: 'backlink-agent-api' });
 
     versionHandler({} as Request, res as unknown as Response);
     expect(res.body).toMatchObject({

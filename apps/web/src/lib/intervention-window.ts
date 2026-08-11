@@ -1,6 +1,6 @@
-/** Open the SEO OS helper tab (not an embedded Playwright view). */
+/** Open the Backlink Agent helper tab (not an embedded Playwright view). */
 
-export const INTERVENTION_CHANNEL = 'seo-os-intervention';
+export const INTERVENTION_CHANNEL = 'BacklinkAgent-intervention';
 
 export type InterventionChannelMessage =
   | { type: 'resumed'; projectId: string; jobId: string; website?: string; message?: string }
@@ -36,7 +36,7 @@ export function openInterventionWindow(
     'popup=yes,width=520,height=640,menubar=no,toolbar=no,location=no,status=no,scrollbars=yes,resizable=yes';
   const win = window.open(
     interventionWindowUrl(projectId, jobId, opts),
-    `seo-os-intervene-${jobId}`,
+    `BacklinkAgent-intervene-${jobId}`,
     features
   );
   openHandles.set(key, win);
@@ -87,7 +87,7 @@ export function waitForInterventionResume(
     };
 
     const onStorage = (e: StorageEvent) => {
-      if (e.key !== 'seo-os-intervention-resumed' || !e.newValue) return;
+      if (e.key !== 'BacklinkAgent-intervention-resumed' || !e.newValue) return;
       try {
         const msg = JSON.parse(e.newValue) as {
           projectId: string;
@@ -156,7 +156,7 @@ export function openRealWebsiteTab(url: string, jobId: string): Window | null {
   try {
     const normalized = normalizeSiteUrl(url);
     if (!normalized) return null;
-    return window.open(normalized, `seo-os-site-${jobId}`, 'noopener,noreferrer');
+    return window.open(normalized, `BacklinkAgent-site-${jobId}`, 'noopener,noreferrer');
   } catch {
     return null;
   }
@@ -185,7 +185,7 @@ export function notifyInterventionResumed(msg: {
   }
   try {
     localStorage.setItem(
-      'seo-os-intervention-resumed',
+      'BacklinkAgent-intervention-resumed',
       JSON.stringify({ ...msg, at: Date.now() })
     );
   } catch {

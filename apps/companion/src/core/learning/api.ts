@@ -1,5 +1,5 @@
 /**
- * Shared learning client — uploads corrections to SEO OS (not chrome.storage).
+ * Shared learning client — uploads corrections to Backlink Agent (not chrome.storage).
  */
 import type { DomainFieldMapping, FillableRole } from '../types';
 import { companionLog } from '../diagnostics/connection';

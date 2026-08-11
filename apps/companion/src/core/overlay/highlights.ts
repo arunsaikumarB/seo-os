@@ -1,4 +1,4 @@
-const STYLE_ID = 'seo-os-companion-fill-highlights';
+const STYLE_ID = 'BacklinkAgent-companion-fill-highlights';
 
 function ensureStyles(): void {
   if (document.getElementById(STYLE_ID)) return;

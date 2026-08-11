@@ -147,7 +147,7 @@ export function ReportsLibraryPage() {
           primaryColor,
           secondaryColor: '#0369a1',
           coverTitle: 'Executive Intelligence Report',
-          footerText: 'Confidential — SEO OS Reports',
+          footerText: 'Confidential — Backlink Agent Reports',
           agencyName: brandName,
           isDefault: true,
         }),

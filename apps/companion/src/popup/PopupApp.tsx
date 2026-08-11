@@ -4,7 +4,7 @@ export function PopupApp() {
   return (
     <div className="popup">
       <header>
-        <h1>SEO OS Companion</h1>
+        <h1>Backlink Agent Companion</h1>
         <p>Phase 2.3 — intelligent field mapping + shared learning</p>
       </header>
       <div className="card">
@@ -12,7 +12,7 @@ export function PopupApp() {
           <strong>Waiting for Package</strong>
         </p>
         <p className="muted">
-          In SEO OS → Assisted Manual → <strong>Activate Package</strong>. The floating widget holds
+          In Backlink Agent → Assisted Manual → <strong>Activate Package</strong>. The floating widget holds
           exactly one package until you activate another or clear it.
         </p>
       </div>

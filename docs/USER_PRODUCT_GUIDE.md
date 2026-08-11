@@ -1,15 +1,15 @@
-# SEO OS — Complete Beginner’s Guide
+# Backlink Agent — Complete Beginner’s Guide
 
-**Who this is for:** Anyone new to SEO OS — freshers, interns, marketers, or founders who need to understand *what this product is*, *what each tool does*, and *how to use the full process*.
+**Who this is for:** Anyone new to Backlink Agent — freshers, interns, marketers, or founders who need to understand *what this product is*, *what each tool does*, and *how to use the full process*.
 
-**What SEO OS is in one sentence:**  
-SEO OS is an **AI-powered SEO operations platform** that helps a team discover website opportunities, plan campaigns, build backlinks, send outreach, track results, and keep the site technically healthy — all from one place.
+**What Backlink Agent is in one sentence:**  
+Backlink Agent is an **AI-powered SEO operations platform** that helps a team discover website opportunities, plan campaigns, build backlinks, send outreach, track results, and keep the site technically healthy — all from one place.
 
 ---
 
 ## Table of contents
 
-1. [Big picture — why SEO OS exists](#1-big-picture)
+1. [Big picture — why Backlink Agent exists](#1-big-picture)
 2. [Core concepts (must know)](#2-core-concepts)
 3. [How to start (first 15 minutes)](#3-how-to-start)
 4. [The recommended end-to-end process](#4-the-recommended-process)
@@ -22,7 +22,7 @@ SEO OS is an **AI-powered SEO operations platform** that helps a team discover w
 ---
 
 <a id="1-big-picture"></a>
-## 1. Big picture — why SEO OS exists
+## 1. Big picture — why Backlink Agent exists
 
 Traditional SEO work is scattered:
 
@@ -32,7 +32,7 @@ Traditional SEO work is scattered:
 - Gmail for outreach  
 - Another dashboard for reports  
 
-**SEO OS connects that work into one workflow**, with AI helping at each step:
+**Backlink Agent connects that work into one workflow**, with AI helping at each step:
 
 ```
 Understand your site
@@ -115,7 +115,7 @@ If you only do those three, you already understand 70% of the product.
 <a id="4-the-recommended-process"></a>
 ## 4. The recommended end-to-end process
 
-This is the **standard SEO OS loop**. Use it every time for a new site.
+This is the **standard Backlink Agent loop**. Use it every time for a new site.
 
 | # | Step | Where in the app | What you do | What you get |
 |---|------|------------------|-------------|--------------|
@@ -369,7 +369,7 @@ Below: **What it is**, **Why it exists**, **How to use it**, and **When to use i
 ---
 
 ### 5.19 Integrations Hub
-**What it is:** Connect external tools to SEO OS.  
+**What it is:** Connect external tools to Backlink Agent.  
 
 | Provider | Use |
 |----------|-----|
@@ -509,9 +509,9 @@ If something looks empty, check **Help**, try **Demo Mode**, or submit **Feedbac
 12. Integrations sync
 ```
 
-That’s SEO OS.
+That’s Backlink Agent.
 
 ---
 
-*Document version: aligned with SEO OS v0.99.5 Closed Beta.*  
+*Document version: aligned with Backlink Agent v0.99.5 Closed Beta.*  
 *For technical/ops docs, see `docs/epic-11-production-readiness/` and `docs/epic-12-closed-beta/`.*

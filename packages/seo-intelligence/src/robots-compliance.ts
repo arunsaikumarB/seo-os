@@ -60,7 +60,7 @@ export async function fetchRobotsTxt(origin: string): Promise<RobotsRules | null
   try {
     const res = await fetch(`${origin}/robots.txt`, {
       signal: AbortSignal.timeout(8000),
-      headers: { 'User-Agent': 'SEO-OS-BrowserIntelligence/1.0' },
+      headers: { 'User-Agent': 'BacklinkAgent-BrowserIntelligence/1.0' },
     });
     if (!res.ok) return null;
     return parseRobotsTxt(await res.text());

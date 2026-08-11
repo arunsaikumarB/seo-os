@@ -150,9 +150,9 @@ async function maybeEmailLongRunning(opts: {
     const provider = createEmailProviderFromAccount('mock', {});
     await provider.send({
       to,
-      subject: `[SEO OS] ${opts.title}`,
+      subject: `[Backlink Agent] ${opts.title}`,
       bodyText: `${opts.summary}\n\nProject: ${opts.projectName}\nOpen: ${opts.href}`,
-      bodyHtml: `<p><strong>${opts.title}</strong></p><p>${opts.summary}</p><p>Project: ${opts.projectName}</p><p><a href="${opts.href}">Open in SEO OS</a></p>`,
+      bodyHtml: `<p><strong>${opts.title}</strong></p><p>${opts.summary}</p><p>Project: ${opts.projectName}</p><p><a href="${opts.href}">Open in Backlink Agent</a></p>`,
     });
   } catch (err) {
     logger.warn({ err, userId: opts.userId }, 'stage notify email failed');

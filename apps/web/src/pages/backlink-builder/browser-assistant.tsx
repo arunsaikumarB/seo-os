@@ -25,7 +25,7 @@ export function BrowserAssistantPage() {
     <PageTransition className="max-w-lg mx-auto space-y-4 py-12 text-center">
       <h1 className="text-xl font-semibold">Opening your browser…</h1>
       <p className="text-sm text-muted-foreground">
-        Complete login or approval on the real website. SEO OS never embeds Playwright — a small
+        Complete login or approval on the real website. Backlink Agent never embeds Playwright — a small
         helper watches for completion and resumes AI.
       </p>
       <div className="flex flex-wrap justify-center gap-2">

@@ -464,7 +464,7 @@ export function debugLogClassifications(
     }))
   );
 
-  const lines: string[] = ['[SEO OS Companion] Detected Fields', '================'];
+  const lines: string[] = ['[Backlink Agent Companion] Detected Fields', '================'];
   for (const c of classifications) {
     lines.push(ROLE_LABELS_SAFE(c.role));
     lines.push(`Confidence ${c.confidence}%`);

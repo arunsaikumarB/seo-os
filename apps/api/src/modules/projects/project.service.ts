@@ -212,7 +212,7 @@ export async function refreshBrandProfile(workspaceId: string): Promise<Record<s
       signal: AbortSignal.timeout(20_000),
       headers: {
         'User-Agent':
-          'Mozilla/5.0 (compatible; SEO-OS-BrandProfile/1.0; +https://seoos.io)',
+          'Mozilla/5.0 (compatible; BacklinkAgent-BrandProfile/1.0; +https://seoos.io)',
         Accept: 'text/html',
       },
     });

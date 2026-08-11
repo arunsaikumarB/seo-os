@@ -106,7 +106,7 @@ Chefgaa has seen a 340% increase in corporate catering requests this year. The t
 
   'generate report': `## Executive SEO Report — Chefgaa
 
-**Period:** Q2 2026 | **Prepared by:** SEO OS AI Workforce
+**Period:** Q2 2026 | **Prepared by:** Backlink Agent AI Workforce
 
 ### Key Metrics
 | Metric | Value | Change |

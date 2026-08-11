@@ -158,7 +158,7 @@ export async function analyzeOpportunityForContent(
     try {
       const res = await fetch(String(opp.url ?? `https://${opp.domain}`), {
         signal: AbortSignal.timeout(8000),
-        headers: { 'User-Agent': 'SEO-OS-ContentStudio/1.2' },
+        headers: { 'User-Agent': 'BacklinkAgent-ContentStudio/1.2' },
       });
       if (res.ok) htmlSnippet = (await res.text()).slice(0, 80_000);
     } catch {

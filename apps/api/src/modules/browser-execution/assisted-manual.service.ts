@@ -3017,7 +3017,7 @@ export async function exportAssistedPackagesWorkbook(workspaceId: string) {
   const ExcelJS = await import('exceljs');
   const board = await listAssistedPackages(workspaceId);
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'SEO OS Phase 7';
+  wb.creator = 'Backlink Agent Phase 7';
   const sheet = wb.addWorksheet('Assisted Manual');
 
   sheet.addRow([

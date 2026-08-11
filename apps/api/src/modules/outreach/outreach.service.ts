@@ -77,7 +77,7 @@ export async function ensureDefaultEmailAccount(workspaceId: string) {
     label: 'Demo Sender (Mock)',
     provider_type: 'mock',
     from_email: 'outreach@seoos.demo',
-    from_name: 'SEO OS Outreach',
+    from_name: 'Backlink Agent Outreach',
     is_default: true,
     status: 'active',
   });

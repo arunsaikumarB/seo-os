@@ -8,7 +8,7 @@ export interface PageHelpContent {
 }
 
 const DEFAULT_HELP: PageHelpContent = {
-  title: 'SEO OS Module',
+  title: 'Backlink Agent Module',
   purpose: 'This module helps you complete a step in the SEO workflow.',
   whyItMatters: 'Each step builds toward verified backlinks and measurable SEO growth.',
   howAiUsesIt: 'AI agents use your project data, knowledge base, and memory to recommend and execute tasks.',
@@ -28,7 +28,7 @@ export const PAGE_HELP: Record<string, PageHelpContent> = {
   'mission-control': {
     title: 'Mission Control',
     purpose: 'Executive summary of website health, AI workforce, campaigns, and backlink progress.',
-    whyItMatters: 'This is your final destination — one view of everything SEO OS has accomplished.',
+    whyItMatters: 'This is your final destination — one view of everything Backlink Agent has accomplished.',
     howAiUsesIt: 'Aggregates data from all modules into actionable KPIs and timelines.',
     bestPractices: ['Visit after completing major workflow steps', 'Share with stakeholders for reporting'],
     example: 'See 12 won backlinks, 3 active campaigns, and 5 AI agents running research tasks.',

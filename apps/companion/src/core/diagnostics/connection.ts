@@ -36,13 +36,13 @@ export function companionLog(
   level: 'info' | 'warn' | 'error' = 'info'
 ): void {
   const entry = {
-    scope: 'seo-os-companion',
+    scope: 'BacklinkAgent-companion',
     stage,
     ts: new Date().toISOString(),
     href: typeof location !== 'undefined' ? location.href.split('#')[0] : undefined,
     ...payload,
   };
-  const line = `[SEO OS Companion] ${stage}`;
+  const line = `[Backlink Agent Companion] ${stage}`;
   if (level === 'error') console.error(line, entry);
   else if (level === 'warn') console.warn(line, entry);
   else console.info(line, entry);

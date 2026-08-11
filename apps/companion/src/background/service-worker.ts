@@ -109,7 +109,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return {
         ok: true,
         phase: '2.3.2',
-        name: 'SEO OS Companion',
+        name: 'Backlink Agent Companion',
         hasPackage: Boolean(active),
       };
     }

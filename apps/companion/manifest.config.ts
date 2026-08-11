@@ -2,7 +2,7 @@ import { defineManifest } from '@crxjs/vite-plugin';
 
 export default defineManifest({
   manifest_version: 3,
-  name: 'SEO OS Companion',
+  name: 'Backlink Agent Companion',
   version: '0.2.8',
   description:
     'Phase 2.3.3 — hardened free/paid detect + listing form fill. Never submits.',
@@ -13,7 +13,7 @@ export default defineManifest({
     '128': 'public/icons/icon-128.png',
   },
   action: {
-    default_title: 'SEO OS Companion',
+    default_title: 'Backlink Agent Companion',
     default_popup: 'src/popup/index.html',
     default_icon: {
       '16': 'public/icons/icon-16.png',

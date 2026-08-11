@@ -421,7 +421,7 @@ export function logResolvedFields(
     role: string;
   }>
 ): void {
-  const lines: string[] = ['[SEO OS Companion] Label Resolution', '================'];
+  const lines: string[] = ['[Backlink Agent Companion] Label Resolution', '================'];
   fields.forEach((f, i) => {
     const m = matches[i];
     lines.push(`FIELD #${i + 1}`);

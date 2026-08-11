@@ -1591,7 +1591,7 @@ export async function getAutomationSummary(workspaceId: string) {
     campaignCounts: counts,
     metricsSource: 'campaign_state' as const,
     disclaimer:
-      'SEO OS automates preparation, classification, and tracking. Third-party websites control publication — backlinks are never guaranteed.',
+      'Backlink Agent automates preparation, classification, and tracking. Third-party websites control publication — backlinks are never guaranteed.',
   };
 }
 
@@ -1686,7 +1686,7 @@ export async function runVerificationCheck(workspaceId: string, backlinkId: stri
       method: 'GET',
       redirect: 'follow',
       signal: AbortSignal.timeout(12000),
-      headers: { 'User-Agent': 'SEO-OS-BacklinkVerifier/1.0' },
+      headers: { 'User-Agent': 'BacklinkAgent-BacklinkVerifier/1.0' },
     });
     const html = await res.text();
     result = inspectBacklinkHtml(

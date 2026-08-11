@@ -242,8 +242,8 @@ export function AssistedManualPage() {
       payload: Record<string, unknown> = {},
       level: 'info' | 'warn' | 'error' = 'info'
     ) => {
-      const entry = { scope: 'seo-os-web-activate', stage, ts: new Date().toISOString(), ...payload };
-      const line = `[SEO OS Activate] ${stage}`;
+      const entry = { scope: 'BacklinkAgent-web-activate', stage, ts: new Date().toISOString(), ...payload };
+      const line = `[Backlink Agent Activate] ${stage}`;
       if (level === 'error') console.error(line, entry);
       else if (level === 'warn') console.warn(line, entry);
       else console.info(line, entry);
@@ -261,7 +261,7 @@ export function AssistedManualPage() {
         if (!opts?.silent) toast.error('Package has no fillable fields yet — generate content first');
         window.postMessage(
           {
-            source: 'seo-os-web',
+            source: 'BacklinkAgent-web',
             type: 'companion.activate_error',
             error: 'Package has no fillable fields',
             packageId: pkg.id,
@@ -302,7 +302,7 @@ export function AssistedManualPage() {
         }, 4000);
         function onAck(event: MessageEvent) {
           const d = event.data as Record<string, unknown> | null;
-          if (!d || d.source !== 'seo-os-companion' || d.type !== 'companion.activate_ack') {
+          if (!d || d.source !== 'BacklinkAgent-companion' || d.type !== 'companion.activate_ack') {
             return;
           }
           window.clearTimeout(timer);
@@ -317,7 +317,7 @@ export function AssistedManualPage() {
 
       window.postMessage(
         {
-          source: 'seo-os-web',
+          source: 'BacklinkAgent-web',
           type: 'companion.activate_package',
           package: payload,
           apiBase,
@@ -356,7 +356,7 @@ export function AssistedManualPage() {
       }
       window.postMessage(
         {
-          source: 'seo-os-web',
+          source: 'BacklinkAgent-web',
           type: 'companion.activate_error',
           error: getApiErrorMessage(err, 'Activate failed'),
           packageId: pkg.id,

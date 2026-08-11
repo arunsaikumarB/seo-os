@@ -107,7 +107,7 @@ function isVisible(el: HTMLElement): boolean {
 }
 
 /**
- * Fill current step of the submission form from the SEO OS opportunity package.
+ * Fill current step of the submission form from the Backlink Agent opportunity package.
  * Never clicks Submit. Never solves CAPTCHA. Never uses a local business profile.
  */
 export function fillMatchedFields(options: FillFormOptions): FillResult {

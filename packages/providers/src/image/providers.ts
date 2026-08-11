@@ -28,7 +28,7 @@ function svgBytes(input: ImageGenerateInput, provider: string): Buffer {
   </defs>
   <rect width="100%" height="100%" fill="url(#g)"/>
   <text x="50%" y="42%" text-anchor="middle" fill="#ecfdf5" font-family="Georgia, serif" font-size="${Math.max(18, Math.floor(input.width / 28))}">${title}</text>
-  <text x="50%" y="55%" text-anchor="middle" fill="#99f6e4" font-family="system-ui,sans-serif" font-size="${Math.max(12, Math.floor(input.width / 48))}">${provider} · SEO OS IIE</text>
+  <text x="50%" y="55%" text-anchor="middle" fill="#99f6e4" font-family="system-ui,sans-serif" font-size="${Math.max(12, Math.floor(input.width / 48))}">${provider} · Backlink Agent IIE</text>
   <text x="50%" y="68%" text-anchor="middle" fill="#5eead4" font-family="system-ui,sans-serif" font-size="${Math.max(10, Math.floor(input.width / 55))}">${promptSafe}</text>
 </svg>`;
   return Buffer.from(svg, 'utf8');

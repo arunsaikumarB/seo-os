@@ -1,6 +1,6 @@
-# SEO OS
+# Backlink Agent
 
-**The AI Workforce for SEO Teams** — Enterprise modular SaaS for AI-powered SEO.
+**AI workforce for backlink teams** — discover opportunities, generate content, submit, and track results.
 
 Sprint 0 delivers the **foundation only**: monorepo, API shell, web shell, shared packages, Supabase migrations 001–003, CI/CD, and local development tooling.
 

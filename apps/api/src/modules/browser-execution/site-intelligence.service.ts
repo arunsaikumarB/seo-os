@@ -797,7 +797,7 @@ export async function fetchPageHtml(
       headers: {
         'User-Agent':
           opts?.userAgent ??
-          'SEO-OS-SiteIntelligence/1.0 (+https://seo-os.local; polite profiler)',
+          'BacklinkAgent-SiteIntelligence/1.0 (+https://seo-os.local; polite profiler)',
         Accept: 'text/html,application/xhtml+xml',
       },
     });

@@ -28,7 +28,7 @@ export const useCurrentOpportunityStore = create<CurrentOpportunityState>()(
           byProject: { ...s.byProject, [projectId]: null },
         })),
     }),
-    { name: 'seo-os-current-opportunity' }
+    { name: 'BacklinkAgent-current-opportunity' }
   )
 );
 

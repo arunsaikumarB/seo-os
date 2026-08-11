@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "SEO OS — The AI Workforce for SEO Teams",
+  "description": "Backlink Agent — AI workforce for backlink teams",
   "workspaces": [
     "apps/*",
     "packages/*",

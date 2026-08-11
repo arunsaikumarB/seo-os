@@ -7,7 +7,7 @@ import { useDemoMode } from '@/hooks/use-demo-mode';
 
 const TOUR_STEPS = [
   {
-    title: 'Welcome to SEO OS',
+    title: 'Welcome to Backlink Agent',
     description:
       'Your AI Backlink Builder. One product flow from import to verified links.',
     path: null as string | null,

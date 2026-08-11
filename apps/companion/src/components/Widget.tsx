@@ -206,8 +206,8 @@ export function Widget() {
       <button
         type="button"
         className="soc-fab"
-        aria-label="Open SEO OS Companion"
-        title="SEO OS Companion"
+        aria-label="Open Backlink Agent Companion"
+        title="Backlink Agent Companion"
         onClick={() => setExpanded(true)}
       >
         <span className="soc-fab-mark">S</span>
@@ -216,10 +216,10 @@ export function Widget() {
   }
 
   return (
-    <div className="soc-panel" role="dialog" aria-label="SEO OS Companion">
+    <div className="soc-panel" role="dialog" aria-label="Backlink Agent Companion">
       <header className="soc-header">
         <div>
-          <div className="soc-brand">SEO OS Companion</div>
+          <div className="soc-brand">Backlink Agent Companion</div>
           <div className="soc-sub">{connected ? 'Connected' : 'Waiting for Package'}</div>
         </div>
         <button
@@ -279,7 +279,7 @@ export function Widget() {
           <div className="soc-warn">
             <p className="soc-error-title">Waiting for Package</p>
             <p>
-              In SEO OS → Assisted Manual → <strong>Activate Package</strong>.
+              In Backlink Agent → Assisted Manual → <strong>Activate Package</strong>.
             </p>
           </div>
         )}

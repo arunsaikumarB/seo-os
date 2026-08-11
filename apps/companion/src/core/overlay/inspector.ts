@@ -3,8 +3,8 @@ import { FILLABLE_ROLES } from '../types';
 import type { FillableRole } from '../types';
 import { CONFIDENCE_FILL_THRESHOLD } from '../types';
 
-const STYLE_ID = 'seo-os-companion-overlay-styles';
-const TIP_ID = 'seo-os-companion-inspect-tip';
+const STYLE_ID = 'BacklinkAgent-companion-overlay-styles';
+const TIP_ID = 'BacklinkAgent-companion-inspect-tip';
 
 /** Phase 2.3 confidence colors */
 const COLORS: Record<MatchSource | 'default', string> = {

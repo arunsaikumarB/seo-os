@@ -582,7 +582,7 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
           announcements: [
             {
               id: 'a1',
-              title: 'Welcome to SEO OS Closed Beta',
+              title: 'Welcome to Backlink Agent Closed Beta',
               body: 'Submit feedback anytime.',
               severity: 'info',
             },
@@ -594,8 +594,8 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
       data: [
         {
           id: 'a1',
-          title: 'Welcome to SEO OS Closed Beta',
-          body: 'You are helping validate SEO OS before Version 1.0.',
+          title: 'Welcome to Backlink Agent Closed Beta',
+          body: 'You are helping validate Backlink Agent before Version 1.0.',
           severity: 'info',
           href: '/org/feedback',
         },
@@ -1293,7 +1293,7 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
           id: 'msg1',
           role: 'assistant',
           content:
-            'Welcome to SEO OS Command Center. I have full context on Chefgaa — competitors, keywords, and 12 pending opportunities. What would you like to do?',
+            'Welcome to Backlink Agent Command Center. I have full context on Chefgaa — competitors, keywords, and 12 pending opportunities. What would you like to do?',
           agent_type: 'seo_strategist',
         },
       ],

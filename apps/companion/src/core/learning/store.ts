@@ -1,5 +1,5 @@
 /**
- * Phase 2.3 — learning shapes + in-memory helpers (persistence is SEO OS API).
+ * Phase 2.3 — learning shapes + in-memory helpers (persistence is Backlink Agent API).
  */
 export type { DomainFieldMapping } from '../types';
 export {

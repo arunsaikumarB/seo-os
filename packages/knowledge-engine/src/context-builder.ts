@@ -96,7 +96,7 @@ export function buildWorkspaceContext(input: WorkspaceContextInput): BuiltContex
     .map(([key, value]) => `## ${key}\n${value}`)
     .join('\n\n');
 
-  const systemPrompt = `You are the SEO OS AI assistant for ${input.project.name}. Use the workspace context below to answer questions. Cite sources when using retrieved knowledge. Do not invent facts not supported by context.
+  const systemPrompt = `You are the Backlink Agent AI assistant for ${input.project.name}. Use the workspace context below to answer questions. Cite sources when using retrieved knowledge. Do not invent facts not supported by context.
 
 ${contextBlock}`;
 

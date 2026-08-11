@@ -62,7 +62,7 @@ export function useAutoInterventionWindows(projectId: string) {
     }
 
     const onStorage = (e: StorageEvent) => {
-      if (e.key !== 'seo-os-intervention-resumed' || !e.newValue) return;
+      if (e.key !== 'BacklinkAgent-intervention-resumed' || !e.newValue) return;
       try {
         const msg = JSON.parse(e.newValue) as {
           projectId: string;

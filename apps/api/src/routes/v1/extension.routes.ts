@@ -42,6 +42,7 @@ extensionPublicRouter.get('/opportunity/current', async (req, res, next) => {
     const header = req.headers.authorization ?? '';
     const token =
       (header.startsWith('Bearer ') ? header.slice(7).trim() : '') ||
+      String(req.headers['x-backlink-agent-handoff'] ?? '').trim() ||
       String(req.headers['x-seo-os-handoff'] ?? '').trim() ||
       String(req.query.token ?? '').trim();
     if (!token) {

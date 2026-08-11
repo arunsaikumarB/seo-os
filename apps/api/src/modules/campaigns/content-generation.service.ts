@@ -89,7 +89,7 @@ async function resolveMediaNeedForOpportunity(
     if (entry) {
       const res = await fetch(entry, {
         signal: AbortSignal.timeout(8_000),
-        headers: { 'User-Agent': 'SEO-OS-ContentGen/1.0' },
+        headers: { 'User-Agent': 'BacklinkAgent-ContentGen/1.0' },
       });
       if (res.ok) {
         const htmlSnippet = (await res.text()).slice(0, 60_000);

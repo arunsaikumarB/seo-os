@@ -4,7 +4,7 @@ import { installWebHandoffBridge } from '../core/session/web-bridge';
 import { installActivePackageSync } from '../core/runtime/memory';
 import widgetCss from './widget.css?inline';
 
-const HOST_ID = 'seo-os-companion-root';
+const HOST_ID = 'BacklinkAgent-companion-root';
 
 function mount(): void {
   if (document.getElementById(HOST_ID)) return;
@@ -15,7 +15,7 @@ function mount(): void {
 
   const host = document.createElement('div');
   host.id = HOST_ID;
-  host.setAttribute('data-seo-os-companion', '1');
+  host.setAttribute('data-backlink-agent-companion', '1');
   document.documentElement.appendChild(host);
 
   const shadow = host.attachShadow({ mode: 'open' });

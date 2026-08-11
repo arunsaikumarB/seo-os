@@ -415,7 +415,7 @@ imageIntelligenceRouter.get(
         const page = doc.addPage([612, 792]);
         let y = 750;
         const lines = [
-          'SEO OS — Image Intelligence Report',
+          'Backlink Agent — Image Intelligence Report',
           `Generated: ${payload.generatedAt}`,
           `Generated: ${stats.generated} · Approved: ${stats.approved} · Submitted: ${stats.submitted}`,
           `Verified: ${stats.verified} · Rejected: ${stats.rejected}`,

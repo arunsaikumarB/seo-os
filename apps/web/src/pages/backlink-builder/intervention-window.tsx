@@ -215,7 +215,7 @@ export function InterventionWindowPage() {
       <div className="w-full max-w-md rounded-2xl border border-border/60 bg-card shadow-lg px-5 py-6 space-y-4">
         <div className="space-y-1">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            SEO OS
+            Backlink Agent
           </p>
           <h1 className="text-lg font-semibold tracking-tight">
             {d.title?.replace(/^AI needs your help —\s*/i, '') || d.reason}

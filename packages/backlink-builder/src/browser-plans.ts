@@ -55,7 +55,7 @@ export function buildBrowserActionPlan(input: {
     steps.push({
       order: steps.length + 1,
       action: 'Sign in',
-      detail: 'Log in with your account on the third-party site. SEO OS will not store or bypass credentials.',
+      detail: 'Log in with your account on the third-party site. Backlink Agent will not store or bypass credentials.',
       requiresUser: true,
       blocker: 'login',
     });

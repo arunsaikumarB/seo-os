@@ -1,7 +1,7 @@
 export type { DomainLearningHook, AiMatchHook } from './types';
 export { createDomainLearningHook } from './learning/api';
 
-/** Prefer createDomainLearningHook() — wired to shared SEO OS knowledge. */
+/** Prefer createDomainLearningHook() — wired to shared Backlink Agent knowledge. */
 export const noopDomainLearning = {
   getDomainAliases(_hostname: string) {
     return null;

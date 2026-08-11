@@ -42,14 +42,14 @@ async function main() {
   await initSentry({
     dsn: env.SENTRY_DSN || undefined,
     environment: env.SENTRY_ENVIRONMENT || env.NODE_ENV,
-    release: 'seo-os-api@1.2.7-queue-init',
+    release: 'backlink-agent-api@1.2.7-queue-init',
   });
 
   const app = createApp();
 
   // Bind early so Railway /health succeeds while workers + Chromium warm up
   server = app.listen(env.PORT, '0.0.0.0', () => {
-    logger.info({ port: env.PORT, host: '0.0.0.0', env: env.NODE_ENV }, 'SEO OS API started');
+    logger.info({ port: env.PORT, host: '0.0.0.0', env: env.NODE_ENV }, 'Backlink Agent API started');
   });
 
   process.on('SIGTERM', () => void shutdown('SIGTERM'));

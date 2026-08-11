@@ -9,7 +9,7 @@ import { listCircuits } from '../lib/circuit-breaker.js';
 import { getProviderManager } from '@seo-os/providers';
 
 export function healthHandler(_req: Request, res: Response): void {
-  res.status(200).json({ status: 'ok', service: 'seo-os-api', version: '1.2.7-queue-init' });
+  res.status(200).json({ status: 'ok', service: 'backlink-agent-api', version: '1.2.7-queue-init' });
 }
 
 export async function readyHandler(_req: Request, res: Response): Promise<void> {

@@ -758,7 +758,7 @@ browserExecutionRouter.get(
         const page = doc.addPage([612, 792]);
         let y = 750;
         for (const line of [
-          'SEO OS — Browser Execution Report',
+          'Backlink Agent — Browser Execution Report',
           `Generated: ${report.generatedAt}`,
           `Total: ${report.totalJobs} · Completed: ${report.completed} · Failed: ${report.failed}`,
           `Waiting User: ${report.waitingUser} · CAPTCHA: ${report.captcha} · Login: ${report.loginRequired}`,

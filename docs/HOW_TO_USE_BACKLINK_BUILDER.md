@@ -1,13 +1,13 @@
-# SEO OS — How to Use (Backlink Builder)
+# Backlink Agent — How to Use (Backlink Builder)
 
-**Who this is for:** Anyone using SEO OS Version 1.0 as a backlink product.  
+**Who this is for:** Anyone using Backlink Agent Version 1.0 as a backlink product.  
 **What you will learn:** How to go from login → import websites → win and verify backlinks.
 
 ---
 
-## What SEO OS is now
+## What Backlink Agent is now
 
-SEO OS is an **AI Backlink Builder**.
+Backlink Agent is an **AI Backlink Builder**.
 
 You work in one main product flow:
 
@@ -244,4 +244,4 @@ That is the whole product flow.
 
 ---
 
-*Aligned with SEO OS Backlink-First Version 1.0 UI.*
+*Aligned with Backlink Agent Backlink-First Version 1.0 UI.*

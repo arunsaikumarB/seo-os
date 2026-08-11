@@ -38,5 +38,5 @@ export const SCAN_LIMITS = {
   fetchTimeoutMs: 12000,
   politenessDelayMs: 200,
   maxRetries: 2,
-  userAgent: 'SEO-OS-BrowserIntelligence/1.0',
+  userAgent: 'BacklinkAgent-BrowserIntelligence/1.0',
 } as const;

@@ -3,7 +3,7 @@
 export const WORKFLOW_ORCHESTRATOR_AGENT = {
   id: 'workflow_orchestrator_agent',
   displayName: 'Workflow Orchestrator Agent',
-  role: 'Coordinate SEO OS modules through automated workflows with human approval gates',
+  role: 'Coordinate Backlink Agent modules through automated workflows with human approval gates',
   responsibilities: [
     'Coordinate Browser Intelligence, Knowledge, Memory, Campaigns, Backlinks, Relationships, and Outreach',
     'Execute workflow graphs node-by-node',

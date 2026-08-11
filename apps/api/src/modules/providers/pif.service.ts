@@ -615,7 +615,7 @@ export async function buildProviderReport(workspaceId: string, format: string) {
     const page = doc.addPage([612, 792]);
     let y = 750;
     for (const line of [
-      'SEO OS — Provider Integration Report',
+      'Backlink Agent — Provider Integration Report',
       `Generated: ${payload.generatedAt}`,
       `Healthy: ${health.healthy} · Offline: ${health.offline} · Calls: ${health.todaysCalls}`,
       ...health.providers.slice(0, 40).map((p) => `${p.key} · ${p.status}`),

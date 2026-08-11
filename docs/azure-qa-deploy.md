@@ -1,7 +1,7 @@
 # Azure QA deploy handoff (for DevOps)
 
 Repo: `arunsaikumarB/seo-os` · branch: `master`  
-App name in product: **SEO OS** (Back Links Agent AI)
+App name in product: **Backlink Agent** (Back Links Agent AI)
 
 Railway API is **down** (trial expired). QA should run on **Azure**. Netlify production still points at the dead Railway URL — do not rely on it for QA demos.
 
@@ -26,11 +26,11 @@ Dockerfile path (repo root context):
 
 ```bash
 # from repo root
-docker build -f apps/api/Dockerfile -t seo-os-api:qa .
+docker build -f apps/api/Dockerfile -t backlink-agent-api:qa .
 # tag + push to Azure Container Registry
 az acr login --name <yourAcr>
-docker tag seo-os-api:qa <yourAcr>.azurecr.io/seo-os-api:qa
-docker push <yourAcr>.azurecr.io/seo-os-api:qa
+docker tag backlink-agent-api:qa <yourAcr>.azurecr.io/backlink-agent-api:qa
+docker push <yourAcr>.azurecr.io/backlink-agent-api:qa
 ```
 
 Health check: `GET /health` → `{"status":"ok",...}`  
@@ -51,7 +51,7 @@ Set these in Azure (do **not** commit secrets):
 | `SUPABASE_SERVICE_ROLE_KEY` | QA service role (server only) |
 | `SUPABASE_JWT_SECRET` | Must match Supabase JWT secret |
 | `DATABASE_URL` | Postgres connection string (Supabase pooler or direct) |
-| `CORS_ORIGIN` | Exact QA web origin(s), comma-separated, e.g. `https://seo-os-qa.azurestaticapps.net` |
+| `CORS_ORIGIN` | Exact QA web origin(s), comma-separated, e.g. `https://backlink-agent-qa.azurestaticapps.net` |
 | `PROVIDER_MODE` | `mvp` unless QA needs live providers |
 | `ENABLE_WORKERS` | `true` for submission / browser jobs |
 | `PLAYWRIGHT_BROWSERS_PATH` | `/ms-playwright` (already in image) |

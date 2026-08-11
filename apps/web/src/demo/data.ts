@@ -24,7 +24,7 @@ export interface DemoProject {
 export const DEMO_ORGANIZATIONS: DemoOrganization[] = [
   {
     id: DEMO_ORG_ID,
-    name: 'SEO OS',
+    name: 'Backlink Agent',
     slug: 'seo-os',
     industry: 'AI / SEO Platform',
     plan: 'Enterprise',
@@ -638,7 +638,7 @@ export const DEMO_AUTOMATION_SUMMARY = {
   waiting: 3,
   accepted: 5,
   disclaimer:
-    'SEO OS automates preparation, classification, and tracking. Third-party websites control publication — backlinks are never guaranteed.',
+    'Backlink Agent automates preparation, classification, and tracking. Third-party websites control publication — backlinks are never guaranteed.',
   recentRuns: [
     {
       id: 'run-demo-1',

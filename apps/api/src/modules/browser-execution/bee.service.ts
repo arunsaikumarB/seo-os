@@ -304,7 +304,7 @@ export async function createExecution(params: {
     try {
       const res = await fetch(url, {
         signal: AbortSignal.timeout(12_000),
-        headers: { 'User-Agent': 'SEO-OS-BEE/1.0' },
+        headers: { 'User-Agent': 'BacklinkAgent-BEE/1.0' },
       });
       if (res.ok) html = (await res.text()).slice(0, 100_000);
     } catch {

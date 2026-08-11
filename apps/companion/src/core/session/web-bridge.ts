@@ -1,5 +1,5 @@
 /**
- * Bridge: SEO OS activates a package via postMessage.
+ * Bridge: Backlink Agent activates a package via postMessage.
  * Acks back to the page after the service worker confirms storage.
  */
 import type { ActivePackage } from '../types';
@@ -76,7 +76,7 @@ function normalizeLearning(data: Record<string, unknown>): LearningAuth | null {
 function ackToPage(payload: Record<string, unknown>): void {
   window.postMessage(
     {
-      source: 'seo-os-companion',
+      source: 'BacklinkAgent-companion',
       type: 'companion.activate_ack',
       ...payload,
     },
@@ -127,7 +127,7 @@ export function installWebHandoffBridge(): void {
     }
 
     const data = event.data as Record<string, unknown> | null;
-    if (!data || data.source !== 'seo-os-web') return;
+    if (!data || data.source !== 'BacklinkAgent-web') return;
 
     if (data.type === 'companion.activate_error') {
       const err = String(data.error ?? 'Activate failed');
@@ -147,7 +147,7 @@ export function installWebHandoffBridge(): void {
 
     const pkg = normalizeActivePackage(data.package);
     if (!pkg) {
-      const err = 'Invalid package payload from SEO OS';
+      const err = 'Invalid package payload from Backlink Agent';
       companionLog('bridge.activate_invalid', {}, 'error');
       patchDiagnostics({ lastError: err, lastStage: 'bridge.activate_invalid' });
       ackToPage({ ok: false, error: err });

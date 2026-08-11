@@ -111,7 +111,7 @@ export const useAppStore = create<AppState>()(
         });
       },
     }),
-    { name: 'seo-os-app' }
+    { name: 'BacklinkAgent-app' }
   )
 );
 

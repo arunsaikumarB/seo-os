@@ -1,7 +1,7 @@
 /**
  * Stage notification delivery on the client:
  * - Desktop Notification API (background tab / other window)
- * - Tab title badge ((n) SEO OS…)
+ * - Tab title badge ((n) Backlink Agent…)
  * - Sonner toast when the user is already on that project
  */
 import { useEffect, useRef } from 'react';
@@ -12,7 +12,7 @@ import { supabase } from '@/lib/supabase';
 import { usePlatformNotifications } from '@/hooks/use-platform';
 import { useAuth } from '@/providers/auth-provider';
 
-const BASE_TITLE = 'SEO OS';
+const BASE_TITLE = 'Backlink Agent';
 const DESKTOP_PERM_KEY = 'seoos.desktopNotifyAsked';
 
 export function requestDesktopNotificationPermission(): Promise<NotificationPermission | 'unsupported'> {
@@ -121,7 +121,7 @@ export function useStageNotificationDelivery() {
           // Skip the initial Realtime handshake flood — only alert after primed
           if (!primed.current) return;
 
-          const title = String(row.title ?? 'SEO OS');
+          const title = String(row.title ?? 'Backlink Agent');
           const body = String(row.body ?? '');
           const href = row.href ?? null;
 

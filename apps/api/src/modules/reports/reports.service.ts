@@ -604,7 +604,7 @@ export async function emailReportRun(
   const provider = createEmailProviderFromAccount('mock', {});
   const result = await provider.send({
     to: recipient,
-    subject: `SEO OS Report — ${exported.filename}`,
+    subject: `Backlink Agent Report — ${exported.filename}`,
     bodyText: `Your report is attached as ${exported.filename}.`,
     bodyHtml: `<p>Your report <strong>${exported.filename}</strong> is ready.</p>`,
   });
@@ -748,7 +748,7 @@ async function renderPptx(doc: GeneratedReportDocument): Promise<Buffer> {
   // pptxgenjs CJS/ESM interop
   const Ctor = (pptxgen as unknown as { default?: new () => PptxInstance }).default ?? (pptxgen as unknown as new () => PptxInstance);
   const pptx = new Ctor();
-  pptx.author = doc.brand.agencyName || 'SEO OS';
+  pptx.author = doc.brand.agencyName || 'Backlink Agent';
   pptx.title = doc.title;
   const primary = doc.brand.primaryColor || '#0d9488';
 
@@ -1046,7 +1046,7 @@ export async function exportBacklinkOpsWorkbook(
   }
 
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'SEO OS Backlink Builder';
+  workbook.creator = 'Backlink Agent Backlink Builder';
   const sheet = workbook.addWorksheet('Submitted Sites');
   rows.forEach((r, i) => {
     if (i === 0) sheet.addRow(r).font = { bold: true };
@@ -1149,7 +1149,7 @@ export async function exportManualLinksWorkbook(
   }
 
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'SEO OS';
+  workbook.creator = 'Backlink Agent';
   const sheet = workbook.addWorksheet('Manual Submissions');
   rows.forEach((r, i) => {
     if (i === 0) sheet.addRow(r).font = { bold: true };

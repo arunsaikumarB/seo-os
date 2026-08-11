@@ -323,12 +323,12 @@ export async function seedDefaultAnnouncement() {
   const { data } = await getSupabaseAdmin()
     .from('beta_announcements')
     .select('id')
-    .eq('title', 'Welcome to SEO OS Closed Beta')
+    .eq('title', 'Welcome to Backlink Agent Closed Beta')
     .limit(1);
   if (data?.length) return data[0];
   return createAnnouncement({
-    title: 'Welcome to SEO OS Closed Beta',
-    body: 'You are helping validate SEO OS before Version 1.0. Use Feedback Center for bugs and ideas. Aim to complete onboarding in under 15 minutes.',
+    title: 'Welcome to Backlink Agent Closed Beta',
+    body: 'You are helping validate Backlink Agent before Version 1.0. Use Feedback Center for bugs and ideas. Aim to complete onboarding in under 15 minutes.',
     severity: 'info',
     audience: 'beta',
     href: '/org/feedback',

@@ -135,7 +135,7 @@ export async function detectAndSaveRequirements(
   try {
     const res = await fetch(String(opp.url ?? `https://${opp.domain}`), {
       signal: AbortSignal.timeout(8000),
-      headers: { 'User-Agent': 'SEO-OS-SubmissionAssistant/1.1' },
+      headers: { 'User-Agent': 'BacklinkAgent-SubmissionAssistant/1.1' },
     });
     if (res.ok) htmlSnippet = (await res.text()).slice(0, 80_000);
   } catch {
@@ -1027,7 +1027,7 @@ export async function createBrowserPlan(
   try {
     const res = await fetch(url, {
       signal: AbortSignal.timeout(8000),
-      headers: { 'User-Agent': 'SEO-OS-BrowserAssistant/1.1' },
+      headers: { 'User-Agent': 'BacklinkAgent-BrowserAssistant/1.1' },
     });
     if (res.ok) htmlSnippet = (await res.text()).slice(0, 100_000);
   } catch {

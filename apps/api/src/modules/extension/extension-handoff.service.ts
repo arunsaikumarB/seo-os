@@ -6,7 +6,7 @@ import { getAssistedPackage } from '../browser-execution/assisted-manual.service
 import type { AssistedPackagePayload } from '@seo-os/backlink-builder';
 import { logger } from '../../lib/logger.js';
 
-const HANDOFF_AUD = 'seo-os-extension-handoff';
+const HANDOFF_AUD = 'backlink-agent-extension-handoff';
 const HANDOFF_TYP = 'extension_handoff';
 /** Short-lived single-use handoff — ~5 minutes */
 const HANDOFF_TTL_SEC = 60 * 5;
@@ -130,7 +130,7 @@ function toCurrent(
 }
 
 /**
- * Create a short-lived handoff. Returns the package in the response so the SEO OS
+ * Create a short-lived handoff. Returns the package in the response so the Backlink Agent
  * tab can hydrate Companion in-memory without burning the single-use token.
  * The directory tab redeems the token once via GET.
  */
@@ -225,7 +225,7 @@ export async function resolveExtensionCurrentOpportunity(
     throw new AppError(
       401,
       'AUTH_INVALID_TOKEN',
-      'Handoff expired or invalid. Please reopen the package from SEO OS.'
+      'Handoff expired or invalid. Please reopen the package from Backlink Agent.'
     );
   }
 
@@ -233,7 +233,7 @@ export async function resolveExtensionCurrentOpportunity(
     throw new AppError(
       401,
       'AUTH_INVALID_TOKEN',
-      'Handoff already used. Please reopen the package from SEO OS.'
+      'Handoff already used. Please reopen the package from Backlink Agent.'
     );
   }
 
