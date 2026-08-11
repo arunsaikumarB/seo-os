@@ -18,10 +18,10 @@ Runbook: `docs/cutover/no-supabase-phase-6.md` on `ba-backend`.
 - File: `backlink-agent-local-20260811-210529.dump` (~1.11 MB, `pg_restore` custom format)  
 - Restore helper: `scripts/cutover/restore-company-postgres.ps1`
 
-**Env**
+**Env (DD3 root layout — next to `package.json`, not under `apps/`)**
 
-- API: copy `apps/api/.env.company.example` → set `LOCAL_JWT_SECRET`, `DATABASE_URL`, `CORS_ORIGIN=<web URL>`  
-- Web: copy `apps/web/.env.company.example` → `VITE_AUTH_MODE=local`, `VITE_API_URL=<api URL>`  
+- Backend: `cp .env.example .env` → set `LOCAL_JWT_SECRET`, `DATABASE_URL`, `CORS_ORIGIN=<web URL>`  
+- Frontend: `cp .env.example .env` and `.env.production` → `VITE_AUTH_MODE=local`, `VITE_API_URL=<api URL>`  
 - No Supabase Cloud keys needed when `COMPANY_STACK=true`
 
 **URLs for you to set on company host**

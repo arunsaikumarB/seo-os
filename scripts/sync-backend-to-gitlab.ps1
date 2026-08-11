@@ -53,7 +53,8 @@ $paths = @(
   'package.json',
   'package-lock.json',
   'turbo.json',
-  'tsconfig.base.json'
+  'tsconfig.base.json',
+  '.env.company.backend.example'
 )
 foreach ($rel in $paths) {
   $src = Join-Path $export $rel
@@ -63,6 +64,8 @@ foreach ($rel in $paths) {
   if (-not (Test-Path $dstParent)) { New-Item -ItemType Directory -Path $dstParent -Force | Out-Null }
   Copy-Item -Path $src -Destination $dst -Recurse -Force
 }
+# DD3 layout: root .env.example (not under apps/api)
+Copy-Item (Join-Path $slice '.env.company.backend.example') (Join-Path $slice '.env.example') -Force
 
 Push-Location $slice
 try {
@@ -90,10 +93,10 @@ Synced from the product monorepo for company / DD3-style deploys.
 
 ## Quick start (company stack)
 
+**Env (DD3 layout):** put ``.env`` at this **repo root** (next to ``package.json``), not under ``apps/api/``.
+
 ``````bash
-docker compose --profile company-postgres up -d company-postgres
-docker compose up -d pgadmin
-cp apps/api/.env.company.example apps/api/.env
+cp .env.example .env
 # edit LOCAL_JWT_SECRET + DATABASE_URL + CORS_ORIGIN
 npm install
 npm run build

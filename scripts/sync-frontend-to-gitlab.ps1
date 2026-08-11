@@ -42,7 +42,7 @@ git worktree add --detach $export $srcCommit
 if ($LASTEXITCODE -ne 0) { throw "git worktree add (export) failed" }
 
 New-Item -ItemType Directory -Path $slice | Out-Null
-foreach ($rel in @('apps\web', 'packages\shared', 'package.json', 'package-lock.json', 'turbo.json', 'tsconfig.base.json')) {
+foreach ($rel in @('apps\web', 'packages\shared', 'package.json', 'package-lock.json', 'turbo.json', 'tsconfig.base.json', '.env.company.frontend.example')) {
   $src = Join-Path $export $rel
   $dst = Join-Path $slice $rel
   if (-not (Test-Path $src)) { throw "Missing in export: $rel" }
@@ -50,6 +50,8 @@ foreach ($rel in @('apps\web', 'packages\shared', 'package.json', 'package-lock.
   if (-not (Test-Path $dstParent)) { New-Item -ItemType Directory -Path $dstParent -Force | Out-Null }
   Copy-Item -Path $src -Destination $dst -Recurse -Force
 }
+# DD3 layout: root .env.example (not under apps/web)
+Copy-Item (Join-Path $slice '.env.company.frontend.example') (Join-Path $slice '.env.example') -Force
 
 Push-Location $slice
 try {
@@ -76,14 +78,14 @@ Synced from the product monorepo (``apps/web`` + ``packages/shared``).
 
 **Node:** ``>=18.18.0`` is enough for FE (React 18 / Vite 6).
 
-Build from this **repo root** (not ``cd apps/web``):
+**Env (DD3 layout):** put ``.env`` at this **repo root** (next to ``package.json``), not under ``apps/web/``.
 
 ``````bash
+cp .env.example .env
+cp .env.example .env.production
+# edit VITE_API_URL + VITE_AUTH_MODE=local
 npm install
-cp apps/web/.env.company.example apps/web/.env
-cp apps/web/.env.company.example apps/web/.env.production
-# edit VITE_API_URL to your company API URL
-npm run build   # -> apps/web/dist
+npm run build   # from this root -> apps/web/dist
 ``````
 "@ | Set-Content -Encoding utf8 README.md
 

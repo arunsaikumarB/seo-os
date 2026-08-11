@@ -1,6 +1,23 @@
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
+
+/** DD3 / company: `.env` at ba-frontend repo root. Local monorepo: `apps/web/.env*`. */
+function resolveEnvDir(mode: string, webDir: string, repoRoot: string): string {
+  const candidates = [
+    '.env',
+    '.env.local',
+    `.env.${mode}`,
+    `.env.${mode}.local`,
+  ];
+  const hasEnv = (dir: string) => candidates.some((f) => existsSync(path.join(dir, f)));
+
+  // Prefer repo-root when present (company / DD3). Else apps/web (local demo).
+  if (hasEnv(repoRoot)) return repoRoot;
+  if (hasEnv(webDir)) return webDir;
+  return repoRoot;
+}
 
 function assertProductionApiUrl(
   apiUrl: string,
@@ -17,9 +34,9 @@ function assertProductionApiUrl(
   if (!normalized) {
     throw new Error(
       `[vite] Refusing production build: VITE_API_URL is empty.\n` +
-        `  Fix (company stack): set VITE_API_URL in apps/web/.env or apps/web/.env.production\n` +
+        `  Company/DD3: put VITE_* in repo-root .env and .env.production\n` +
         `  Example: VITE_API_URL=https://your-api-host\n` +
-        `  Then run \`npm run build\` from the repo root (ba-frontend).`
+        `  Build from ba-frontend root: npm run build`
     );
   }
 
@@ -29,27 +46,29 @@ function assertProductionApiUrl(
     throw new Error(
       `[vite] Refusing production build: VITE_API_URL is localhost.\n` +
         `  Current: ${apiUrl}\n` +
-        `  Company stack: set VITE_AUTH_MODE=local and VITE_API_URL to your API URL\n` +
-        `    in apps/web/.env (and apps/web/.env.production if you use one).\n` +
-        `  Or set VITE_ALLOW_LOCALHOST_API=true for an internal localhost API.\n` +
-        `  Build from repo root: npm run build`
+        `  Company/DD3: set VITE_AUTH_MODE=local and VITE_API_URL in repo-root .env\n` +
+        `  Or set VITE_ALLOW_LOCALHOST_API=true for an internal localhost API.`
     );
   }
 
   if (normalized.includes('supabase.co') || normalized.includes('supabase.in')) {
     throw new Error(
       `[vite] Refusing production build: VITE_API_URL points at Supabase.\n` +
-        `  Use your Backlink Agent API URL (company host or Railway), not Supabase.`
+        `  Use your Backlink Agent API URL, not Supabase.`
     );
   }
 }
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, __dirname, '');
+  const webDir = __dirname;
+  const repoRoot = path.resolve(__dirname, '../..');
+  const envDir = resolveEnvDir(mode, webDir, repoRoot);
+  const env = loadEnv(mode, envDir, '');
   const apiUrl = env.VITE_API_URL || 'http://localhost:3001';
   assertProductionApiUrl(apiUrl, mode, env);
 
   return {
+    envDir,
     plugins: [react()],
     resolve: {
       alias: {

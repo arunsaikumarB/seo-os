@@ -1,4 +1,6 @@
-import 'dotenv/config';
+import { loadApiEnvFiles } from './load-env.js';
+loadApiEnvFiles();
+
 import { createApp } from './app.js';
 import { getEnv } from './config/env.js';
 import { logger } from './lib/logger.js';

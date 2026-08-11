@@ -67,10 +67,12 @@ Details: [Phase 1](./no-supabase-phase-1.md).
 
 On a bare company Postgres (not the Docker helper), restore with `pg_restore` into the target DB after creating roles (see `scripts/cutover/prepare-company-roles.sql`).
 
-### 3. API env
+### 3. API env (DD3 root layout)
 
-```powershell
-cp apps/api/.env.company.example apps/api/.env
+On `ba-backend` **repo root** (next to `package.json`), not under `apps/api/`:
+
+```bash
+cp .env.example .env
 ```
 
 Required:
@@ -84,10 +86,13 @@ CORS_ORIGIN=https://your-frontend-origin
 
 `COMPANY_STACK=true` forces local JWT auth + direct Postgres (`AUTH_MODE=local`, `DATA_MODE=pg`). Supabase keys are **not** required.
 
-### 4. Web env (from `ba-frontend`)
+### 4. Web env (DD3 root layout on `ba-frontend`)
 
-```powershell
-cp apps/web/.env.company.example apps/web/.env
+On `ba-frontend` **repo root** (next to `package.json`), not under `apps/web/`:
+
+```bash
+cp .env.example .env
+cp .env.example .env.production
 ```
 
 ```env
@@ -97,7 +102,7 @@ VITE_API_URL=https://your-api-origin
 
 ### 5. Build & run
 
-**API (`ba-backend`):**
+**API (`ba-backend` root):**
 
 ```bash
 npm install
@@ -107,7 +112,7 @@ npm run start
 
 Docker (Playwright image): build from `apps/api/Dockerfile` at the `ba-backend` root (context must include `packages/`).
 
-**Web (`ba-frontend`):**
+**Web (`ba-frontend` root):**
 
 ```bash
 npm install
