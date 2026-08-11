@@ -4,7 +4,9 @@ Paste this (adjust URLs when you have company hostnames).
 
 ---
 
-You're right that there is **no committed `.env`** in GitLab (by design — secrets stay off git).
+You're right that real `.env` is **not** committed (secrets stay off git).
+
+Pull the **company example** files from GitLab, then copy them to `.env` / `.env.production` on the server and replace `YOUR-*` / `REPLACE_*` placeholders.
 
 Use the **company** examples only (ignore Supabase / Railway / Netlify values).
 
