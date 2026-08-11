@@ -13,29 +13,40 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $RepoRoot
 
-$wt = Join-Path $env:TEMP "ba-frontend-push"
-if (Test-Path $wt) {
+function Invoke-GitQuiet {
+  param([Parameter(ValueFromRemainingArguments = $true)][string[]]$GitArgs)
   $prevEap = $ErrorActionPreference
   $ErrorActionPreference = "SilentlyContinue"
-  git worktree remove -f $wt | Out-Null
+  & git @GitArgs 2>&1 | Out-Null
+  $code = $LASTEXITCODE
   $ErrorActionPreference = $prevEap
+  return $code
+}
+
+$srcCommit = (git rev-parse HEAD).Trim()
+if (-not $srcCommit) { throw "Could not resolve source commit" }
+
+$wt = Join-Path $env:TEMP "ba-frontend-push"
+if (Test-Path $wt) {
+  Invoke-GitQuiet worktree remove -f $wt | Out-Null
   Remove-Item -Recurse -Force $wt -ErrorAction SilentlyContinue
 }
 
-git worktree add --detach $wt HEAD
+git worktree add --detach $wt $srcCommit
+if ($LASTEXITCODE -ne 0) { throw "git worktree add failed" }
+
 Push-Location $wt
 try {
-  $prevEap = $ErrorActionPreference
-  $ErrorActionPreference = "SilentlyContinue"
-  git branch -D ba-frontend-sync | Out-Null
-  $ErrorActionPreference = $prevEap
+  Invoke-GitQuiet branch -D ba-frontend-sync | Out-Null
   git checkout --orphan ba-frontend-sync
-  $ErrorActionPreference = "SilentlyContinue"
-  git rm -rf --cached . | Out-Null
-  $ErrorActionPreference = $prevEap
+  if ($LASTEXITCODE -ne 0) { throw "orphan checkout failed" }
+
+  Invoke-GitQuiet rm -rf --cached . | Out-Null
   Get-ChildItem -Force | Where-Object { $_.Name -ne ".git" } | Remove-Item -Recurse -Force
 
-  git checkout HEAD -- apps/web packages/shared package.json package-lock.json turbo.json tsconfig.base.json
+  git checkout $srcCommit -- apps/web packages/shared package.json package-lock.json turbo.json tsconfig.base.json
+  if ($LASTEXITCODE -ne 0) { throw "Failed to restore frontend paths from $srcCommit" }
+  if (-not (Test-Path "apps/web/package.json")) { throw "apps/web missing after checkout — aborting push" }
 
   if (Test-Path apps/api) { Remove-Item -Recurse -Force apps/api }
   if (Test-Path apps/companion) { Remove-Item -Recurse -Force apps/companion }
@@ -69,26 +80,29 @@ npm run build   # -> apps/web/dist
 ``````
 "@ | Set-Content -Encoding utf8 README.md
 
-  npm install --package-lock-only | Out-Null
+  npm install --package-lock-only
+  if ($LASTEXITCODE -ne 0) { throw "npm install --package-lock-only failed" }
   if (Test-Path node_modules) { Remove-Item -Recurse -Force node_modules }
 
   git add -A
+  $fileCount = (git ls-files | Measure-Object).Count
+  if ($fileCount -lt 50) { throw "Refusing to push sparse tree ($fileCount files). Expected full frontend slice." }
+
   git commit -m $Message
-  $ErrorActionPreference = "SilentlyContinue"
-  git remote remove gitlab | Out-Null
-  $ErrorActionPreference = $prevEap
+  if ($LASTEXITCODE -ne 0) { throw "commit failed" }
+
+  Invoke-GitQuiet remote remove gitlab | Out-Null
   git remote add gitlab $GitLabUrl
   git push -u gitlab "HEAD:${Branch}" --force
-  Write-Host "Synced to $GitLabUrl branch $Branch"
+  if ($LASTEXITCODE -ne 0) { throw "git push to GitLab failed" }
+
+  Write-Host "Synced to $GitLabUrl branch $Branch ($fileCount files)"
   git rev-parse --short HEAD
 }
 finally {
   Pop-Location
   Set-Location $RepoRoot
-  $prevEap = $ErrorActionPreference
-  $ErrorActionPreference = "SilentlyContinue"
-  git worktree remove -f $wt | Out-Null
+  Invoke-GitQuiet worktree remove -f $wt | Out-Null
   Remove-Item -Recurse -Force $wt -ErrorAction SilentlyContinue
-  git branch -D ba-frontend-sync | Out-Null
-  $ErrorActionPreference = $prevEap
+  Invoke-GitQuiet branch -D ba-frontend-sync | Out-Null
 }
