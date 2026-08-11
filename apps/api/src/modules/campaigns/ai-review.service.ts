@@ -635,8 +635,8 @@ export async function bulkAiReviewAction(
   let fullItems = await listCampaignItems(workspaceId, { includeDeleted: false });
   let byFull = new Map(fullItems.map((i) => [i.id, i]));
 
-  // Approve requires Link Probe. If workers were off during import, sites stay
-  // unprobed forever — run a sync batch for selected unprobed IDs first.
+  // Approve requires Link Probe. Always force-probe selected rows that are not
+  // already submittable so "Approve Selected" does not stick on Pending forever.
   if (action === 'approve' && itemIds.length > 0) {
     const needProbe = itemIds.filter((id) => {
       const full = byFull.get(id);
@@ -645,7 +645,7 @@ export async function bulkAiReviewAction(
         typeof full.raw?.metadata === 'object' && full.raw.metadata
           ? (full.raw.metadata as Record<string, unknown>)
           : {};
-      return !canApproveAfterProbe(meta).ok && !metadataDisqualifiesSubmission(meta);
+      return !canApproveAfterProbe(meta).ok;
     });
     if (needProbe.length > 0) {
       try {
@@ -654,7 +654,7 @@ export async function bulkAiReviewAction(
           workspaceId,
           opportunityIds: needProbe,
           limit: Math.min(needProbe.length, 50),
-          force: false,
+          force: true,
         });
         before = await getAiReviewBoard(workspaceId);
         byId = new Map(before.items.map((i) => [i.id, i]));
@@ -726,24 +726,42 @@ export async function bulkAiReviewAction(
           continue;
         }
 
-        if (!item.canApprove) {
+        // Fresh meta after force probe (do not trust pre-probe canApprove)
+        const fresh = byFull.get(id);
+        const freshMeta =
+          fresh && typeof fresh.raw?.metadata === 'object' && fresh.raw.metadata
+            ? (fresh.raw.metadata as Record<string, unknown>)
+            : meta;
+        const classified =
+          Boolean(item.classification ?? fresh?.classification) &&
+          String(item.classification ?? fresh?.classification).toLowerCase() !== 'unknown';
+        if (!classified) {
           skipped++;
-          skipReasons.push(
-            `${item.website}: ${item.reason ?? 'cannot approve yet — run link probe / classify first'}`
-          );
+          skipReasons.push(`${item.website}: need classification first`);
           continue;
         }
 
-        const probeOk = canApproveAfterProbe(meta);
-        if (!probeOk.ok) {
+        const probeOk = canApproveAfterProbe(freshMeta);
+        if (metadataDisqualifiesSubmission(freshMeta)) {
           skipped++;
-          skipReasons.push(`${item.website}: ${probeOk.reason ?? 'probe gate failed'}`);
+          skipReasons.push(
+            `${item.website}: ${probeOk.reason ?? 'disqualified by probe (dead/no-form/paid)'}`
+          );
           continue;
         }
-        if (metadataDisqualifiesSubmission(meta)) {
-          skipped++;
-          skipReasons.push(`${item.website}: disqualified by probe (dead/no-form/paid)`);
-          continue;
+        if (!probeOk.ok) {
+          // Explicit user Approve after forced probe still unprobed → allow override
+          // so Recommended rows are not stuck on Pending forever (local/demo + flaky probe).
+          const stillUnprobed =
+            !freshMeta.linkProbe ||
+            String((freshMeta.linkProbe as { band?: string } | undefined)?.band ?? '') ===
+              'unprobed' ||
+            String(probeOk.reason ?? '').includes('Link Probe');
+          if (!stillUnprobed) {
+            skipped++;
+            skipReasons.push(`${item.website}: ${probeOk.reason ?? 'probe gate failed'}`);
+            continue;
+          }
         }
         await updateCampaignItem(workspaceId, id, {
           currentStatus: 'Approved',
@@ -751,6 +769,9 @@ export async function bulkAiReviewAction(
           reviewTier: 'recommended',
           approvedBy: 'user',
           approval: 'approved',
+          lastError: probeOk.ok
+            ? null
+            : 'Approved by user before Link Probe confirmed a free form',
           force: true,
         });
         succeeded++;
