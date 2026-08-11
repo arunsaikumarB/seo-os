@@ -354,7 +354,7 @@ export function ClassificationDashboardPage() {
     typeList.find((t) => t.id === id)?.displayName ?? id ?? null;
 
   return (
-    <PageTransition className="space-y-6 max-w-4xl">
+    <PageTransition className="space-y-6 w-full min-w-0">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
           <Sparkles className="h-6 w-6" /> AI Review

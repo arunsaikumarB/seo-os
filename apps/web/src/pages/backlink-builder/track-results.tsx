@@ -55,7 +55,7 @@ export function TrackResultsPage() {
   ] as const;
 
   return (
-    <PageTransition className="mx-auto max-w-5xl space-y-6">
+    <PageTransition className="w-full min-w-0 space-y-6">
       <div className="space-y-2">
         <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
           <CheckCircle2 className="h-6 w-6" /> Track Results

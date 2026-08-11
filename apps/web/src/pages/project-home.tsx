@@ -129,7 +129,7 @@ export function ProjectHomePage() {
             : aiStatusLine;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-8">
+    <div className="w-full min-w-0 space-y-8">
       <motion.div
         initial={{ opacity: 0, y: -6 }}
         animate={{ opacity: 1, y: 0 }}

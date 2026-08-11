@@ -45,8 +45,10 @@ export function OrgShell() {
             })}
           </nav>
         </aside>
-        <main className="flex-1 overflow-y-auto p-6 pb-20 md:pb-6">
-          <Outlet />
+        <main className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-6 pb-20 md:pb-6">
+          <div className="mx-auto w-full min-w-0 max-w-none">
+            <Outlet />
+          </div>
         </main>
       </div>
       <CommandPalette />

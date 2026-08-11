@@ -47,7 +47,7 @@ export function OrgSettingsGeneralPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="w-full min-w-0 space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">Organization settings</h1>
         <p className="text-muted-foreground">General preferences for your organization</p>

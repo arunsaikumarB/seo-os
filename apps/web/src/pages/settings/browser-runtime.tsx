@@ -119,7 +119,7 @@ export function BrowserRuntimePage() {
     verify.isPending || install.isPending || repair.isPending || diagnostics.isPending;
 
   return (
-    <div className="space-y-6 p-6 max-w-5xl mx-auto">
+    <div className="space-y-6 p-6 w-full min-w-0">
       <ProjectSettingsNav projectId={projectId} />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>

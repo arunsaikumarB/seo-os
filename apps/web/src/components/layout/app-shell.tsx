@@ -44,7 +44,7 @@ export function AppShell({ projectId }: AppShellProps) {
   }, [projectId, setCurrentProjectId]);
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-screen min-w-0 overflow-hidden">
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:m-2 focus:rounded-md focus:bg-background focus:px-3 focus:py-2 focus:shadow"
@@ -52,7 +52,7 @@ export function AppShell({ projectId }: AppShellProps) {
         Skip to main content
       </a>
       <Sidebar projectId={projectId} className="hidden md:flex" />
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <OfflineBanner />
         <BetaAnnouncementBar />
         <Topbar projectId={projectId} showProjectSwitcher />
@@ -64,18 +64,24 @@ export function AppShell({ projectId }: AppShellProps) {
             <AiCoachPanel />
           </div>
         </div>
-        <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto p-4 pb-20 md:p-6 md:pb-6">
-          <WorkflowProgressHeader projectId={projectId} />
-          <WorkflowCelebration projectId={projectId} />
-          {!onGeneratePage && !onAssistedManual ? (
-            <CampaignAiStatus projectId={projectId} />
-          ) : null}
-          {!isHome && !onAssistedManual ? (
-            <div className="mb-6 max-w-xl">
-              <NextActionPanel projectId={projectId} />
-            </div>
-          ) : null}
-          <Outlet />
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4 pb-20 md:p-6 md:pb-6"
+        >
+          <div className="mx-auto w-full min-w-0 max-w-none">
+            <WorkflowProgressHeader projectId={projectId} />
+            <WorkflowCelebration projectId={projectId} />
+            {!onGeneratePage && !onAssistedManual ? (
+              <CampaignAiStatus projectId={projectId} />
+            ) : null}
+            {!isHome && !onAssistedManual ? (
+              <div className="mb-6 w-full min-w-0">
+                <NextActionPanel projectId={projectId} />
+              </div>
+            ) : null}
+            <Outlet />
+          </div>
         </main>
       </div>
       <MobileNav projectId={projectId} />

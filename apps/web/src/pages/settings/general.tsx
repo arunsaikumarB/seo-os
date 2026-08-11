@@ -153,7 +153,7 @@ export function ProjectSettingsPage() {
   });
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 p-6">
+    <div className="w-full min-w-0 space-y-6 p-6">
       <ProjectSettingsNav projectId={projectId} />
       <div>
         <h1 className="text-2xl font-semibold flex items-center gap-2">

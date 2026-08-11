@@ -662,7 +662,7 @@ export function AssistedManualPage() {
   };
 
   return (
-    <PageTransition className="space-y-6 max-w-5xl">
+    <PageTransition className="space-y-6 w-full min-w-0">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">

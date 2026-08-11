@@ -45,7 +45,7 @@ export function OrgNotificationsPage() {
   const p = prefs.data?.data;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="w-full min-w-0 space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold flex items-center gap-2">
