@@ -1,10 +1,19 @@
-# Local development — Supabase CLI preferred for full stack.
-# Optional: Postgres + Ollama for offline AI fallback (Sprint 4+).
+# Local development stack (does NOT affect Railway / Netlify / cloud Supabase).
+#
+# Preferred path:
+#   1) supabase start          → Postgres + Auth + Storage on localhost
+#   2) docker compose up -d pgadmin
+#   3) Point apps/api/.env + apps/web/.env at local keys (see docs/local-setup.md)
+#
+# Optional bare Postgres (only if you are NOT using `supabase start` — same host port 54322):
+#   docker compose up -d postgres
 
 services:
+  # Only start this when NOT using Supabase CLI (port clash on 54322).
   postgres:
     image: postgres:15-alpine
     container_name: seo-os-postgres
+    profiles: ["bare-postgres"]
     restart: unless-stopped
     ports:
       - "54322:5432"
@@ -20,6 +29,23 @@ services:
       timeout: 5s
       retries: 5
 
+  # pgAdmin 4 — manage local Postgres (Supabase CLI DB or bare-postgres)
+  # UI: http://localhost:5050  login: admin@seoos.local / admin
+  # Add server → Host: host.docker.internal  Port: 54322  User: postgres  Pass: postgres
+  pgadmin:
+    image: dpage/pgadmin4:8
+    container_name: seo-os-pgadmin
+    restart: unless-stopped
+    ports:
+      - "5050:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    volumes:
+      - seo_os_pgadmin_data:/var/lib/pgadmin
+
   # Uncomment when using local Ollama (Sprint 4+)
   # ollama:
   #   image: ollama/ollama:latest
@@ -31,4 +57,5 @@ services:
 
 volumes:
   seo_os_pg_data:
+  seo_os_pgadmin_data:
   # seo_os_ollama:

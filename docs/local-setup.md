@@ -1,105 +1,110 @@
-# Local Development Guide
+# Local Development Guide (no cloud deploys)
+
+Run the **entire app on your machine**. Production (Netlify / Railway / cloud Supabase) is left alone.
+
+Cloud credentials are backed up as `apps/api/.env.cloud.bak` and `apps/web/.env.cloud.bak` (gitignored). To switch back to cloud env later, copy those over `.env`.
 
 ## Prerequisites
 
-| Tool           | Version  | Purpose               |
-| -------------- | -------- | --------------------- |
-| Node.js        | ≥ 20     | Runtime               |
-| npm            | ≥ 10     | Package manager       |
-| Supabase CLI   | Latest   | Local database + auth |
-| Docker Desktop | Optional | Postgres fallback     |
+| Tool | Purpose |
+| --- | --- |
+| Node.js ≥ 20 | Runtime |
+| Docker Desktop | Local containers |
+| Supabase CLI | Local Postgres + Auth + Storage |
+| pgAdmin (browser UI) | Manage local Postgres |
 
-## First-Time Setup
+## One-time / daily start
 
-```bash
-# 1. Install dependencies
-npm install
+```powershell
+# 1) Docker Desktop must be running
 
-# 2. Environment files
-cp .env.example apps/api/.env
-cp apps/web/.env.example apps/web/.env
-
-# 3. Edit apps/api/.env and apps/web/.env with your Supabase credentials
-#    For shell-only dev, valid URL-shaped placeholders work for /health
-
-# 4. Database (recommended)
+# 2) Local Supabase (Postgres :54322, Auth/API :54321, Studio :54323)
 supabase start
-npm run db:push
 
-# 5. Verify Sprint 0 foundation
-npm run verify:local
-```
+# 3) pgAdmin 4 UI
+docker compose up -d pgadmin
 
-## Running Dev Servers
+# 4) Ensure apps point at localhost (see Env files below)
+#    First time: migrations already applied by `supabase start`
 
-### All apps (Turborepo)
-
-```bash
+# 5) Run API + Web
 npm run dev
 ```
 
-| Service | URL                   |
-| ------- | --------------------- |
-| Web     | http://localhost:5173 |
-| API     | http://localhost:3001 |
+| Service | URL |
+| --- | --- |
+| Web | http://localhost:5173 |
+| API | http://localhost:3001 |
+| Supabase Studio | http://127.0.0.1:54323 |
+| pgAdmin | http://localhost:5050 |
+| Local mail (Mailpit) | http://127.0.0.1:54324 |
 
-### Individual apps
+## Env files (localhost)
 
-```bash
-# API only
-npm run dev --workspace=@seo-os/api
+### `apps/api/.env`
 
-# Web only
-npm run dev --workspace=@seo-os/web
+```env
+NODE_ENV=development
+PORT=3001
+SUPABASE_URL=http://127.0.0.1:54321
+SUPABASE_ANON_KEY=<from: supabase status>
+SUPABASE_SERVICE_ROLE_KEY=<from: supabase status>
+SUPABASE_JWT_SECRET=<from: supabase status>
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres
+CORS_ORIGIN=http://localhost:5173
+PROVIDER_MODE=mvp
+ENABLE_WORKERS=false
 ```
 
-## Docker Postgres (alternative to Supabase CLI)
+### `apps/web/.env`
 
-```bash
-docker compose up -d postgres
-# DATABASE_URL=postgresql://postgres:postgres@localhost:54322/postgres
+```env
+VITE_SUPABASE_URL=http://127.0.0.1:54321
+VITE_SUPABASE_ANON_KEY=<same anon key>
+VITE_API_URL=http://localhost:3001
 ```
 
-Uses **PostgreSQL 15** to align with `supabase/config.toml`.
+Print keys anytime:
 
-## Quality Commands
-
-| Command                               | Description                      |
-| ------------------------------------- | -------------------------------- |
-| `npm run lint`                        | ESLint (zero warnings)           |
-| `npm run lint:fix`                    | Auto-fix lint issues             |
-| `npm run format`                      | Prettier write                   |
-| `npm run format:check`                | Prettier check (CI)              |
-| `npm run typecheck`                   | TypeScript all packages          |
-| `npm run build`                       | Production build all packages    |
-| `npm run verify:local`                | Full local Sprint 0 verification |
-| `node scripts/smoke-local-health.mjs` | API `/health` smoke only         |
-
-## Demo Navigation (no auth)
-
-1. Open http://localhost:5173/projects
-2. Click **Demo Project Shell** → Mission Control
-3. Explore sidebar routes (placeholders for future sprints)
-
-## API Smoke Tests
-
-```bash
-# Local (after build)
-node scripts/smoke-local-health.mjs
-
-# Staging (requires deployed API)
-STAGING_API_URL=https://your-staging-api.railway.app npm run smoke:staging
+```powershell
+supabase status -o env
 ```
 
-## Workspace Packages
+## pgAdmin 4 connection
 
-| Package                     | Path                       | Purpose                           |
-| --------------------------- | -------------------------- | --------------------------------- |
-| `@seo-os/web`               | `apps/web`                 | React SPA                         |
-| `@seo-os/api`               | `apps/api`                 | Express API                       |
-| `@seo-os/shared`            | `packages/shared`          | Types, Zod, errors                |
-| `@seo-os/providers`         | `packages/providers`       | Provider interfaces               |
-| `@seo-os/agent-contracts`   | `packages/agent-contracts` | Agent types                       |
-| `@seo-os/db`                | `packages/db`              | DB utilities (RLS tests Sprint 1) |
-| `@seo-os/worker-general`    | `workers/general`          | Job worker scaffold               |
-| `@seo-os/worker-playwright` | `workers/playwright`       | Playwright worker scaffold        |
+1. Open http://localhost:5050  
+2. Login: `admin@example.com` / `admin`  
+3. **Register → Server**:
+   - Host: `host.docker.internal` (or `172.17.0.1` if that fails)
+   - Port: `54322`
+   - Database: `postgres`
+   - Username: `postgres`
+   - Password: `postgres`
+
+Desktop pgAdmin 4 (installed on Windows) can use Host `127.0.0.1` Port `54322` with the same user/password.
+
+## Auth (local)
+
+Signup is enabled locally (`supabase/config.toml`).
+
+1. Open http://localhost:5173/signup  
+2. Create an account (email confirmation goes to Mailpit: http://127.0.0.1:54324)  
+3. Or confirm via Supabase Studio → Authentication → Users
+
+## Useful commands
+
+| Command | Description |
+| --- | --- |
+| `supabase start` | Start local DB + Auth |
+| `supabase stop` | Stop local Supabase |
+| `supabase status` | URLs + keys |
+| `npm run db:push` | Apply new migrations |
+| `npm run dev` | API + Web |
+| `docker compose up -d pgadmin` | Start pgAdmin only |
+| `docker compose --profile bare-postgres up -d postgres` | Bare Postgres **without** Supabase CLI (do not combine with `supabase start`) |
+
+## Do not disturb production
+
+- Do **not** point local `.env` at Railway/Netlify/cloud Supabase while developing locally.
+- Do **not** run `railway up` / Netlify deploy for day-to-day local work.
+- Restore cloud env from `*.env.cloud.bak` only when you intentionally need cloud again.

@@ -10,7 +10,7 @@
     "workers/*"
   ],
   "scripts": {
-    "dev": "turbo run dev",
+    "dev": "turbo run dev --concurrency=20",
     "build": "turbo run build",
     "build:api": "turbo run build --filter=@seo-os/api",
     "lint": "eslint . --max-warnings 0",

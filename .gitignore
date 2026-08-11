@@ -14,8 +14,11 @@ build/
 .env.local
 .env.production
 .env.*.local
+.env.cloud.bak
+.env.*.bak
 !.env.example
 !.env.production.example
+!.env.local.example
 
 # IDE
 .idea/
