@@ -75,11 +75,13 @@ Synced from the product monorepo (``apps/web`` + ``packages/shared``).
 
 **Node:** ``>=18.18.0`` is enough for FE (React 18 / Vite 6).
 
+Build from this **repo root** (not ``cd apps/web``):
+
 ``````bash
 npm install
-cp apps/web/.env.company.example apps/web/.env   # company stack
-# or: cp apps/web/.env.local.example apps/web/.env
-npm run dev
+cp apps/web/.env.company.example apps/web/.env
+cp apps/web/.env.company.example apps/web/.env.production
+# edit VITE_API_URL to your company API URL
 npm run build   # -> apps/web/dist
 ``````
 "@ | Set-Content -Encoding utf8 README.md

@@ -2,35 +2,44 @@ import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
 
-function assertProductionApiUrl(apiUrl: string, mode: string, env: Record<string, string>) {
+function assertProductionApiUrl(
+  apiUrl: string,
+  mode: string,
+  env: Record<string, string>
+) {
   if (mode !== 'production') return;
+
   const normalized = apiUrl.replace(/\/$/, '');
+  const authMode = String(env.VITE_AUTH_MODE ?? 'supabase').toLowerCase();
   const allowLocalhost =
-    env.VITE_ALLOW_LOCALHOST_API === 'true' || env.VITE_AUTH_MODE === 'local';
+    authMode === 'local' || env.VITE_ALLOW_LOCALHOST_API === 'true';
 
   if (!normalized) {
     throw new Error(
       `[vite] Refusing production build: VITE_API_URL is empty.\n` +
-        `  Fix: set VITE_API_URL in apps/web/.env or apps/web/.env.production to your public API URL,\n` +
-        `  then rebuild from the repo root: npm run build`
+        `  Fix (company stack): set VITE_API_URL in apps/web/.env or apps/web/.env.production\n` +
+        `  Example: VITE_API_URL=https://your-api-host\n` +
+        `  Then run \`npm run build\` from the repo root (ba-frontend).`
     );
   }
 
-  const isLoopback =
+  const isLocal =
     normalized.includes('localhost') || normalized.includes('127.0.0.1');
-  if (isLoopback && !allowLocalhost) {
+  if (isLocal && !allowLocalhost) {
     throw new Error(
-      `[vite] Refusing production build: VITE_API_URL must be your public API URL, not localhost.\n` +
+      `[vite] Refusing production build: VITE_API_URL is localhost.\n` +
         `  Current: ${apiUrl}\n` +
-        `  Company stack: set VITE_API_URL=https://<your-api-host> in apps/web/.env\n` +
-        `  (or apps/web/.env.production), then: npm run build\n` +
-        `  Internal-only exception: VITE_AUTH_MODE=local also allows localhost for smoke builds.`
+        `  Company stack: set VITE_AUTH_MODE=local and VITE_API_URL to your API URL\n` +
+        `    in apps/web/.env (and apps/web/.env.production if you use one).\n` +
+        `  Or set VITE_ALLOW_LOCALHOST_API=true for an internal localhost API.\n` +
+        `  Build from repo root: npm run build`
     );
   }
 
   if (normalized.includes('supabase.co') || normalized.includes('supabase.in')) {
     throw new Error(
-      `[vite] Refusing production build: VITE_API_URL points at Supabase. Use your API host URL.`
+      `[vite] Refusing production build: VITE_API_URL points at Supabase.\n` +
+        `  Use your Backlink Agent API URL (company host or Railway), not Supabase.`
     );
   }
 }

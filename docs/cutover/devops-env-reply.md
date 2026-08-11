@@ -37,21 +37,40 @@ Notes:
 
 ### Frontend (`ba-frontend`)
 
+Build from the **repo root** (`/opt/www/backlink-agent`), not `cd apps/web`:
+
 ```bash
 cp apps/web/.env.company.example apps/web/.env
+cp apps/web/.env.production.example apps/web/.env.production
 ```
 
-Edit `apps/web/.env` to:
+Edit both (same values) to:
 
 ```env
 VITE_AUTH_MODE=local
 VITE_API_URL=https://<YOUR_API_PUBLIC_URL>
 ```
 
+For internal QA with API on same machine:
+
+```env
+VITE_AUTH_MODE=local
+VITE_API_URL=http://localhost:3001
+```
+
+(`VITE_AUTH_MODE=local` allows localhost in production builds.)
+
+Then:
+
+```bash
+npm install
+npm run build   # from repo root -> apps/web/dist
+```
+
 Notes:
 - `VITE_AUTH_MODE=local` is required (no Supabase Auth in browser).
-- **Do not** set Railway / cloud Supabase URLs.
-- Rebuild web after changing `VITE_*` (`npm run build`).
+- **Do not** set Railway / cloud Supabase URLs unless that is truly your API.
+- Vite production mode reads `.env.production` — copy it, don’t only edit `.env`.
 
 ### Quick verify after start
 
