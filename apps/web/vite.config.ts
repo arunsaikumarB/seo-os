@@ -2,19 +2,35 @@ import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
 
-function assertProductionApiUrl(apiUrl: string, mode: string) {
+function assertProductionApiUrl(apiUrl: string, mode: string, env: Record<string, string>) {
   if (mode !== 'production') return;
   const normalized = apiUrl.replace(/\/$/, '');
-  if (!normalized || normalized.includes('localhost') || normalized.includes('127.0.0.1')) {
+  const allowLocalhost =
+    env.VITE_ALLOW_LOCALHOST_API === 'true' || env.VITE_AUTH_MODE === 'local';
+
+  if (!normalized) {
     throw new Error(
-      `[vite] Refusing production build: VITE_API_URL must be your Railway API URL, not localhost.\n` +
-        `  Current: ${apiUrl || '(empty)'}\n` +
-        `  Fix: set VITE_API_URL in apps/web/.env.production or Netlify env vars, then rebuild.`
+      `[vite] Refusing production build: VITE_API_URL is empty.\n` +
+        `  Fix: set VITE_API_URL in apps/web/.env or apps/web/.env.production to your public API URL,\n` +
+        `  then rebuild from the repo root: npm run build`
     );
   }
+
+  const isLoopback =
+    normalized.includes('localhost') || normalized.includes('127.0.0.1');
+  if (isLoopback && !allowLocalhost) {
+    throw new Error(
+      `[vite] Refusing production build: VITE_API_URL must be your public API URL, not localhost.\n` +
+        `  Current: ${apiUrl}\n` +
+        `  Company stack: set VITE_API_URL=https://<your-api-host> in apps/web/.env\n` +
+        `  (or apps/web/.env.production), then: npm run build\n` +
+        `  Internal-only exception: VITE_AUTH_MODE=local also allows localhost for smoke builds.`
+    );
+  }
+
   if (normalized.includes('supabase.co') || normalized.includes('supabase.in')) {
     throw new Error(
-      `[vite] Refusing production build: VITE_API_URL points at Supabase. Use the Railway API URL.`
+      `[vite] Refusing production build: VITE_API_URL points at Supabase. Use your API host URL.`
     );
   }
 }
@@ -22,7 +38,7 @@ function assertProductionApiUrl(apiUrl: string, mode: string) {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname, '');
   const apiUrl = env.VITE_API_URL || 'http://localhost:3001';
-  assertProductionApiUrl(apiUrl, mode);
+  assertProductionApiUrl(apiUrl, mode, env);
 
   return {
     plugins: [react()],
