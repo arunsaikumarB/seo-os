@@ -20,7 +20,7 @@ const schema = z.object({
 type FormData = z.infer<typeof schema>;
 
 export function SignupPage() {
-  const { signUp, signInWithGoogle } = useAuth();
+  const { signUp, signInWithGoogle, authMode } = useAuth();
   const navigate = useNavigate();
   const {
     register,
@@ -31,7 +31,11 @@ export function SignupPage() {
   const onSubmit = async (data: FormData) => {
     try {
       await signUp(data.email, data.password, data.fullName);
-      toast.success('Check your email to confirm your account');
+      toast.success(
+        authMode === 'local'
+          ? 'Account created — you are signed in'
+          : 'Check your email to confirm your account'
+      );
       navigate('/onboarding/organization');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Sign up failed');
@@ -76,14 +80,16 @@ export function SignupPage() {
               Create account
             </Button>
           </form>
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full"
-            onClick={() => signInWithGoogle()}
-          >
-            Continue with Google
-          </Button>
+          {authMode === 'supabase' ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={() => void signInWithGoogle().catch((e) => toast.error(String(e)))}
+            >
+              Continue with Google
+            </Button>
+          ) : null}
           <p className="text-center text-sm text-muted-foreground">
             Already have an account?{' '}
             <Link to="/login" className="text-primary hover:underline">

@@ -19,7 +19,7 @@ const schema = z.object({
 type FormData = z.infer<typeof schema>;
 
 export function LoginPage() {
-  const { signIn, signInWithGoogle } = useAuth();
+  const { signIn, signInWithGoogle, authMode } = useAuth();
   const navigate = useNavigate();
   const {
     register,
@@ -71,14 +71,20 @@ export function LoginPage() {
               Sign in
             </Button>
           </form>
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full"
-            onClick={() => signInWithGoogle()}
-          >
-            Continue with Google
-          </Button>
+          {authMode === 'supabase' ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={() => void signInWithGoogle().catch((e) => toast.error(String(e)))}
+            >
+              Continue with Google
+            </Button>
+          ) : (
+            <p className="text-center text-xs text-muted-foreground">
+              Local auth mode — API login (`AUTH_MODE=local` + `VITE_AUTH_MODE=local`)
+            </p>
+          )}
           <p className="text-center text-sm text-muted-foreground">
             No account?{' '}
             <Link to="/signup" className="text-primary hover:underline">

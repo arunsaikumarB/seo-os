@@ -69,6 +69,8 @@ export const webEnvSchema = z.object({
   VITE_SUPABASE_URL: z.string().url(),
   VITE_SUPABASE_ANON_KEY: z.string().min(1),
   VITE_API_URL: z.string().url(),
+  /** Auth cutover (Phase 3). Default supabase — keep for normal demos. */
+  VITE_AUTH_MODE: z.enum(['supabase', 'local']).default('supabase'),
 });
 
 export type WebEnv = z.infer<typeof webEnvSchema>;
