@@ -1,5 +1,8 @@
 # Azure QA deploy handoff (for DevOps)
 
+**PDF for email/share:** [Backlink-Agent-Azure-QA-DevOps-Handoff.pdf](./Backlink-Agent-Azure-QA-DevOps-Handoff.pdf)  
+Regenerate: `python scripts/generate-azure-devops-pdf.py`
+
 Repo: `arunsaikumarB/seo-os` · branch: `master`  
 App name in product: **Backlink Agent** (Back Links Agent AI)
 
