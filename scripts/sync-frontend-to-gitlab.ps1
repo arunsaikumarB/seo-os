@@ -19,9 +19,10 @@ if (Test-Path $wt) {
   Remove-Item -Recurse -Force $wt -ErrorAction SilentlyContinue
 }
 
-git worktree add --detach $wt HEAD
+  git worktree add --detach $wt HEAD
 Push-Location $wt
 try {
+  git branch -D ba-frontend-sync 2>$null | Out-Null
   git checkout --orphan ba-frontend-sync
   git rm -rf --cached . 2>$null | Out-Null
   Get-ChildItem -Force | Where-Object { $_.Name -ne ".git" } | Remove-Item -Recurse -Force
@@ -76,4 +77,5 @@ finally {
   Set-Location $RepoRoot
   git worktree remove -f $wt 2>$null
   Remove-Item -Recurse -Force $wt -ErrorAction SilentlyContinue
+  git branch -D ba-frontend-sync 2>$null | Out-Null
 }

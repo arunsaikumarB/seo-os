@@ -1,0 +1,17 @@
+---
+description: After backend/API changes, sync to GitLab ba-backend
+alwaysApply: true
+---
+
+# GitLab backend sync
+
+When you change **backend** code (`apps/api/**`, `packages/**` used by the API, `workers/**`, or cutover scripts under `scripts/cutover/**`), after committing to GitHub also sync to GitLab when on a branch meant for DevOps (e.g. `cutover/no-supabase` or `master` after cutover merge):
+
+```powershell
+powershell -File scripts/sync-backend-to-gitlab.ps1 -Message "<same conventional message>"
+```
+
+- Remote: `http://gitlab.lstech-hq.lstechinc.com/websites/backlink-agent.git`
+- Branch: `ba-backend`
+- Do **not** push web/UI to `ba-backend` (that is `ba-frontend`)
+- Skip sync for docs-only / web-only / companion-only changes

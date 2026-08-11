@@ -38,6 +38,6 @@ Leave `COMPANY_STACK` unset. Keep existing `apps/api/.env` / `apps/web/.env` poi
 
 `@supabase/supabase-js` remains installed so `AUTH_MODE=supabase` demos still work. Runtime company stack does not call Supabase Cloud.
 
-## Next (Phase 6)
+## Next
 
-Push API slice to GitLab `ba-backend` (frontend already on `ba-frontend`) and hand DevOps the company examples + Phase 1 dump/restore PDF notes.
+See [Phase 6](./no-supabase-phase-6.md) — GitLab `ba-backend` sync + DevOps company-stack handoff.
