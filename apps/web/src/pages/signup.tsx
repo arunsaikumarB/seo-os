@@ -44,8 +44,9 @@ export function SignupPage() {
         <CardHeader className="text-center space-y-3">
           <BrandLogo
             variant="full"
-            className="mx-auto rounded-xl bg-white px-3 py-2 shadow-sm ring-1 ring-border/40"
-            imgClassName="h-16 w-auto max-w-[280px]"
+            showTitle={false}
+            className="mx-auto rounded-2xl bg-white p-3 shadow-sm ring-1 ring-border/40"
+            imgClassName="h-24 w-24"
           />
           <CardTitle className="text-2xl">Create your {APP_NAME} account</CardTitle>
           <CardDescription>Start building your AI backlink workforce</CardDescription>

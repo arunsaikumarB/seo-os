@@ -26,8 +26,9 @@ export function OnboardingWelcomePage() {
             >
               <BrandLogo
                 variant="full"
-                className="rounded-xl bg-white px-3 py-2 shadow-sm ring-1 ring-border/40"
-                imgClassName="h-14 w-auto max-w-[260px]"
+                showTitle={false}
+                className="rounded-2xl bg-white p-3 shadow-sm ring-1 ring-border/40"
+                imgClassName="h-20 w-20"
               />
             </motion.div>
 
