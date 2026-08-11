@@ -1,9 +1,13 @@
 import type { NextFunction, Request, Response } from 'express';
-import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { createRemoteJWKSet, jwtVerify, decodeJwt } from 'jose';
 import { AppError } from '@seo-os/shared';
 import type { OrgRole, TenantContext } from '@seo-os/shared';
 import { getEnv } from '../config/env.js';
 import { getSupabaseAdmin } from '../lib/supabase.js';
+import {
+  LOCAL_JWT_ISSUER,
+  verifyLocalAccessToken,
+} from '../modules/auth/local-auth.service.js';
 import type { RequestWithTrace } from './traceId.js';
 
 export interface AuthenticatedRequest extends RequestWithTrace {
@@ -30,16 +34,46 @@ function getJwks(supabaseUrl: string) {
   return jwksCache.get(supabaseUrl)!;
 }
 
+async function verifySupabaseToken(token: string): Promise<{ sub: string }> {
+  const env = getEnv();
+  const jwks = getJwks(env.SUPABASE_URL);
+  const { payload } = await jwtVerify(token, jwks, {
+    issuer: `${env.SUPABASE_URL}/auth/v1`,
+    audience: 'authenticated',
+  });
+  if (!payload.sub) throw new Error('Missing sub');
+  return { sub: payload.sub };
+}
+
+/**
+ * Dual-mode token verify:
+ * - AUTH_MODE=supabase (default): Supabase JWKS only
+ * - AUTH_MODE=local: local HS256 JWT; falls back to Supabase JWKS for transitional tokens
+ */
 async function verifyToken(token: string): Promise<{ sub: string }> {
   const env = getEnv();
+  if (env.AUTH_MODE === 'local') {
+    try {
+      const decoded = decodeJwt(token);
+      if (decoded.iss === LOCAL_JWT_ISSUER) {
+        return verifyLocalAccessToken(token);
+      }
+    } catch {
+      // fall through to Supabase verify for transitional sessions
+    }
+    try {
+      return await verifyLocalAccessToken(token);
+    } catch {
+      try {
+        return await verifySupabaseToken(token);
+      } catch {
+        throw new AppError(401, 'AUTH_INVALID_TOKEN', 'Invalid or expired token');
+      }
+    }
+  }
+
   try {
-    const jwks = getJwks(env.SUPABASE_URL);
-    const { payload } = await jwtVerify(token, jwks, {
-      issuer: `${env.SUPABASE_URL}/auth/v1`,
-      audience: 'authenticated',
-    });
-    if (!payload.sub) throw new Error('Missing sub');
-    return { sub: payload.sub };
+    return await verifySupabaseToken(token);
   } catch {
     throw new AppError(401, 'AUTH_INVALID_TOKEN', 'Invalid or expired token');
   }
@@ -47,7 +81,6 @@ async function verifyToken(token: string): Promise<{ sub: string }> {
 
 /**
  * Auth foundation — validates JWT and resolves org membership.
- * Sprint 1 will expand project-level access checks.
  */
 export async function authMiddleware(
   req: Request,

@@ -219,7 +219,6 @@ function buildMockContentPack(params: LiveGenParams): Record<string, unknown> {
       classificationId: params.classificationId,
       classificationLabel: params.classificationLabel,
       reason: params.reason,
-      allowMockFallback: true,
     }
   ) as unknown as Record<string, unknown>;
 

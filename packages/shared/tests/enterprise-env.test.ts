@@ -26,4 +26,17 @@ describe('api env parsing', () => {
     });
     expect(env.SENTRY_DSN).toContain('sentry.io');
   });
+
+  it('defaults AUTH_MODE to supabase', () => {
+    const env = parseApiEnv({
+      SUPABASE_URL: 'https://example.supabase.co',
+      SUPABASE_ANON_KEY: 'anon',
+      SUPABASE_SERVICE_ROLE_KEY: 'service',
+      SUPABASE_JWT_SECRET: 'jwt-secret-value',
+      DATABASE_URL: 'postgres://localhost/seo',
+      NODE_ENV: 'test',
+      ENABLE_WORKERS: 'false',
+    });
+    expect(env.AUTH_MODE).toBe('supabase');
+  });
 });

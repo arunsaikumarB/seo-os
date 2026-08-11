@@ -75,6 +75,7 @@ import { integrationsRouter } from './integrations.routes.js';
 import { betaOrgRouter, betaGlobalRouter } from './beta.routes.js';
 import { extensionProjectRouter, extensionPublicRouter } from './extension.routes.js';
 import { learningRouter } from './learning.routes.js';
+import { authRouter } from './auth.routes.js';
 import { getExecutiveSummary } from '../../modules/executive/executive.service.js';
 import { logger } from '../../lib/logger.js';
 
@@ -87,6 +88,9 @@ export const v1Router = Router();
 const projectScopeRouter = Router({ mergeParams: true });
 projectScopeRouter.use(authMiddleware);
 projectScopeRouter.use(requireProjectAccess);
+
+/** Public auth endpoints (local mode). No JWT required. */
+v1Router.use('/auth', authRouter);
 
 v1Router.get('/version', async (_req, res) => {
   try {

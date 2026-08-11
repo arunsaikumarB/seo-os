@@ -100,7 +100,7 @@ Local demo can keep old path until you switch.
 | --- | --- | --- |
 | **0** | This inventory + freeze rules | No |
 | **1** | Company Postgres runbook (dump/restore + pgAdmin) | No |
-| **2** | API auth (`AUTH_MODE=supabase\|local`) + user password table | No if default=`supabase` |
+| **2** | API auth (`AUTH_MODE=supabase\|local`) + user password table — see [phase 2](./no-supabase-phase-2.md) | No if default=`supabase` |
 | **3** | Web login uses API when `VITE_AUTH_MODE=local` | No if default=`supabase` |
 | **4** | DB access via `pg` pool; deprecate PostgREST client behind flag | No if default=`supabase` |
 | **5** | Default local/company mode; remove Supabase deps | Only after sign-off |

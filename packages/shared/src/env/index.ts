@@ -4,10 +4,18 @@ export const apiEnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production', 'staging']).default('development'),
   PORT: z.coerce.number().default(3001),
   API_URL: z.string().url().optional(),
+  /**
+   * Auth cutover flag (Phase 2).
+   * - supabase (default): current behavior — web uses Supabase Auth; API verifies Supabase JWTs
+   * - local: API `/v1/auth/login|signup` issues HS256 JWTs; middleware accepts local (and transitional Supabase) tokens
+   */
+  AUTH_MODE: z.enum(['supabase', 'local']).default('supabase'),
   SUPABASE_URL: z.string().url(),
   SUPABASE_ANON_KEY: z.string().min(1),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   SUPABASE_JWT_SECRET: z.string().min(1),
+  /** Optional override for local JWT signing; defaults to SUPABASE_JWT_SECRET when unset */
+  LOCAL_JWT_SECRET: z.string().min(32).optional(),
   DATABASE_URL: z.string().min(1),
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
   ENCRYPTION_KEY: z.string().optional(),
