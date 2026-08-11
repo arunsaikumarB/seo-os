@@ -14,4 +14,5 @@ powershell -File scripts/sync-frontend-to-gitlab.ps1 -Message "<same conventiona
 - Remote: `http://gitlab.lstech-hq.lstechinc.com/websites/backlink-agent.git`
 - Branch: `ba-frontend`
 - Do **not** push API/backend to `ba-frontend` (that is `ba-backend`)
+- Do **not** force-push — sync script commits on top of existing history only
 - Skip sync for docs-only / API-only / companion-only changes

@@ -1,0 +1,12 @@
+---
+description: Never force-push to any remote
+alwaysApply: true
+---
+
+# No force push
+
+**Never** run `git push --force`, `git push -f`, or `git push --force-with-lease` to any remote (GitHub or GitLab), including `ba-frontend` / `ba-backend`.
+
+GitLab sync scripts must commit on top of the existing branch history and use a normal `git push` only.
+
+If a push is rejected as non-fast-forward: stop, report to the user, and let them/DevOps reconcile — do not force.
