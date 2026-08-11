@@ -1,5 +1,4 @@
-import { loadApiEnvFiles } from './load-env.js';
-loadApiEnvFiles();
+import './load-env.js';
 
 import { createApp } from './app.js';
 import { getEnv } from './config/env.js';
@@ -49,7 +48,7 @@ async function main() {
 
   const app = createApp();
 
-  // Bind early so Railway /health succeeds while workers + Chromium warm up
+  // Bind early so /health succeeds while workers + Chromium warm up
   server = app.listen(env.PORT, '0.0.0.0', () => {
     logger.info({ port: env.PORT, host: '0.0.0.0', env: env.NODE_ENV }, 'Backlink Agent API started');
   });

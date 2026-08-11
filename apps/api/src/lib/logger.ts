@@ -1,12 +1,12 @@
 import pino from 'pino';
-import { getEnv } from '../config/env.js';
 
-const env = getEnv();
+// Do not call getEnv()/Zod here — this module may load before dotenv finishes.
+const nodeEnv = process.env.NODE_ENV ?? 'development';
 
 export const logger = pino({
-  level: env.NODE_ENV === 'production' ? 'info' : 'debug',
+  level: nodeEnv === 'production' ? 'info' : 'debug',
   transport:
-    env.NODE_ENV === 'development'
+    nodeEnv === 'development'
       ? { target: 'pino-pretty', options: { colorize: true } }
       : undefined,
   redact: ['req.headers.authorization', 'req.headers.cookie'],

@@ -4,22 +4,43 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
- * DD3 / company layout: `.env` at repo (slice) root.
- * Local monorepo: `apps/api/.env` still wins when present.
+ * DD3 / company: `.env` at repo root (next to package.json).
+ * Local monorepo: `apps/api/.env` still supported (loads last, wins).
  *
- * Load order: root first, then apps/api/.env (override).
+ * IMPORTANT: this module runs on import (side effect) so env is ready
+ * before logger/config parse process.env. Keep `import './load-env.js'`
+ * as the first import in index.ts.
  */
-export function loadApiEnvFiles(): void {
-  const apiRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+function resolveApiRoot(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const base = here.replace(/[/\\](dist|src)$/, '');
+  return base === here ? resolve(here, '..') : base;
+}
+
+export function loadApiEnvFiles(): string[] {
+  const apiRoot = resolveApiRoot();
   const repoRoot = resolve(apiRoot, '../..');
+  const cwd = process.cwd();
 
-  const rootEnv = resolve(repoRoot, '.env');
-  const appEnv = resolve(apiRoot, '.env');
+  const candidates = [
+    process.env.ENV_FILE,
+    resolve(repoRoot, '.env'),
+    resolve(cwd, '.env'),
+    resolve(cwd, '../.env'),
+    resolve(apiRoot, '.env'),
+  ].filter((p): p is string => Boolean(p));
 
-  if (existsSync(rootEnv)) {
-    loadDotenv({ path: rootEnv });
+  const loaded: string[] = [];
+  for (const path of candidates) {
+    if (!existsSync(path)) continue;
+    // Later files override earlier (apps/api/.env wins over root when both exist)
+    loadDotenv({ path, override: true });
+    loaded.push(path);
   }
-  if (existsSync(appEnv)) {
-    loadDotenv({ path: appEnv, override: true });
-  }
+  return loaded;
+}
+
+const loadedPaths = loadApiEnvFiles();
+if (process.env.DEBUG_ENV_LOAD === 'true') {
+  console.error('[api] dotenv loaded from:', loadedPaths.length ? loadedPaths.join(', ') : '(none)');
 }
