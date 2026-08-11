@@ -108,12 +108,9 @@ Local demo can keep old path until you switch.
 
 ---
 
-## Phase 1 preview (next, when you say go)
+## Phase 1
 
-1. Script to `pg_dump` local Supabase Postgres → file (read-only).  
-2. Doc: restore into plain Postgres on company server / local test DB.  
-3. pgAdmin connection notes.  
-4. **Still no Auth rewrite.**
+See [no-supabase-phase-1.md](./no-supabase-phase-1.md) — dump/restore scripts + company Postgres on port **54332** + pgAdmin notes.
 
 ---
 

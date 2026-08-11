@@ -47,6 +47,10 @@ supabase/.temp
 test-results/
 playwright-report/
 
+# Cutover DB dumps (never commit — may contain local demo data)
+.cutover-dumps/
+*.dump
+
 # Misc
 *.pem
 

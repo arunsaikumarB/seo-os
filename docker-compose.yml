@@ -29,9 +29,35 @@ services:
       timeout: 5s
       retries: 5
 
+  # Company-style plain Postgres for cutover testing (DD3-like).
+  # Uses port 54332 so it NEVER clashes with Supabase local (54322).
+  #   docker compose --profile company-postgres up -d company-postgres
+  # Does not replace supabase start. App .env stays on Supabase until Phase 2+.
+  # PG 17 + pgvector (matches Supabase local major; enables kb_embeddings restore).
+  # Port 54332 — never clashes with Supabase on 54322.
+  company-postgres:
+    image: pgvector/pgvector:pg17
+    container_name: ba-company-postgres
+    profiles: ["company-postgres"]
+    restart: unless-stopped
+    ports:
+      - "54332:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: backlink_agent
+    volumes:
+      - ba_company_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d backlink_agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   # pgAdmin 4 — manage local Postgres (Supabase CLI DB or bare-postgres)
   # UI: http://localhost:5050  login: admin@seoos.local / admin
   # Add server → Host: host.docker.internal  Port: 54322  User: postgres  Pass: postgres
+  # Company cutover DB: Host host.docker.internal Port 54332 DB backlink_agent
   pgadmin:
     image: dpage/pgadmin4:8
     container_name: seo-os-pgadmin
@@ -58,4 +84,5 @@ services:
 volumes:
   seo_os_pg_data:
   seo_os_pgadmin_data:
+  ba_company_pg_data:
   # seo_os_ollama:
