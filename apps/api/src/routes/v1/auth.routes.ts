@@ -32,8 +32,10 @@ authRouter.get('/mode', (_req, res) => {
     data: {
       authMode: env.AUTH_MODE,
       dataMode: env.DATA_MODE,
+      companyStack: env.companyStack,
       localAuthEnabled: env.AUTH_MODE === 'local',
       pgDataEnabled: env.DATA_MODE === 'pg',
+      supabaseRequired: !env.companyStack,
     },
   });
 });

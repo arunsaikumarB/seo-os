@@ -104,7 +104,7 @@ Local demo can keep old path until you switch.
 | **3** | Web login uses API when `VITE_AUTH_MODE=local` — see [phase 3](./no-supabase-phase-3.md) | No if default=`supabase` |
 | **4** | `DATA_MODE=pg` for core tenancy — see [phase 4](./no-supabase-phase-4.md) | No if default=`supabase` |
 | **4b** | PostgREST-compat so most `getSupabaseAdmin()` paths work on pg — [phase 4b](./no-supabase-phase-4b.md) | No if default=`supabase` |
-| **5** | Default local/company mode; remove Supabase deps | Only after sign-off |
+| **5** | `COMPANY_STACK` first-class (Supabase optional) — [phase 5](./no-supabase-phase-5.md) | Opt-in only |
 | **6** | GitLab `ba-frontend` / `ba-backend` sync for DevOps | After 5 |
 
 ---

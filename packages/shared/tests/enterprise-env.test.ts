@@ -39,5 +39,19 @@ describe('api env parsing', () => {
     });
     expect(env.AUTH_MODE).toBe('supabase');
     expect(env.DATA_MODE).toBe('supabase');
+    expect(env.companyStack).toBe(false);
+  });
+
+  it('allows COMPANY_STACK without Supabase credentials', () => {
+    const env = parseApiEnv({
+      COMPANY_STACK: 'true',
+      LOCAL_JWT_SECRET: 'company-local-jwt-secret-value-32chars',
+      DATABASE_URL: 'postgresql://postgres:postgres@127.0.0.1:54332/backlink_agent',
+      NODE_ENV: 'test',
+      ENABLE_WORKERS: 'false',
+    });
+    expect(env.companyStack).toBe(true);
+    expect(env.AUTH_MODE).toBe('local');
+    expect(env.DATA_MODE).toBe('pg');
   });
 });

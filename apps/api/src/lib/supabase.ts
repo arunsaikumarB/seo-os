@@ -28,9 +28,14 @@ export function getSupabaseAdmin(): SupabaseClient {
   return adminClient;
 }
 
-/** User-scoped Supabase client (RLS). Remains supabase-only — not used under DATA_MODE=pg. */
+/** User-scoped Supabase client (RLS). Not available on company / DATA_MODE=pg stack. */
 export function getSupabaseUserClient(accessToken: string): SupabaseClient {
   const env = getEnv();
+  if (env.companyStack || isPgDataMode()) {
+    throw new Error(
+      'getSupabaseUserClient is unavailable when COMPANY_STACK=true or DATA_MODE=pg. Use API JWT + pg data access.'
+    );
+  }
   return createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
     global: { headers: { Authorization: `Bearer ${accessToken}` } },
     auth: { autoRefreshToken: false, persistSession: false },

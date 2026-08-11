@@ -1,10 +1,10 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { isSupabaseBrowserConfigured, supabase } from '@/lib/supabase';
 
 /**
  * Subscribe to platform_events + notifications via Supabase Realtime.
- * Invalidates Mission Control / activity / notification queries on insert.
+ * No-ops on company stack (VITE_AUTH_MODE=local) — poll/invalidate via normal queries.
  */
 export function usePlatformRealtime(opts: {
   workspaceId?: string;
@@ -12,7 +12,7 @@ export function usePlatformRealtime(opts: {
   enabled?: boolean;
 }) {
   const queryClient = useQueryClient();
-  const enabled = opts.enabled !== false;
+  const enabled = opts.enabled !== false && isSupabaseBrowserConfigured();
 
   useEffect(() => {
     if (!enabled || !opts.workspaceId) return;

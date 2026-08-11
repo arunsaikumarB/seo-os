@@ -8,7 +8,7 @@ import { useEffect, useRef } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { supabase } from '@/lib/supabase';
+import { isSupabaseBrowserConfigured, supabase } from '@/lib/supabase';
 import { usePlatformNotifications } from '@/hooks/use-platform';
 import { useAuth } from '@/providers/auth-provider';
 
@@ -93,7 +93,7 @@ export function useStageNotificationDelivery() {
   useNotificationTitleBadge();
 
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id || !isSupabaseBrowserConfigured()) return;
 
     const channel = supabase
       .channel(`stage-notify:${user.id}`)
