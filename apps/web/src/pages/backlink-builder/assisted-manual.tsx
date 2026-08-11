@@ -291,18 +291,24 @@ export function AssistedManualPage() {
         hasLearningAuth: Boolean(accessToken && orgId),
       });
 
+      const ackSources = new Set(['BacklinkAgent-companion', 'seo-os-companion']);
       const ackPromise = new Promise<{ ok: boolean; error?: string }>((resolve) => {
         const timer = window.setTimeout(() => {
           window.removeEventListener('message', onAck);
           resolve({
             ok: false,
             error:
-              'Companion did not respond — reload the unpacked extension (v0.2.7+) and try again',
+              'Companion did not respond — chrome://extensions → Reload “Backlink Agent Companion” (load unpacked from apps/companion/dist, v0.2.9+)',
           });
-        }, 4000);
+        }, 8000);
         function onAck(event: MessageEvent) {
           const d = event.data as Record<string, unknown> | null;
-          if (!d || d.source !== 'BacklinkAgent-companion' || d.type !== 'companion.activate_ack') {
+          if (
+            !d ||
+            typeof d.source !== 'string' ||
+            !ackSources.has(d.source) ||
+            d.type !== 'companion.activate_ack'
+          ) {
             return;
           }
           window.clearTimeout(timer);
@@ -315,18 +321,17 @@ export function AssistedManualPage() {
         window.addEventListener('message', onAck);
       });
 
-      window.postMessage(
-        {
-          source: 'BacklinkAgent-web',
-          type: 'companion.activate_package',
-          package: payload,
-          apiBase,
-          accessToken,
-          orgId: orgId || '',
-          projectId,
-        },
-        window.location.origin
-      );
+      const activateMsg = {
+        type: 'companion.activate_package' as const,
+        package: payload,
+        apiBase,
+        accessToken,
+        orgId: orgId || '',
+        projectId,
+      };
+      // Dual source for renamed companion + any stale content-script build
+      window.postMessage({ source: 'BacklinkAgent-web', ...activateMsg }, window.location.origin);
+      window.postMessage({ source: 'seo-os-web', ...activateMsg }, window.location.origin);
 
       const ack = await ackPromise;
       if (!ack.ok) {

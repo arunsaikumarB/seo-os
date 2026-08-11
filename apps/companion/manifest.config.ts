@@ -3,9 +3,9 @@ import { defineManifest } from '@crxjs/vite-plugin';
 export default defineManifest({
   manifest_version: 3,
   name: 'Backlink Agent Companion',
-  version: '0.2.8',
+  version: '0.2.9',
   description:
-    'Phase 2.3.3 — hardened free/paid detect + listing form fill. Never submits.',
+    'Phase 2.3.4 — activate bridge hardened after Backlink Agent rename. Never submits.',
   icons: {
     '16': 'public/icons/icon-16.png',
     '32': 'public/icons/icon-32.png',

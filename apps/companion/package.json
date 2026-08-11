@@ -1,9 +1,9 @@
 {
   "name": "@seo-os/companion",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "private": true,
   "type": "module",
-  "description": "Backlink Agent Companion — hardened free/paid + form detect (Phase 2.3.3)",
+  "description": "Backlink Agent Companion — activate bridge + form detect (Phase 2.3.4)",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

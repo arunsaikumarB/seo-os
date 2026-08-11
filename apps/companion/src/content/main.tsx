@@ -7,11 +7,13 @@ import widgetCss from './widget.css?inline';
 const HOST_ID = 'BacklinkAgent-companion-root';
 
 function mount(): void {
-  if (document.getElementById(HOST_ID)) return;
   if (!document.documentElement) return;
 
+  // Always (re)ensure the activate bridge — even if the host widget already exists
   installWebHandoffBridge();
   installActivePackageSync();
+
+  if (document.getElementById(HOST_ID)) return;
 
   const host = document.createElement('div');
   host.id = HOST_ID;
