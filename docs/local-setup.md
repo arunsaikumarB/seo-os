@@ -2,6 +2,9 @@
 
 Run the **entire app on your machine**. Production (Netlify / Railway / cloud Supabase) is left alone.
 
+- Candidate demo on this PC: [demo-today.md](./demo-today.md)  
+- Azure QA handoff for DevOps: [azure-qa-deploy.md](./azure-qa-deploy.md)
+
 Cloud credentials are backed up as `apps/api/.env.cloud.bak` and `apps/web/.env.cloud.bak` (gitignored). To switch back to cloud env later, copy those over `.env`.
 
 ## Prerequisites
