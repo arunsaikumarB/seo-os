@@ -14,7 +14,7 @@ $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $RepoRoot
 
 function Invoke-GitQuiet {
-  param([Parameter(ValueFromRemainingArguments = $true)][string[]]$GitArgs)
+  param([Parameter(Mandatory = $true)][string[]]$GitArgs)
   $prevEap = $ErrorActionPreference
   $ErrorActionPreference = "SilentlyContinue"
   & git @GitArgs 2>&1 | Out-Null
@@ -28,7 +28,7 @@ if (-not $srcCommit) { throw "Could not resolve source commit" }
 
 $wt = Join-Path $env:TEMP "ba-frontend-push"
 if (Test-Path $wt) {
-  Invoke-GitQuiet worktree remove -f $wt | Out-Null
+  Invoke-GitQuiet -GitArgs @('worktree','remove','-f',$wt) | Out-Null
   Remove-Item -Recurse -Force $wt -ErrorAction SilentlyContinue
 }
 
@@ -37,11 +37,11 @@ if ($LASTEXITCODE -ne 0) { throw "git worktree add failed" }
 
 Push-Location $wt
 try {
-  Invoke-GitQuiet branch -D ba-frontend-sync | Out-Null
+  Invoke-GitQuiet -GitArgs @('branch','-D','ba-frontend-sync') | Out-Null
   git checkout --orphan ba-frontend-sync
   if ($LASTEXITCODE -ne 0) { throw "orphan checkout failed" }
 
-  Invoke-GitQuiet rm -rf --cached . | Out-Null
+  Invoke-GitQuiet -GitArgs @('rm','-rf','--cached','.') | Out-Null
   Get-ChildItem -Force | Where-Object { $_.Name -ne ".git" } | Remove-Item -Recurse -Force
 
   git checkout $srcCommit -- apps/web packages/shared package.json package-lock.json turbo.json tsconfig.base.json
@@ -91,7 +91,7 @@ npm run build   # -> apps/web/dist
   git commit -m $Message
   if ($LASTEXITCODE -ne 0) { throw "commit failed" }
 
-  Invoke-GitQuiet remote remove gitlab | Out-Null
+  Invoke-GitQuiet -GitArgs @('remote','remove','gitlab') | Out-Null
   git remote add gitlab $GitLabUrl
   git push -u gitlab "HEAD:${Branch}" --force
   if ($LASTEXITCODE -ne 0) { throw "git push to GitLab failed" }
@@ -102,7 +102,7 @@ npm run build   # -> apps/web/dist
 finally {
   Pop-Location
   Set-Location $RepoRoot
-  Invoke-GitQuiet worktree remove -f $wt | Out-Null
+  Invoke-GitQuiet -GitArgs @('worktree','remove','-f',$wt) | Out-Null
   Remove-Item -Recurse -Force $wt -ErrorAction SilentlyContinue
-  Invoke-GitQuiet branch -D ba-frontend-sync | Out-Null
+  Invoke-GitQuiet -GitArgs @('branch','-D','ba-frontend-sync') | Out-Null
 }
