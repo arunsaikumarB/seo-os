@@ -72,7 +72,7 @@ fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');
 "@
 
   @"
-# Backlink Agent — Frontend (``ba-frontend``)
+# Backlink Agent - Frontend (``ba-frontend``)
 
 Synced from the product monorepo (``apps/web`` + ``packages/shared``).
 
@@ -104,7 +104,7 @@ Push-Location $wt
 try {
   git pull --ff-only origin $Branch
   if ($LASTEXITCODE -ne 0) {
-    throw "Cannot fast-forward $Branch. Resolve on GitLab first — this script will NOT force-push."
+    throw "Cannot fast-forward $Branch. Resolve on GitLab first - this script will NOT force-push."
   }
 
   Get-ChildItem -Force | Where-Object { $_.Name -ne ".git" } | Remove-Item -Recurse -Force
@@ -127,7 +127,7 @@ try {
   # NEVER --force / --force-with-lease
   git push origin "HEAD:${Branch}"
   if ($LASTEXITCODE -ne 0) {
-    throw "git push failed (non-fast-forward). Do NOT force-push — pull/reconcile on GitLab, then re-run sync."
+    throw "git push failed (non-fast-forward). Do NOT force-push - pull/reconcile on GitLab, then re-run sync."
   }
 
   Write-Host "Synced to $GitLabUrl branch $Branch ($fileCount files) without force-push"
