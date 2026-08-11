@@ -63,6 +63,7 @@ function msBetween(start?: string | null, end?: string | null): number | null {
 async function computeStepTimings(
   workspaceId: string,
   progress: WorkflowProgress,
+  input: WorkflowProgressInput,
   project: { created_at?: string | null; updated_at?: string | null } | null
 ): Promise<StepTimingDto[]> {
   const flags = progress.flags;
@@ -102,43 +103,90 @@ async function computeStepTimings(
     : msBetween(pipelineStart, pipelineEnd);
 
   const items = await listCampaignItems(workspaceId, { includeDeleted: false });
+
+  // AI Review: own clock (do not reuse Import). Runs while pending analysis / classify remains.
+  const reviewItemTimes = items
+    .map((i) => i.updatedAt ?? i.createdAt)
+    .filter(Boolean)
+    .map((t) => new Date(String(t)).getTime())
+    .filter((n) => Number.isFinite(n));
+  const reviewStartIso =
+    pipelineEnd ??
+    latestImport?.updated_at ??
+    latestImport?.created_at ??
+    (reviewItemTimes.length ? new Date(Math.min(...reviewItemTimes)).toISOString() : null);
+  const aiReviewBusy =
+    flags.importDone &&
+    !flags.aiReviewDone &&
+    (pipelineBusy || input.aiReviewPending > 0);
+  const aiReviewEndIso = reviewItemTimes.length
+    ? new Date(Math.max(...reviewItemTimes)).toISOString()
+    : null;
+  const aiReviewElapsed = aiReviewBusy
+    ? msBetween(reviewStartIso, null)
+    : flags.aiReviewDone
+      ? msBetween(reviewStartIso, aiReviewEndIso) ??
+        (reviewItemTimes.length >= 2
+          ? Math.max(...reviewItemTimes) - Math.min(...reviewItemTimes)
+          : reviewItemTimes.length === 1
+            ? 0
+            : null)
+      : null;
+
   const genBusy = items.some(
     (i) => i.generationStatus === 'Queued' || i.generationStatus === 'Generating'
-  );
+  ) || (flags.aiReviewDone && input.pendingGeneration > 0);
   const genCohort = items.filter(
     (i) =>
       i.generationStatus === 'Queued' ||
       i.generationStatus === 'Generating' ||
       i.generationStatus === 'Completed' ||
       i.generationStatus === 'Needs Review' ||
+      i.generationStatus === 'Failed' ||
       ['Package Generated', 'Ready', 'Submitting', 'Waiting Human', 'Submitted', 'Verified', 'Completed'].includes(
         i.currentStatus
       )
   );
   const genTimes = genCohort
-    .map((i) => i.updatedAt)
+    .map((i) => i.updatedAt ?? i.createdAt)
     .filter(Boolean)
     .map((t) => new Date(String(t)).getTime())
     .filter((n) => Number.isFinite(n));
   const genBusyTimes = items
     .filter((i) => i.generationStatus === 'Queued' || i.generationStatus === 'Generating')
-    .map((i) => i.updatedAt)
+    .map((i) => i.updatedAt ?? i.createdAt)
     .filter(Boolean)
     .map((t) => new Date(String(t)).getTime())
     .filter((n) => Number.isFinite(n));
-  const genStartedAt =
-    genBusy && genBusyTimes.length
+  const genAttempted =
+    genTimes.length > 0 ||
+    input.generatedPackages > 0 ||
+    input.failedGeneration > 0 ||
+    input.pendingGeneration > 0;
+  const genStartedAt = genBusy
+    ? genBusyTimes.length
       ? new Date(Math.min(...genBusyTimes)).toISOString()
-      : null;
+      : genTimes.length
+        ? new Date(Math.min(...genTimes)).toISOString()
+        : reviewStartIso
+    : null;
+  const genFinishedAttempt =
+    !genBusy &&
+    genAttempted &&
+    (flags.generateDone ||
+      (input.pendingGeneration === 0 &&
+        (input.generatedPackages > 0 || input.failedGeneration > 0)));
   const genElapsed = genBusy
     ? genStartedAt
       ? msBetween(genStartedAt, null)
       : null
-    : genTimes.length >= 2
+    : genFinishedAttempt && genTimes.length >= 2
       ? Math.max(...genTimes) - Math.min(...genTimes)
-      : genTimes.length === 1
+      : genFinishedAttempt && genTimes.length === 1
         ? 0
-        : null;
+        : genFinishedAttempt
+          ? msBetween(reviewStartIso, aiReviewEndIso)
+          : null;
 
   const submitBusy = items.some((i) => i.currentStatus === 'Submitting');
   const submitCohort = items.filter((i) =>
@@ -210,16 +258,19 @@ async function computeStepTimings(
     const row = progress.steps.find((s) => s.id === id);
     if (row?.state === 'done') return 'done';
     if (id === 'import-websites' && pipelineBusy) return 'running';
-    if (id === 'ai-review' && pipelineBusy && !flags.aiReviewDone) return 'running';
+    if (id === 'ai-review' && aiReviewBusy) return 'running';
     if (id === 'generate-content' && genBusy) return 'running';
+    // Show "took Xs" after a generate attempt finishes (incl. all-Failed), even if step not green yet
+    if (id === 'generate-content' && genFinishedAttempt) return 'done';
     if (id === 'submit-backlinks' && submitBusy) return 'running';
     return 'idle';
   };
 
   const startedAtFor = (id: GuidedWorkflowStepId, phase: StepTimingDto['phase']): string | null => {
     if (phase !== 'running') return null;
-    if (id === 'import-websites' || id === 'ai-review') return pipelineStart;
-    if (id === 'generate-content') return genStartedAt;
+    if (id === 'import-websites') return pipelineStart;
+    if (id === 'ai-review') return reviewStartIso;
+    if (id === 'generate-content') return genStartedAt ?? reviewStartIso;
     if (id === 'submit-backlinks') return submitStartedAt;
     return null;
   };
@@ -231,9 +282,9 @@ async function computeStepTimings(
       case 'import-websites':
         return importElapsed;
       case 'ai-review':
-        return flags.aiReviewDone || pipelineBusy ? importElapsed : null;
+        return aiReviewElapsed;
       case 'generate-content':
-        return flags.generateDone || genBusy ? genElapsed : null;
+        return genElapsed;
       case 'submit-backlinks':
         return flags.submitDone || submitBusy ? submitElapsed : null;
       case 'track-results':
@@ -278,7 +329,7 @@ export async function getWorkflowProgressForWorkspace(
   });
 
   const progress = getWorkflowProgress(input);
-  const timings = await computeStepTimings(workspaceId, progress, {
+  const timings = await computeStepTimings(workspaceId, progress, input, {
     created_at: project?.createdAt ?? null,
     updated_at: project?.updatedAt ?? null,
   });
