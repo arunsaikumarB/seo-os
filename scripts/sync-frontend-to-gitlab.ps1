@@ -58,6 +58,7 @@ const p=JSON.parse(fs.readFileSync('package.json','utf8'));
 p.name='backlink-agent-frontend';
 p.description='Backlink Agent frontend (GitLab ba-frontend)';
 p.workspaces=['apps/web','packages/shared'];
+p.engines={ node: '>=18.18.0' };
 p.scripts={
   dev:'npm run dev --workspace=@seo-os/web',
   build:'npm run build --workspace=@seo-os/web',
@@ -72,9 +73,12 @@ fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');
 
 Synced from the product monorepo (``apps/web`` + ``packages/shared``).
 
+**Node:** ``>=18.18.0`` is enough for FE (React 18 / Vite 6).
+
 ``````bash
 npm install
-cp apps/web/.env.example apps/web/.env
+cp apps/web/.env.company.example apps/web/.env   # company stack
+# or: cp apps/web/.env.local.example apps/web/.env
 npm run dev
 npm run build   # -> apps/web/dist
 ``````

@@ -68,6 +68,11 @@ Notes:
 | `CORS_ORIGIN` / `VITE_API_URL` mismatch | Web URL ↔ API URL must match each other |
 | Dump not restored | API will fail DB checks |
 
+### Node versions
+
+- **Frontend (`ba-frontend`):** Node **18.18+** is enough (React 18 / Vite 6).
+- **Backend (`ba-backend`):** prefer Node **22** (repo default). Node 20 may work; don’t go below 18 for API.
+
 Full runbook: `docs/cutover/no-supabase-phase-6.md` on `ba-backend`.
 
 If you paste your current (redacted) `.env` keys/names only — no secrets — I can spot the mismatch.
