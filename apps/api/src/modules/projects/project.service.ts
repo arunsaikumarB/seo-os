@@ -1,6 +1,8 @@
 import type { Project, UpdateProjectInput } from '@seo-os/shared';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { logger } from '../../lib/logger.js';
+import { isPgDataMode } from '../../lib/data-mode.js';
+import { pgOne, pgMany, pgQuery, withPgTransaction } from '../../lib/pg.js';
 import { ensureProfile } from '../organizations/member.service.js';
 
 export function mapWorkspaceRow(row: Record<string, unknown>): Project {
@@ -36,6 +38,21 @@ export async function listProjectsByOrg(
   orgId: string,
   opts: { includeArchived?: boolean } = {}
 ): Promise<Project[]> {
+  if (isPgDataMode()) {
+    const rows = opts.includeArchived
+      ? await pgMany<Record<string, unknown>>(
+          `SELECT * FROM public.workspaces WHERE org_id = $1 ORDER BY updated_at DESC`,
+          [orgId]
+        )
+      : await pgMany<Record<string, unknown>>(
+          `SELECT * FROM public.workspaces
+           WHERE org_id = $1 AND status IS DISTINCT FROM 'archived'
+           ORDER BY updated_at DESC`,
+          [orgId]
+        );
+    return rows.map(mapWorkspace);
+  }
+
   let q = getSupabaseAdmin()
     .from('workspaces')
     .select('*')
@@ -51,6 +68,14 @@ export async function listProjectsByOrg(
 }
 
 export async function getProjectById(projectId: string, orgId: string): Promise<Project | null> {
+  if (isPgDataMode()) {
+    const row = await pgOne<Record<string, unknown>>(
+      `SELECT * FROM public.workspaces WHERE id = $1 AND org_id = $2`,
+      [projectId, orgId]
+    );
+    return row ? mapWorkspace(row) : null;
+  }
+
   const { data, error } = await getSupabaseAdmin()
     .from('workspaces')
     .select('*')
@@ -64,6 +89,14 @@ export async function getProjectById(projectId: string, orgId: string): Promise<
 
 /** Load workspace/project by id alone (content generation brand injection). */
 export async function getProjectByWorkspaceId(projectId: string): Promise<Project | null> {
+  if (isPgDataMode()) {
+    const row = await pgOne<Record<string, unknown>>(
+      `SELECT * FROM public.workspaces WHERE id = $1`,
+      [projectId]
+    );
+    return row ? mapWorkspace(row) : null;
+  }
+
   const { data, error } = await getSupabaseAdmin()
     .from('workspaces')
     .select('*')
@@ -111,6 +144,46 @@ export async function createProject(
     { orgId, userId, insertPayload, action: 'create_project' },
     'Creating workspace (project)'
   );
+
+  if (isPgDataMode()) {
+    const data = await withPgTransaction(async (client) => {
+      const ws = await client.query<Record<string, unknown>>(
+        `INSERT INTO public.workspaces (
+           org_id, name, domain, url, industry, description,
+           contact_email, contact_name, contact_phone, company_name,
+           brand_profile, created_by
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'{}'::jsonb,$11)
+         RETURNING *`,
+        [
+          insertPayload.org_id,
+          insertPayload.name,
+          insertPayload.domain,
+          insertPayload.url,
+          insertPayload.industry,
+          insertPayload.description,
+          insertPayload.contact_email,
+          insertPayload.contact_name,
+          insertPayload.contact_phone,
+          insertPayload.company_name,
+          insertPayload.created_by,
+        ]
+      );
+      const row = ws.rows[0];
+      if (!row) throw new Error('Workspace insert failed');
+      await client.query(
+        `INSERT INTO public.workspace_settings (workspace_id) VALUES ($1)
+         ON CONFLICT (workspace_id) DO NOTHING`,
+        [row.id]
+      );
+      return row;
+    });
+
+    logger.info({ orgId, userId, projectId: data.id }, 'Workspace created');
+    void refreshBrandProfile(String(data.id)).catch((err) =>
+      logger.warn({ err, workspaceId: data.id }, 'brand profile crawl failed on create')
+    );
+    return mapWorkspace(data);
+  }
 
   const { data, error } = await getSupabaseAdmin()
     .from('workspaces')
@@ -165,6 +238,31 @@ export async function updateProject(
   if (input.companyName !== undefined) payload.company_name = input.companyName;
   if (input.status !== undefined) payload.status = input.status;
 
+  if (isPgDataMode()) {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    let i = 1;
+    for (const [k, v] of Object.entries(payload)) {
+      sets.push(`${k} = $${i++}`);
+      vals.push(v);
+    }
+    sets.push('updated_at = now()');
+    vals.push(projectId, orgId);
+    const row = await pgOne<Record<string, unknown>>(
+      `UPDATE public.workspaces SET ${sets.join(', ')}
+       WHERE id = $${i++} AND org_id = $${i}
+       RETURNING *`,
+      vals
+    );
+    if (!row) throw new Error('Project not found');
+    if (input.url !== undefined || input.domain !== undefined) {
+      void refreshBrandProfile(projectId).catch((err) =>
+        logger.warn({ err, workspaceId: projectId }, 'brand profile crawl failed on update')
+      );
+    }
+    return mapWorkspace(row);
+  }
+
   const { data, error } = await getSupabaseAdmin()
     .from('workspaces')
     .update(payload)
@@ -194,11 +292,18 @@ export async function archiveProject(projectId: string, orgId: string): Promise<
  * Uses seo-intelligence buildBrandProfile — no invented features.
  */
 export async function refreshBrandProfile(workspaceId: string): Promise<Record<string, unknown> | null> {
-  const { data: ws } = await getSupabaseAdmin()
-    .from('workspaces')
-    .select('id, name, domain, url, industry')
-    .eq('id', workspaceId)
-    .maybeSingle();
+  const ws = isPgDataMode()
+    ? await pgOne<Record<string, unknown>>(
+        `SELECT id, name, domain, url, industry FROM public.workspaces WHERE id = $1`,
+        [workspaceId]
+      )
+    : (
+        await getSupabaseAdmin()
+          .from('workspaces')
+          .select('id, name, domain, url, industry')
+          .eq('id', workspaceId)
+          .maybeSingle()
+      ).data;
   if (!ws) return null;
 
   const target =
@@ -248,10 +353,19 @@ export async function refreshBrandProfile(workspaceId: string): Promise<Record<s
       projectName: ws.name,
     };
 
-    await getSupabaseAdmin()
-      .from('workspaces')
-      .update({ brand_profile: brandProfile, updated_at: new Date().toISOString() })
-      .eq('id', workspaceId);
+    if (isPgDataMode()) {
+      await pgQuery(
+        `UPDATE public.workspaces
+         SET brand_profile = $2::jsonb, updated_at = now()
+         WHERE id = $1`,
+        [workspaceId, JSON.stringify(brandProfile)]
+      );
+    } else {
+      await getSupabaseAdmin()
+        .from('workspaces')
+        .update({ brand_profile: brandProfile, updated_at: new Date().toISOString() })
+        .eq('id', workspaceId);
+    }
 
     logger.info({ workspaceId, target, topics: profile.primaryTopics?.length }, 'brand profile saved');
     return brandProfile;

@@ -102,7 +102,7 @@ Local demo can keep old path until you switch.
 | **1** | Company Postgres runbook (dump/restore + pgAdmin) | No |
 | **2** | API auth (`AUTH_MODE=supabase\|local`) + user password table — see [phase 2](./no-supabase-phase-2.md) | No if default=`supabase` |
 | **3** | Web login uses API when `VITE_AUTH_MODE=local` — see [phase 3](./no-supabase-phase-3.md) | No if default=`supabase` |
-| **4** | DB access via `pg` pool; deprecate PostgREST client behind flag | No if default=`supabase` |
+| **4** | `DATA_MODE=pg` for core tenancy — see [phase 4](./no-supabase-phase-4.md) | No if default=`supabase` |
 | **5** | Default local/company mode; remove Supabase deps | Only after sign-off |
 | **6** | GitLab `ba-frontend` / `ba-backend` sync for DevOps | After 5 |
 

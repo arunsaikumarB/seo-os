@@ -17,11 +17,20 @@ export async function readyHandler(_req: Request, res: Response): Promise<void> 
   const checks: Record<string, string> = { api: 'ok' };
 
   try {
-    const supabase = getSupabaseAdmin();
-    const { error } = await supabase.from('organizations').select('id').limit(1);
-    checks.database = error ? 'degraded' : 'ok';
+    if (env.DATA_MODE === 'pg') {
+      const { pgQuery } = await import('../lib/pg.js');
+      await pgQuery('SELECT 1 FROM public.organizations LIMIT 1');
+      checks.database = 'ok';
+      checks.dataMode = 'pg';
+    } else {
+      const supabase = getSupabaseAdmin();
+      const { error } = await supabase.from('organizations').select('id').limit(1);
+      checks.database = error ? 'degraded' : 'ok';
+      checks.dataMode = 'supabase';
+    }
   } catch {
     checks.database = 'down';
+    checks.dataMode = env.DATA_MODE;
   }
 
   try {

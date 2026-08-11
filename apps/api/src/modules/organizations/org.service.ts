@@ -1,6 +1,8 @@
 import type { Organization } from '@seo-os/shared';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { logger } from '../../lib/logger.js';
+import { isPgDataMode } from '../../lib/data-mode.js';
+import { pgMany, pgOne, withPgTransaction } from '../../lib/pg.js';
 import { ensureProfile } from './member.service.js';
 
 function mapOrg(row: Record<string, unknown>): Organization {
@@ -21,6 +23,27 @@ export async function createOrganization(
   input: { name: string; slug: string; industry?: string }
 ): Promise<Organization> {
   await ensureProfile(userId);
+
+  if (isPgDataMode()) {
+    return withPgTransaction(async (client) => {
+      const orgRes = await client.query<Record<string, unknown>>(
+        `INSERT INTO public.organizations (name, slug, industry)
+         VALUES ($1, $2, $3)
+         RETURNING *`,
+        [input.name, input.slug, input.industry ?? null]
+      );
+      const org = orgRes.rows[0];
+      if (!org) throw new Error('Organization insert failed');
+
+      await client.query(
+        `INSERT INTO public.org_members (org_id, user_id, role, status, joined_at)
+         VALUES ($1, $2, 'owner', 'active', now())`,
+        [org.id, userId]
+      );
+
+      return mapOrg(org);
+    });
+  }
 
   const { data: org, error: orgError } = await getSupabaseAdmin()
     .from('organizations')
@@ -51,6 +74,14 @@ export async function createOrganization(
 }
 
 export async function getOrganization(orgId: string): Promise<Organization | null> {
+  if (isPgDataMode()) {
+    const row = await pgOne<Record<string, unknown>>(
+      `SELECT * FROM public.organizations WHERE id = $1`,
+      [orgId]
+    );
+    return row ? mapOrg(row) : null;
+  }
+
   const { data, error } = await getSupabaseAdmin()
     .from('organizations')
     .select('*')
@@ -64,6 +95,17 @@ export async function getOrganization(orgId: string): Promise<Organization | nul
 export async function listUserOrganizations(
   userId: string
 ): Promise<Array<Organization & { role: string }>> {
+  if (isPgDataMode()) {
+    const rows = await pgMany<Record<string, unknown>>(
+      `SELECT o.*, m.role AS member_role
+       FROM public.org_members m
+       JOIN public.organizations o ON o.id = m.org_id
+       WHERE m.user_id = $1 AND m.status = 'active'`,
+      [userId]
+    );
+    return rows.map((row) => ({ ...mapOrg(row), role: row.member_role as string }));
+  }
+
   const { data, error } = await getSupabaseAdmin()
     .from('org_members')
     .select('role, organizations(*)')

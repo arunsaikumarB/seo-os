@@ -27,7 +27,7 @@ describe('api env parsing', () => {
     expect(env.SENTRY_DSN).toContain('sentry.io');
   });
 
-  it('defaults AUTH_MODE to supabase', () => {
+  it('defaults AUTH_MODE and DATA_MODE to supabase', () => {
     const env = parseApiEnv({
       SUPABASE_URL: 'https://example.supabase.co',
       SUPABASE_ANON_KEY: 'anon',
@@ -38,5 +38,6 @@ describe('api env parsing', () => {
       ENABLE_WORKERS: 'false',
     });
     expect(env.AUTH_MODE).toBe('supabase');
+    expect(env.DATA_MODE).toBe('supabase');
   });
 });

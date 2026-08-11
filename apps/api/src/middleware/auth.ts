@@ -3,11 +3,11 @@ import { createRemoteJWKSet, jwtVerify, decodeJwt } from 'jose';
 import { AppError } from '@seo-os/shared';
 import type { OrgRole, TenantContext } from '@seo-os/shared';
 import { getEnv } from '../config/env.js';
-import { getSupabaseAdmin } from '../lib/supabase.js';
 import {
   LOCAL_JWT_ISSUER,
   verifyLocalAccessToken,
 } from '../modules/auth/local-auth.service.js';
+import { getActiveOrgMembership } from '../modules/organizations/member.service.js';
 import type { RequestWithTrace } from './traceId.js';
 
 export interface AuthenticatedRequest extends RequestWithTrace {
@@ -105,15 +105,8 @@ export async function authMiddleware(
       throw new AppError(400, 'VALIDATION_ERROR', 'X-Org-Id must be a valid organization UUID');
     }
 
-    const supabase = getSupabaseAdmin();
-    const { data: member, error } = await supabase
-      .from('org_members')
-      .select('role, status')
-      .eq('org_id', orgId)
-      .eq('user_id', userId)
-      .single();
-
-    if (error || !member || member.status !== 'active') {
+    const member = await getActiveOrgMembership(orgId, userId);
+    if (!member) {
       throw new AppError(403, 'AUTH_FORBIDDEN', 'Not a member of this organization');
     }
 

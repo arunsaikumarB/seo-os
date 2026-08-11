@@ -31,7 +31,9 @@ authRouter.get('/mode', (_req, res) => {
   res.json({
     data: {
       authMode: env.AUTH_MODE,
+      dataMode: env.DATA_MODE,
       localAuthEnabled: env.AUTH_MODE === 'local',
+      pgDataEnabled: env.DATA_MODE === 'pg',
     },
   });
 });

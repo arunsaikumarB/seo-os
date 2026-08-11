@@ -10,6 +10,12 @@ export const apiEnvSchema = z.object({
    * - local: API `/v1/auth/login|signup` issues HS256 JWTs; middleware accepts local (and transitional Supabase) tokens
    */
   AUTH_MODE: z.enum(['supabase', 'local']).default('supabase'),
+  /**
+   * Data access cutover (Phase 4).
+   * - supabase (default): getSupabaseAdmin() PostgREST — current behavior
+   * - pg: migrated services use DATABASE_URL via node-pg (core tenancy first)
+   */
+  DATA_MODE: z.enum(['supabase', 'pg']).default('supabase'),
   SUPABASE_URL: z.string().url(),
   SUPABASE_ANON_KEY: z.string().min(1),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
