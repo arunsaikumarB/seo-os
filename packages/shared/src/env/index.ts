@@ -74,7 +74,10 @@ export function isCompanyStackEnv(env: {
   return env.AUTH_MODE === 'local' && env.DATA_MODE === 'pg';
 }
 
-export function parseApiEnv(env: NodeJS.ProcessEnv): ApiEnv {
+/** Process env map — typed without requiring @types/node in every consumer workspace. */
+export type ProcessEnvMap = Record<string, string | undefined>;
+
+export function parseApiEnv(env: ProcessEnvMap): ApiEnv {
   const parsed = apiEnvSchema.parse(env);
   const companyStack = isCompanyStackEnv(parsed);
 
