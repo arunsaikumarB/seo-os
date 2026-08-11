@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { ChevronDown } from 'lucide-react';
 import { APP_NAME, APP_TAGLINE } from '@seo-os/shared';
+import { BrandLogo } from '@/components/brand/brand-logo';
 import { workflowNavSections } from '@/config/workflow-navigation';
 import { useFeatureFlags } from '@/hooks/use-feature-flags';
 import { useProjectMediaNeeds } from '@/components/images/image-generation-readiness';
@@ -73,10 +74,15 @@ export function Sidebar({ projectId, className }: SidebarProps) {
 
   return (
     <aside className={cn('flex h-full w-64 flex-col border-r border-border/60 bg-card', className)}>
-      <div className="flex h-14 items-center border-b border-border/60 px-5">
-        <div>
-          <p className="font-semibold tracking-tight">{APP_NAME}</p>
-          <p className="text-[10px] text-muted-foreground leading-tight">{APP_TAGLINE}</p>
+      <div className="flex h-16 items-center gap-2.5 border-b border-border/60 px-4">
+        <BrandLogo
+          variant="mark"
+          className="rounded-lg bg-white p-1 shadow-sm ring-1 ring-border/40"
+          imgClassName="h-9 w-9"
+        />
+        <div className="min-w-0">
+          <p className="font-semibold tracking-tight truncate">{APP_NAME}</p>
+          <p className="text-[10px] text-muted-foreground leading-tight truncate">{APP_TAGLINE}</p>
         </div>
       </div>
       <nav className="flex-1 overflow-y-auto px-3 py-4">

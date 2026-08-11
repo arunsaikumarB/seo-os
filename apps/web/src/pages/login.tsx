@@ -3,8 +3,9 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { toast } from 'sonner';
-import { APP_NAME, APP_TAGLINE } from '@seo-os/shared';
+import { APP_TAGLINE } from '@seo-os/shared';
 import { useAuth } from '@/providers/auth-provider';
+import { BrandLogo } from '@/components/brand/brand-logo';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -38,8 +39,13 @@ export function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
       <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <CardTitle className="text-2xl">{APP_NAME}</CardTitle>
+        <CardHeader className="text-center space-y-3">
+          <BrandLogo
+            variant="full"
+            className="mx-auto rounded-xl bg-white px-3 py-2 shadow-sm ring-1 ring-border/40"
+            imgClassName="h-16 w-auto max-w-[280px]"
+          />
+          <CardTitle className="sr-only">Backlink Agent</CardTitle>
           <CardDescription>{APP_TAGLINE}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

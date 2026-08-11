@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { toast } from 'sonner';
 import { APP_NAME } from '@seo-os/shared';
 import { useAuth } from '@/providers/auth-provider';
+import { BrandLogo } from '@/components/brand/brand-logo';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -40,9 +41,14 @@ export function SignupPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
       <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
+        <CardHeader className="text-center space-y-3">
+          <BrandLogo
+            variant="full"
+            className="mx-auto rounded-xl bg-white px-3 py-2 shadow-sm ring-1 ring-border/40"
+            imgClassName="h-16 w-auto max-w-[280px]"
+          />
           <CardTitle className="text-2xl">Create your {APP_NAME} account</CardTitle>
-          <CardDescription>Start building your AI SEO workforce</CardDescription>
+          <CardDescription>Start building your AI backlink workforce</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">

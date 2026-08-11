@@ -1,6 +1,7 @@
 import { Outlet } from 'react-router-dom';
 import { Link } from 'react-router-dom';
 import { APP_NAME } from '@seo-os/shared';
+import { BrandLogo } from '@/components/brand/brand-logo';
 import { orgNav } from '@/config/navigation';
 import { Topbar } from './topbar';
 import { CommandPalette } from './command-palette';
@@ -17,10 +18,17 @@ export function OrgShell() {
       <div className="flex flex-1">
         <aside className="hidden w-56 border-r bg-card md:block">
           <div className="border-b p-4">
-            <Link to="/projects" className="font-semibold tracking-tight">
-              {APP_NAME}
+            <Link to="/projects" className="flex items-center gap-2.5">
+              <BrandLogo
+                variant="mark"
+                className="rounded-lg bg-white p-1 shadow-sm ring-1 ring-border/40"
+                imgClassName="h-8 w-8"
+              />
+              <span>
+                <span className="block font-semibold tracking-tight">{APP_NAME}</span>
+                <span className="block text-xs text-muted-foreground">Organization</span>
+              </span>
             </Link>
-            <p className="text-xs text-muted-foreground">Organization</p>
           </div>
           <nav className="space-y-0.5 p-3">
             {orgNav.map((item) => {

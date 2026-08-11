@@ -1,7 +1,8 @@
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Sparkles, Clock, GraduationCap } from 'lucide-react';
+import { Clock, GraduationCap } from 'lucide-react';
 import { APP_NAME } from '@seo-os/shared';
+import { BrandLogo } from '@/components/brand/brand-logo';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -19,11 +20,15 @@ export function OnboardingWelcomePage() {
         <Card className="border-primary/20 shadow-lg">
           <CardContent className="pt-10 pb-8 px-8 text-center space-y-6">
             <motion.div
-              animate={{ rotate: [0, 5, -5, 0] }}
-              transition={{ repeat: Infinity, duration: 4, ease: 'easeInOut' }}
-              className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10"
+              animate={{ y: [0, -4, 0] }}
+              transition={{ repeat: Infinity, duration: 3.5, ease: 'easeInOut' }}
+              className="mx-auto"
             >
-              <Sparkles className="h-8 w-8 text-primary" />
+              <BrandLogo
+                variant="full"
+                className="rounded-xl bg-white px-3 py-2 shadow-sm ring-1 ring-border/40"
+                imgClassName="h-14 w-auto max-w-[260px]"
+              />
             </motion.div>
 
             <div className="space-y-2">
