@@ -22,6 +22,7 @@ import {
   leadingAttrToken,
   recipeVersionsCurrent,
   textSimilarity,
+  valueForRole,
 } from './assisted-manual.js';
 
 const SIMPLE_FORM = `
@@ -980,5 +981,70 @@ describe('Phase 7 Assisted Manual', () => {
 
     const linkType = pkg.otherFields?.find((o) => /LINK_TYPE|Link Type/i.test(o.label));
     expect(linkType?.humanStep).toMatch(/you choose/i);
+  });
+
+  it('maps phpLD Article + META Description separately from Short Description', () => {
+    expect(
+      inferFieldRole({
+        label: 'Article',
+        name: 'ARTICLE',
+        id: 'ARTICLE',
+        placeholder: null,
+        ariaLabel: null,
+        type: 'textarea',
+        required: true,
+        maxlength: 5000,
+        surroundingText: null,
+        options: [],
+      }).role
+    ).toBe('article');
+
+    expect(
+      inferFieldRole({
+        label: 'META Description',
+        name: 'META_DESCRIPTION',
+        id: 'META_DESCRIPTION',
+        placeholder: null,
+        ariaLabel: null,
+        type: 'textarea',
+        required: false,
+        maxlength: 250,
+        surroundingText: null,
+        options: [],
+      }).role
+    ).toBe('meta_desc');
+
+    expect(
+      inferFieldRole({
+        label: 'Short Description',
+        name: 'DESCRIPTION',
+        id: 'DESCRIPTION',
+        placeholder: null,
+        ariaLabel: null,
+        type: 'textarea',
+        required: true,
+        maxlength: 250,
+        surroundingText: null,
+        options: [],
+      }).role
+    ).toBe('short_desc');
+
+    expect(
+      valueForRole('meta_desc', {
+        title: 'Chefgaa',
+        url: 'https://go.chefgaa.com',
+        shortDescription: 'Short listing copy.',
+        metaDescription: 'SEO meta description for directories.',
+        articleBody: 'Full guest-post article body about restaurant POS.',
+      })
+    ).toBe('SEO meta description for directories.');
+
+    expect(
+      valueForRole('article', {
+        title: 'Chefgaa',
+        url: 'https://go.chefgaa.com',
+        articleBody: 'Full guest-post article body about restaurant POS.',
+      })
+    ).toContain('Full guest-post');
   });
 });

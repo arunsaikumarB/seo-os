@@ -26,10 +26,12 @@ export interface SignalScore {
 function exactOrWord(signal: string, alias: string): 'exact' | 'word' | 'none' {
   if (!signal || !alias) return 'none';
   if (signal === alias) return 'exact';
+  // Alias as a whole word inside the signal (e.g. "short description" contains "description").
   const re = new RegExp(`(?:^|\\s)${escapeReg(alias)}(?:\\s|$)`);
   if (re.test(signal)) return 'word';
   if (alias.length >= 4 && signal.includes(alias)) return 'word';
-  if (signal.length >= 3 && alias.includes(signal)) return 'word';
+  // Do NOT match reverse includes (alias.includes(signal)) — "article" must not
+  // hit title alias "article title", or META Description stays unmapped after demotion.
   return 'none';
 }
 

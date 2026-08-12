@@ -21,6 +21,7 @@ export type FieldRole =
   | 'email'
   | 'phone'
   | 'description'
+  | 'meta_description'
   | 'further_info'
   | 'article'
   | 'keywords'
@@ -48,6 +49,7 @@ export const FILLABLE_ROLES = [
   'email',
   'phone',
   'description',
+  'meta_description',
   'further_info',
   'article',
   'keywords',
@@ -72,6 +74,7 @@ export type OpportunityPackageFields = {
   url: string;
   description: string;
   shortDescription: string;
+  metaDescription: string;
   furtherCompanyInfo: string;
   article: string;
   keywords: string;
@@ -228,6 +231,12 @@ export function activePackageToFillFields(pkg: ActivePackage): OpportunityPackag
     url: get('url', 'website'),
     description: get('description', 'long_desc', 'longDescription'),
     shortDescription: get('shortDescription', 'short_desc', 'short_description'),
+    metaDescription: get(
+      'metaDescription',
+      'meta_description',
+      'meta_desc',
+      'metaDesc'
+    ),
     furtherCompanyInfo: get(
       'furtherCompanyInfo',
       'further_info',

@@ -70,6 +70,8 @@ export type FieldRole =
   | 'title'
   | 'short_desc'
   | 'long_desc'
+  /** SEO / META description (separate from short listing description). */
+  | 'meta_desc'
   /** Further Company / Product / Service Information (~1500 chars). */
   | 'further_info'
   /** Full article / guest-post body. */
@@ -417,6 +419,7 @@ export type PasteReadyContentItem = {
     | 'title'
     | 'short_desc'
     | 'long_desc'
+    | 'meta_desc'
     | 'further_info'
     | 'article'
     | 'keywords'
@@ -958,18 +961,20 @@ function isLongTextControl(facts: FormFieldFacts): boolean {
 
 function descriptionRoleFromControl(
   facts: FormFieldFacts
-): 'short_desc' | 'long_desc' | 'further_info' | 'article' {
+): 'short_desc' | 'long_desc' | 'meta_desc' | 'further_info' | 'article' {
   const blob = [facts.label, facts.ariaLabel, facts.placeholder, facts.name]
     .filter(Boolean)
     .join(' ');
+  if (/meta[_\s-]?desc|seo[_\s-]?desc/i.test(blob)) return 'meta_desc';
   if (/further\s+(company|product|service)/i.test(blob)) return 'further_info';
   if (/\barticle\b/i.test(blob) && (facts.type === 'textarea' || isLongTextControl(facts))) {
     return 'article';
   }
+  if (/short\s*desc|tagline|blurb|excerpt/i.test(blob)) return 'short_desc';
   // phpLD-style ~1500-char extended company/product fields (not ordinary ≤500 desc)
   if (facts.maxlength != null && facts.maxlength >= 1000) return 'further_info';
-  if (facts.type === 'textarea') return 'long_desc';
   if (facts.maxlength != null && facts.maxlength <= LONG_DESC_MAXLENGTH) return 'short_desc';
+  if (facts.type === 'textarea') return 'long_desc';
   if (facts.maxlength != null && facts.maxlength > LONG_DESC_MAXLENGTH) return 'long_desc';
   return 'long_desc';
 }
@@ -1072,6 +1077,23 @@ export function roleFromDirectoryFieldName(facts: FormFieldFacts): FieldRole | n
     return 'url';
   }
 
+  // phpLD / directory content field names
+  if (/^(article|article_body|article_content)$/i.test(name) || /^(article|article_body)$/i.test(id)) {
+    return 'article';
+  }
+  if (
+    /^(meta_description|meta_desc|seo_description)$/i.test(name) ||
+    /^(meta_description|meta_desc)$/i.test(id)
+  ) {
+    return 'meta_desc';
+  }
+  if (/^(meta_keywords|keywords)$/i.test(name) || /^(meta_keywords|keywords)$/i.test(id)) {
+    return 'keywords';
+  }
+  if (/^(description|short_description|long_description)$/i.test(name)) {
+    return descriptionRoleFromControl(facts);
+  }
+
   return null;
 }
 
@@ -1101,6 +1123,7 @@ function roleFromLeadingToken(
     if (/owner|contact|person|full.?name|your.?name/i.test(blob)) return 'name';
     return 'title';
   }
+  if (/^(meta)$/i.test(token) && /desc/i.test(blob)) return 'meta_desc';
   if (
     /^(description|about|summary|tagline|blurb|excerpt|details|bio|content|message|notes|article)$/i.test(
       token
@@ -1204,6 +1227,15 @@ const ROLE_HINTS: Array<{ role: FieldRole; patterns: RegExp[] }> = [
       /guest\s*post/i,
       /^blog\s*(post|content)$/i,
       /^full\s*(article|content)$/i,
+    ],
+  },
+  {
+    role: 'meta_desc',
+    patterns: [
+      /^meta\s*desc/i,
+      /meta[_\s-]?description/i,
+      /seo\s*description/i,
+      /^metadescription$/i,
     ],
   },
   {
@@ -1401,7 +1433,7 @@ export function inferFieldRole(facts: FormFieldFacts): {
   // URL leading token on a long control ("Website notes") is notes, not a URL field.
   if (isLongTextControl(facts)) {
     const fromLead = roleFromLeadingToken(leading, facts);
-    if (fromLead === 'short_desc' || fromLead === 'long_desc') {
+    if (fromLead === 'short_desc' || fromLead === 'long_desc' || fromLead === 'meta_desc') {
       return {
         role: descriptionRoleFromControl(facts),
         confidence: 'high',
@@ -1448,7 +1480,7 @@ export function inferFieldRole(facts: FormFieldFacts): {
       if (hint.role === 'url') continue;
       if (hay && hint.patterns.some((p) => p.test(hay))) {
         const role =
-          hint.role === 'short_desc' || hint.role === 'long_desc'
+          hint.role === 'short_desc' || hint.role === 'long_desc' || hint.role === 'meta_desc'
             ? descriptionRoleFromControl(facts)
             : hint.role;
         return {
@@ -2037,6 +2069,8 @@ export function valueForRole(role: FieldRole, content: ContentSource): string {
     case 'short_desc':
       // Prefer short/meta — do not paste longDescription (cross-field reuse).
       return String(content.shortDescription || content.metaDescription || '').trim();
+    case 'meta_desc':
+      return String(content.metaDescription || content.shortDescription || '').trim();
     case 'long_desc':
       // Prefer long; fall back to short only when long is empty (single Description field forms).
       return String(
@@ -2241,6 +2275,11 @@ export function buildPasteReadyContent(
       value: String(content.shortDescription || content.metaDescription || '').trim(),
     },
     {
+      role: 'meta_desc',
+      label: 'META description',
+      value: String(content.metaDescription || content.shortDescription || '').trim(),
+    },
+    {
       role: 'long_desc',
       label: 'Description',
       value: String(
@@ -2315,6 +2354,7 @@ export function buildAssistedPackage(input: {
     'title',
     'short_desc',
     'long_desc',
+    'meta_desc',
     'further_info',
     'article',
     'keywords',
@@ -2405,7 +2445,7 @@ export function buildAssistedPackage(input: {
       if (phrase) raw = phrase;
     }
     // Description caps: ≤200 or smaller form maxlength
-    if (rf.role === 'short_desc' || rf.role === 'long_desc') {
+    if (rf.role === 'short_desc' || rf.role === 'long_desc' || rf.role === 'meta_desc') {
       const capped = fitDescriptionToCap(raw, rf.maxlength);
       raw = capped.value;
     } else if (rf.maxlength != null && rf.maxlength > 0) {
@@ -2422,7 +2462,10 @@ export function buildAssistedPackage(input: {
       } else {
         usedTitles.add(norm);
       }
-    } else if ((rf.role === 'short_desc' || rf.role === 'long_desc') && raw) {
+    } else if (
+      (rf.role === 'short_desc' || rf.role === 'long_desc' || rf.role === 'meta_desc') &&
+      raw
+    ) {
       let clashes = false;
       for (const prev of usedDescs) {
         if (norm === prev || textsAreRepetitive(raw, prev)) {
@@ -2436,9 +2479,11 @@ export function buildAssistedPackage(input: {
             ? String(
                 input.content.shortDescription || input.content.metaDescription || ''
               ).trim()
-            : String(
-                input.content.longDescription || input.content.metaDescription || ''
-              ).trim();
+            : rf.role === 'meta_desc'
+              ? String(input.content.shortDescription || input.content.longDescription || '').trim()
+              : String(
+                  input.content.longDescription || input.content.metaDescription || ''
+                ).trim();
         const alt = fitDescriptionToCap(altRaw, rf.maxlength).value;
         const altNorm = alt.replace(/\s+/g, ' ').trim().toLowerCase();
         if (

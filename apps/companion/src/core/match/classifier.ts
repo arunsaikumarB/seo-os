@@ -227,6 +227,16 @@ function matchDirectoryNameAttr(field: NormalizedField): FieldClassification | n
     DESC: 'description',
     LONG_DESCRIPTION: 'description',
     SHORT_DESCRIPTION: 'description',
+    META_DESCRIPTION: 'meta_description',
+    META_DESC: 'meta_description',
+    SEO_DESCRIPTION: 'meta_description',
+    ARTICLE: 'article',
+    ARTICLE_BODY: 'article',
+    ARTICLE_CONTENT: 'article',
+    META_KEYWORDS: 'keywords',
+    KEYWORDS: 'keywords',
+    CATEGORY_ID: 'category',
+    CATEGORY: 'category',
     OWNER_NAME: 'business_name',
     CONTACT_NAME: 'business_name',
     YOUR_NAME: 'business_name',
@@ -283,6 +293,7 @@ export function classifyFields(
     // Priority 3–4: resolved label → alias library (Phase 2.3.1)
     // Pass ONLY the resolved label into the alias engine; confidence from resolver.
     let best: FieldClassification | null = null;
+    let bestLabelAliasScore = 0;
     for (const role of FILLABLE_ROLES) {
       const aliasesForRole = aliases[role] ?? [];
       const labelHit = field.label
@@ -298,7 +309,14 @@ export function classifyFields(
           field.labelResolverConfidence >= 75
             ? field.labelResolverConfidence
             : confidence;
-        if (!best || useConfidence > best.confidence) {
+        // On tied resolver confidence, prefer exact alias (100) over word (90)
+        // so bare "Article" wins article over title's "article title".
+        const better =
+          !best ||
+          useConfidence > best.confidence ||
+          (useConfidence === best.confidence && labelHit.score > bestLabelAliasScore);
+        if (better) {
+          bestLabelAliasScore = labelHit.score;
           best = {
             field,
             role,

@@ -144,6 +144,8 @@ const ROLE_TO_ACTIVE_KEY: Record<string, string> = {
   website: 'url',
   description: 'description',
   long_desc: 'description',
+  meta_desc: 'metaDescription',
+  meta_description: 'metaDescription',
   further_info: 'furtherCompanyInfo',
   article: 'article',
   keywords: 'keywords',
@@ -207,7 +209,10 @@ function buildActivePackageFields(
 
   const long = byKey.get('description') || '';
   const short = byKey.get('shortDescription') || '';
+  const meta = byKey.get('metaDescription') || '';
   if (!long && short) byKey.set('description', short);
+  if (!meta && short) byKey.set('metaDescription', short);
+  if (!byKey.get('article') && long) byKey.set('article', long);
 
   return [...byKey.entries()].map(([key, value]) => ({ key, value }));
 }
