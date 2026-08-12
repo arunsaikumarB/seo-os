@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import ExcelJS from 'exceljs';
 import {
   BACKLINK_TYPES,
-  analyzeDomainLive,
+  analyzeDomainForImport,
   AUTOMATION_PIPELINE_STEPS,
   classifyOpportunity,
   qualifyOpportunity,
@@ -33,6 +33,7 @@ import { startBrowserIntelligenceScan, executeBrowserIntelligenceScan } from '..
 import { uploadDocument } from '../knowledge/document.service.js';
 import { fireAndForget, publishPlatformEvent } from '../platform/event-bus.service.js';
 import { logger } from '../../lib/logger.js';
+import { getEnv } from '../../config/env.js';
 import { enqueueJob, QUEUES } from '../../jobs/boss.js';
 import { loadClassificationLearning } from './classification.service.js';
 import { summarizeClassificationCounts } from '@seo-os/backlink-builder';
@@ -507,9 +508,20 @@ export async function runAutomationPipeline(
             {};
 
           try {
-            await log('analyze', `Scanning homepage — ${domain}`);
-            await log('analyze', `Fetching robots.txt — ${domain}`, { level: 'debug' });
-            const analysis = await analyzeDomainLive(domain, url, fetch, { learning });
+            const skipLive =
+              getEnv().companyStack ||
+              String(process.env.COMPANY_STACK ?? '').toLowerCase() === 'true' ||
+              String(process.env.ANALYZE_SKIP_LIVE ?? '').toLowerCase() === 'true';
+            await log(
+              'analyze',
+              skipLive
+                ? `Classifying from URL (no live fetch) — ${domain}`
+                : `Scanning homepage — ${domain}`
+            );
+            const analysis = await analyzeDomainForImport(domain, url, fetch, {
+              learning,
+              skipLive,
+            });
             await log(
               'analyze',
               `Analyzed ${domain} (DR ${analysis.domainRating ?? 'n/a'}, robots ${analysis.robotsTxtStatus ?? 'n/a'})`
@@ -1274,8 +1286,12 @@ export async function runAutomationPipeline(
       /* notify optional */
     }
 
-    // Batch link probes once (not per domain) so Import finishes fast on company hosts
-    if (probeOpportunityIds.length) {
+    // Live link probes hang on company hosts with no outbound HTTPS — skip them there.
+    if (
+      probeOpportunityIds.length &&
+      !getEnv().companyStack &&
+      String(process.env.COMPANY_STACK ?? '').toLowerCase() !== 'true'
+    ) {
       try {
         const { enqueueLinkProbe } = await import('./link-probe.service.js');
         await enqueueLinkProbe({
@@ -1445,7 +1461,9 @@ async function triggerBackgroundEnginesAfterImport(opts: {
     logger.warn({ err, workspaceId, importId }, 'background knowledge upload skipped');
   }
 
-  if (userId) {
+  const skipOutbound =
+    getEnv().companyStack || String(process.env.COMPANY_STACK ?? '').toLowerCase() === 'true';
+  if (userId && !skipOutbound) {
     for (const domain of domains.slice(0, 3)) {
       const targetUrl = domain.startsWith('http') ? domain : `https://${domain}`;
       try {

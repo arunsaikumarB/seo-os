@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { qualifyOpportunity, MIN_QUALIFY_SCORE } from '../src/qualification.js';
-import type { DomainAnalysisResult } from '../src/domain-analyzer.js';
+import {
+  analyzeDomainForImport,
+  isDeadWebsiteAnalysis,
+  type DomainAnalysisResult,
+} from '../src/domain-analyzer.js';
+import { classifyOpportunity } from '../src/classification.js';
 import type { ClassificationResult } from '../src/classification.js';
 
 function analysis(partial: Partial<DomainAnalysisResult>): DomainAnalysisResult {
@@ -111,6 +116,26 @@ describe('qualifyOpportunity', () => {
       classification({ backlinkType: 'news', opportunityScore: 74 })
     );
     expect(q.classificationLabel).toBe('Editorial');
+    expect(q.qualified).toBe(true);
+  });
+});
+
+describe('company import without live fetch', () => {
+  it('submit.php directories qualify from URL path (no outbound HTTP)', async () => {
+    const a = await analyzeDomainForImport(
+      'groovy-directory.com',
+      'https://groovy-directory.com/submit.php',
+      async () => {
+        throw new Error('network should not be called');
+      },
+      { skipLive: true }
+    );
+    expect(a.metadata.directoryPathConfirmed).toBe(true);
+    expect(a.detectedPages.directory).toContain('submit.php');
+    expect(isDeadWebsiteAnalysis(a)).toBe(false);
+    const c = classifyOpportunity(a, {});
+    const q = qualifyOpportunity(a, c);
+    expect(q.signals.hasPublicSubmissionPath).toBe(true);
     expect(q.qualified).toBe(true);
   });
 });

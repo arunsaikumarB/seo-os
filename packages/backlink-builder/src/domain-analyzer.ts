@@ -126,6 +126,45 @@ function detectOpportunityTypes(domain: string, niche: string): BacklinkTypeId[]
   return [...new Set(types)].slice(0, 4) as BacklinkTypeId[];
 }
 
+const SUBMIT_PATH =
+  /submit\.php|\/submit\b|add[-_]?url|add[-_]?link|add[-_]?site|add[-_]?listing|\/listing/i;
+
+/** Directory/submit URLs are evidence even when the company host cannot fetch the public internet. */
+export function applyImportUrlSignals(
+  analysis: DomainAnalysisResult,
+  url?: string
+): DomainAnalysisResult {
+  const raw = (url ?? String(analysis.metadata?.analyzedUrl ?? '')).trim();
+  if (!raw) return analysis;
+  const lower = raw.toLowerCase();
+  const domainHint = analysis.domain.includes('directory') || analysis.domain.includes('listings');
+  if (!SUBMIT_PATH.test(lower) && !domainHint) return analysis;
+
+  const detectedPages = {
+    ...analysis.detectedPages,
+    directory: analysis.detectedPages.directory ?? raw,
+    submission: analysis.detectedPages.submission ?? raw,
+  };
+  const opportunityTypes = [
+    'directory' as BacklinkTypeId,
+    ...analysis.opportunityTypes.filter((t) => t !== 'directory'),
+  ].slice(0, 4) as BacklinkTypeId[];
+
+  return {
+    ...analysis,
+    primaryType: 'directory',
+    opportunityTypes,
+    detectedPages,
+    metadata: {
+      ...analysis.metadata,
+      analyzedUrl: raw,
+      directoryPathConfirmed: true,
+      submissionPathConfirmed: true,
+      hasPublicSubmitUrl: true,
+    },
+  };
+}
+
 export function analyzeDomain(domain: string, url?: string): DomainAnalysisResult {
   const clean = domain.replace(/^www\./, '').toLowerCase();
   const niche = detectNiche(clean);
@@ -136,20 +175,50 @@ export function analyzeDomain(domain: string, url?: string): DomainAnalysisResul
   const parts = clean.split('.');
   const websiteName = parts[0].replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 
-  return {
-    domain: clean,
-    websiteName,
-    niche,
-    language: 'en',
-    country: detectCountry(clean),
-    domainRating: estimateDr(clean),
-    monthlyTraffic: estimateTraffic(clean),
-    detectedPages: buildDetectedPages(clean, primaryCategory),
-    opportunityTypes,
-    primaryType,
-    metricsSource: 'estimated',
-    metadata: { analyzedUrl: url ?? `https://${clean}`, analyzer: 'heuristic_v1' },
-  };
+  return applyImportUrlSignals(
+    {
+      domain: clean,
+      websiteName,
+      niche,
+      language: 'en',
+      country: detectCountry(clean),
+      domainRating: estimateDr(clean),
+      monthlyTraffic: estimateTraffic(clean),
+      detectedPages: buildDetectedPages(clean, primaryCategory),
+      opportunityTypes,
+      primaryType,
+      metricsSource: 'estimated',
+      metadata: { analyzedUrl: url ?? `https://${clean}`, analyzer: 'heuristic_v1' },
+    },
+    url
+  );
+}
+
+/**
+ * Company / blocked-outbound: skip live HTTP (hangs  minutes).
+ * Local: live fetch with a hard cap, then heuristic fallback.
+ */
+export async function analyzeDomainForImport(
+  domain: string,
+  url?: string,
+  fetchImpl: typeof fetch = fetch,
+  opts: { learning?: LearningPattern[]; skipLive?: boolean } = {}
+): Promise<DomainAnalysisResult> {
+  if (opts.skipLive) {
+    return analyzeDomain(domain, url);
+  }
+
+  const capMs = Math.max(2000, Number(process.env.ANALYZE_HARD_CAP_MS ?? 8000));
+  try {
+    return await Promise.race([
+      analyzeDomainLive(domain, url, fetchImpl, opts),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error(`analyze_hard_cap_${capMs}ms`)), capMs);
+      }),
+    ]);
+  } catch {
+    return analyzeDomain(domain, url);
+  }
 }
 
 /**
