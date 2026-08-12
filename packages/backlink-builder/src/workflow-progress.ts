@@ -114,15 +114,15 @@ function stepDoneFlags(input: WorkflowProgressInput) {
   const createDone = Boolean(input.projectReady);
   const importDone = createDone && input.importedCount >= 1;
   const aiReviewDone = importDone && input.aiReviewPending === 0;
+  // Do not mark Generate/Submit "done" when nothing was approved (company dead-site imports)
   const generateDone =
     aiReviewDone &&
-    (input.approvedCount === 0 ||
-      (input.generatedPackages >= input.approvedCount &&
-        input.pendingGeneration === 0 &&
-        input.failedGeneration === 0));
+    input.approvedCount > 0 &&
+    input.generatedPackages >= input.approvedCount &&
+    input.pendingGeneration === 0 &&
+    input.failedGeneration === 0;
   const submitDone =
-    generateDone &&
-    (input.contentReadyCount === 0 || input.submitOpenCount === 0);
+    generateDone && input.contentReadyCount > 0 && input.submitOpenCount === 0;
   // Track Results: informational — done only when real results exist (never on visit)
   const trackResultsDone = submitDone && input.hasTrackedResults;
   const reportsDone = trackResultsDone && input.hasReport;

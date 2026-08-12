@@ -4,7 +4,6 @@ import {
   discoverKeywordCandidates,
   type DiscoverInputs,
 } from '@seo-os/backlink-builder';
-import { AppError } from '@seo-os/shared';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { getProjectById } from '../projects/project.service.js';
 import { enqueueJob, QUEUES, areQueuesInitialized } from '../../jobs/boss.js';
@@ -142,6 +141,34 @@ export async function listDiscoveryRuns(workspaceId: string, limit = 20) {
   return data ?? [];
 }
 
+async function startInlineAutomation(
+  workspaceId: string,
+  importId: string,
+  orgId?: string,
+  userId?: string
+) {
+  await getSupabaseAdmin()
+    .from('backlink_imports')
+    .update({ status: 'analyzing' })
+    .eq('id', importId)
+    .eq('workspace_id', workspaceId)
+    .in('status', ['validated', 'failed', 'pending', 'analyzing']);
+
+  void runAutomationPipeline(workspaceId, importId, orgId, userId).catch((err) => {
+    logger.error({ err, importId, workspaceId }, 'Inline automation pipeline failed');
+  });
+  return { queued: false as const, jobId: null, importId, status: 'started_inline' as const };
+}
+
+async function waitForQueues(msTotal = 12_000, stepMs = 500): Promise<boolean> {
+  const deadline = Date.now() + msTotal;
+  while (Date.now() < deadline) {
+    if (areQueuesInitialized()) return true;
+    await new Promise((r) => setTimeout(r, stepMs));
+  }
+  return areQueuesInitialized();
+}
+
 export async function enqueueAutomationPipeline(
   workspaceId: string,
   importId: string,
@@ -152,31 +179,19 @@ export async function enqueueAutomationPipeline(
 
   // Workers disabled: mark analyzing and run inline (never claim a queue job succeeded).
   if (!env.ENABLE_WORKERS) {
-    await getSupabaseAdmin()
-      .from('backlink_imports')
-      .update({ status: 'analyzing' })
-      .eq('id', importId)
-      .eq('workspace_id', workspaceId)
-      .in('status', ['validated', 'failed', 'pending', 'analyzing']);
-
-    void runAutomationPipeline(workspaceId, importId, orgId, userId).catch((err) => {
-      logger.error({ err, importId, workspaceId }, 'Inline automation pipeline failed');
-    });
-    return { queued: false, jobId: null, importId, status: 'started_inline' as const };
+    return startInlineAutomation(workspaceId, importId, orgId, userId);
   }
 
+  // Boot race: HTTP can accept imports before pg-boss finishes — wait, then fall back inline.
   if (!areQueuesInitialized()) {
-    logger.error({ importId, workspaceId }, 'Automation enqueue refused — queues not initialized');
-    await markImportEnqueueFailed(
-      workspaceId,
-      importId,
-      'pg-boss queues not initialized — automation job was not created'
-    );
-    throw new AppError(
-      503,
-      'SERVICE_UNAVAILABLE',
-      'Automation queue is not ready. Import was marked failed — retry after API workers start.'
-    );
+    const ready = await waitForQueues();
+    if (!ready) {
+      logger.warn(
+        { importId, workspaceId },
+        'Queues not ready after wait — running import pipeline inline (no Failed enqueue)'
+      );
+      return startInlineAutomation(workspaceId, importId, orgId, userId);
+    }
   }
 
   const jobId = await enqueueJob(
@@ -187,20 +202,11 @@ export async function enqueueAutomationPipeline(
   );
 
   if (!jobId) {
-    logger.error(
+    logger.warn(
       { importId, workspaceId, queuesInitialized: areQueuesInitialized() },
-      'Automation enqueue failed — boss.send returned null (not treated as already_active)'
+      'pg-boss send returned null — falling back to inline automation'
     );
-    await markImportEnqueueFailed(
-      workspaceId,
-      importId,
-      'Failed to enqueue automation job (pg-boss send returned null). Import left failed — not analyzing.'
-    );
-    throw new AppError(
-      503,
-      'SERVICE_UNAVAILABLE',
-      'Failed to enqueue automation pipeline job. Import was marked failed — please retry.'
-    );
+    return startInlineAutomation(workspaceId, importId, orgId, userId);
   }
 
   // Only mark analyzing after a real job id exists

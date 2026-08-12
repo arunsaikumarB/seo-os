@@ -90,6 +90,20 @@ psql "$DATABASE_URL" -c "\dt public.assisted_packages"
 
 If Import shows a toast but history stays empty / Ready stays 0 — schema was incomplete; re-run `db:setup` then re-import.
 
+### Import speed / Failed on company
+
+Pull latest `ba-backend` + `ba-frontend`, then on API `.env` add:
+
+```env
+IMPORT_VALIDATE_CONCURRENCY=6
+ANALYZE_HOME_TIMEOUT_MS=4000
+ANALYZE_AUX_TIMEOUT_MS=2000
+ENABLE_WORKERS=true
+```
+
+`npm run db:setup && npm run build && pm2 restart <api> --update-env`  
+Rebuild FE. Re-import — should finish in ~1–2 min for 10 links (not 10 min), and must not mark Failed just because queues were still booting.
+
 ### Verify
 
 1. `GET /ready` → database ok, `dataMode=pg`

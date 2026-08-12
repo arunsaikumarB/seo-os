@@ -211,26 +211,32 @@ export async function analyzeDomainLive(
   let websiteSignals: WebsiteInspectionSignals | undefined;
   let htmlRaw = '';
 
+  // Company hosts often block outbound HTTPS — keep timeouts short and fall back to estimated.
+  const HOME_MS = Math.max(1000, Number(process.env.ANALYZE_HOME_TIMEOUT_MS ?? 4000));
+  const AUX_MS = Math.max(500, Number(process.env.ANALYZE_AUX_TIMEOUT_MS ?? 2000));
+
   try {
     const fetchTargets = [url ?? origin];
     try {
       const u = new URL(url ?? origin);
       const host = u.hostname.replace(/^www\./, '');
-      for (const h of [`https://${host}${u.pathname}${u.search}`, `https://www.${host}${u.pathname}${u.search}`]) {
-        if (!fetchTargets.includes(h)) fetchTargets.push(h);
-      }
+      // Cap to 2 variants (submitted URL + www/apex flip) — was up to 3 × 15s = 45s dead wait
+      const alt = u.hostname.startsWith('www.')
+        ? `https://${host}${u.pathname}${u.search}`
+        : `https://www.${host}${u.pathname}${u.search}`;
+      if (!fetchTargets.includes(alt)) fetchTargets.push(alt);
     } catch {
       /* ignore */
     }
 
     let homeRes: Response | null = null;
     let lastFetchErr: unknown = null;
-    for (const target of fetchTargets) {
+    for (const target of fetchTargets.slice(0, 2)) {
       try {
         homeRes = await fetchImpl(target, {
           method: 'GET',
           redirect: 'follow',
-          signal: AbortSignal.timeout(15_000),
+          signal: AbortSignal.timeout(HOME_MS),
           headers: {
             'User-Agent':
               'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -242,9 +248,15 @@ export async function analyzeDomainLive(
       } catch (err) {
         lastFetchErr = err;
         homeRes = null;
+        const msg = err instanceof Error ? err.message : String(err);
+        // DNS / refused — other host variants usually fail the same way; skip remaining
+        if (/ENOTFOUND|ECONNREFUSED|EAI_AGAIN|getaddrinfo|certificate/i.test(msg)) {
+          break;
+        }
       }
     }
     if (!homeRes) {
+      // Fall through to estimated analysis (do not throw out of this function)
       throw lastFetchErr instanceof Error ? lastFetchErr : new Error('fetch_failed');
     }
     fetchStatusCode = homeRes.status;
@@ -314,39 +326,41 @@ export async function analyzeDomainLive(
     homepageReachable = false;
   }
 
-  try {
-    const robotsRes = await fetchImpl(`${origin}/robots.txt`, {
-      method: 'GET',
-      signal: AbortSignal.timeout(5000),
-      headers: { 'User-Agent': 'BacklinkAgent-BacklinkBuilder/1.0' },
-    });
-    if (robotsRes.ok) {
-      robotsTxtStatus = 'found';
-      const robots = await robotsRes.text();
-      meta.robotsTxtSnippet = robots.slice(0, 1000);
-      if (/sitemap:\s*(\S+)/i.test(robots)) sitemapFound = true;
-      // Do NOT set metricsSource = 'live' from robots alone
-    } else {
-      robotsTxtStatus = `http_${robotsRes.status}`;
-    }
-  } catch {
-    robotsTxtStatus = 'unreachable';
-  }
-
-  if (!sitemapFound) {
+  // Skip aux fetches when homepage already proven unreachable (saves ~10s/domain on blocked hosts)
+  if (homepageReachable) {
     try {
-      const sm = await fetchImpl(`${origin}/sitemap.xml`, {
+      const robotsRes = await fetchImpl(`${origin}/robots.txt`, {
         method: 'GET',
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(AUX_MS),
         headers: { 'User-Agent': 'BacklinkAgent-BacklinkBuilder/1.0' },
       });
-      if (sm.ok) {
-        sitemapFound = true;
-        // Do NOT set metricsSource = 'live' from sitemap alone
+      if (robotsRes.ok) {
+        robotsTxtStatus = 'found';
+        const robots = await robotsRes.text();
+        meta.robotsTxtSnippet = robots.slice(0, 1000);
+        if (/sitemap:\s*(\S+)/i.test(robots)) sitemapFound = true;
+      } else {
+        robotsTxtStatus = `http_${robotsRes.status}`;
       }
     } catch {
-      /* ignore */
+      robotsTxtStatus = 'unreachable';
     }
+
+    if (!sitemapFound) {
+      try {
+        const sm = await fetchImpl(`${origin}/sitemap.xml`, {
+          method: 'GET',
+          signal: AbortSignal.timeout(AUX_MS),
+          headers: { 'User-Agent': 'BacklinkAgent-BacklinkBuilder/1.0' },
+        });
+        if (sm.ok) sitemapFound = true;
+      } catch {
+        /* ignore */
+      }
+    }
+  } else {
+    robotsTxtStatus = 'skipped_unreachable';
+    meta.outboundLikelyBlocked = Boolean(meta.homepageFetchError);
   }
 
   const fetchOk =

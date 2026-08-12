@@ -113,6 +113,7 @@ function sanitizeMigrationSql(name: string, sql: string, repoRoot: string): stri
 }
 
 function isIgnorableStmtError(msg: string): boolean {
+  // Do NOT ignore permission/ownership errors — those leave a half schema and break Import.
   return (
     /already exists/i.test(msg) ||
     /is already a member of publication/i.test(msg) ||
@@ -121,7 +122,6 @@ function isIgnorableStmtError(msg: string): boolean {
     /type "vector" does not exist/i.test(msg) ||
     /extension "vector"/i.test(msg) ||
     /could not open extension control file/i.test(msg) ||
-    /must be owner of/i.test(msg) ||
     /policy .* already exists/i.test(msg) ||
     /trigger .* already exists/i.test(msg)
   );
@@ -209,14 +209,27 @@ export async function applyCompanyMigrations(
 }
 
 export async function assertPipelineTables(client: pg.PoolClient): Promise<string[]> {
+  // Full Import → AI Review → Generate → Assisted Manual path (no pgvector/kb_*)
   const required = [
     'organizations',
     'local_auth_users',
     'workspaces',
+    'workspace_settings',
     'backlink_imports',
     'backlink_import_rows',
+    'backlink_domain_analyses',
+    'backlink_automation_runs',
+    'backlink_automation_run_logs',
     'opportunities',
+    'backlink_ai_drafts',
+    'backlink_submissions',
+    'relationship_organizations',
+    'relationship_contacts',
+    'content_packs',
     'assisted_packages',
+    'site_profiles',
+    'execution_policies',
+    'platform_events',
   ];
   const { rows } = await client.query<{ table_name: string }>(
     `SELECT table_name FROM information_schema.tables
@@ -226,7 +239,9 @@ export async function assertPipelineTables(client: pg.PoolClient): Promise<strin
   const have = new Set(rows.map((r) => r.table_name));
   const missing = required.filter((t) => !have.has(t));
   if (missing.length) {
-    throw new Error(`Pipeline tables missing after migrate: ${missing.join(', ')}`);
+    throw new Error(
+      `Pipeline tables missing after migrate: ${missing.join(', ')}. Re-run: npm run db:setup`
+    );
   }
   return [...have].sort();
 }

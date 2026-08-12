@@ -52,22 +52,22 @@ async function main() {
     await ensureCompanyDatabase();
   }
 
-  const app = createApp();
-
-  // Bind early so /health succeeds while workers + Chromium warm up
-  server = app.listen(env.PORT, '0.0.0.0', () => {
-    logger.info({ port: env.PORT, host: '0.0.0.0', env: env.NODE_ENV }, 'Backlink Agent API started');
-  });
-
-  process.on('SIGTERM', () => void shutdown('SIGTERM'));
-  process.on('SIGINT', () => void shutdown('SIGINT'));
-
+  // Start workers BEFORE accepting traffic — avoids import Failed (queues not ready).
   if (env.ENABLE_WORKERS) {
     await startJobInfrastructure();
     logger.info('Background job workers enabled');
   } else {
     logger.info('Background job workers disabled (ENABLE_WORKERS=false)');
   }
+
+  const app = createApp();
+
+  server = app.listen(env.PORT, '0.0.0.0', () => {
+    logger.info({ port: env.PORT, host: '0.0.0.0', env: env.NODE_ENV }, 'Backlink Agent API started');
+  });
+
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdown('SIGINT'));
 
   // Browser runtime + infrastructure startup health (auto-install Chromium if missing)
   try {

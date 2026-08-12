@@ -422,6 +422,13 @@ export async function runAutomationPipeline(
     });
   };
 
+  let opportunitiesCreated = 0;
+  let analysesCreated = 0;
+  let contentGenerated = 0;
+  let submissionsCreated = 0;
+  let relationshipsCreated = 0;
+  const probeOpportunityIds: string[] = [];
+
   try {
     await log('import', `Importing URLs from import ${importId.slice(0, 8)}…`);
     steps.add('import');
@@ -456,7 +463,9 @@ export async function runAutomationPipeline(
 
     if (validRows.length === 0) {
       await log('validate', 'No valid URLs to process', { level: 'error' });
-      await updateImportStatus(importId, 'failed');
+      await updateImportStatus(importId, 'failed', {
+        error_message: 'No valid URLs in import',
+      });
       await updateRun(runId, {
         status: 'failed',
         progress: progressFromStages(steps),
@@ -471,11 +480,6 @@ export async function runAutomationPipeline(
       richByUrl?: Record<string, Record<string, string | null>>;
     };
     const richByUrl = importMeta.richByUrl ?? {};
-    let opportunitiesCreated = 0;
-    let analysesCreated = 0;
-    let contentGenerated = 0;
-    let submissionsCreated = 0;
-    let relationshipsCreated = 0;
     const classificationDecisions: Array<{
       classificationId: string;
       displayName?: string;
@@ -489,7 +493,7 @@ export async function runAutomationPipeline(
 
       const CONCURRENCY = Math.min(
         8,
-        Math.max(1, Number(process.env.IMPORT_VALIDATE_CONCURRENCY ?? 4))
+        Math.max(1, Number(process.env.IMPORT_VALIDATE_CONCURRENCY ?? 6))
       );
     for (let i = 0; i < validRows.length; i += CONCURRENCY) {
       const batch = validRows.slice(i, i + CONCURRENCY);
@@ -776,17 +780,8 @@ export async function runAutomationPipeline(
                 homepageReachable: analysis.homepageReachable ?? null,
                 duplicateOfId: existingId && existingId !== oppId ? existingId : null,
               });
-              // Probe ASAP — ready+free may promote; no_form/dead/paid revoke forever
-              try {
-                const { enqueueLinkProbe } = await import('./link-probe.service.js');
-                await enqueueLinkProbe({
-                  workspaceId,
-                  opportunityIds: [oppId],
-                  limit: 1,
-                });
-              } catch (probeErr) {
-                console.warn('[import] enqueue link probe failed', probeErr);
-              }
+              // Defer probes to end of import — per-row probes fight CRAWL concurrency and slow company hosts
+              probeOpportunityIds.push(oppId);
             } catch (e) {
               console.error('[CSM] apply analysis failed', e);
             }
@@ -1279,6 +1274,20 @@ export async function runAutomationPipeline(
       /* notify optional */
     }
 
+    // Batch link probes once (not per domain) so Import finishes fast on company hosts
+    if (probeOpportunityIds.length) {
+      try {
+        const { enqueueLinkProbe } = await import('./link-probe.service.js');
+        await enqueueLinkProbe({
+          workspaceId,
+          opportunityIds: probeOpportunityIds,
+          limit: probeOpportunityIds.length,
+        });
+      } catch (probeErr) {
+        logger.warn({ err: probeErr, importId }, 'batch link probe enqueue failed');
+      }
+    }
+
     // Non-blocking enrichment only (memory/knowledge/browser) — core data already persisted
     fireAndForget(
       triggerBackgroundEnginesAfterImport({
@@ -1309,6 +1318,37 @@ export async function runAutomationPipeline(
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Pipeline failed';
     await log('store', `Pipeline failed: ${message}`, { level: 'error' });
+    // If we already persisted opportunities, keep the import usable for AI Review
+    if (opportunitiesCreated > 0) {
+      await updateImportStatus(importId, 'completed', {
+        error_message: message,
+        opportunities_created: opportunitiesCreated,
+      });
+      await updateRun(runId, {
+        status: 'partially_completed',
+        error_message: message,
+        steps_completed: [...steps],
+        progress: progressFromStages(steps),
+        stats: { opportunitiesCreated, analysesCreated },
+        completed_at: new Date().toISOString(),
+      });
+      logger.warn(
+        { importId, opportunitiesCreated, message },
+        'Pipeline error after opportunities persisted — marked completed/partial'
+      );
+      return {
+        runId,
+        importId,
+        opportunitiesCreated,
+        contentGenerated,
+        submissionsCreated,
+        relationshipsCreated,
+        analysesCreated,
+        stepsCompleted: [...steps],
+        status: 'partially_completed',
+        errors: stageErrors,
+      };
+    }
     await updateImportStatus(importId, 'failed', { error_message: message });
     await updateRun(runId, {
       status: 'failed',
