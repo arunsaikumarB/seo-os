@@ -266,6 +266,13 @@ export async function analyzeDomainLive(
   fetchImpl: typeof fetch = fetch,
   opts: { learning?: LearningPattern[] } = {}
 ): Promise<DomainAnalysisResult> {
+  const skipLive =
+    String(process.env.COMPANY_STACK ?? '').toLowerCase() === 'true' ||
+    String(process.env.ANALYZE_SKIP_LIVE ?? '').toLowerCase() === 'true';
+  if (skipLive) {
+    return analyzeDomain(domain, url);
+  }
+
   const base = analyzeDomain(domain, url);
   const origin = `https://${base.domain}`;
   const meta = { ...base.metadata } as Record<string, unknown>;

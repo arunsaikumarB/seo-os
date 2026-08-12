@@ -8,8 +8,11 @@ import { getAIRuntime } from '../modules/ai/runtime.js';
 import { listCircuits } from '../lib/circuit-breaker.js';
 import { getProviderManager } from '@seo-os/providers';
 
+/** Bump this whenever company Import behavior changes — /ready must show the new value after rebuild. */
+export const API_RELEASE = '1.2.8-import-inline';
+
 export function healthHandler(_req: Request, res: Response): void {
-  res.status(200).json({ status: 'ok', service: 'backlink-agent-api', version: '1.2.7-queue-init' });
+  res.status(200).json({ status: 'ok', service: 'backlink-agent-api', version: API_RELEASE });
 }
 
 export async function readyHandler(_req: Request, res: Response): Promise<void> {
@@ -54,6 +57,10 @@ export async function readyHandler(_req: Request, res: Response): Promise<void> 
         : 'optional';
 
   checks.sentry = env.SENTRY_DSN ? 'configured' : 'optional';
+  checks.importMode =
+    env.companyStack || String(process.env.ANALYZE_SKIP_LIVE ?? '').toLowerCase() === 'true'
+      ? 'skip-live-inline'
+      : 'live-queue';
 
   const hardFail = Object.values(checks).some((v) => v === 'down');
   res.status(hardFail ? 503 : 200).json({
@@ -63,7 +70,7 @@ export async function readyHandler(_req: Request, res: Response): Promise<void> 
         ? 'degraded'
         : 'ready',
     checks,
-    version: '1.2.7-queue-init',
+    version: API_RELEASE,
   });
 }
 
@@ -71,7 +78,7 @@ export async function versionHandler(_req: Request, res: Response): Promise<void
   try {
     const bb = await import('@seo-os/backlink-builder');
     res.json({
-      version: '1.2.7-queue-init',
+      version: API_RELEASE,
       api: 'v1',
       release: 'Enterprise Production Polish',
       assisted: {
@@ -81,7 +88,7 @@ export async function versionHandler(_req: Request, res: Response): Promise<void
     });
   } catch {
     res.json({
-      version: '1.2.7-queue-init',
+      version: API_RELEASE,
       api: 'v1',
       release: 'Enterprise Production Polish',
     });
@@ -253,7 +260,7 @@ export async function opsHealthHandler(_req: Request, res: Response): Promise<vo
       workersEnabled: env.ENABLE_WORKERS,
       providerMode: env.PROVIDER_MODE,
     },
-    version: '1.2.7-queue-init',
+    version: API_RELEASE,
   };
 
   res.status(200).json({ data: payload });
@@ -279,7 +286,7 @@ export async function opsPerformanceHandler(_req: Request, res: Response): Promi
       ...getPerformanceSnapshot(),
       metrics: getMetricsSnapshot(),
       browserPool,
-      version: '1.2.7-queue-init',
+      version: API_RELEASE,
     },
   });
 }
@@ -311,7 +318,7 @@ export async function opsQueuesHandler(_req: Request, res: Response): Promise<vo
         lastError: q.lastError,
       })),
       requiredQueues: Object.values(QUEUES),
-      version: '1.2.7-queue-init',
+      version: API_RELEASE,
     },
   });
 }

@@ -43,7 +43,7 @@ async function main() {
   await initSentry({
     dsn: env.SENTRY_DSN || undefined,
     environment: env.SENTRY_ENVIRONMENT || env.NODE_ENV,
-    release: 'backlink-agent-api@1.2.7-queue-init',
+    release: 'backlink-agent-api@1.2.8-import-inline',
   });
 
   // Company / DD3: create core tables on empty Postgres (no pgvector).

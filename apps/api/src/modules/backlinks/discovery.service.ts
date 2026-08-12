@@ -169,6 +169,12 @@ async function waitForQueues(msTotal = 12_000, stepMs = 500): Promise<boolean> {
   return areQueuesInitialized();
 }
 
+function isCompanyStackProcess(): boolean {
+  return (
+    getEnv().companyStack || String(process.env.COMPANY_STACK ?? '').toLowerCase() === 'true'
+  );
+}
+
 export async function enqueueAutomationPipeline(
   workspaceId: string,
   importId: string,
@@ -177,8 +183,13 @@ export async function enqueueAutomationPipeline(
 ) {
   const env = getEnv();
 
-  // Workers disabled: mark analyzing and run inline (never claim a queue job succeeded).
-  if (!env.ENABLE_WORKERS) {
+  // Company hosts: the crawl queue is shared with Playwright/site-scans that hang
+  // without outbound HTTPS, so Import never starts. Run analysis inline instead.
+  if (isCompanyStackProcess() || !env.ENABLE_WORKERS) {
+    logger.info(
+      { importId, workspaceId, company: isCompanyStackProcess() },
+      'Starting import pipeline inline (not waiting on crawl queue)'
+    );
     return startInlineAutomation(workspaceId, importId, orgId, userId);
   }
 
@@ -326,56 +337,14 @@ export async function recoverStuckAnalyzingImports(): Promise<{
       .eq('id', row.id);
 
     try {
-      // Use a recovery singleton so a prior null ghost does not block forever
-      const env = getEnv();
-      if (!env.ENABLE_WORKERS || !areQueuesInitialized()) {
-        await markImportEnqueueFailed(
-          row.workspace_id,
-          row.id,
-          'Cannot recover — workers/queues unavailable'
-        );
-        failed++;
-        continue;
-      }
-
-      const jobId = await enqueueJob(
-        QUEUES.CRAWL,
-        'backlink_automation',
-        {
-          type: 'backlink_automation',
-          workspaceId: row.workspace_id,
-          importId: row.id,
-          userId: row.created_by ?? undefined,
-        },
-        { singletonKey: `automation-recovery-${row.id}`, retryLimit: 1 }
+      const result = await enqueueAutomationPipeline(
+        row.workspace_id,
+        row.id,
+        undefined,
+        row.created_by ?? undefined
       );
-
-      if (!jobId) {
-        await markImportEnqueueFailed(
-          row.workspace_id,
-          row.id,
-          'Recovery re-enqueue failed — boss.send returned null'
-        );
-        failed++;
-        continue;
-      }
-
-      await getSupabaseAdmin()
-        .from('backlink_imports')
-        .update({
-          status: 'analyzing',
-          metadata: {
-            ...meta,
-            recoveryAttemptedAt: new Date().toISOString(),
-            lastEnqueuedJobId: jobId,
-            lastEnqueuedAt: new Date().toISOString(),
-            enqueueError: null,
-          },
-        })
-        .eq('id', row.id);
-
       requeued++;
-      logger.info({ importId: row.id, jobId }, 'Re-enqueued stuck analyzing import');
+      logger.info({ importId: row.id, result }, 'Recovered stuck analyzing import');
     } catch (err) {
       logger.error({ err, importId: row.id }, 'Stuck import recovery error');
       await markImportEnqueueFailed(

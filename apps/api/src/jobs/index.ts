@@ -66,11 +66,26 @@ export async function startJobInfrastructure(): Promise<void> {
         String(j.data.type ?? '') !== 'bee_profile' &&
         !String(j.data.type ?? '').startsWith('backlink_')
     );
+    // Import/probes first — Playwright and public scans hang on company hosts
+    // and used to block this queue for minutes.
+    if (backlinkJobs.length) await handleBacklinkJobs(backlinkJobs);
+
+    const company =
+      getEnv().companyStack || String(process.env.COMPANY_STACK ?? '').toLowerCase() === 'true';
+    if (company) {
+      if (profileJobs.length || scanJobs.length) {
+        logger.warn(
+          { profiles: profileJobs.length, scans: scanJobs.length },
+          'Skipping outbound crawl jobs on company stack'
+        );
+      }
+      return;
+    }
+
     if (profileJobs.length) {
       const { handlePlaywrightJobs } = await import('./handlers/playwright.js');
       await handlePlaywrightJobs(profileJobs);
     }
-    if (backlinkJobs.length) await handleBacklinkJobs(backlinkJobs);
     if (scanJobs.length) await handleIntelligenceScanJobs(scanJobs);
   }, { concurrency: 2, batchSize: 2, pollingIntervalSeconds: 1 });
 

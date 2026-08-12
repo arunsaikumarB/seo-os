@@ -97,7 +97,7 @@ v1Router.get('/version', async (_req, res) => {
     const bb = await import('@seo-os/backlink-builder');
     res.json({
       data: {
-        version: '1.2.7-queue-init',
+        version: '1.2.8-import-inline',
         api: 'v1',
         assisted: {
           readerVersion: bb.ASSISTED_FORM_READER_VERSION,
@@ -106,7 +106,7 @@ v1Router.get('/version', async (_req, res) => {
       },
     });
   } catch {
-    res.json({ data: { version: '1.2.7-queue-init', api: 'v1' } });
+    res.json({ data: { version: '1.2.8-import-inline', api: 'v1' } });
   }
 });
 
