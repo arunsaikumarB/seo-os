@@ -43,7 +43,40 @@ export function createApp() {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     next();
   });
-  app.use(cors({ origin: env.CORS_ORIGIN.split(',').map((o) => o.trim()), credentials: true }));
+  // Company/DD3: set CORS_ORIGIN to the exact web origin (e.g. http://10.0.12.193:5000).
+  // Use CORS_ORIGIN=* to reflect any Origin (internal LAN only — not for public internet).
+  const corsRaw = env.CORS_ORIGIN.trim();
+  const corsAllowAll = corsRaw === '*';
+  const corsAllowed = corsAllowAll
+    ? []
+    : corsRaw
+        .split(',')
+        .map((o) => o.trim().replace(/\/$/, ''))
+        .filter(Boolean);
+  app.use(
+    cors({
+      origin(origin, callback) {
+        // Non-browser / same-origin tools (curl, server-to-server) send no Origin
+        if (!origin) {
+          callback(null, true);
+          return;
+        }
+        const normalized = origin.replace(/\/$/, '');
+        if (corsAllowAll || corsAllowed.includes(normalized)) {
+          callback(null, true);
+          return;
+        }
+        logger.warn(
+          { origin, corsOriginEnv: corsRaw },
+          'CORS blocked request Origin — set CORS_ORIGIN on API to this web URL'
+        );
+        callback(new Error(`CORS blocked for origin ${origin}`));
+      },
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Org-Id', 'X-Trace-Id'],
+    })
+  );
   app.use(express.json({ limit: '10mb' }));
   app.use(traceIdMiddleware);
   app.use(metricsMiddleware);

@@ -22,10 +22,14 @@ PORT=3001
 COMPANY_STACK=true
 LOCAL_JWT_SECRET=<random 32+ characters>
 DATABASE_URL=postgresql://USER:PASSWORD@DB_HOST:PORT/backlink_agent
-CORS_ORIGIN=https://<your-web-url>
+CORS_ORIGIN=http://10.0.12.193:5000
 PROVIDER_MODE=mvp
 ENABLE_WORKERS=true
 ```
+
+`CORS_ORIGIN` must be the **exact frontend URL** the browser uses (scheme + IP/host + port).  
+Current company pair: web `http://10.0.12.193:5000` → API `CORS_ORIGIN=http://10.0.12.193:5000`  
+(Internal LAN only: `CORS_ORIGIN=*` also works.)
 
 Do **not** put this under `apps/api/.env` on company servers.
 
