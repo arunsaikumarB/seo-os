@@ -1,11 +1,11 @@
 ---
-description: After frontend changes, sync apps/web to GitLab ba-frontend
+description: After frontend changes, sync apps/web + companion to GitLab ba-frontend
 alwaysApply: true
 ---
 
 # GitLab frontend sync
 
-When you change **frontend** code (`apps/web/**` or `packages/shared/**` used by the web app), after committing to GitHub `master` also sync to GitLab:
+When you change **frontend** code (`apps/web/**`, `apps/companion/**`, or `packages/shared/**` used by the web app), after committing to GitHub also sync to GitLab:
 
 ```powershell
 powershell -File scripts/sync-frontend-to-gitlab.ps1 -Message "<same conventional message>"
@@ -13,6 +13,7 @@ powershell -File scripts/sync-frontend-to-gitlab.ps1 -Message "<same conventiona
 
 - Remote: `http://gitlab.lstech-hq.lstechinc.com/websites/backlink-agent.git`
 - Branch: `ba-frontend`
+- Includes: `apps/web`, `apps/companion`, `packages/shared`
 - Do **not** push API/backend to `ba-frontend` (that is `ba-backend`)
 - Do **not** force-push — sync script commits on top of existing history only
-- Skip sync for docs-only / API-only / companion-only changes
+- Skip sync for docs-only / API-only changes

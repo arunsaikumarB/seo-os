@@ -42,7 +42,8 @@ git worktree add --detach $export $srcCommit
 if ($LASTEXITCODE -ne 0) { throw "git worktree add (export) failed" }
 
 New-Item -ItemType Directory -Path $slice | Out-Null
-foreach ($rel in @('apps\web', 'packages\shared', 'package.json', 'package-lock.json', 'turbo.json', 'tsconfig.base.json', '.env.company.frontend.example')) {
+# Web app + shared types + Chrome companion (load unpacked from apps/companion/dist).
+foreach ($rel in @('apps\web', 'apps\companion', 'packages\shared', 'package.json', 'package-lock.json', 'turbo.json', 'tsconfig.base.json', '.env.company.frontend.example')) {
   $src = Join-Path $export $rel
   $dst = Join-Path $slice $rel
   if (-not (Test-Path $src)) { throw "Missing in export: $rel" }
@@ -60,11 +61,12 @@ const fs=require('fs');
 const p=JSON.parse(fs.readFileSync('package.json','utf8'));
 p.name='backlink-agent-frontend';
 p.description='Backlink Agent frontend (GitLab ba-frontend)';
-p.workspaces=['apps/web','packages/shared'];
+p.workspaces=['apps/web','apps/companion','packages/shared'];
 p.engines={ node: '>=18.18.0' };
 p.scripts={
   dev:'npm run dev --workspace=@seo-os/web',
   build:'npm run build --workspace=@seo-os/web',
+  'build:companion':'npm run build --workspace=@seo-os/companion',
   typecheck:'npm run typecheck --workspace=@seo-os/web',
   lint:'npm run lint --workspace=@seo-os/web'
 };
@@ -74,7 +76,7 @@ fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');
   @"
 # Backlink Agent - Frontend (``ba-frontend``)
 
-Synced from the product monorepo (``apps/web`` + ``packages/shared``).
+Synced from the product monorepo (``apps/web`` + ``apps/companion`` + ``packages/shared``).
 
 **Node:** ``>=18.18.0`` is enough for FE (React 18 / Vite 6).
 
@@ -85,7 +87,8 @@ cp .env.example .env
 cp .env.example .env.production
 # edit VITE_API_URL + VITE_AUTH_MODE=local
 npm install
-npm run build   # from this root -> apps/web/dist
+npm run build            # web -> apps/web/dist
+npm run build:companion  # Chrome extension -> apps/companion/dist (load unpacked)
 ``````
 "@ | Set-Content -Encoding utf8 README.md
 
