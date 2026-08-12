@@ -1,5 +1,4 @@
-/**
- * Minimal PostgREST-lite client for DATA_MODE=pg.
+/** pg-compat: ILIKE/LIKE + jsonb array encoding for company Postgres Import. */
  * Chainable API mirrors supabase-js patterns used heavily in apps/api.
  * Not full PostgREST parity — see docs/cutover/no-supabase-phase-4b.md.
  */
@@ -27,6 +26,8 @@ type FilterOp =
   | 'lte'
   | 'in'
   | 'is'
+  | 'like'
+  | 'ilike'
   | 'not.is'
   | 'not.in'
   | 'or';
@@ -367,6 +368,16 @@ class QueryBuilder implements PromiseLike<PgCompatResult> {
     return this;
   }
 
+  like(column: string, value: unknown): this {
+    this.filters.push({ op: 'like', column, value });
+    return this;
+  }
+
+  ilike(column: string, value: unknown): this {
+    this.filters.push({ op: 'ilike', column, value });
+    return this;
+  }
+
   neq(column: string, value: unknown): this {
     this.filters.push({ op: 'neq', column, value });
     return this;
@@ -519,6 +530,14 @@ class QueryBuilder implements PromiseLike<PgCompatResult> {
           parts.push(`${col} NOT IN (${phs.join(', ')})`);
           break;
         }
+        case 'like':
+          params.push(f.value);
+          parts.push(`${col} LIKE $${params.length}`);
+          break;
+        case 'ilike':
+          params.push(f.value);
+          parts.push(`${col} ILIKE $${params.length}`);
+          break;
         case 'is':
           if (f.value === null) parts.push(`${col} IS NULL`);
           else if (f.value === true) parts.push(`${col} IS TRUE`);

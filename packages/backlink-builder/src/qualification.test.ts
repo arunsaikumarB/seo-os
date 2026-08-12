@@ -138,4 +138,19 @@ describe('company import without live fetch', () => {
     expect(q.signals.hasPublicSubmissionPath).toBe(true);
     expect(q.qualified).toBe(true);
   });
+
+  it('submit_article.php and add.php qualify from URL path', async () => {
+    const a = await analyzeDomainForImport(
+      'freetoprankdirectory.com',
+      'https://www.freetoprankdirectory.com/submit_article.php?id=145',
+      async () => {
+        throw new Error('network should not be called');
+      },
+      { skipLive: true }
+    );
+    expect(a.metadata.submissionPathConfirmed).toBe(true);
+    const q = qualifyOpportunity(a, classifyOpportunity(a, {}));
+    expect(q.signals.hasPublicSubmissionPath).toBe(true);
+    expect(q.qualified).toBe(true);
+  });
 });

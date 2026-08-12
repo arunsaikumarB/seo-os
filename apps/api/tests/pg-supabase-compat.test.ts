@@ -86,6 +86,14 @@ describe('pg-supabase-compat (DATA_MODE=pg)', () => {
       expect(rows.length).toBeGreaterThanOrEqual(1);
       expect(rows[0]!.slug).toBe(slug);
 
+      const ilikeHit = await client
+        .from('organizations')
+        .select('id, slug')
+        .ilike('slug', slug)
+        .maybeSingle();
+      expect(ilikeHit.error).toBeNull();
+      expect((ilikeHit.data as { slug: string }).slug).toBe(slug);
+
       const one = await client.from('organizations').select('*').eq('id', org.id).maybeSingle();
       expect(one.error).toBeNull();
       expect((one.data as { id: string }).id).toBe(org.id);

@@ -127,7 +127,7 @@ function detectOpportunityTypes(domain: string, niche: string): BacklinkTypeId[]
 }
 
 const SUBMIT_PATH =
-  /submit\.php|\/submit\b|add[-_]?url|add[-_]?link|add[-_]?site|add[-_]?listing|\/listing/i;
+  /submit(?:_article|_listing|_link|_site)?\.php|\/submit(?:\.php)?(?:\?|$|\/)|\/add\.php|suggest\.php|add[-_]?url|add[-_]?link|add[-_]?site|add[-_]?listing|\/listing/i;
 
 /** Directory/submit URLs are evidence even when the company host cannot fetch the public internet. */
 export function applyImportUrlSignals(

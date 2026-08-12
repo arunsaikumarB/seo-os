@@ -321,6 +321,8 @@ export async function listImports(workspaceId: string, limit = 20) {
       .eq('import_id', imp.id);
 
     const oppCount = count ?? Number(imp.opportunities_created ?? 0);
+    if (oppCount <= 0) continue;
+
     await getSupabaseAdmin()
       .from('backlink_imports')
       .update({
@@ -602,9 +604,14 @@ export async function runAutomationPipeline(
             if (!qualification.qualified) {
               // Still create one Campaign Item — AI Review decides tier/decision via CSM
               const ignoredId = randomUUID();
-              const existingId = await import('../campaigns/ai-review.service.js').then((m) =>
-                m.findExistingByDomain(workspaceId, domain)
-              );
+              let existingId: string | null = null;
+              try {
+                existingId = await import('../campaigns/ai-review.service.js').then((m) =>
+                  m.findExistingByDomain(workspaceId, domain)
+                );
+              } catch {
+                existingId = null;
+              }
               const deadWebsite = isDeadWebsiteAnalysis(analysis);
               const notQualInsert = await getSupabaseAdmin().from('opportunities').insert({
                 id: ignoredId,
@@ -688,9 +695,14 @@ export async function runAutomationPipeline(
               return;
             }
 
-            const existingId = await import('../campaigns/ai-review.service.js').then((m) =>
-              m.findExistingByDomain(workspaceId, domain)
-            );
+            let existingId: string | null = null;
+            try {
+              existingId = await import('../campaigns/ai-review.service.js').then((m) =>
+                m.findExistingByDomain(workspaceId, domain)
+              );
+            } catch {
+              existingId = null;
+            }
             const deadWebsite = isDeadWebsiteAnalysis(analysis);
 
             const oppId = randomUUID();
