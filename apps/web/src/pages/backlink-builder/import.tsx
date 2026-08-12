@@ -468,7 +468,7 @@ export function BacklinkImportPage() {
                     {imp.valid_rows}/{imp.total_rows} valid · {imp.opportunities_created}{' '}
                     opportunities · {new Date(imp.created_at).toLocaleDateString()}
                   </p>
-                  {imp.status === 'failed' && imp.error_message ? (
+                  {imp.error_message ? (
                     <p className="text-xs text-destructive mt-1 max-w-xl break-words">
                       {imp.error_message}
                     </p>

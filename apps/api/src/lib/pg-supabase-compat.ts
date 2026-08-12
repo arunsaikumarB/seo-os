@@ -69,6 +69,40 @@ function quoteTable(table: string): string {
   return `public.${quoteIdent(table)}`;
 }
 
+/**
+ * node-pg encodes JS arrays as `{a,b}` (Postgres array literal). That is invalid
+ * for jsonb columns (`opportunity_types`, `steps_completed`, `metadata`, …) and
+ * was aborting Import with "invalid input syntax for type json".
+ * Native text[]/uuid[] columns keep JS arrays so node-pg can encode them.
+ */
+const PG_NATIVE_ARRAY_COLUMNS = new Set([
+  'domain_style_profiles.keywords',
+  'image_learning.style_tags',
+  'image_metadata.categories',
+  'image_metadata.keywords',
+  'image_metadata.tags',
+  'image_prompt_library.style_tags',
+  'image_submission_requirements.supported_formats',
+  'integration_connections.scopes',
+  'outreach_messages.cc',
+  'provider_registry.auth_modes',
+  'report_runs.export_formats',
+  'site_profiles.opportunity_ids',
+]);
+
+export function encodePgWriteValue(table: string, column: string, value: unknown): unknown {
+  if (value === undefined || value === null) return null;
+  if (value instanceof Date) return value;
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(value)) return value;
+  if (Array.isArray(value) && PG_NATIVE_ARRAY_COLUMNS.has(`${table}.${column}`)) {
+    return value;
+  }
+  if (Array.isArray(value) || typeof value === 'object') {
+    return JSON.stringify(value);
+  }
+  return value;
+}
+
 function err(message: string, code?: string): PgCompatError {
   return { message, code };
 }
@@ -697,7 +731,7 @@ class QueryBuilder implements PromiseLike<PgCompatResult> {
     for (const row of rows) {
       const phs: string[] = [];
       for (const k of keys) {
-        params.push(row[k] ?? null);
+        params.push(encodePgWriteValue(this.table, k, row[k] ?? null));
         phs.push(`$${params.length}`);
       }
       valueGroups.push(`(${phs.join(', ')})`);
@@ -764,7 +798,7 @@ class QueryBuilder implements PromiseLike<PgCompatResult> {
 
     const params: unknown[] = [];
     const sets = keys.map((k) => {
-      params.push(patch[k]);
+      params.push(encodePgWriteValue(this.table, k, patch[k]));
       return `${quoteIdent(k)} = $${params.length}`;
     });
     const where = this.buildWhere(params);

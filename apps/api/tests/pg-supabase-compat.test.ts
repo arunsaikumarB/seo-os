@@ -4,6 +4,7 @@
  */
 import { describe, expect, it, beforeAll } from 'vitest';
 import pg from 'pg';
+import { encodePgWriteValue } from '../src/lib/pg-supabase-compat.js';
 
 const DB_CANDIDATES = [
   'postgresql://postgres:postgres@127.0.0.1:54322/postgres',
@@ -146,6 +147,56 @@ describe('pg-supabase-compat (DATA_MODE=pg)', () => {
       expect(empty.error).toBeNull();
       expect(Array.isArray(empty.data)).toBe(true);
     } finally {
+      await client.from('organizations').delete().eq('id', orgId);
+    }
+  });
+
+  it('encodes JS arrays as JSON for jsonb columns (import opportunity_types)', () => {
+    expect(encodePgWriteValue('backlink_domain_analyses', 'opportunity_types', ['directory'])).toBe(
+      '["directory"]'
+    );
+    expect(encodePgWriteValue('backlink_domain_analyses', 'detected_pages', { directory: '/submit.php' })).toBe(
+      '{"directory":"/submit.php"}'
+    );
+    expect(encodePgWriteValue('image_metadata', 'keywords', ['seo', 'links'])).toEqual(['seo', 'links']);
+  });
+
+  it('inserts jsonb arrays into backlink_domain_analyses', async ({ skip }) => {
+    if (!dbReachable) {
+      skip();
+      return;
+    }
+    const { createPgSupabaseCompat } = await import('../src/lib/pg-supabase-compat.js');
+    const client = createPgSupabaseCompat();
+    const slug = `pg-jsonb-${Date.now()}`;
+    const { data: org, error: orgErr } = await client
+      .from('organizations')
+      .insert({ name: 'JSONB Test Org', slug })
+      .select('*')
+      .single();
+    expect(orgErr).toBeNull();
+    const orgId = (org as { id: string }).id;
+    const { data: ws, error: wsErr } = await client
+      .from('workspaces')
+      .insert({ org_id: orgId, name: 'JSONB WS', domain: `jsonb-${Date.now()}.example` })
+      .select('*')
+      .single();
+    expect(wsErr).toBeNull();
+    const wsId = (ws as { id: string }).id;
+    try {
+      const inserted = await client.from('backlink_domain_analyses').insert({
+        workspace_id: wsId,
+        domain: 'freetoprankdirectory.com',
+        website_name: 'Free Top Rank',
+        detected_pages: { directory: 'https://www.freetoprankdirectory.com/submit.php' },
+        opportunity_types: ['directory'],
+        metadata: { directoryPathConfirmed: true },
+        metrics_source: 'estimated',
+      });
+      expect(inserted.error).toBeNull();
+    } finally {
+      await client.from('backlink_domain_analyses').delete().eq('workspace_id', wsId);
+      await client.from('workspaces').delete().eq('id', wsId);
       await client.from('organizations').delete().eq('id', orgId);
     }
   });
