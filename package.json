@@ -25,7 +25,8 @@
     "smoke:enterprise": "node scripts/smoke-enterprise.mjs",
     "db:push": "supabase db push",
     "db:reset": "supabase db reset",
-    "db:migrate": "node scripts/db-migrate.mjs"
+    "db:migrate": "node scripts/db-migrate.mjs",
+    "db:setup": "npm run db:setup --workspace=@seo-os/api"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

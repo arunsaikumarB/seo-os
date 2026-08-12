@@ -53,21 +53,21 @@ docker compose up -d pgadmin
 
 pgAdmin server: Host `host.docker.internal`, Port `54332`, DB `backlink_agent`, User `postgres`, Pass `postgres`.
 
-### 2. Schema — prefer `npm run db:migrate` (empty company DB)
+### 2. Schema — prefer `npm run db:setup` (empty company DB, **no pgvector**)
 
-DD3-style: create tables from the backend repo (no dump required):
+DD3-style TypeScript bootstrap: `apps/api/src/db/Database.ts`
 
 ```bash
 # ba-backend root — DATABASE_URL in .env points at empty backlink_agent DB
-# DB user should be able to CREATE EXTENSION (superuser recommended once)
 npm ci
-npm run db:migrate
+npm run db:setup
 ```
 
-This runs roles/auth stubs + all `supabase/migrations` (~150 public tables including `organizations`, `local_auth_users`).
+Creates core tables for signup / org / project (`organizations`, `local_auth_users`, `workspaces`, …).  
+With `COMPANY_STACK=true`, the API also runs this on startup.
 
-**Alternate:** dump/restore from a healthy local Supabase DB — [Phase 1](./no-supabase-phase-1.md).  
-**Do not commit** `.cutover-dumps/*`.
+Optional full schema (needs pgvector): `npm run db:migrate`  
+**Alternate:** dump/restore — [Phase 1](./no-supabase-phase-1.md).
 
 ### 3. API env (DD3 root layout)
 
@@ -108,7 +108,7 @@ VITE_API_URL=https://your-api-origin
 
 ```bash
 npm install
-npm run db:migrate   # required once on empty Postgres
+npm run db:setup     # Database.ts — no pgvector (required once on empty DB)
 npm run build
 npm run start
 ```

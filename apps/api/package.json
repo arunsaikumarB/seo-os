@@ -8,6 +8,7 @@
     "prebuild": "node ../../scripts/build-api-deps.mjs",
     "build": "tsc -b --force",
     "start": "node dist/index.js",
+    "db:setup": "tsx src/db/setup-cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "clean": "rimraf dist",

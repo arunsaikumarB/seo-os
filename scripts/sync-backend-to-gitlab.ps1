@@ -84,7 +84,8 @@ p.scripts={
   typecheck:'npm run typecheck --workspace=@seo-os/api',
   test:'npm run test --workspace=@seo-os/api',
   lint:'npm run lint --workspace=@seo-os/api',
-  'db:migrate':'node scripts/db-migrate.mjs'
+  'db:migrate':'node scripts/db-migrate.mjs',
+  'db:setup':'npm run db:setup --workspace=@seo-os/api'
 };
 fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');
 "@
@@ -102,7 +103,8 @@ Synced from the product monorepo for company / DD3-style deploys.
 cp .env.example .env
 # edit LOCAL_JWT_SECRET + DATABASE_URL + CORS_ORIGIN + PORT
 npm install
-npm run db:migrate   # creates tables on empty Postgres (DD3-style)
+npm run db:setup     # Database.ts — core tables, NO pgvector (DD3-style)
+# optional full schema: npm run db:migrate  (needs pgvector)
 npm run build
 npm run start
 ``````

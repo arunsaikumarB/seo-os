@@ -46,6 +46,12 @@ async function main() {
     release: 'backlink-agent-api@1.2.7-queue-init',
   });
 
+  // Company / DD3: create core tables on empty Postgres (no pgvector).
+  if (env.companyStack) {
+    const { ensureCompanyDatabase } = await import('./db/Database.js');
+    await ensureCompanyDatabase();
+  }
+
   const app = createApp();
 
   // Bind early so /health succeeds while workers + Chromium warm up

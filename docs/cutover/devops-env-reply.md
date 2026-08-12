@@ -67,7 +67,7 @@ npm run build
 # -> apps/web/dist
 ```
 
-### Empty database — create tables (DD3-style)
+### Empty database — create tables (DD3-style, **no pgvector**)
 
 If pgAdmin shows **no tables** under `public`:
 
@@ -75,13 +75,17 @@ If pgAdmin shows **no tables** under `public`:
 cd /opt/apps/backlink-agent   # ba-backend root, .env with DATABASE_URL
 git fetch origin && git reset --hard origin/ba-backend
 npm ci
-npm run db:migrate
-# expect: organizations=true local_auth_users=true (~150 public tables)
+npm run db:setup
+# Uses apps/api/src/db/Database.ts — creates organizations, profiles,
+# local_auth_users, org_members, workspaces, workspace_settings (+ auth.users)
+# Does NOT require pgvector.
+
 pm2 restart <api> --update-env
+# COMPANY_STACK=true also auto-runs Database.ensureTables() on API start
 curl -s http://127.0.0.1:4002/ready
 ```
 
-`db:migrate` reads `DATABASE_URL` from root `.env` and applies `supabase/migrations` (no Supabase CLI).
+Optional later (full product schema, needs pgvector): `npm run db:migrate`
 
 ### Verify
 
