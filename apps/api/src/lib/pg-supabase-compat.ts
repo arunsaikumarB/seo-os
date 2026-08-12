@@ -1,6 +1,8 @@
-/** pg-compat: ILIKE/LIKE + jsonb array encoding for company Postgres Import. */
+/**
+ * Minimal PostgREST-lite client for DATA_MODE=pg.
  * Chainable API mirrors supabase-js patterns used heavily in apps/api.
  * Not full PostgREST parity — see docs/cutover/no-supabase-phase-4b.md.
+ * Includes ILIKE/LIKE + jsonb array encoding for company Postgres Import.
  */
 import { pgQuery } from './pg.js';
 
