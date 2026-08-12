@@ -43,8 +43,8 @@ export function createApp() {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     next();
   });
-  // Company/DD3: set CORS_ORIGIN to the exact web origin (e.g. http://10.0.12.193:5000).
-  // Use CORS_ORIGIN=* to reflect any Origin (internal LAN only — not for public internet).
+  // Company/DD3: set CORS_ORIGIN in the file named `.env` (next to package.json).
+  // Example: CORS_ORIGIN=http://10.0.12.193:5000  or  CORS_ORIGIN=* (LAN only).
   const corsRaw = env.CORS_ORIGIN.trim();
   const corsAllowAll = corsRaw === '*';
   const corsAllowed = corsAllowAll

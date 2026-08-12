@@ -4,14 +4,14 @@ Paste this.
 
 ---
 
-You're right — use the **DD3 layout**: `.env` at the **repo root** (next to `package.json`), not under `apps/`.
+Use a file named **`.env`** (not `root.env`). Put it next to `package.json`. The API loads `CORS_ORIGIN` from that `.env` on startup.
 
 There is no committed real `.env` in GitLab (secrets stay off git). Copy from `.env.example`.
 
 ### Backend (`ba-backend`)
 
 ```bash
-cd /opt/www/backlink-agent   # ba-backend root
+cd /opt/www/backlink-agent   # ba-backend — same folder as package.json
 cp .env.example .env
 nano .env
 ```
@@ -27,11 +27,15 @@ PROVIDER_MODE=mvp
 ENABLE_WORKERS=true
 ```
 
+After restart, PM2 logs should show:
+`[api] dotenv loaded from: .../.env`
+`[api] CORS_ORIGIN= http://10.0.12.193:5000`
+
 `CORS_ORIGIN` must be the **exact frontend URL** the browser uses (scheme + IP/host + port).  
-Current company pair: web `http://10.0.12.193:5000` → API `CORS_ORIGIN=http://10.0.12.193:5000`  
+Current company pair: web `http://10.0.12.193:5000` → in `.env`: `CORS_ORIGIN=http://10.0.12.193:5000`  
 (Internal LAN only: `CORS_ORIGIN=*` also works.)
 
-Do **not** put this under `apps/api/.env` on company servers.
+Do **not** use a file named `root.env`. Do **not** put company secrets under `apps/api/.env`.
 
 ### Frontend (`ba-frontend`)
 
