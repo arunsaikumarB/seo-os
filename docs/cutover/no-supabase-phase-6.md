@@ -63,7 +63,8 @@ npm ci
 npm run db:setup
 ```
 
-Creates core tables for signup / org / project (`organizations`, `local_auth_users`, `workspaces`, …).  
+Creates core tables **plus** Import → Assisted Manual pipeline tables  
+(`backlink_imports`, `opportunities`, `assisted_packages`, …) without pgvector.  
 With `COMPANY_STACK=true`, the API also runs this on startup.
 
 Optional full schema (needs pgvector): `npm run db:migrate`  

@@ -76,16 +76,19 @@ cd /opt/apps/backlink-agent   # ba-backend root, .env with DATABASE_URL
 git fetch origin && git reset --hard origin/ba-backend
 npm ci
 npm run db:setup
-# Uses apps/api/src/db/Database.ts — creates organizations, profiles,
-# local_auth_users, org_members, workspaces, workspace_settings (+ auth.users)
-# Does NOT require pgvector.
+# Database.ts — core + Import/Assisted Manual tables (NO pgvector).
+# Expect tables: backlink_imports, opportunities, assisted_packages, ...
 
 pm2 restart <api> --update-env
-# COMPANY_STACK=true also auto-runs Database.ensureTables() on API start
+# COMPANY_STACK=true also auto-runs this on API start
 curl -s http://127.0.0.1:4002/ready
+
+# Confirm import tables exist:
+psql "$DATABASE_URL" -c "\dt public.backlink_imports"
+psql "$DATABASE_URL" -c "\dt public.assisted_packages"
 ```
 
-Optional later (full product schema, needs pgvector): `npm run db:migrate`
+If Import shows a toast but history stays empty / Ready stays 0 — schema was incomplete; re-run `db:setup` then re-import.
 
 ### Verify
 

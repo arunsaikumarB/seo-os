@@ -1,21 +1,20 @@
 /**
  * Company / DD3-style schema bootstrap (no pgvector, no Supabase CLI).
  *
- * Creates the tables needed for local auth + orgs + projects on an empty Postgres.
- * Safe to re-run (IF NOT EXISTS).
+ * 1) Core auth/org/project tables
+ * 2) Full product migrations for Import → Assisted Manual (vector/kb skipped)
  *
  * Usage:
  *   - API startup when COMPANY_STACK=true (automatic)
- *   - CLI: npm run db:setup  (from ba-backend / monorepo root)
+ *   - CLI: npm run db:setup
  */
 import type pg from 'pg';
 import { getPgPool } from '../lib/pg.js';
 import { logger } from '../lib/logger.js';
+import { applyCompanyMigrations, assertPipelineTables } from './apply-migrations.js';
 
-const STATEMENTS: string[] = [
-  // Built-in on PG13+ via pgcrypto; ignore if not allowed
+const CORE_STATEMENTS: string[] = [
   `CREATE EXTENSION IF NOT EXISTS pgcrypto`,
-
   `CREATE SCHEMA IF NOT EXISTS auth`,
   `CREATE SCHEMA IF NOT EXISTS pgboss`,
 
@@ -40,17 +39,12 @@ const STATEMENTS: string[] = [
      WHERE email IS NOT NULL`,
 
   `CREATE OR REPLACE FUNCTION auth.uid()
-     RETURNS UUID
-     LANGUAGE sql
-     STABLE
-   AS $$
+     RETURNS UUID LANGUAGE sql STABLE AS $$
      SELECT NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid;
    $$`,
 
   `CREATE OR REPLACE FUNCTION public.set_updated_at()
-     RETURNS TRIGGER
-     LANGUAGE plpgsql
-   AS $$
+     RETURNS TRIGGER LANGUAGE plpgsql AS $$
    BEGIN
      NEW.updated_at = now();
      RETURN NEW;
@@ -144,35 +138,39 @@ const STATEMENTS: string[] = [
      ON public.workspaces(org_id, status)`,
 ];
 
-async function execIgnoreExists(client: pg.PoolClient, sql: string): Promise<void> {
+async function execSoft(client: pg.PoolClient, sql: string): Promise<void> {
   try {
     await client.query(sql);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    // Extension may be unavailable; gen_random_uuid() is built-in on modern Postgres.
     if (
       /extension .* is not available|permission denied to create extension|could not open extension control file/i.test(
         msg
-      )
+      ) ||
+      /already exists/i.test(msg)
     ) {
       return;
     }
-    if (/already exists/i.test(msg)) return;
     throw err;
   }
 }
 
 export class Database {
-  /** Create company core tables. No pgvector. Idempotent. */
-  static async ensureTables(pool: pg.Pool = getPgPool()): Promise<{ ok: true; tables: string[] }> {
+  /**
+   * Core tables + full import/pipeline schema (no pgvector).
+   * Idempotent — safe on every COMPANY_STACK boot.
+   */
+  static async ensureTables(pool: pg.Pool = getPgPool()): Promise<{
+    ok: true;
+    tables: string[];
+    migrations: { applied: number; skipped: number };
+  }> {
     const client = await pool.connect();
     try {
-      for (const sql of STATEMENTS) {
-        await execIgnoreExists(client, sql);
+      for (const sql of CORE_STATEMENTS) {
+        await execSoft(client, sql);
       }
-
-      // Ensure newer columns exist if an older workspaces table was created earlier
-      await execIgnoreExists(
+      await execSoft(
         client,
         `ALTER TABLE public.workspaces
            ADD COLUMN IF NOT EXISTS contact_email TEXT,
@@ -182,32 +180,14 @@ export class Database {
            ADD COLUMN IF NOT EXISTS brand_profile JSONB NOT NULL DEFAULT '{}'::jsonb`
       );
 
-      const { rows } = await client.query<{ table_name: string }>(
-        `SELECT table_name
-         FROM information_schema.tables
-         WHERE table_schema = 'public'
-           AND table_name IN (
-             'organizations','profiles','local_auth_users',
-             'org_members','workspaces','workspace_settings'
-           )
-         ORDER BY table_name`
-      );
-      const tables = rows.map((r) => r.table_name);
-      const required = [
-        'organizations',
-        'profiles',
-        'local_auth_users',
-        'org_members',
-        'workspaces',
-        'workspace_settings',
-      ];
-      const missing = required.filter((t) => !tables.includes(t));
-      if (missing.length) {
-        throw new Error(`Database.ensureTables incomplete — missing: ${missing.join(', ')}`);
-      }
+      const migrations = await applyCompanyMigrations(client);
+      const tables = await assertPipelineTables(client);
 
-      logger.info({ tables }, 'Database.ensureTables complete (no pgvector)');
-      return { ok: true, tables };
+      logger.info(
+        { tables, migrations },
+        'Database.ensureTables complete — import/pipeline ready (no pgvector)'
+      );
+      return { ok: true, tables, migrations };
     } finally {
       client.release();
     }
