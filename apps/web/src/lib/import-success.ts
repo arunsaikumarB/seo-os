@@ -5,13 +5,13 @@ export function isSuccessfulImportRecord(row: {
   valid_rows?: number | null;
   total_rows?: number | null;
 }): boolean {
-  if (Number(row.opportunities_created ?? 0) > 0) return true;
-  if (Number(row.valid_rows ?? 0) > 0) return true;
   const s = String(row.status ?? '').toLowerCase();
+  // Failed imports must not look “successful” just because valid_rows > 0
   if (['failed', 'error', 'cancelled', 'canceled'].includes(s)) return false;
+  if (Number(row.opportunities_created ?? 0) > 0) return true;
   if (
     ['completed', 'complete', 'classified', 'done', 'success', 'analyzed'].includes(s) &&
-    Number(row.total_rows ?? 0) > 0
+    (Number(row.valid_rows ?? 0) > 0 || Number(row.total_rows ?? 0) > 0)
   ) {
     return true;
   }

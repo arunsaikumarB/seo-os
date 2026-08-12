@@ -33,6 +33,7 @@ type ImportRecord = {
   total_rows: number;
   valid_rows: number;
   opportunities_created: number;
+  error_message?: string | null;
   created_at: string;
   metadata?: {
     classificationSummary?: {
@@ -467,6 +468,11 @@ export function BacklinkImportPage() {
                     {imp.valid_rows}/{imp.total_rows} valid · {imp.opportunities_created}{' '}
                     opportunities · {new Date(imp.created_at).toLocaleDateString()}
                   </p>
+                  {imp.status === 'failed' && imp.error_message ? (
+                    <p className="text-xs text-destructive mt-1 max-w-xl break-words">
+                      {imp.error_message}
+                    </p>
+                  ) : null}
                 </div>
                 <Badge
                   className={`text-[10px] capitalize ${

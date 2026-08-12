@@ -118,11 +118,16 @@ function progressFromStages(steps: Set<string>): number {
 
 async function getBrandContext(workspaceId: string, orgId?: string): Promise<BrandContext> {
   const project = orgId ? await getProjectById(workspaceId, orgId) : null;
-  const memory = await listMemory(workspaceId);
-  const notes = [
-    ...memory.entries.slice(0, 2).map((e) => e.content),
-    ...memory.facts.slice(0, 2).map((f) => f.content),
-  ];
+  let notes: string[] = [];
+  try {
+    const memory = await listMemory(workspaceId);
+    notes = [
+      ...memory.entries.slice(0, 2).map((e) => e.content),
+      ...memory.facts.slice(0, 2).map((f) => f.content),
+    ];
+  } catch {
+    /* memory optional on company bootstrap */
+  }
   return {
     brandName: project?.name ?? 'Our Brand',
     projectDomain: project?.domain ?? undefined,
@@ -483,8 +488,8 @@ export async function runAutomationPipeline(
     const learning = await loadClassificationLearning(workspaceId);
 
       const CONCURRENCY = Math.min(
-        16,
-        Math.max(1, Number(process.env.IMPORT_VALIDATE_CONCURRENCY ?? 8))
+        8,
+        Math.max(1, Number(process.env.IMPORT_VALIDATE_CONCURRENCY ?? 4))
       );
     for (let i = 0; i < validRows.length; i += CONCURRENCY) {
       const batch = validRows.slice(i, i + CONCURRENCY);
@@ -585,49 +590,49 @@ export async function runAutomationPipeline(
                 m.findExistingByDomain(workspaceId, domain)
               );
               const deadWebsite = isDeadWebsiteAnalysis(analysis);
-              await getSupabaseAdmin()
-                .from('opportunities')
-                .insert({
-                  id: ignoredId,
-                  workspace_id: workspaceId,
-                  opportunity_type: classification.backlinkType,
-                  title: analysis.websiteName,
-                  url,
-                  domain,
-                  score: classification.opportunityScore,
-                  status: 'qualified',
-                  pipeline_stage: 'qualified',
-                  automation_status: 'qualified',
-                  campaign_lifecycle: 'Classified',
-                  campaign_step: 'ai-review',
-                  website_name: analysis.websiteName,
-                  domain_rating: analysis.domainRating,
-                  monthly_traffic: analysis.monthlyTraffic,
-                  import_id: importId,
-                  domain_analysis_id: analysisId,
-                  discovery_source: 'import',
-                  queue_status: 'pending_review',
-                  confidence_score: classification.confidence,
-                  metadata: {
-                    qualification: {
-                      qualified: false,
-                      reason: qualification.reason,
-                    },
-                    classification: {
-                      id: classification.classificationId,
-                      displayName: classification.classificationLabel,
-                      confidence: classification.confidence,
-                      reason: classification.reason,
-                    },
+              const notQualInsert = await getSupabaseAdmin().from('opportunities').insert({
+                id: ignoredId,
+                workspace_id: workspaceId,
+                opportunity_type: classification.backlinkType,
+                title: analysis.websiteName,
+                url,
+                domain,
+                score: classification.opportunityScore,
+                status: 'qualified',
+                pipeline_stage: 'qualified',
+                automation_status: 'qualified',
+                campaign_lifecycle: 'Classified',
+                campaign_step: 'ai-review',
+                website_name: analysis.websiteName,
+                domain_rating: analysis.domainRating,
+                monthly_traffic: analysis.monthlyTraffic,
+                import_id: importId,
+                domain_analysis_id: analysisId,
+                discovery_source: 'import',
+                queue_status: 'pending_review',
+                confidence_score: classification.confidence,
+                metadata: {
+                  qualification: {
+                    qualified: false,
+                    reason: qualification.reason,
                   },
-                })
-                .then((r) => {
-                  if (!r.error) opportunitiesCreated++;
-                });
-              await getSupabaseAdmin()
-                .from('backlink_import_rows')
-                .update({ opportunity_id: ignoredId })
-                .eq('id', row.id);
+                  classification: {
+                    id: classification.classificationId,
+                    displayName: classification.classificationLabel,
+                    confidence: classification.confidence,
+                    reason: classification.reason,
+                  },
+                },
+              });
+              await requireWrite(`opportunity_not_qual:${domain}`, notQualInsert);
+              opportunitiesCreated++;
+              await requireWrite(
+                `link_row_not_qual:${domain}`,
+                await getSupabaseAdmin()
+                  .from('backlink_import_rows')
+                  .update({ opportunity_id: ignoredId })
+                  .eq('id', row.id)
+              );
 
               try {
                 const { applyAnalysisToCampaignItem } = await import(
@@ -901,15 +906,22 @@ export async function runAutomationPipeline(
           acc[r.reason] = (acc[r.reason] ?? 0) + 1;
           return acc;
         }, {});
+      const sampleErrors = stageErrors
+        .slice(0, 3)
+        .map((e) => `${e.domain ?? '?'}: ${e.message}`)
+        .join(' | ');
       const msg =
         qualificationReport.length > 0
-          ? `No opportunities qualified (${qualificationReport.length} classified, 0 qualified). Reasons: ${JSON.stringify(rejectedReasons)}`
-          : `No opportunities persisted (${stageErrors.length} row failures)`;
+          ? `No opportunities persisted (${qualificationReport.length} classified). Reasons: ${JSON.stringify(rejectedReasons)}${sampleErrors ? ` · Errors: ${sampleErrors}` : ''}`
+          : `No opportunities persisted (${stageErrors.length} row failures)${sampleErrors ? `: ${sampleErrors}` : ''}`;
       await log('store', msg, {
         level: 'error',
         detail: { stageErrors, qualificationReport, rejectedReasons },
       });
-      await updateImportStatus(importId, 'failed');
+      await updateImportStatus(importId, 'failed', {
+        error_message: msg,
+        opportunities_created: 0,
+      });
       await updateRun(runId, {
         status: 'failed',
         progress: progressFromStages(steps),
@@ -1297,7 +1309,7 @@ export async function runAutomationPipeline(
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Pipeline failed';
     await log('store', `Pipeline failed: ${message}`, { level: 'error' });
-    await updateImportStatus(importId, 'failed');
+    await updateImportStatus(importId, 'failed', { error_message: message });
     await updateRun(runId, {
       status: 'failed',
       error_message: message,

@@ -11,7 +11,8 @@ export function getPgPool(): pg.Pool {
     const env = getEnv();
     pool = new Pool({
       connectionString: env.DATABASE_URL,
-      max: 10,
+      // Import pipeline runs concurrent domain analysis; keep headroom under load.
+      max: Number(process.env.PG_POOL_MAX ?? 25) || 25,
     });
   }
   return pool;
