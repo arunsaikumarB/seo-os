@@ -219,6 +219,8 @@ function buildMockContentPack(params: LiveGenParams): Record<string, unknown> {
       classificationId: params.classificationId,
       classificationLabel: params.classificationLabel,
       reason: params.reason,
+      // Explicit fallback path — generateContentPack refuses silent templates otherwise.
+      allowMockFallback: true,
     }
   ) as unknown as Record<string, unknown>;
 
@@ -350,6 +352,8 @@ function buildMockContentPack(params: LiveGenParams): Record<string, unknown> {
 function allowMockFallback(): boolean {
   if (isGenerationMockEnabled()) return true;
   if (String(process.env.PROVIDER_MODE ?? '').toLowerCase() === 'mvp') return true;
+  // Company Postgres stack often has no LLM keys yet — use unique template packs.
+  if (String(process.env.COMPANY_STACK ?? '').toLowerCase() === 'true') return true;
   return String(process.env.NODE_ENV ?? '').toLowerCase() === 'development';
 }
 
