@@ -43,6 +43,19 @@ describe('submission-form-gate', () => {
     expect(g.reason).toMatch(/No submission form/);
   });
 
+  it('allows approve when unprobed but formUrl is a public submit path', () => {
+    expect(
+      canApproveAfterProbe({
+        linkProbe: {
+          band: 'unprobed',
+          formFound: null,
+          formUrl: 'https://www.usalistingdirectory.com/submit_article.php',
+          probedAt: 'x',
+        },
+      }).ok
+    ).toBe(true);
+  });
+
   it('blocks approve when unprobed, no_form, or paid in metadata', () => {
     expect(canApproveAfterProbe({}).ok).toBe(false);
     expect(

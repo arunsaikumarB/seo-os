@@ -635,8 +635,8 @@ export async function bulkAiReviewAction(
   let fullItems = await listCampaignItems(workspaceId, { includeDeleted: false });
   let byFull = new Map(fullItems.map((i) => [i.id, i]));
 
-  // Approve requires Link Probe. Always force-probe selected rows that are not
-  // already submittable so "Approve Selected" does not stick on Pending forever.
+  // Approve requires Link Probe. Force-probe selected rows that are not submittable yet.
+  // Company / skip-live: never call outbound probe (hangs); URL submit evidence unlocks via canApproveAfterProbe.
   if (action === 'approve' && itemIds.length > 0) {
     const needProbe = itemIds.filter((id) => {
       const full = byFull.get(id);
@@ -647,7 +647,10 @@ export async function bulkAiReviewAction(
           : {};
       return !canApproveAfterProbe(meta).ok;
     });
-    if (needProbe.length > 0) {
+    const companySkip =
+      String(process.env.COMPANY_STACK ?? '').toLowerCase() === 'true' ||
+      String(process.env.ANALYZE_SKIP_LIVE ?? '').toLowerCase() === 'true';
+    if (needProbe.length > 0 && !companySkip) {
       try {
         const { runLinkProbeBatch } = await import('../backlinks/link-probe.service.js');
         await runLinkProbeBatch({

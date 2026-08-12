@@ -25,6 +25,8 @@ import {
   type RichImportRow,
   type TrackingStatus,
   classifyUrlProvisional,
+  syntheticLinkProbeFromSubmitUrl,
+  looksLikePublicSubmitUrl,
 } from '@seo-os/backlink-builder';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { getProjectById } from '../projects/project.service.js';
@@ -786,6 +788,15 @@ export async function runAutomationPipeline(
                   success_probability: 'Estimated',
                   difficulty: 'Estimated',
                 },
+                ...(skipLive && looksLikePublicSubmitUrl(url)
+                  ? {
+                      linkProbe: syntheticLinkProbeFromSubmitUrl(url),
+                      submissionPathConfirmed: true,
+                      directoryPathConfirmed: true,
+                      hasPublicSubmitUrl: true,
+                      analyzedUrl: url,
+                    }
+                  : {}),
               },
             });
             await requireWrite(`opportunity:${domain}`, oppInsert);
@@ -802,10 +813,13 @@ export async function runAutomationPipeline(
                 classificationId: classification.classificationId,
                 deadWebsite,
                 homepageReachable: analysis.homepageReachable ?? null,
+                formConfirmed: skipLive && looksLikePublicSubmitUrl(url) ? true : undefined,
                 duplicateOfId: existingId && existingId !== oppId ? existingId : null,
               });
-              // Defer probes to end of import — per-row probes fight CRAWL concurrency and slow company hosts
-              probeOpportunityIds.push(oppId);
+              // Defer probes to end of import — skip on company/skip-live (no outbound HTTPS)
+              if (!skipLive) {
+                probeOpportunityIds.push(oppId);
+              }
             } catch (e) {
               console.error('[CSM] apply analysis failed', e);
             }
