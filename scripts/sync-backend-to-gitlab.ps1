@@ -47,7 +47,9 @@ $paths = @(
   'packages',
   'workers',
   'scripts\build-api-deps.mjs',
+  'scripts\db-migrate.mjs',
   'scripts\cutover',
+  'supabase\migrations',
   'docker-compose.yml',
   'docs\cutover',
   'package.json',
@@ -81,7 +83,8 @@ p.scripts={
   start:'npm run start --workspace=@seo-os/api',
   typecheck:'npm run typecheck --workspace=@seo-os/api',
   test:'npm run test --workspace=@seo-os/api',
-  lint:'npm run lint --workspace=@seo-os/api'
+  lint:'npm run lint --workspace=@seo-os/api',
+  'db:migrate':'node scripts/db-migrate.mjs'
 };
 fs.writeFileSync('package.json', JSON.stringify(p,null,2)+'\n');
 "@
@@ -97,8 +100,9 @@ Synced from the product monorepo for company / DD3-style deploys.
 
 ``````bash
 cp .env.example .env
-# edit LOCAL_JWT_SECRET + DATABASE_URL + CORS_ORIGIN
+# edit LOCAL_JWT_SECRET + DATABASE_URL + CORS_ORIGIN + PORT
 npm install
+npm run db:migrate   # creates tables on empty Postgres (DD3-style)
 npm run build
 npm run start
 ``````

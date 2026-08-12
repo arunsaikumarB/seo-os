@@ -67,6 +67,22 @@ npm run build
 # -> apps/web/dist
 ```
 
+### Empty database — create tables (DD3-style)
+
+If pgAdmin shows **no tables** under `public`:
+
+```bash
+cd /opt/apps/backlink-agent   # ba-backend root, .env with DATABASE_URL
+git fetch origin && git reset --hard origin/ba-backend
+npm ci
+npm run db:migrate
+# expect: organizations=true local_auth_users=true (~150 public tables)
+pm2 restart <api> --update-env
+curl -s http://127.0.0.1:4002/ready
+```
+
+`db:migrate` reads `DATABASE_URL` from root `.env` and applies `supabase/migrations` (no Supabase CLI).
+
 ### Verify
 
 1. `GET /ready` → database ok, `dataMode=pg`

@@ -53,19 +53,21 @@ docker compose up -d pgadmin
 
 pgAdmin server: Host `host.docker.internal`, Port `54332`, DB `backlink_agent`, User `postgres`, Pass `postgres`.
 
-### 2. Schema dump / restore
+### 2. Schema — prefer `npm run db:migrate` (empty company DB)
 
-From a machine that still has a healthy local Supabase DB (read-only dump):
+DD3-style: create tables from the backend repo (no dump required):
 
-```powershell
-powershell -File scripts/cutover/dump-local-postgres.ps1
-powershell -File scripts/cutover/restore-company-postgres.ps1 -DumpPath .cutover-dumps\<file>.dump
+```bash
+# ba-backend root — DATABASE_URL in .env points at empty backlink_agent DB
+# DB user should be able to CREATE EXTENSION (superuser recommended once)
+npm ci
+npm run db:migrate
 ```
 
-Details: [Phase 1](./no-supabase-phase-1.md).  
-**Do not commit** `.cutover-dumps/*`. Transfer dumps over a secure channel.
+This runs roles/auth stubs + all `supabase/migrations` (~150 public tables including `organizations`, `local_auth_users`).
 
-On a bare company Postgres (not the Docker helper), restore with `pg_restore` into the target DB after creating roles (see `scripts/cutover/prepare-company-roles.sql`).
+**Alternate:** dump/restore from a healthy local Supabase DB — [Phase 1](./no-supabase-phase-1.md).  
+**Do not commit** `.cutover-dumps/*`.
 
 ### 3. API env (DD3 root layout)
 
@@ -106,6 +108,7 @@ VITE_API_URL=https://your-api-origin
 
 ```bash
 npm install
+npm run db:migrate   # required once on empty Postgres
 npm run build
 npm run start
 ```
