@@ -194,6 +194,9 @@ async function probeOpportunity(
       pagesChecked: 0,
       probedAt: new Date().toISOString(),
       listingPricing: 'unknown',
+      submissionType: 'UNKNOWN',
+      submissionTypeConfidence: 0,
+      submissionTypeEvidence: [],
     };
   }
 
@@ -482,6 +485,9 @@ export async function runLinkProbeBatch(input: {
         pagesChecked: 0,
         probedAt: new Date().toISOString(),
         listingPricing: 'unknown',
+        submissionType: 'UNKNOWN',
+        submissionTypeConfidence: 0,
+        submissionTypeEvidence: [],
       };
       await saveProbe(row.id, (row.metadata as Record<string, unknown>) ?? {}, fail);
       await applyProbeSubmissionGate(input.workspaceId, row.id, fail);
