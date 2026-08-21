@@ -274,9 +274,9 @@ export function DirectoryFormIntelligencePage() {
                   <CardHeader className="pb-2">
                     <div className="flex flex-wrap items-center gap-2">
                       <CardTitle className="text-base">{schema.domain}</CardTitle>
-                      <Badge variant="outline">{schema.status}</Badge>
+                      <Badge>{schema.status}</Badge>
                       {schema.formPatternHint ? (
-                        <Badge variant="secondary">{schema.formPatternHint.replace(/_/g, ' ')}</Badge>
+                        <Badge className="bg-muted">{schema.formPatternHint.replace(/_/g, ' ')}</Badge>
                       ) : null}
                       {schema.reviewRequired ? (
                         <Badge className="bg-amber-500/15 text-amber-900 border-amber-500/30">
@@ -344,17 +344,17 @@ export function DirectoryFormIntelligencePage() {
                           <span className="text-sm font-medium">
                             {f.originalLabel || f.canonicalField}
                           </span>
-                          <Badge variant="outline" className="text-[10px]">
+                          <Badge className="text-[10px]">
                             {f.canonicalField}
                           </Badge>
                           {f.required ? (
                             <Badge className="text-[10px] bg-red-500/10 text-red-800">Required</Badge>
                           ) : (
-                            <Badge variant="secondary" className="text-[10px]">
+                            <Badge className="text-[10px] bg-muted">
                               Optional
                             </Badge>
                           )}
-                          <Badge variant="outline" className="text-[10px]">
+                          <Badge className="text-[10px]">
                             {FILL_STATUS_LABEL[f.fillStatus] || f.fillStatus}
                           </Badge>
                           <span className="text-[10px] text-muted-foreground ml-auto">
