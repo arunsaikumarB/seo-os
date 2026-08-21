@@ -238,6 +238,17 @@ export function Widget() {
             <div className="soc-opp">
               <div className="soc-opp-label">Current Package</div>
               <div className="soc-opp-domain">{active.domain}</div>
+              {(active.projectName || active.businessName) && (
+                <p className="soc-meta" style={{ marginTop: 4 }}>
+                  Project: <strong>{active.projectName || '—'}</strong>
+                  {active.businessName ? (
+                    <>
+                      {' '}
+                      · Business: <strong>{active.businessName}</strong>
+                    </>
+                  ) : null}
+                </p>
+              )}
               <p className="soc-meta" style={{ marginTop: 6 }}>
                 <strong>{fieldCount(active)} fields</strong> · Generated{' '}
                 <strong>{formatGenerated(active.generatedAt)}</strong>

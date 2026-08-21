@@ -1,8 +1,12 @@
 /**
  * SEO expert keyword / title-description bank (from seo-os-keywords-list.xlsx).
- * Used to seed unique titles, short descriptions, and keyword strings per opportunity.
+ *
+ * IMPORTANT (P0 isolation): This bank is ChefGaa-branded.
+ * It may ONLY seed titles/keywords when the CURRENT project's brand matches the bank brand.
+ * Desi Dhamaka (and every other project) must never receive ChefGaa bank copy.
  */
 import { SEO_KEYWORD_BANK_DATA } from './data/seo-keyword-bank.js';
+import { brandsMatch } from './project-content-isolation.js';
 
 export type SeoTitleBlock = {
   section: string;
@@ -27,6 +31,13 @@ export const SEO_KEYWORD_BANK = SEO_KEYWORD_BANK_DATA as unknown as SeoKeywordBa
 /** Directory / listing field hard cap used by many phpLD forms. */
 export const FURTHER_COMPANY_INFO_MAX = 1500;
 
+export type BankPickOpts = {
+  /** Current project brand — required to unlock the ChefGaa bank. */
+  brandName?: string | null;
+  maxKeywords?: number;
+  maxChars?: number;
+};
+
 function hashSeed(s: string): number {
   let h = 0;
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
@@ -39,7 +50,19 @@ export function pickBankIndex(seed: string, length: number): number {
   return hashSeed(seed || 'default') % length;
 }
 
-export function pickTitleDescriptionBlock(seed: string): SeoTitleBlock | null {
+/** True only when the project brand matches the bank's brand (ChefGaa). */
+export function isSeoKeywordBankAllowedForBrand(brandName?: string | null): boolean {
+  return brandsMatch(SEO_KEYWORD_BANK.brand, brandName);
+}
+
+export function pickTitleDescriptionBlock(
+  seed: string,
+  opts?: BankPickOpts | string
+): SeoTitleBlock | null {
+  const brandName =
+    typeof opts === 'string' ? opts : opts?.brandName ?? null;
+  // Legacy callers that omit brandName must NOT receive ChefGaa seeds.
+  if (!isSeoKeywordBankAllowedForBrand(brandName)) return null;
   const blocks = SEO_KEYWORD_BANK.titleDescriptionBlocks ?? [];
   if (!blocks.length) return null;
   return blocks[pickBankIndex(seed, blocks.length)] ?? null;
@@ -48,11 +71,13 @@ export function pickTitleDescriptionBlock(seed: string): SeoTitleBlock | null {
 /**
  * Build a comma-separated keyword string for form "Keywords" fields.
  * Mixes KW1 (long-tail) + KW2 (head terms) uniquely per seed.
+ * Returns '' unless brand matches the bank brand.
  */
 export function pickKeywordsForOpportunity(
   seed: string,
-  opts?: { maxKeywords?: number; maxChars?: number }
+  opts?: BankPickOpts
 ): string {
+  if (!isSeoKeywordBankAllowedForBrand(opts?.brandName)) return '';
   const maxKeywords = opts?.maxKeywords ?? 8;
   const maxChars = opts?.maxChars ?? 255;
   const kw1 = SEO_KEYWORD_BANK.kw1 ?? [];
@@ -73,7 +98,6 @@ export function pickKeywordsForOpportunity(
     picked.push(k);
   };
 
-  // Prefer 2–3 KW2 head terms + rest long-tail KW1
   for (let n = 0; n < 3 && kw2.length; n++) {
     push(kw2[(i2 + n) % kw2.length]!);
   }
@@ -90,8 +114,9 @@ export function pickKeywordsForOpportunity(
   return out;
 }
 
-/** All bank keywords (for LLM prompt context). */
-export function listBankKeywordSamples(limit = 40): string[] {
+/** All bank keywords (for LLM prompt context) — empty unless brand matches. */
+export function listBankKeywordSamples(limit = 40, brandName?: string | null): string[] {
+  if (!isSeoKeywordBankAllowedForBrand(brandName)) return [];
   const merged = [...(SEO_KEYWORD_BANK.kw2 ?? []), ...(SEO_KEYWORD_BANK.kw1 ?? [])];
   const seen = new Set<string>();
   const out: string[] = [];

@@ -18,11 +18,50 @@ import {
   pickBankIndex,
   textSimilarity,
   CONTENT_SIMILARITY_THRESHOLD,
+  findForeignBrandContamination,
+  resolveSubmissionPlatformType,
+  isArticleLikePlatform,
   type BrandContext,
   type OpportunityAiContext,
 } from '@seo-os/backlink-builder';
 import { completeLlmWithFailover } from '../providers/llm-failover.service.js';
 import { logger } from '../../lib/logger.js';
+
+function assertPackBrandIsolation(
+  pack: Record<string, unknown>,
+  brandName: string,
+  workspaceId?: string
+): void {
+  const blob = [
+    pack.seoTitle,
+    pack.h1,
+    pack.shortDescription,
+    pack.longDescription,
+    pack.metaDescription,
+    pack.furtherCompanyInfo,
+    pack.body,
+    pack.articleBody,
+    pack.keywords,
+    pack.businessName,
+    pack.excerpt,
+    pack.authorBio,
+  ]
+    .map((v) => String(v ?? ''))
+    .join('\n');
+  const foreign = findForeignBrandContamination(blob, brandName);
+  if (foreign.length) {
+    logger.error(
+      { workspaceId, brandName, foreign: foreign.slice(0, 8) },
+      'Project isolation: foreign brand detected in generated pack'
+    );
+    throw new Error(
+      `Project isolation violation: foreign brand content (${foreign.slice(0, 5).join(', ')}) does not belong to ${brandName}`
+    );
+  }
+  // Force business name to the current brand — never keep a foreign LLM hallucination
+  pack.businessName = brandName;
+  pack.companyName = pack.companyName || brandName;
+}
 
 const MAX_PARSE_ATTEMPTS = 2;
 
@@ -62,29 +101,50 @@ function buildPrompt(params: {
   const brandUrl =
     params.brand.projectUrl ||
     (params.brand.projectDomain ? `https://${params.brand.projectDomain}` : '');
+  const brandName = String(params.brand.brandName ?? '').trim();
   const seed = `${params.opp.domain ?? ''}:${params.websiteUrl ?? ''}:${params.opp.title ?? ''}:${params.storageType}`;
-  const bankBlock = pickTitleDescriptionBlock(seed);
-  const bankKeywords = pickKeywordsForOpportunity(seed, { maxKeywords: 8, maxChars: 220 });
-  const keywordSamples = listBankKeywordSamples(24).join('; ');
+  const bankBlock = pickTitleDescriptionBlock(seed, { brandName });
+  const bankKeywords = pickKeywordsForOpportunity(seed, {
+    brandName,
+    maxKeywords: 8,
+    maxChars: 220,
+  });
+  const keywordSamples = listBankKeywordSamples(24, brandName).join('; ');
+  const platformType = resolveSubmissionPlatformType({
+    storageType: params.storageType,
+    classificationId: params.classificationLabel,
+    classificationLabel: params.classificationLabel,
+    domain: params.opp.domain,
+    url: params.websiteUrl,
+  });
   const fields =
     params.requiredFields?.filter(Boolean).slice(0, 20).join(', ') ||
     'title, description, url, keywords, email';
-  const bankSeedBlock = `
-SEO EXPERT BANK (must use — from approved KW1/KW2 + title-description sheet):
-- Preferred title seed: ${bankBlock?.title || '(pick a unique ChefGaa restaurant POS title)'}
-- Preferred H1 seed: ${bankBlock?.h1 || '(match title)'}
-- Preferred short description seed: ${bankBlock?.description || '(write a unique ≤200 char blurb)'}
+  const bankSeedBlock = bankBlock
+    ? `
+SEO EXPERT BANK (approved for THIS brand only — ${brandName}):
+- Preferred title seed: ${bankBlock.title}
+- Preferred H1 seed: ${bankBlock.h1 || '(match title)'}
+- Preferred short description seed: ${bankBlock.description}
 - Keywords for THIS listing (use exactly, comma-separated): ${bankKeywords || keywordSamples}
 - Other approved keyword ideas (do not dump all — stay on-theme): ${keywordSamples}
+`
+    : `
+PROJECT-NATIVE COPY (no foreign SEO bank — write only from the PROJECT / BRAND facts below):
+- Preferred title: invent a unique ≤60 char title that includes ${brandName} and fits ${site}
+- Preferred short description: unique ≤200 char blurb about ${brandName} for this listing only
+- Keywords: derive from industry / features / brand topics — NEVER use another brand's POS/software bank
 `;
   const formBlock = `
 TARGET FORM (study and write fields for THIS site only — not a generic blurb):
 - Submit URL: ${params.websiteUrl || params.opp.domain || 'unknown'}
 - Site name: ${site}
+- Platform type: ${platformType}${isArticleLikePlatform(platformType) ? ' (article / Web 2.0 — emphasize articleTitle + articleBody)' : ''}
 - Detected / required form fields: ${fields}
 - Form / site hints: ${params.formHints || params.reason || 'n/a'}
-- Match tone to a ${params.classificationLabel ?? params.storageType} submission (directory vs guest post vs profile vs forum).
+- Match tone to a ${params.classificationLabel ?? params.storageType} submission (directory vs guest post vs profile vs forum vs Web 2.0 article).
 - shortDescription / longDescription / furtherCompanyInfo must map cleanly onto typical Title / Description / Further Info fields on this form.
+- HARD RULE: never mention ChefGaa, Desi Dhamaka, or any other brand except ${brandName}.
 `;
   const avoidBlock =
     params.avoidTexts && params.avoidTexts.length > 0
@@ -135,20 +195,18 @@ This package is for THIS site only — never reuse copy from another listing.
 
 Return ONLY a JSON object with:
 {
-  "seoTitle": string (45-60 chars, must include brand or product naturally — prefer the bank title seed, lightly adapted),
+  "seoTitle": string (45-60 chars, must include ${params.brand.brandName} naturally — never another brand),
   "metaDescription": string (120-155 chars, HARD MAX 160),
   "h1": string,
   "h2": string[3-5],
-  "body": string (markdown ARTICLE for article/guest_post forms: 350-900 words; for directory/forum/profile write a shorter useful article 120-250 words),
-  "shortDescription": string (ONE sentence, 180-195 chars, HARD MAX 200 — never longer; prefer bank description seed, rewritten uniquely),
+  "body": string (markdown ARTICLE for article/guest_post/Web 2.0 forms: 350-900 words; for directory/forum/profile write a shorter useful article 120-250 words),
+  "shortDescription": string (ONE sentence, 180-195 chars, HARD MAX 200 — never longer; unique to ${params.brand.brandName}),
   "longDescription": string (distinct from shortDescription, 180-195 chars, HARD MAX 200 — never longer),
   "furtherCompanyInfo": string (Further Company / Product / Service Information — ${Math.floor(FURTHER_COMPANY_INFO_MAX * 0.75)}-${FURTHER_COMPANY_INFO_MAX} characters, HARD MAX ${FURTHER_COMPANY_INFO_MAX}. Detailed product/service overview for directory forms. Must be longer and richer than longDescription.),
-  "keywords": string (comma-separated; use the Keywords for THIS listing from the bank — do not invent unrelated terms),
+  "keywords": string (comma-separated; on-brand for ${params.brand.brandName} only — do not invent unrelated terms or other brands),
   "businessDescription": string (≤200 chars, same rules),
-  "businessName": string (exact brand name),
-  "faq": [{"question": string, "answer": string}],
-  "suggestedLinks": [{"anchor": string, "url": string}],
-  "internalLinks": [{"anchor": string, "url": string}],
+  "businessName": string (exact brand name: ${params.brand.brandName}),
+  "articleTitle": string (for WEB_2_0 / ARTICLE platforms — same brand rules),
   "authorBio": string,
   "excerpt": string (≤200 chars)
 }
@@ -238,7 +296,7 @@ function buildMockContentPack(params: LiveGenParams): Record<string, unknown> {
   const attempt = params.uniquenessAttempt ?? 1;
   const avoid = params.avoidTexts ?? [];
 
-  let bankBlock = pickTitleDescriptionBlock(`${domain}:${submitUrl}`);
+  let bankBlock = pickTitleDescriptionBlock(`${domain}:${submitUrl}`, { brandName });
   let bankKeywords = '';
   let seoTitle = '';
   let shortDescription = '';
@@ -249,8 +307,12 @@ function buildMockContentPack(params: LiveGenParams): Record<string, unknown> {
 
   for (let offset = 0; offset < 28; offset++) {
     const seed = `${params.opportunityId ?? ''}:${domain}:${submitUrl}:${typeLabel}:a${attempt}:o${offset}`;
-    bankBlock = pickTitleDescriptionBlock(seed);
-    bankKeywords = pickKeywordsForOpportunity(seed, { maxKeywords: 8, maxChars: 220 });
+    bankBlock = pickTitleDescriptionBlock(seed, { brandName });
+    bankKeywords = pickKeywordsForOpportunity(seed, {
+      brandName,
+      maxKeywords: 8,
+      maxChars: 220,
+    });
 
     const feature =
       params.featureEmphasis ||
@@ -346,6 +408,14 @@ function buildMockContentPack(params: LiveGenParams): Record<string, unknown> {
     section: bankBlock?.section ?? null,
   };
   pack.quality = scoreLivePack(pack, brandName);
+  pack.projectId = params.workspaceId;
+  pack.platformType = resolveSubmissionPlatformType({
+    storageType: params.storageType,
+    classificationLabel: params.classificationLabel,
+    domain: params.opp.domain,
+    url: params.websiteUrl,
+  });
+  assertPackBrandIsolation(pack, brandName, params.workspaceId);
   return pack;
 }
 
@@ -420,8 +490,8 @@ export async function generateLiveContentPack(
       const longFromLlm = String(llm.longDescription ?? '').trim();
       const shortFromLlm = String(llm.shortDescription ?? '').trim();
       const seed = `${params.opp.domain ?? ''}:${params.opp.title ?? ''}:${params.storageType}`;
-      const bankBlock = pickTitleDescriptionBlock(seed);
-      const bankKeywords = pickKeywordsForOpportunity(seed);
+      const bankBlock = pickTitleDescriptionBlock(seed, { brandName });
+      const bankKeywords = pickKeywordsForOpportunity(seed, { brandName });
       const furtherRaw = String(
         llm.furtherCompanyInfo ?? llm.businessDescription ?? body ?? ''
       ).trim();
@@ -496,6 +566,14 @@ export async function generateLiveContentPack(
         );
       }
 
+      pack.projectId = params.workspaceId;
+      pack.platformType = resolveSubmissionPlatformType({
+        storageType: params.storageType,
+        classificationLabel: params.classificationLabel,
+        domain: params.opp.domain,
+        url: params.websiteUrl,
+      });
+      assertPackBrandIsolation(pack, brandName, params.workspaceId);
       pack.quality = scoreLivePack(pack, brandName);
       return pack;
     } catch (err) {

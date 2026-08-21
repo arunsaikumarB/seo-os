@@ -9,6 +9,9 @@ export type ActivePackage = {
   opportunityId: string;
   domain: string;
   projectId: string;
+  /** Display name for isolation UI (e.g. Desi Dhamaka) */
+  projectName?: string;
+  businessName?: string;
   generatedAt: string;
   entryUrl?: string;
   fields: ActivePackageField[];

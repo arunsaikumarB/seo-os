@@ -30,16 +30,22 @@ function emit(): void {
 }
 
 function applyLocal(pkg: ActivePackage | null, stage: string): void {
+  // Full object replace — never spread previous active package
   active = pkg
     ? {
         opportunityId: String(pkg.opportunityId),
         domain: String(pkg.domain),
         projectId: String(pkg.projectId),
+        projectName: pkg.projectName ? String(pkg.projectName) : undefined,
+        businessName: pkg.businessName ? String(pkg.businessName) : undefined,
         generatedAt: String(pkg.generatedAt || new Date().toISOString()),
         entryUrl: pkg.entryUrl,
         fields: (pkg.fields ?? [])
-          .filter((f) => f && String(f.key ?? '').trim())
-          .map((f) => ({ key: String(f.key).trim(), value: String(f.value ?? '') })),
+          .map((f) => ({
+            key: String(f.key ?? '').trim(),
+            value: String(f.value ?? ''),
+          }))
+          .filter((f) => f.key),
       }
     : null;
 
@@ -47,6 +53,8 @@ function applyLocal(pkg: ActivePackage | null, stage: string): void {
     companionLog(stage, {
       opportunityId: active.opportunityId,
       domain: active.domain,
+      projectId: active.projectId,
+      businessName: active.businessName,
       fieldCount: active.fields.length,
       generatedAt: active.generatedAt,
     });

@@ -26,6 +26,8 @@ import {
   fitFurtherCompanyInfo,
   pickKeywordsForOpportunity,
   pickTitleDescriptionBlock,
+  validateProjectContentIsolation,
+  findForeignBrandContamination,
   formUnavailableMessage,
   htmlHasFormElement,
   looksLikeSpaShell,
@@ -575,20 +577,40 @@ async function upsertRecipeOnProfile(
 }
 
 async function loadContentForOpportunity(workspaceId: string, opportunityId: string) {
-  const { data: pack } = await admin()
+  // Hard project scope — never load a pack by opportunity_id alone.
+  const { data: packRow } = await admin()
     .from('content_packs')
-    .select('pack')
+    .select('pack, workspace_id, opportunity_id')
     .eq('opportunity_id', opportunityId)
+    .eq('workspace_id', workspaceId)
     .order('version', { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  const p = (pack?.pack as Record<string, unknown> | null) ?? {};
+  if (packRow && String(packRow.workspace_id) !== String(workspaceId)) {
+    throw new AppError(
+      409,
+      'VALIDATION_ERROR',
+      'Package belongs to another project — refusing to load'
+    );
+  }
+
+  const { data: oppRow } = await admin()
+    .from('opportunities')
+    .select('id, workspace_id')
+    .eq('id', opportunityId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle();
+  if (!oppRow) {
+    throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Opportunity not found in this project');
+  }
+
+  const p = (packRow?.pack as Record<string, unknown> | null) ?? {};
   const brand = await getBrandContextForBee(workspaceId);
   // Phase 15 — campaign reciprocal settings live on brand_profile (not Generation)
   const { data: wsRow } = await admin()
     .from('workspaces')
-    .select('brand_profile')
+    .select('brand_profile, name, company_name')
     .eq('id', workspaceId)
     .maybeSingle();
   const brandProfile =
@@ -606,30 +628,41 @@ async function loadContentForOpportunity(workspaceId: string, opportunityId: str
     .replace(/\/+$/, '')
     .trim();
 
+  const brandName = String(
+    brand.brandName || wsRow?.company_name || wsRow?.name || ''
+  ).trim();
+  if (!brandName) {
+    throw new AppError(
+      400,
+      'VALIDATION_ERROR',
+      'Project has no business name — cannot build package'
+    );
+  }
+
   const longDescRaw = String(p.longDescription ?? p.businessDescription ?? '').trim();
   const meta = String(p.metaDescription ?? '').trim();
   const shortRaw = String(p.shortDescription ?? p.excerpt ?? meta ?? '').trim();
-  // Brand fallbacks so Needs a person packages never ship empty paste cards
+  // Brand fallbacks from THIS project only — never ChefGaa / foreign SEO bank
   const brandFallbackLong =
     String(brand.tagline ?? '').trim() ||
     (brand.industry
-      ? `${brand.brandName} provides ${brand.industry} solutions.`
-      : `${brand.brandName} — visit https://${projectDomain || 'example.com'}.`);
+      ? `${brandName} provides ${brand.industry} solutions.`
+      : `${brandName}${projectDomain ? ` — visit https://${projectDomain}.` : '.'}`);
   const longDesc = longDescRaw || brandFallbackLong;
   const shortDesc =
     shortRaw ||
     String(brand.tagline ?? '').trim() ||
     longDesc.slice(0, 160);
   const seed = `${opportunityId}:${String(p.seoTitle ?? '')}:${workspaceId}`;
-  const bankBlock = pickTitleDescriptionBlock(seed);
-  const bankKeywords = pickKeywordsForOpportunity(seed);
+  const bankBlock = pickTitleDescriptionBlock(seed, { brandName });
+  const bankKeywords = pickKeywordsForOpportunity(seed, { brandName });
   const deduped = dedupeContentFields({
     title: String(
       p.seoTitle ??
         p.headline ??
         bankBlock?.title ??
         p.businessName ??
-        brand.brandName ??
+        brandName ??
         projectDomain ??
         ''
     ),
@@ -637,9 +670,8 @@ async function loadContentForOpportunity(workspaceId: string, opportunityId: str
     longDescription: longDesc,
     metaDescription: meta || shortDesc,
   });
-  const businessName = String(
-    p.businessName ?? brand.brandName ?? projectDomain ?? ''
-  );
+  // Always prefer this project's business name over any pack field from a prior leak
+  const businessName = brandName;
   const title = deduped.title || businessName || projectDomain || 'Listing';
   const images = Array.isArray(p.suggestedImages) ? p.suggestedImages : [];
   const imageFileName =
@@ -657,6 +689,54 @@ async function loadContentForOpportunity(workspaceId: string, opportunityId: str
   ).value;
   const keywords = String(p.keywords ?? '').trim() || bankKeywords;
 
+  const isolation = validateProjectContentIsolation({
+    currentProjectId: workspaceId,
+    packageProjectId: String((p as { projectId?: string }).projectId ?? workspaceId),
+    opportunityProjectId: workspaceId,
+    businessName,
+    expectedBusinessName: brandName,
+    title,
+    description: `${shortDesc}\n${longDesc}\n${meta}`,
+    articleBody,
+    keywords,
+  });
+  if (!isolation.ok) {
+    // Strip contaminated title/keywords rather than serving ChefGaa into Desi Dhamaka
+    if (isolation.foreignMarkers.length) {
+      const safeTitle = `${brandName} · Listing`;
+      const safeKeywords = (brand.industry ? `${brand.industry}, ${brandName}` : brandName).slice(
+        0,
+        220
+      );
+      return {
+        title: safeTitle,
+        shortDescription: fitDescriptionToCap(shortDesc || brandFallbackLong).value,
+        longDescription: fitDescriptionToCap(longDesc || brandFallbackLong).value,
+        metaDescription: meta || shortDesc || brandFallbackLong.slice(0, 160),
+        furtherCompanyInfo: fitFurtherCompanyInfo(brandFallbackLong).value,
+        articleBody: findForeignBrandContamination(articleBody, brandName).length
+          ? furtherCompanyInfo || brandFallbackLong
+          : articleBody || furtherCompanyInfo || brandFallbackLong,
+        keywords: safeKeywords,
+        businessName,
+        companyName: String(brand.companyName || brandName),
+        contactName: String(brand.contactName ?? p.contactName ?? p.authorName ?? ''),
+        url: listingUrl,
+        email: String(brand.contactEmail || p.email || ''),
+        phone: String(brand.contactPhone || p.phone || ''),
+        address: String(p.address ?? ''),
+        reciprocalUrl: reciprocalUrl || undefined,
+        anchorText: reciprocalAnchor || undefined,
+        imageFileName,
+        contentTooSimilar: Boolean(p.contentTooSimilar),
+        projectId: workspaceId,
+        projectName: String(wsRow?.name || brandName),
+        isolationRepaired: true,
+        isolationErrors: isolation.errors,
+      };
+    }
+  }
+
   return {
     title,
     shortDescription: fitDescriptionToCap(deduped.shortDescription || shortDesc).value,
@@ -666,9 +746,7 @@ async function loadContentForOpportunity(workspaceId: string, opportunityId: str
     articleBody: articleBody || furtherCompanyInfo,
     keywords,
     businessName,
-    companyName: String(
-      brand.companyName || p.businessName || brand.brandName || businessName || ''
-    ),
+    companyName: String(brand.companyName || brandName),
     contactName: String(brand.contactName ?? p.contactName ?? p.authorName ?? ''),
     url: listingUrl,
     email: String(brand.contactEmail || p.email || ''),
@@ -678,6 +756,8 @@ async function loadContentForOpportunity(workspaceId: string, opportunityId: str
     anchorText: reciprocalAnchor || undefined,
     imageFileName,
     contentTooSimilar: Boolean(p.contentTooSimilar),
+    projectId: workspaceId,
+    projectName: String(wsRow?.name || brandName),
   };
 }
 

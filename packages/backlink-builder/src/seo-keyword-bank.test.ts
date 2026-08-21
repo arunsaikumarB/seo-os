@@ -16,16 +16,21 @@ describe('seo-keyword-bank', () => {
   });
 
   it('picks stable unique keywords per opportunity seed', () => {
-    const a = pickKeywordsForOpportunity('site-a.example');
-    const b = pickKeywordsForOpportunity('site-b.example');
+    const a = pickKeywordsForOpportunity('site-a.example', { brandName: 'ChefGaa' });
+    const b = pickKeywordsForOpportunity('site-b.example', { brandName: 'ChefGaa' });
     expect(a.length).toBeGreaterThan(10);
     expect(a).toMatch(/,/);
     expect(a === b).toBe(false);
   });
 
   it('picks a title/description block', () => {
-    const block = pickTitleDescriptionBlock('chefgaa-directory-1');
+    const block = pickTitleDescriptionBlock('chefgaa-directory-1', { brandName: 'ChefGaa' });
     expect(block?.title || block?.h1).toBeTruthy();
+  });
+
+  it('refuses bank seeds for other brands', () => {
+    expect(pickTitleDescriptionBlock('x', { brandName: 'Desi Dhamaka' })).toBeNull();
+    expect(pickKeywordsForOpportunity('x', { brandName: 'Desi Dhamaka' })).toBe('');
   });
 
   it('caps further company info at 1500', () => {

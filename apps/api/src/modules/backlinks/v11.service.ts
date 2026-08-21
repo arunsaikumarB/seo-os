@@ -517,6 +517,34 @@ export async function createContentPack(
   pack.featureEmphasis = featureEmphasis;
   pack.openingAngle = openingAngle;
   pack.maxSiblingSimilarity = closest;
+  pack.projectId = workspaceId;
+  pack.businessName = brand.brandName;
+  pack.brandName = brand.brandName;
+  pack.platformType = (await import('@seo-os/backlink-builder')).resolveSubmissionPlatformType({
+    storageType,
+    classificationId: plan.detectedType,
+    classificationLabel: plan.detectedTypeLabel,
+    domain: opp.domain as string | null,
+    url: String(opp.url ?? ''),
+  });
+  const { findForeignBrandContamination: findForeign } = await import('@seo-os/backlink-builder');
+  const packBlob = [
+    pack.seoTitle,
+    pack.shortDescription,
+    pack.longDescription,
+    pack.metaDescription,
+    pack.body,
+    pack.articleBody,
+    pack.keywords,
+  ]
+    .map((v) => String(v ?? ''))
+    .join('\n');
+  const foreignHits = findForeign(packBlob, brand.brandName);
+  if (foreignHits.length) {
+    throw new Error(
+      `Project isolation: refusing to save pack with foreign brand markers (${foreignHits.slice(0, 5).join(', ')}) for ${brand.brandName}`
+    );
+  }
   if (contentTooSimilar) {
     pack.contentTooSimilar = true;
     pack.contentFlags = [

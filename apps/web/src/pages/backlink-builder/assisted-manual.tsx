@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -171,6 +171,8 @@ type ActivePackagePayload = {
   opportunityId: string;
   domain: string;
   projectId: string;
+  projectName?: string;
+  businessName?: string;
   generatedAt: string;
   entryUrl?: string;
   fields: Array<{ key: string; value: string }>;
@@ -237,6 +239,12 @@ export function AssistedManualPage() {
     setFieldEdits((prev) => ({ ...prev, [fieldKey(packageId, selector)]: value }));
   };
 
+  // Project switch — wipe paste edits so Chefgaa values never bleed into Desi Dhamaka
+  useEffect(() => {
+    setFieldEdits({});
+    setOpenId(null);
+  }, [projectId]);
+
   /** Phase 2.3.2 — push package, wait for Companion SW ack, then succeed. */
   const activatePackageIntoCompanion = async (
     pkg: AssistedPackage,
@@ -276,14 +284,33 @@ export function AssistedManualPage() {
         return false;
       }
 
+      const bizField = fields.find(
+        (f) => f.key === 'businessName' || f.key === 'business_name'
+      );
       const payload: ActivePackagePayload = {
         opportunityId,
         domain: pkg.domain,
         projectId,
+        projectName: String(
+          (pkg as { projectName?: string }).projectName ||
+            bizField?.value ||
+            ''
+        ).trim() || undefined,
+        businessName: bizField?.value?.trim() || undefined,
         generatedAt: pkg.preparedAt || new Date().toISOString(),
         entryUrl: pkg.entryUrl,
         fields,
       };
+
+      // Refuse activation if package fields contain foreign brand markers vs businessName
+      const blob = fields.map((f) => f.value).join('\n');
+      const biz = payload.businessName || '';
+      if (biz && /chefgaa/i.test(blob) && !/chefgaa/i.test(biz)) {
+        if (!opts?.silent) {
+          toast.error('Project mismatch — package was not loaded (foreign brand content)');
+        }
+        return false;
+      }
 
       const accessToken = (await getAccessToken()) || '';
       const apiBase = getApiUrl();
@@ -677,6 +704,10 @@ export function AssistedManualPage() {
             Free worklist only — an active free option must exist. Pages that say free is
             disabled, require a premium token, or only show $-priced plans are parked as Paid.
             Sites with both free and paid still count as Free — pick Free on the site.
+          </p>
+          <p className="text-xs text-muted-foreground mt-2 font-mono">
+            Content source: this project only ({projectId.slice(0, 8)}…) — packages from other
+            projects are refused.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

@@ -25,7 +25,7 @@ export async function getBrandContextForBee(workspaceId: string): Promise<BrandC
   const tagline = profile.tagline ? String(profile.tagline) : undefined;
 
   return {
-    brandName: (ws?.company_name as string) || (ws?.name as string) || 'Our Brand',
+    brandName: String((ws?.company_name as string) || (ws?.name as string) || '').trim(),
     projectDomain: (ws?.domain as string | undefined) ?? undefined,
     projectUrl: (ws?.url as string | undefined) ?? undefined,
     industry: (ws?.industry as string | undefined) ?? undefined,
