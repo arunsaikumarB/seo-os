@@ -47,6 +47,9 @@ export const FIELD_ALIASES: Record<FillableRole, string[]> = {
     'entry title',
     'submission title',
     'article title',
+    'story title',
+    'story name',
+    'link title',
     'job title',
     'position title',
   ],
@@ -70,6 +73,9 @@ export const FIELD_ALIASES: Record<FillableRole, string[]> = {
     'weburl',
     'link',
     'your website',
+    'story url',
+    'link url',
+    'destination url',
   ],
   email: [
     'email',
@@ -129,6 +135,8 @@ export const FIELD_ALIASES: Record<FillableRole, string[]> = {
     'tell us about',
     'long_desc',
     'longdesc',
+    'story description',
+    'news description',
   ],
   meta_description: [
     'meta description',
@@ -175,6 +183,8 @@ export const FIELD_ALIASES: Record<FillableRole, string[]> = {
     'tag',
     'key words',
     'meta_keywords',
+    'story tags',
+    'link tags',
   ],
   address: [
     'address',

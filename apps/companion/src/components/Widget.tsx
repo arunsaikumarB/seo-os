@@ -17,6 +17,7 @@ import {
   getConnectionState,
   onActivePackageChange,
 } from '../core/runtime/memory';
+import { getLearningAuth } from '../core/learning/api';
 import {
   disableInspector,
   enableInspector,
@@ -130,6 +131,30 @@ export function Widget() {
   const onFill = () => {
     const pkg = getActivePackage();
     if (!pkg || busy) return;
+    const learning = getLearningAuth();
+    if (learning?.projectId && pkg.projectId && learning.projectId !== pkg.projectId) {
+      companionLog(
+        'package_validation',
+        {
+          error: 'Package belongs to another project.',
+          packageProjectId: pkg.projectId,
+          activeProjectId: learning.projectId,
+        },
+        'error'
+      );
+      setSummary(null);
+      window.alert('Package belongs to another project.');
+      return;
+    }
+    const targetUrl =
+      pkg.fields.find((f) => f.key === 'url' || f.key === 'website')?.value ?? '';
+    companionLog('package_validation', {
+      project: pkg.projectName || pkg.businessName || pkg.projectId,
+      opportunity: pkg.opportunityId,
+      domain: pkg.domain,
+      submissionType: pkg.submissionType ?? null,
+      targetUrl,
+    });
     setBusy(true);
     try {
       const flat = activePackageToFillFields(pkg);
@@ -247,6 +272,11 @@ export function Widget() {
                       · Business: <strong>{active.businessName}</strong>
                     </>
                   ) : null}
+                </p>
+              )}
+              {active.submissionType && (
+                <p className="soc-meta" style={{ marginTop: 4 }}>
+                  Type: <strong>{active.submissionType.replace(/_/g, ' ')}</strong>
                 </p>
               )}
               <p className="soc-meta" style={{ marginTop: 6 }}>

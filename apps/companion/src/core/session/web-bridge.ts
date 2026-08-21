@@ -68,6 +68,7 @@ function normalizeActivePackage(raw: unknown): ActivePackage | null {
     projectId,
     projectName: o.projectName ? String(o.projectName) : undefined,
     businessName: o.businessName ? String(o.businessName) : undefined,
+    submissionType: o.submissionType ? String(o.submissionType) : undefined,
     generatedAt: String(o.generatedAt ?? new Date().toISOString()),
     entryUrl: o.entryUrl ? String(o.entryUrl) : undefined,
     // Full replace — never merge with previous package fields

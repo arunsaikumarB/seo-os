@@ -9,7 +9,7 @@ import { listCircuits } from '../lib/circuit-breaker.js';
 import { getProviderManager } from '@seo-os/providers';
 
 /** Bump this whenever company Import behavior changes — /ready must show the new value after rebuild. */
-export const API_RELEASE = '1.3.0-project-isolation';
+export const API_RELEASE = '1.4.0-submission-types';
 
 export function healthHandler(_req: Request, res: Response): void {
   res.status(200).json({ status: 'ok', service: 'backlink-agent-api', version: API_RELEASE });

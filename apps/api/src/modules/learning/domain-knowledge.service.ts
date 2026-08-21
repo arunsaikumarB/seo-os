@@ -12,6 +12,10 @@ const FILLABLE = new Set([
   'email',
   'phone',
   'description',
+  'meta_description',
+  'further_info',
+  'article',
+  'keywords',
   'address',
   'city',
   'state',
@@ -30,12 +34,20 @@ const MAP_ALIASES: Record<string, string> = {
   business_name: 'business_name',
   companyname: 'business_name',
   title: 'title',
+  storytitle: 'title',
   website: 'website',
   url: 'website',
   email: 'email',
   phone: 'phone',
   description: 'description',
   longdesc: 'description',
+  metadescription: 'meta_description',
+  meta_description: 'meta_description',
+  further_info: 'further_info',
+  article: 'article',
+  keywords: 'keywords',
+  tags: 'keywords',
+  tag: 'keywords',
   address: 'address',
   city: 'city',
   state: 'state',
@@ -67,6 +79,8 @@ export type DomainKnowledge = {
   lastVerified: string | null;
   updatedAt: string | null;
   fieldCount: number;
+  /** Learned submission type for this domain (e.g. SOCIAL_BOOKMARK). */
+  submissionType?: string | null;
 };
 
 export type DomainKnowledgeSummary = {
@@ -107,6 +121,24 @@ export function normalizeMappedTo(raw: string): string {
   return mapped;
 }
 
+function extractSubmissionType(categories: unknown[]): string | null {
+  for (const c of categories) {
+    if (c && typeof c === 'object' && (c as { kind?: string }).kind === 'submissionType') {
+      const v = String((c as { value?: string }).value ?? '').trim();
+      return v || null;
+    }
+  }
+  return null;
+}
+
+function withSubmissionType(categories: unknown[], submissionType: string | null): unknown[] {
+  const rest = categories.filter(
+    (c) => !(c && typeof c === 'object' && (c as { kind?: string }).kind === 'submissionType')
+  );
+  if (!submissionType) return rest;
+  return [{ kind: 'submissionType', value: submissionType }, ...rest];
+}
+
 function rowToKnowledge(row: {
   domain: string;
   field_mappings: unknown;
@@ -120,16 +152,18 @@ function rowToKnowledge(row: {
   const fieldMappings = Array.isArray(row.field_mappings)
     ? (row.field_mappings as FieldMappingRow[])
     : [];
+  const categories = Array.isArray(row.category_mapping) ? row.category_mapping : [];
   return {
     domain: row.domain,
     fieldMappings,
-    categories: Array.isArray(row.category_mapping) ? row.category_mapping : [],
+    categories,
     wizardSteps: Array.isArray(row.wizard_steps) ? row.wizard_steps : [],
     verified: Boolean(row.verified),
     successCount: Number(row.success_count ?? 0),
     lastVerified: row.last_verified_at,
     updatedAt: row.updated_at,
     fieldCount: fieldMappings.length,
+    submissionType: extractSubmissionType(categories),
   };
 }
 
@@ -163,6 +197,7 @@ export async function getDomainKnowledge(
       lastVerified: null,
       updatedAt: null,
       fieldCount: 0,
+      submissionType: null,
     };
   }
 
@@ -404,4 +439,86 @@ export async function deleteFieldMapping(input: {
     domain,
     fieldMappings: next,
   });
+}
+
+const ALLOWED_SUBMISSION_TYPES = new Set([
+  'BUSINESS_DIRECTORY',
+  'SOCIAL_BOOKMARK',
+  'WEB2_ARTICLE',
+  'PROFILE',
+  'FORUM',
+  'BLOG_COMMENT',
+  'PRESS_RELEASE',
+  'OTHER',
+  'UNKNOWN',
+]);
+
+/** Persist a human correction of domain submission type (e.g. "This is actually Web 2.0 Article"). */
+export async function upsertSubmissionType(input: {
+  orgId: string;
+  domain: string;
+  submissionType: string;
+  verifiedBy?: string;
+}): Promise<DomainKnowledge> {
+  const domain = normalizeDomain(input.domain);
+  const submissionType = String(input.submissionType ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '_');
+  if (!ALLOWED_SUBMISSION_TYPES.has(submissionType)) {
+    throw new AppError(400, 'VALIDATION_ERROR', `Invalid submissionType: ${input.submissionType}`);
+  }
+  const existing = await getDomainKnowledge(input.orgId, domain);
+  const categories = withSubmissionType(existing.categories, submissionType);
+  const now = new Date().toISOString();
+  const { data, error } = await getSupabaseAdmin()
+    .from('companion_domain_knowledge')
+    .upsert(
+      {
+        org_id: input.orgId,
+        domain,
+        field_mappings: existing.fieldMappings,
+        category_mapping: categories,
+        wizard_steps: existing.wizardSteps,
+        verified: true,
+        success_count: existing.successCount + 1,
+        last_verified_at: now,
+        updated_at: now,
+      },
+      { onConflict: 'org_id,domain' }
+    )
+    .select('*')
+    .single();
+
+  if (error) {
+    const current = await getSupabaseAdmin()
+      .from('companion_domain_knowledge')
+      .select('id')
+      .eq('org_id', input.orgId)
+      .ilike('domain', domain)
+      .maybeSingle();
+    if (current.data?.id) {
+      const { data: updated, error: upErr } = await getSupabaseAdmin()
+        .from('companion_domain_knowledge')
+        .update({
+          category_mapping: categories,
+          verified: true,
+          last_verified_at: now,
+          updated_at: now,
+          success_count: existing.successCount + 1,
+        })
+        .eq('id', current.data.id)
+        .select('*')
+        .single();
+      if (upErr) throw new AppError(500, 'INTERNAL_ERROR', 'Failed to save submission type');
+      return rowToKnowledge(updated);
+    }
+    throw new AppError(500, 'INTERNAL_ERROR', error.message);
+  }
+
+  logger.info(
+    { orgId: input.orgId, domain, submissionType, verifiedBy: input.verifiedBy ?? 'user' },
+    'companion submission type saved'
+  );
+  return rowToKnowledge(data);
 }

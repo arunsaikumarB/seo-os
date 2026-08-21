@@ -13,6 +13,11 @@ import {
 import { htmlHasFormElement, looksLikeSpaShell } from './form-unavailable.js';
 import { selectTargetForm } from './target-form.js';
 import { resolveListingPricing, type ListingPricingKind } from './listing-pricing.js';
+import {
+  classifySubmissionType,
+  type SubmissionType,
+  type SubmissionTypeResult,
+} from './submission-type.js';
 
 export const LINK_PROBE_BANDS = [
   'ready',
@@ -47,6 +52,9 @@ export type LinkProbeResult = {
   probedAt: string;
   /** Free-word rule on form/payment HTML. */
   listingPricing: ListingPricingKind;
+  submissionType: SubmissionType;
+  submissionTypeConfidence: number;
+  submissionTypeEvidence: string[];
 };
 
 export type ProbePageInput = {
@@ -79,8 +87,45 @@ function emptyResult(partial: Partial<LinkProbeResult>): LinkProbeResult {
     pagesChecked: 0,
     probedAt: new Date().toISOString(),
     listingPricing: 'unknown',
+    submissionType: 'UNKNOWN',
+    submissionTypeConfidence: 0,
+    submissionTypeEvidence: [],
     ...partial,
   };
+}
+
+function submissionTypeFromHtml(url: string, html: string): SubmissionTypeResult {
+  const pick = (re: RegExp, limit = 25): string[] => {
+    const out: string[] = [];
+    let m: RegExpExecArray | null;
+    const r = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
+    const slice = html.slice(0, 80_000);
+    while ((m = r.exec(slice)) && out.length < limit) {
+      const v = (m[1] ?? m[0]).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      if (v.length > 1 && v.length < 120) out.push(v);
+    }
+    return out;
+  };
+  const title =
+    html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/<[^>]+>/g, '').trim() ?? '';
+  const headings = pick(/<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/i, 12);
+  const labels = pick(/<label[^>]*>([\s\S]*?)<\/label>/i, 40);
+  const fieldNames = pick(/\b(?:name|id)=["']([^"']+)["']/i, 40);
+  const placeholders = pick(/placeholder=["']([^"']+)["']/i, 20);
+  const buttons = [
+    ...pick(/<button[^>]*>([\s\S]*?)<\/button>/i, 20),
+    ...pick(/<input[^>]*type=["']submit["'][^>]*value=["']([^"']+)["']/i, 10),
+  ];
+  return classifySubmissionType({
+    url,
+    title,
+    headings,
+    labels,
+    fieldNames,
+    placeholders,
+    buttons,
+    visibleText: html.slice(0, 12_000).replace(/<[^>]+>/g, ' '),
+  });
 }
 
 function classifyGates(html: string, url: string): string[] {
@@ -164,6 +209,7 @@ export function classifyProbedPage(input: ProbePageInput): LinkProbeResult {
   const hardGates = gates.filter((g) => HARD_GATES.has(g));
   const target = selectTargetForm(html, { minScore: 2 });
   const listingPricing = resolveListingPricing({ html });
+  const submission = submissionTypeFromHtml(input.url, html);
 
   const formFound =
     Boolean(target.formFound) ||
@@ -203,6 +249,9 @@ export function classifyProbedPage(input: ProbePageInput): LinkProbeResult {
       reasons: [pageScore.reason || 'No submission form detected'],
       listingPricing,
       probedAt,
+      submissionType: submission.submissionType,
+      submissionTypeConfidence: submission.submissionTypeConfidence,
+      submissionTypeEvidence: submission.submissionTypeEvidence,
     });
   }
 
@@ -213,9 +262,17 @@ export function classifyProbedPage(input: ProbePageInput): LinkProbeResult {
   if (hardGates.length) reasons.push(`gates:${hardGates.join(',')}`);
   if (listingPricing === 'paid') reasons.push('paid_no_free_word');
   if (listingPricing === 'free') reasons.push('free_listing');
+  if (submission.submissionType !== 'UNKNOWN') {
+    reasons.push(`type:${submission.submissionType}`);
+  }
 
   // Paid listings are never "ready" — park for Ranked Queue free filter
   const paidBand = listingPricing === 'paid';
+  const typeFields = {
+    submissionType: submission.submissionType,
+    submissionTypeConfidence: submission.submissionTypeConfidence,
+    submissionTypeEvidence: submission.submissionTypeEvidence,
+  };
 
   if (hardGates.length) {
     return emptyResult({
@@ -238,6 +295,7 @@ export function classifyProbedPage(input: ProbePageInput): LinkProbeResult {
       pagesChecked: 1,
       listingPricing,
       probedAt,
+      ...typeFields,
     });
   }
 
@@ -266,6 +324,7 @@ export function classifyProbedPage(input: ProbePageInput): LinkProbeResult {
       pagesChecked: 1,
       listingPricing,
       probedAt,
+      ...typeFields,
     });
   }
 
@@ -289,6 +348,7 @@ export function classifyProbedPage(input: ProbePageInput): LinkProbeResult {
     pagesChecked: 1,
     listingPricing,
     probedAt,
+    ...typeFields,
   });
 }
 

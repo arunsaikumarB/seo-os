@@ -493,14 +493,28 @@ const RULES: SignalRule[] = [
   },
   {
     id: 'social_bookmark',
-    weight: 26,
+    weight: 48,
     match: (s) => {
-      const hit = includesAny(lowerJoin([...s.navTexts, ...s.buttonTexts]), [
-        'bookmark',
-        'save link',
-        'social bookmark',
+      const blob = lowerJoin([
+        ...(s.navTexts ?? []),
+        ...(s.buttonTexts ?? []),
+        ...(s.formLabels ?? []),
+        ...(s.h1 ?? []),
+        s.title ?? '',
+        s.metaDescription ?? '',
       ]);
-      return { hit, evidence: hit ? ['Detected social bookmarking UI'] : [] };
+      const hits: string[] = [];
+      if (/\bstory title\b/.test(blob)) hits.push('Story Title');
+      if (/\barticle details\b/.test(blob)) hits.push('Article Details');
+      if (/\btags?\b/.test(blob) && /\b(web|programming|software)\b/.test(blob)) hits.push('Tags');
+      if (/\b(news story|story you are linking|submit story|submit link|save story)\b/.test(blob)) {
+        hits.push('Submit/news story UI');
+      }
+      if (includesAny(blob, ['bookmark', 'social bookmark', 'save link'])) {
+        hits.push('Social bookmarking UI');
+      }
+      const hit = hits.length >= 2 || (hits.length >= 1 && /\bstory title\b/.test(blob));
+      return { hit, evidence: hit ? hits : [] };
     },
   },
   {

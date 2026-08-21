@@ -758,6 +758,11 @@ async function loadContentForOpportunity(workspaceId: string, opportunityId: str
     contentTooSimilar: Boolean(p.contentTooSimilar),
     projectId: workspaceId,
     projectName: String(wsRow?.name || brandName),
+    submissionType: String(p.submissionType ?? '') || null,
+    typedContent:
+      p.typedContent && typeof p.typedContent === 'object'
+        ? (p.typedContent as Record<string, unknown>)
+        : null,
   };
 }
 
@@ -1524,6 +1529,22 @@ async function prepareOnePackage(
     discoveryFailureReason:
       !formFound && recipe.fields.length === 0 ? discoveryFailureReason : null,
   });
+
+  // Prefer live HTML classification when available (Pligg Story Title / Tags / …)
+  if (html) {
+    const { classifySubmissionType } = await import('@seo-os/backlink-builder');
+    const live = classifySubmissionType({
+      url: recipe.resolvedFormUrl || entryUrl,
+      labels: recipe.fields.map((f) => f.label ?? ''),
+      fieldNames: recipe.fields.map((f) => f.selector),
+      visibleText: html.slice(0, 12_000).replace(/<[^>]+>/g, ' '),
+    });
+    if (live.submissionTypeConfidence >= 0.45) {
+      payload.submissionType = live.submissionType;
+      payload.submissionTypeConfidence = live.submissionTypeConfidence;
+      payload.submissionTypeEvidence = live.submissionTypeEvidence;
+    }
+  }
 
   // Prefer the resolved form URL for Open package (falls back inside buildAssistedPackage)
   payload.entryUrl = recipe.resolvedFormUrl || entryUrl;

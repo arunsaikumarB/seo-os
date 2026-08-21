@@ -292,6 +292,7 @@ export function resolveSubmissionPlatformType(input: {
     .join(' ')
     .toLowerCase();
 
+  if (/\b(social_bookmark|dirstop|webcastlist|pligg)\b/.test(blob)) return 'SOCIAL_PROFILE';
   if (/\b(medium\.com|substack|hashnode|dev\.to|blogspot|wordpress\.com|tumblr)\b/.test(blob)) {
     return 'WEB_2_0';
   }

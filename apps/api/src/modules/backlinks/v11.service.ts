@@ -527,6 +527,63 @@ export async function createContentPack(
     domain: opp.domain as string | null,
     url: String(opp.url ?? ''),
   });
+  {
+    const {
+      submissionTypeFromStorage,
+      buildTypedContentViews,
+      classifySubmissionType,
+    } = await import('@seo-os/backlink-builder');
+    const oppMetaFinal =
+      typeof opp.metadata === 'object' && opp.metadata
+        ? (opp.metadata as Record<string, unknown>)
+        : {};
+    const linkProbeFinal =
+      typeof oppMetaFinal.linkProbe === 'object' && oppMetaFinal.linkProbe
+        ? (oppMetaFinal.linkProbe as Record<string, unknown>)
+        : {};
+    const probeType =
+      typeof linkProbeFinal.submissionType === 'string'
+        ? String(linkProbeFinal.submissionType)
+        : '';
+    const fromStorage = submissionTypeFromStorage(storageType, plan.detectedType);
+    const classified = classifySubmissionType({
+      url: String(opp.url ?? ''),
+      title: String(opp.title ?? ''),
+      labels: plan.requirements?.requiredFields ?? [],
+    });
+    const liveType =
+      probeType ||
+      (classified.submissionType !== 'UNKNOWN' ? classified.submissionType : fromStorage);
+    const submissionType =
+      liveType !== 'UNKNOWN' && liveType !== 'OTHER' ? liveType : fromStorage;
+    pack.submissionType = submissionType;
+    pack.submissionTypeConfidence =
+      typeof linkProbeFinal.submissionTypeConfidence === 'number'
+        ? linkProbeFinal.submissionTypeConfidence
+        : classified.submissionTypeConfidence || 0.7;
+    pack.submissionTypeEvidence = Array.isArray(linkProbeFinal.submissionTypeEvidence)
+      ? linkProbeFinal.submissionTypeEvidence
+      : classified.submissionTypeEvidence.length
+        ? classified.submissionTypeEvidence
+        : [plan.detectedTypeLabel || storageType].filter(Boolean);
+    pack.typedContent = buildTypedContentViews({
+      businessName: brand.brandName,
+      title: String(pack.seoTitle ?? ''),
+      shortDescription: String(pack.shortDescription ?? ''),
+      longDescription: String(pack.longDescription ?? ''),
+      metaDescription: String(pack.metaDescription ?? ''),
+      articleBody: String(pack.articleBody ?? pack.body ?? ''),
+      body: String(pack.body ?? ''),
+      keywords: String(pack.keywords ?? ''),
+      url:
+        String(pack.targetUrl ?? '') ||
+        (brand.projectDomain ? `https://${brand.projectDomain}` : ''),
+      email: brand.contactEmail ?? '',
+      phone: brand.contactPhone ?? '',
+      contactName: brand.contactName ?? '',
+      excerpt: String(pack.excerpt ?? ''),
+    });
+  }
   const { findForeignBrandContamination: findForeign } = await import('@seo-os/backlink-builder');
   const packBlob = [
     pack.seoTitle,

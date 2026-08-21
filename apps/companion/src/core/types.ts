@@ -12,6 +12,7 @@ export type ActivePackage = {
   /** Display name for isolation UI (e.g. Desi Dhamaka) */
   projectName?: string;
   businessName?: string;
+  submissionType?: string;
   generatedAt: string;
   entryUrl?: string;
   fields: ActivePackageField[];

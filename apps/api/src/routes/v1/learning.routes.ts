@@ -9,6 +9,7 @@ import {
   listDomainKnowledge,
   replaceDomainMappings,
   upsertFieldMapping,
+  upsertSubmissionType,
 } from '../../modules/learning/domain-knowledge.service.js';
 
 function param(value: string | string[]): string {
@@ -67,6 +68,7 @@ learningRouter.get('/domain/:domain', requireRole('viewer'), async (req, res, ne
         lastVerified: knowledge.lastVerified,
         updatedAt: knowledge.updatedAt,
         fieldCount: knowledge.fieldCount,
+        submissionType: knowledge.submissionType ?? null,
       },
     });
   } catch (err) {
@@ -87,6 +89,31 @@ learningRouter.post('/field-mapping', requireRole('member'), async (req, res, ne
       websiteField: parsed.data.websiteField,
       mappedTo: parsed.data.mappedTo,
       confidence: parsed.data.confidence,
+      verifiedBy: parsed.data.verifiedBy ?? 'user',
+    });
+    res.status(201).json({ data: knowledge });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const submissionTypeBodySchema = z.object({
+  domain: z.string().min(1),
+  submissionType: z.string().min(1),
+  verifiedBy: z.string().max(64).optional(),
+});
+
+learningRouter.post('/submission-type', requireRole('member'), async (req, res, next) => {
+  try {
+    const parsed = submissionTypeBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw new AppError(400, 'VALIDATION_ERROR', 'Invalid submission type payload');
+    }
+    const { orgId } = (req as AuthenticatedRequest).auth;
+    const knowledge = await upsertSubmissionType({
+      orgId,
+      domain: parsed.data.domain,
+      submissionType: parsed.data.submissionType,
       verifiedBy: parsed.data.verifiedBy ?? 'user',
     });
     res.status(201).json({ data: knowledge });

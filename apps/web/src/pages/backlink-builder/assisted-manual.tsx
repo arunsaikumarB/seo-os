@@ -107,6 +107,11 @@ type AssistedPackage = {
     formDiscoverySource?: string | null;
     humanSteps?: string[];
     targetFormSelector?: string | null;
+    listingPricing?: string | null;
+    submissionType?: string | null;
+    submissionTypeConfidence?: number | null;
+    submissionTypeEvidence?: string[] | null;
+    typedContent?: Record<string, unknown> | null;
   };
   blocked?: boolean;
   blockReason?: string;
@@ -173,6 +178,7 @@ type ActivePackagePayload = {
   projectId: string;
   projectName?: string;
   businessName?: string;
+  submissionType?: string;
   generatedAt: string;
   entryUrl?: string;
   fields: Array<{ key: string; value: string }>;
@@ -207,6 +213,32 @@ function buildActivePackageFields(
     const role = String(p.role ?? '').trim();
     const key = ROLE_TO_ACTIVE_KEY[role] ?? role;
     put(key, String(p.value ?? ''));
+  }
+
+  // Type-aware overlays from content pack (social bookmark / web2 / …)
+  // Force-overwrite so Story Title / Tags / Description get type-specific values.
+  const forcePut = (key: string, value: string) => {
+    const v = value.trim();
+    if (!key || !v) return;
+    byKey.set(key, v);
+  };
+  const packMeta = (pkg.package ?? {}) as Record<string, unknown>;
+  const typed = packMeta.typedContent as Record<string, Record<string, string>> | undefined;
+  const submissionType = String(packMeta.submissionType ?? '');
+  if (typed && submissionType === 'SOCIAL_BOOKMARK' && typed.socialBookmarkContent) {
+    const c = typed.socialBookmarkContent;
+    forcePut('title', String(c.title ?? ''));
+    forcePut('keywords', String(c.tags ?? ''));
+    forcePut('shortDescription', String(c.description ?? ''));
+    forcePut('description', String(c.description ?? ''));
+    forcePut('url', String(c.url ?? ''));
+  } else if (typed && submissionType === 'WEB2_ARTICLE' && typed.web2ArticleContent) {
+    const c = typed.web2ArticleContent;
+    forcePut('title', String(c.title ?? ''));
+    forcePut('article', String(c.body ?? ''));
+    forcePut('shortDescription', String(c.excerpt ?? ''));
+    forcePut('keywords', String(c.tags ?? ''));
+    forcePut('url', String(c.url ?? ''));
   }
 
   const long = byKey.get('description') || '';
@@ -297,6 +329,9 @@ export function AssistedManualPage() {
             ''
         ).trim() || undefined,
         businessName: bizField?.value?.trim() || undefined,
+        submissionType: String(
+          ((pkg.package ?? {}) as { submissionType?: string }).submissionType ?? ''
+        ).trim() || undefined,
         generatedAt: pkg.preparedAt || new Date().toISOString(),
         entryUrl: pkg.entryUrl,
         fields,
@@ -989,6 +1024,23 @@ export function AssistedManualPage() {
 
                         {pkg.package?.gateNotes ? (
                           <p className="text-xs text-muted-foreground">{pkg.package.gateNotes}</p>
+                        ) : null}
+                        {pkg.package?.submissionType ? (
+                          <p className="text-xs text-muted-foreground">
+                            Submission type:{' '}
+                            <strong>
+                              {String(pkg.package.submissionType).replace(/_/g, ' ')}
+                            </strong>
+                            {typeof pkg.package.submissionTypeConfidence === 'number'
+                              ? ` · Confidence: ${Math.round(pkg.package.submissionTypeConfidence * 100)}%`
+                              : ''}
+                            {pkg.package.listingPricing
+                              ? ` · ${String(pkg.package.listingPricing).toUpperCase()}`
+                              : ''}
+                            {pkg.package.submissionTypeEvidence?.length
+                              ? ` · Evidence: ${pkg.package.submissionTypeEvidence.slice(0, 4).join(', ')}`
+                              : ''}
+                          </p>
                         ) : null}
                         {pkg.package?.humanSteps && pkg.package.humanSteps.length > 0 ? (
                           <p className="text-xs text-amber-800">

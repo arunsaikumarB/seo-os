@@ -19,6 +19,12 @@ import {
   resolveListingPricing,
   type ListingPricingKind,
 } from './listing-pricing.js';
+import {
+  buildTypedContentViews,
+  classifySubmissionType,
+  submissionTypeFromStorage,
+  type SubmissionType,
+} from './submission-type.js';
 
 export type { ListingPricingKind } from './listing-pricing.js';
 
@@ -485,6 +491,11 @@ export type AssistedPackagePayload = {
   classifierVersion?: number;
   /** Free worklist vs paid park (see listing-pricing.ts). */
   listingPricing?: ListingPricingKind | null;
+  /** Deterministic submission-type intelligence (see submission-type.ts). */
+  submissionType?: string | null;
+  submissionTypeConfidence?: number | null;
+  submissionTypeEvidence?: string[] | null;
+  typedContent?: Record<string, unknown> | null;
 };
 
 export type AssistedLaneCounts = {
@@ -2052,6 +2063,10 @@ export type ContentSource = {
   imageFileName?: string | null;
   /** Cross-package uniqueness failed after max attempts */
   contentTooSimilar?: boolean;
+  projectId?: string | null;
+  projectName?: string | null;
+  submissionType?: string | null;
+  typedContent?: Record<string, unknown> | null;
 };
 
 /**
@@ -2682,6 +2697,49 @@ export function buildAssistedPackage(input: {
                     : 'No special gate detected beyond normal form submit.';
   const gateNotes = youMust ? `${gateNotesBase} · ${youMust}` : gateNotesBase;
 
+  const typeFromContent = String(input.content.submissionType ?? '').trim() as SubmissionType | '';
+  const typeClassified = classifySubmissionType({
+    url: openUrl,
+    labels: input.recipe.fields.map((f) => f.label ?? ''),
+    fieldNames: input.recipe.fields.map((f) => f.selector),
+    buttons: [],
+  });
+  const submissionType: SubmissionType =
+    (typeFromContent &&
+    [
+      'BUSINESS_DIRECTORY',
+      'SOCIAL_BOOKMARK',
+      'WEB2_ARTICLE',
+      'PROFILE',
+      'FORUM',
+      'BLOG_COMMENT',
+      'PRESS_RELEASE',
+      'OTHER',
+      'UNKNOWN',
+    ].includes(typeFromContent)
+      ? typeFromContent
+      : null) ||
+    (typeClassified.submissionTypeConfidence >= 0.35
+      ? typeClassified.submissionType
+      : submissionTypeFromStorage(null, null));
+
+  const typedContent =
+    (input.content.typedContent as Record<string, unknown> | null) ??
+    (buildTypedContentViews({
+      businessName: input.content.businessName,
+      title: input.content.title,
+      shortDescription: input.content.shortDescription,
+      longDescription: input.content.longDescription,
+      metaDescription: input.content.metaDescription,
+      articleBody: input.content.articleBody,
+      keywords: input.content.keywords,
+      url: input.content.url,
+      email: input.content.email,
+      phone: input.content.phone,
+      address: input.content.address,
+      contactName: input.content.contactName,
+    }) as unknown as Record<string, unknown>);
+
   return {
     entryUrl: openUrl,
     importedEntryUrl:
@@ -2716,6 +2774,10 @@ export function buildAssistedPackage(input: {
     readerVersion: Number(input.recipe.readerVersion) || 0,
     classifierVersion: Number(input.recipe.classifierVersion) || 0,
     listingPricing,
+    submissionType,
+    submissionTypeConfidence: typeClassified.submissionTypeConfidence,
+    submissionTypeEvidence: typeClassified.submissionTypeEvidence,
+    typedContent,
   };
 }
 
