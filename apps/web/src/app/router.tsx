@@ -120,6 +120,11 @@ const AssistedManualPage = lazy(() =>
     default: m.AssistedManualPage,
   }))
 );
+const DirectoryFormIntelligencePage = lazy(() =>
+  import('@/pages/backlink-builder/directory-form-intelligence').then((m) => ({
+    default: m.DirectoryFormIntelligencePage,
+  }))
+);
 const BacklinkAuditPage = lazy(() =>
   import('@/pages/backlink-builder/audit').then((m) => ({ default: m.BacklinkAuditPage }))
 );
@@ -433,6 +438,10 @@ export function AppRouter() {
                     <Route
                       path="backlink-builder/assisted-manual"
                       element={lazyEl(AssistedManualPage)}
+                    />
+                    <Route
+                      path="backlink-builder/directory-forms"
+                      element={lazyEl(DirectoryFormIntelligencePage)}
                     />
                     <Route
                       path="backlink-builder/verification"

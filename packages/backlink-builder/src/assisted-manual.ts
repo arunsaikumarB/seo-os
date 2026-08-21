@@ -376,6 +376,8 @@ export type SiteRecipe = {
    * Sites with both still count as free (human picks Free on the site).
    */
   listingPricing?: ListingPricingKind | null;
+  /** Persisted Directory Form Intelligence schema (reuse + drift re-check). */
+  directoryFormSchema?: import('./directory-form-schema.js').DirectoryFormSchema | null;
 };
 
 export function recipeVersionsCurrent(recipe: SiteRecipe | null | undefined): boolean {

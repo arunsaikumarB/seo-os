@@ -316,6 +316,106 @@ backlinkBuilderRouter.get(
   }
 );
 
+/** Directory Form Intelligence — dynamic per-directory schemas */
+backlinkBuilderRouter.get(
+  '/directory-forms',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const { listDirectoryFormSchemas } = await import(
+        '../../modules/browser-execution/directory-form.service.js'
+      );
+      res.json({ data: await listDirectoryFormSchemas(param(req.params.projectId)) });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+backlinkBuilderRouter.post(
+  '/directory-forms/analyze',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const body = z
+        .object({
+          url: z.string().url(),
+          force: z.boolean().optional(),
+          businessCategory: z.string().max(200).optional().nullable(),
+        })
+        .parse(req.body ?? {});
+      const { analyzeDirectoryForm } = await import(
+        '../../modules/browser-execution/directory-form.service.js'
+      );
+      res.json({
+        data: await analyzeDirectoryForm({
+          workspaceId: param(req.params.projectId),
+          url: body.url,
+          force: body.force,
+          businessCategory: body.businessCategory,
+        }),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+backlinkBuilderRouter.get(
+  '/directory-forms/:domain',
+  authMiddleware,
+  requireRole('viewer'),
+  async (req, res, next) => {
+    try {
+      const { getDirectoryFormSchema } = await import(
+        '../../modules/browser-execution/directory-form.service.js'
+      );
+      const schema = await getDirectoryFormSchema(
+        param(req.params.projectId),
+        decodeURIComponent(param(req.params.domain))
+      );
+      if (!schema) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'No schema for domain');
+      res.json({ data: schema });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+backlinkBuilderRouter.post(
+  '/directory-forms/:domain/review',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const body = z
+        .object({
+          corrections: z.array(
+            z.object({
+              selector: z.string().min(1),
+              canonicalField: z.string().min(1),
+            })
+          ),
+        })
+        .parse(req.body ?? {});
+      const { reviewDirectoryFormSchema } = await import(
+        '../../modules/browser-execution/directory-form.service.js'
+      );
+      res.json({
+        data: await reviewDirectoryFormSchema({
+          workspaceId: param(req.params.projectId),
+          domain: decodeURIComponent(param(req.params.domain)),
+          corrections: body.corrections,
+        }),
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 backlinkBuilderRouter.post(
   '/assisted-manual/prepare',
   authMiddleware,

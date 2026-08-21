@@ -87,6 +87,12 @@ export const workflowNavSections: WorkflowNavSection[] = [
         stepNumber: 5,
       },
       {
+        label: 'Directory Forms',
+        href: 'backlink-builder/directory-forms',
+        icon: ClipboardList,
+        featureFlag: 'backlink_builder',
+      },
+      {
         label: 'Track Results',
         href: 'backlink-builder/track-results',
         icon: CheckCircle2,

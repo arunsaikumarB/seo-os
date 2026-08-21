@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ClipboardList,
@@ -743,6 +743,15 @@ export function AssistedManualPage() {
           <p className="text-xs text-muted-foreground mt-2 font-mono">
             Content source: this project only ({projectId.slice(0, 8)}…) — packages from other
             projects are refused.
+          </p>
+          <p className="text-xs mt-2">
+            <Link
+              to={`/projects/${projectId}/backlink-builder/directory-forms`}
+              className="text-primary underline-offset-2 hover:underline"
+            >
+              Directory Form Intelligence
+            </Link>{' '}
+            — inspect each directory’s real fields before submit.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

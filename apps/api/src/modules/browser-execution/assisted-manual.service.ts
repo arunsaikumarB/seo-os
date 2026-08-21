@@ -1514,6 +1514,38 @@ async function prepareOnePackage(
 
   await upsertRecipeOnProfile(workspaceId, domain, recipe);
 
+  // Stamp DirectoryFormSchema onto the recipe for reuse / dynamic UI
+  if (html && formFound) {
+    try {
+      const {
+        buildDirectoryFormSchema,
+        populateDirectoryFormFromProfile,
+      } = await import('@seo-os/backlink-builder');
+      const brand = await getBrandContextForBee(workspaceId);
+      let dirSchema = buildDirectoryFormSchema({
+        html,
+        directoryUrl: importedEntryUrl || entryUrl,
+        submissionUrl: recipe.resolvedFormUrl || entryUrl,
+        businessCategory: brand.industry ?? null,
+      });
+      dirSchema = populateDirectoryFormFromProfile(dirSchema, {
+        businessName: brand.brandName,
+        companyName: brand.companyName ?? brand.brandName,
+        websiteUrl: brand.projectDomain ? `https://${brand.projectDomain}` : brand.projectUrl,
+        email: brand.contactEmail,
+        phone: brand.contactPhone,
+        industry: brand.industry,
+        category: brand.industry,
+        title: brand.brandName,
+        description: brand.tagline,
+      });
+      recipe = { ...recipe, directoryFormSchema: dirSchema };
+      await upsertRecipeOnProfile(workspaceId, domain, recipe);
+    } catch (err) {
+      logger.warn({ err, domain }, 'directory-form schema stamp skipped');
+    }
+  }
+
   const content = await loadContentForOpportunity(workspaceId, opportunityId);
   const preparedAt = new Date().toISOString();
   const expiresAt = new Date(
