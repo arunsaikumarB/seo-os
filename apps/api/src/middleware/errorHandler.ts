@@ -28,8 +28,13 @@ function mapDatabaseError(err: PostgrestErrorLike): AppError {
     if (target.includes('slug') || target.includes('organizations')) {
       return new AppError(409, 'VALIDATION_ERROR', 'That organization URL slug is already taken');
     }
-    if (target.includes('domain') || target.includes('workspaces')) {
-      return new AppError(409, 'VALIDATION_ERROR', 'A project with this domain already exists');
+    // workspaces no longer enforce unique (org_id, domain) — see migration 111
+    if (target.includes('workspaces_org_id_domain') || target.includes('workspaces_org_id_domain_key')) {
+      return new AppError(
+        409,
+        'VALIDATION_ERROR',
+        'A project with this domain already exists — apply migration 111 to allow duplicate domains'
+      );
     }
     return new AppError(409, 'VALIDATION_ERROR', 'A record with this value already exists');
   }

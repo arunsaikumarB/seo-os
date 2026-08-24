@@ -157,17 +157,6 @@ export async function deleteProject(
   };
 }
 
-function duplicateDomain(domain: string): string {
-  const clean = domain.replace(/^www\./i, '').toLowerCase();
-  const parts = clean.split('.');
-  if (parts.length >= 2) {
-    const tld = parts.pop()!;
-    const base = parts.join('.');
-    return `${base}-copy.${tld}`;
-  }
-  return `${clean}-copy`;
-}
-
 export async function duplicateProject(
   projectId: string,
   orgId: string,
@@ -185,29 +174,18 @@ export async function duplicateProject(
     .single();
   if (srcErr || !sourceRow) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Project not found');
 
-  let newDomain = duplicateDomain(source.domain);
-  // Ensure uniqueness within org
-  for (let i = 0; i < 8; i++) {
-    const { data: clash } = await getSupabaseAdmin()
-      .from('workspaces')
-      .select('id')
-      .eq('org_id', orgId)
-      .eq('domain', newDomain)
-      .maybeSingle();
-    if (!clash) break;
-    const clean = source.domain.replace(/^www\./i, '').toLowerCase();
-    const parts = clean.split('.');
-    const tld = parts.length >= 2 ? parts.pop()! : 'com';
-    const base = parts.join('.') || clean;
-    newDomain = `${base}-copy${i + 2}.${tld}`;
-  }
+  // Same domain is allowed — multiple projects may share a website domain.
+  const newDomain = String(source.domain ?? '')
+    .replace(/^www\./i, '')
+    .toLowerCase()
+    .trim();
 
   const newId = randomUUID();
   const insertPayload = {
     id: newId,
     org_id: orgId,
     name: (opts.name?.trim() || `${source.name} (Copy)`).slice(0, 100),
-    domain: newDomain,
+    domain: newDomain || source.domain,
     url: source.url,
     industry: source.industry,
     description: source.description,
