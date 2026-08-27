@@ -14,6 +14,19 @@ function mapProfile(row: Record<string, unknown>): Profile {
   };
 }
 
+function mapOrg(row: Record<string, unknown>): Organization {
+  return {
+    id: row.id as string,
+    name: row.name as string,
+    slug: row.slug as string,
+    industry: (row.industry as string) ?? null,
+    plan: row.plan as string,
+    settings: (row.settings as Record<string, unknown>) ?? {},
+    createdAt: row.created_at as string,
+    updatedAt: row.updated_at as string,
+  };
+}
+
 export async function getProfile(userId: string): Promise<Profile | null> {
   if (isPgDataMode()) {
     const row = await pgOne<Record<string, unknown>>(
@@ -255,4 +268,48 @@ export async function getActiveOrgMembership(
 
   if (error || !data || data.status !== 'active') return null;
   return { role: data.role as string, status: data.status as string };
+}
+
+/** Shape returned by GET /v1/me for organization memberships. */
+export async function listUserOrgMemberships(
+  userId: string
+): Promise<
+  Array<{
+    role: string;
+    org_id: string;
+    organizations: Organization;
+  }>
+> {
+  if (isPgDataMode()) {
+    const rows = await pgMany<Record<string, unknown>>(
+      `SELECT
+         m.role,
+         m.org_id,
+         o.id, o.name, o.slug, o.industry, o.plan, o.settings, o.created_at, o.updated_at
+       FROM public.org_members m
+       INNER JOIN public.organizations o ON o.id = m.org_id
+       WHERE m.user_id = $1 AND m.status = 'active'
+       ORDER BY m.joined_at ASC NULLS LAST`,
+      [userId]
+    );
+    return rows.map((row) => ({
+      role: row.role as string,
+      org_id: row.org_id as string,
+      organizations: mapOrg(row),
+    }));
+  }
+
+  const { data, error } = await getSupabaseAdmin()
+    .from('org_members')
+    .select('role, org_id, organizations(id, name, slug, industry, plan)')
+    .eq('user_id', userId)
+    .eq('status', 'active');
+
+  if (error) throw error;
+
+  return (data ?? []).map((row) => ({
+    role: row.role as string,
+    org_id: row.org_id as string,
+    organizations: mapOrg(row.organizations as unknown as Record<string, unknown>),
+  }));
 }

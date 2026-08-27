@@ -1,3 +1,5 @@
+import { isLiveOrgId } from '@/lib/org-id';
+
 function resolveApiUrl(): string {
   const configured = import.meta.env.VITE_API_URL;
   if (configured) {
@@ -43,6 +45,7 @@ export async function apiFetch<T>(
   options: RequestInit & { orgId?: string; token?: string } = {}
 ): Promise<T> {
   const { orgId, token, headers, ...rest } = options;
+  const liveOrgId = orgId && isLiveOrgId(orgId) ? orgId : undefined;
   const baseUrl = resolveApiUrl();
   let res: Response;
   try {
@@ -51,7 +54,7 @@ export async function apiFetch<T>(
       headers: {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(orgId ? { 'X-Org-Id': orgId } : {}),
+        ...(liveOrgId ? { 'X-Org-Id': liveOrgId } : {}),
         ...headers,
       },
     });

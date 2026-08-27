@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useApi } from '@/hooks/use-api';
+import { isLiveOrgId, resolveLiveOrgId } from '@/lib/org-id';
 import { useAppStore } from '@/stores/app-store';
 
 /** Resolves the org id that is safe to use for live API calls. */
@@ -18,16 +19,19 @@ export function useActiveOrg() {
     () => data?.data.organizations ?? [],
     [data?.data.organizations]
   );
-  const validOrgIds = useMemo(() => new Set(memberships.map((m) => m.org_id)), [memberships]);
+  const membershipOrgIds = useMemo(
+    () => memberships.map((m) => m.org_id).filter(isLiveOrgId),
+    [memberships]
+  );
 
-  const activeOrgId =
-    demoMode || (currentOrgId && validOrgIds.has(currentOrgId))
-      ? currentOrgId
-      : (memberships[0]?.org_id ?? null);
+  /** Org id for live API mutations (never demo placeholders). */
+  const activeOrgId = demoMode
+    ? null
+    : resolveLiveOrgId(currentOrgId, membershipOrgIds);
 
   return {
     activeOrgId,
-    hasOrganizations: demoMode || memberships.length > 0,
+    hasOrganizations: demoMode || membershipOrgIds.length > 0,
     isReady: demoMode || isFetched,
     isLoading: !demoMode && isLoading,
     memberships,

@@ -1,6 +1,7 @@
-import { useCallback, useMemo, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { useAppStore } from '@/stores/app-store';
+import { isDemoOrgId } from '@/lib/org-id';
 import { DEMO_ORG_ID, DEMO_PROJECT_CHEFGAA } from '@/demo/data';
 import { DemoModeContext } from './demo-mode-context';
 
@@ -13,6 +14,14 @@ export function DemoModeProvider({ children }: { children: ReactNode }) {
   const setShowTour = useAppStore((s) => s.setShowTour);
   const setCurrentOrgId = useAppStore((s) => s.setCurrentOrgId);
   const setCurrentProjectId = useAppStore((s) => s.setCurrentProjectId);
+
+  // One-time cleanup for persisted demo ids after demo mode was turned off in a prior session.
+  useEffect(() => {
+    if (isDemoMode) return;
+    const { currentOrgId, currentProjectId } = useAppStore.getState();
+    if (isDemoOrgId(currentOrgId)) setCurrentOrgId(null);
+    if (currentProjectId?.startsWith('demo-')) setCurrentProjectId(null);
+  }, [isDemoMode, setCurrentOrgId, setCurrentProjectId]);
 
   const enableDemoMode = useCallback(() => {
     const wasOff = !useAppStore.getState().demoMode;

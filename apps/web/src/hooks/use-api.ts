@@ -1,4 +1,5 @@
 import { useAuth } from '@/providers/auth-provider';
+import { isLiveOrgId } from '@/lib/org-id';
 import { useAppStore } from '@/stores/app-store';
 import { apiFetch } from '@/lib/api';
 import { useCallback } from 'react';
@@ -27,10 +28,19 @@ export function useApi() {
     async <T>(path: string, options: RequestInit & { orgId?: string | null } = {}): Promise<T> => {
       const token = await getAccessToken();
       if (!token) throw new Error('Not authenticated');
+      const resolvedOrgId =
+        options.orgId === null
+          ? undefined
+          : options.orgId !== undefined
+            ? options.orgId
+            : isLiveOrgId(currentOrgId)
+              ? currentOrgId
+              : undefined;
+
       return apiFetch<T>(path, {
         ...options,
         token,
-        orgId: options.orgId ?? currentOrgId ?? undefined,
+        orgId: resolvedOrgId,
       });
     },
     [getAccessToken, currentOrgId]

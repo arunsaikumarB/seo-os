@@ -12,7 +12,9 @@ import { toast } from 'sonner';
 import type { Project } from '@seo-os/shared';
 import { useApi } from '@/hooks/use-api';
 import { useActiveOrg } from '@/hooks/use-active-org';
+import { useDemoMode } from '@/hooks/use-demo-mode';
 import { getApiErrorMessage } from '@/lib/api';
+import { useAppStore } from '@/stores/app-store';
 import {
   Dialog,
   DialogContent,
@@ -34,6 +36,8 @@ interface ProjectFormDialogProps {
 export function ProjectFormDialog({ open, onOpenChange, mode, project }: ProjectFormDialogProps) {
   const queryClient = useQueryClient();
   const { activeOrgId, hasOrganizations } = useActiveOrg();
+  const { isDemoMode } = useDemoMode();
+  const setCurrentOrgId = useAppStore((s) => s.setCurrentOrgId);
   const { createProject, updateProject } = useApi();
 
   const schema = mode === 'create' ? createProjectSchema : updateProjectSchema;
@@ -78,12 +82,19 @@ export function ProjectFormDialog({ open, onOpenChange, mode, project }: Project
   const onSubmit = async (data: CreateProjectInput | UpdateProjectInput) => {
     try {
       if (mode === 'create') {
+        if (isDemoMode) {
+          toast.error('Demo mode is on', {
+            description: 'Turn off Demo Mode in the profile menu to create a real project.',
+          });
+          return;
+        }
         if (!hasOrganizations || !activeOrgId) {
           toast.error('No organization selected', {
             description: 'Create or select an organization first.',
           });
           return;
         }
+        setCurrentOrgId(activeOrgId);
         await createProject(activeOrgId, data as CreateProjectInput);
         toast.success('Project created');
       } else if (project) {

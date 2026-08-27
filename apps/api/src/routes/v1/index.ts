@@ -20,6 +20,7 @@ import { createOrganization, getOrganization } from '../../modules/organizations
 import {
   getProfile,
   listOrgMembers,
+  listUserOrgMemberships,
   updateOrganization,
   updateProfile,
 } from '../../modules/organizations/member.service.js';
@@ -37,7 +38,6 @@ import {
   resetProject,
   restoreProject,
 } from '../../modules/projects/project-lifecycle.service.js';
-import { getSupabaseAdmin } from '../../lib/supabase.js';
 import {
   createAgentRun,
   getAgentRun,
@@ -120,17 +120,12 @@ v1Router.get('/me', jwtOnlyMiddleware, async (req, res, next) => {
   try {
     const { userId } = (req as AuthenticatedRequest).auth;
     const profile = await getProfile(userId);
-
-    const { data: memberships } = await getSupabaseAdmin()
-      .from('org_members')
-      .select('role, org_id, organizations(id, name, slug, industry, plan)')
-      .eq('user_id', userId)
-      .eq('status', 'active');
+    const memberships = await listUserOrgMemberships(userId);
 
     res.json({
       data: {
         user: profile,
-        organizations: memberships ?? [],
+        organizations: memberships,
       },
     });
   } catch (err) {
