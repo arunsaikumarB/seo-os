@@ -13,6 +13,8 @@ export type ActivePackage = {
   projectName?: string;
   businessName?: string;
   submissionType?: string;
+  backlinkType?: string;
+  submissionMethod?: string;
   generatedAt: string;
   entryUrl?: string;
   fields: ActivePackageField[];

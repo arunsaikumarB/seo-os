@@ -39,6 +39,12 @@ function applyLocal(pkg: ActivePackage | null, stage: string): void {
         projectName: pkg.projectName ? String(pkg.projectName) : undefined,
         businessName: pkg.businessName ? String(pkg.businessName) : undefined,
         submissionType: pkg.submissionType ? String(pkg.submissionType) : undefined,
+        backlinkType: pkg.backlinkType
+          ? String(pkg.backlinkType)
+          : pkg.submissionType
+            ? String(pkg.submissionType)
+            : undefined,
+        submissionMethod: pkg.submissionMethod ? String(pkg.submissionMethod) : undefined,
         generatedAt: String(pkg.generatedAt || new Date().toISOString()),
         entryUrl: pkg.entryUrl,
         fields: (pkg.fields ?? [])

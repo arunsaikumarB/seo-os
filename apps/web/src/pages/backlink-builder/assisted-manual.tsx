@@ -109,6 +109,7 @@ type AssistedPackage = {
     targetFormSelector?: string | null;
     listingPricing?: string | null;
     submissionType?: string | null;
+    submissionMethod?: string | null;
     submissionTypeConfidence?: number | null;
     submissionTypeEvidence?: string[] | null;
     typedContent?: Record<string, unknown> | null;
@@ -1036,15 +1037,21 @@ export function AssistedManualPage() {
                         ) : null}
                         {pkg.package?.submissionType ? (
                           <p className="text-xs text-muted-foreground">
-                            Submission type:{' '}
+                            Backlink type:{' '}
                             <strong>
                               {String(pkg.package.submissionType).replace(/_/g, ' ')}
                             </strong>
                             {typeof pkg.package.submissionTypeConfidence === 'number'
                               ? ` · Confidence: ${Math.round(pkg.package.submissionTypeConfidence * 100)}%`
                               : ''}
+                            {pkg.package.submissionMethod
+                              ? ` · Method: ${String(pkg.package.submissionMethod).replace(/_/g, ' ')}`
+                              : ''}
                             {pkg.package.listingPricing
-                              ? ` · ${String(pkg.package.listingPricing).toUpperCase()}`
+                              ? ` · Pricing: ${String(pkg.package.listingPricing).toUpperCase()}`
+                              : ''}
+                            {pkg.package.submissionType === 'UNKNOWN'
+                              ? ' · Submission type could not be confidently determined.'
                               : ''}
                             {pkg.package.submissionTypeEvidence?.length
                               ? ` · Evidence: ${pkg.package.submissionTypeEvidence.slice(0, 4).join(', ')}`

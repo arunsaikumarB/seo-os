@@ -389,3 +389,35 @@ export const STRUCTURAL_HINTS: Record<
   search: ['search', 'query', 'find', 'filter', 'keyword search', 'site search'],
   newsletter: ['newsletter', 'subscribe', 'mailing list', 'promo code', 'coupon', 'discount code'],
 };
+
+/** Submission-type aliases — applied after domain knowledge, before generic scoring. */
+export function aliasesForSubmissionType(
+  type: string | null | undefined
+): Partial<Record<FillableRole, string[]>> {
+  switch (String(type ?? '').toUpperCase()) {
+    case 'SOCIAL_BOOKMARK':
+      return {
+        title: ['story title', 'submit story', 'link title'],
+        keywords: ['tags', 'story tags'],
+        description: ['story description'],
+        website: ['story url', 'link url'],
+      };
+    case 'WEB2_ARTICLE':
+    case 'GUEST_POST':
+      return {
+        title: ['article title', 'headline'],
+        article: ['article body', 'post content'],
+        description: ['excerpt', 'summary'],
+        keywords: ['tags'],
+        business_name: ['author', 'guest author'],
+      };
+    case 'PROFILE':
+      return {
+        business_name: ['display name', 'username'],
+        description: ['bio', 'about me', 'profile description'],
+        website: ['profile url'],
+      };
+    default:
+      return {};
+  }
+}

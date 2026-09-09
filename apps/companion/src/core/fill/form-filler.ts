@@ -97,6 +97,7 @@ export interface FillFormOptions {
   debug?: boolean;
   /** Only fill currently visible fields (wizard step) */
   visibleOnly?: boolean;
+  submissionType?: string | null;
 }
 
 function isVisible(el: HTMLElement): boolean {
@@ -123,6 +124,7 @@ export function fillMatchedFields(options: FillFormOptions): FillResult {
 
   const classifications = classifyFields(fields, {
     domainLearning: options.domainLearning,
+    submissionType: options.submissionType,
   });
 
   const details: FillDetail[] = [];
@@ -285,6 +287,7 @@ export function previewClassifications(options: {
   const fields = scanDomFields(scoped.root).filter((f) => isVisible(f.element));
   const classifications = classifyFields(fields, {
     domainLearning: options.domainLearning,
+    submissionType: options.submissionType,
   });
   return { fields, classifications, formReason: scoped.reason };
 }

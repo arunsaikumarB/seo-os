@@ -1,6 +1,7 @@
 /**
  * Companion domain field-mapping knowledge — shared, deterministic, no AI.
  */
+import { BACKLINK_TYPES } from '@seo-os/backlink-builder';
 import { AppError } from '@seo-os/shared';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { logger } from '../../lib/logger.js';
@@ -441,17 +442,7 @@ export async function deleteFieldMapping(input: {
   });
 }
 
-const ALLOWED_SUBMISSION_TYPES = new Set([
-  'BUSINESS_DIRECTORY',
-  'SOCIAL_BOOKMARK',
-  'WEB2_ARTICLE',
-  'PROFILE',
-  'FORUM',
-  'BLOG_COMMENT',
-  'PRESS_RELEASE',
-  'OTHER',
-  'UNKNOWN',
-]);
+const ALLOWED_SUBMISSION_TYPES = new Set<string>(BACKLINK_TYPES);
 
 /** Persist a human correction of domain submission type (e.g. "This is actually Web 2.0 Article"). */
 export async function upsertSubmissionType(input: {

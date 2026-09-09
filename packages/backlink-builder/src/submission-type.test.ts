@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   activeFieldsForSubmissionType,
+  assertPackageProject,
+  buildTypeContentPackage,
   buildTypedContentViews,
   classifySubmissionType,
+  independentDimensions,
   submissionTypeFromStorage,
 } from './submission-type.js';
 import { classifyProbedPage } from './link-probe.js';
@@ -190,5 +193,103 @@ describe('typed content + project isolation', () => {
     expect(submissionTypeFromStorage('directory', 'business_directory')).toBe(
       'BUSINESS_DIRECTORY'
     );
+  });
+});
+
+describe('extended backlink taxonomy', () => {
+  it('classifies local directory citations', () => {
+    const r = classifySubmissionType({
+      labels: ['Business Name', 'Address', 'Phone', 'City', 'ZIP', 'Hours', 'Service Area'],
+      headings: ['Local Business Listing'],
+    });
+    expect(r.submissionType).toBe('LOCAL_DIRECTORY');
+  });
+
+  it('classifies web directory submissions', () => {
+    const r = classifySubmissionType({
+      url: 'https://dir.example/submit-website',
+      labels: ['Website', 'Category', 'Description'],
+      buttons: ['Submit Website'],
+      headings: ['Web Directory'],
+    });
+    expect(r.submissionType).toBe('WEB_DIRECTORY');
+  });
+
+  it('classifies guest posts separately from web 2.0', () => {
+    const r = classifySubmissionType({
+      labels: ['Guest Author', 'Article Title'],
+      headings: ['Write For Us', 'Contributor Guidelines'],
+      buttons: ['Submit Guest Post'],
+    });
+    expect(r.submissionType).toBe('GUEST_POST');
+  });
+
+  it('classifies classified, resource, and Q&A', () => {
+    expect(
+      classifySubmissionType({
+        labels: ['Title', 'Price', 'Location'],
+        buttons: ['Post Ad'],
+        headings: ['Classified'],
+      }).submissionType
+    ).toBe('CLASSIFIED');
+    expect(
+      classifySubmissionType({
+        labels: ['Title', 'URL', 'Description'],
+        buttons: ['Suggest Resource'],
+        headings: ['Add Resource'],
+      }).submissionType
+    ).toBe('RESOURCE_PAGE');
+    expect(
+      classifySubmissionType({
+        labels: ['Question Title', 'Your Answer'],
+        buttons: ['Post Answer'],
+        headings: ['Ask Question'],
+      }).submissionType
+    ).toBe('QA');
+  });
+
+  it('stays UNKNOWN when confidence is too low', () => {
+    const r = classifySubmissionType({
+      labels: ['Search'],
+      buttons: ['Go'],
+      visibleText: 'Welcome to our homepage',
+    });
+    expect(r.submissionType).toBe('UNKNOWN');
+  });
+
+  it('keeps pricing independent of backlink type', () => {
+    const bookmark = independentDimensions({
+      backlinkType: 'SOCIAL_BOOKMARK',
+      confidence: 0.96,
+      listingPricing: 'free',
+    });
+    const paidArticle = independentDimensions({
+      backlinkType: 'WEB2_ARTICLE',
+      confidence: 0.8,
+      listingPricing: 'paid',
+    });
+    expect(bookmark.backlinkType).toBe('SOCIAL_BOOKMARK');
+    expect(bookmark.pricingStatus).toBe('FREE');
+    expect(bookmark.submissionMethod).toBe('FORM');
+    expect(paidArticle.backlinkType).toBe('WEB2_ARTICLE');
+    expect(paidArticle.pricingStatus).toBe('PAID_ONLY');
+    expect(paidArticle.submissionMethod).toBe('ARTICLE_EDITOR');
+  });
+
+  it('refuses content packages from another project', () => {
+    const views = buildTypedContentViews({
+      businessName: 'Logisoft',
+      title: 'Logisoft',
+      url: 'https://logisoft.example',
+    });
+    const pkg = buildTypeContentPackage({
+      projectId: 'proj-logisoft',
+      opportunityId: 'opp-1',
+      backlinkType: 'SOCIAL_BOOKMARK',
+      views,
+    });
+    expect(pkg.projectId).toBe('proj-logisoft');
+    expect(pkg.fields.every((f) => !/desi|chefgaa/i.test(f.value))).toBe(true);
+    expect(() => assertPackageProject(pkg, 'proj-chefgaa')).toThrow(/mismatch/i);
   });
 });

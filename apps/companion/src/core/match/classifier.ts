@@ -10,7 +10,7 @@ import type {
   NormalizedField,
 } from '../types';
 import { CONFIDENCE_FILL_THRESHOLD, FILLABLE_ROLES } from '../types';
-import { FIELD_ALIASES, STRUCTURAL_HINTS } from './aliases';
+import { FIELD_ALIASES, STRUCTURAL_HINTS, aliasesForSubmissionType } from './aliases';
 import {
   bestAliasScore,
   bestResolvedLabelScore,
@@ -211,6 +211,8 @@ export interface ClassifyOptions {
   domainLearning?: DomainLearningHook;
   hostname?: string;
   aliases?: Record<FillableRole, string[]>;
+  /** After domain knowledge; boosts type-specific labels (Story Title, Article Body, …). */
+  submissionType?: string | null;
 }
 
 function matchDirectoryNameAttr(field: NormalizedField): FieldClassification | null {
@@ -285,6 +287,7 @@ export function classifyFields(
   if (options.domainLearning?.getDomainAliases && host) {
     aliases = mergeAliasLists(aliases, options.domainLearning.getDomainAliases(host));
   }
+  aliases = mergeAliasLists(aliases, aliasesForSubmissionType(options.submissionType));
 
   const raw: FieldClassification[] = fields.map((field) => {
     const structural = classifyStructural(field);

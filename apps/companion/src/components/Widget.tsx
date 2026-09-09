@@ -164,6 +164,7 @@ export function Widget() {
         threshold: CONFIDENCE_FILL_THRESHOLD,
         debug,
         visibleOnly: true,
+        submissionType: pkg.backlinkType || pkg.submissionType,
       });
       setSummary(fillResult.summary);
       setMapping(fillResult.summary.mapping ?? computeMappingDiagnostics(fillResult.classifications));
@@ -274,9 +275,14 @@ export function Widget() {
                   ) : null}
                 </p>
               )}
-              {active.submissionType && (
+              {(active.backlinkType || active.submissionType) && (
                 <p className="soc-meta" style={{ marginTop: 4 }}>
-                  Type: <strong>{active.submissionType.replace(/_/g, ' ')}</strong>
+                  Backlink Type:{' '}
+                  <strong>
+                    {(active.backlinkType || active.submissionType || '').replace(/_/g, ' ')}
+                  </strong>
+                  {active.submissionMethod ? ` · ${active.submissionMethod.replace(/_/g, ' ')}` : ''}
+                  {` · ${fieldCount(active)} fields ready`}
                 </p>
               )}
               <p className="soc-meta" style={{ marginTop: 6 }}>

@@ -22,6 +22,8 @@ import {
 import {
   buildTypedContentViews,
   classifySubmissionType,
+  isBacklinkType,
+  inferSubmissionMethod,
   submissionTypeFromStorage,
   type SubmissionType,
 } from './submission-type.js';
@@ -495,6 +497,9 @@ export type AssistedPackagePayload = {
   listingPricing?: ListingPricingKind | null;
   /** Deterministic submission-type intelligence (see submission-type.ts). */
   submissionType?: string | null;
+  /** Alias of submissionType — canonical backlink taxonomy. */
+  backlinkType?: string | null;
+  submissionMethod?: string | null;
   submissionTypeConfidence?: number | null;
   submissionTypeEvidence?: string[] | null;
   typedContent?: Record<string, unknown> | null;
@@ -2707,20 +2712,7 @@ export function buildAssistedPackage(input: {
     buttons: [],
   });
   const submissionType: SubmissionType =
-    (typeFromContent &&
-    [
-      'BUSINESS_DIRECTORY',
-      'SOCIAL_BOOKMARK',
-      'WEB2_ARTICLE',
-      'PROFILE',
-      'FORUM',
-      'BLOG_COMMENT',
-      'PRESS_RELEASE',
-      'OTHER',
-      'UNKNOWN',
-    ].includes(typeFromContent)
-      ? typeFromContent
-      : null) ||
+    (typeFromContent && isBacklinkType(typeFromContent) ? typeFromContent : null) ||
     (typeClassified.submissionTypeConfidence >= 0.35
       ? typeClassified.submissionType
       : submissionTypeFromStorage(null, null));
@@ -2777,6 +2769,11 @@ export function buildAssistedPackage(input: {
     classifierVersion: Number(input.recipe.classifierVersion) || 0,
     listingPricing,
     submissionType,
+    backlinkType: submissionType,
+    submissionMethod: inferSubmissionMethod(submissionType, {
+      url: openUrl,
+      labels: input.recipe.fields.map((f) => f.label ?? ''),
+    }),
     submissionTypeConfidence: typeClassified.submissionTypeConfidence,
     submissionTypeEvidence: typeClassified.submissionTypeEvidence,
     typedContent,
