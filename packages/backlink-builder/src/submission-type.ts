@@ -3,7 +3,7 @@
  * Canonical taxonomy used everywhere — not free-text.
  * Existing `submissionType` fields stay as aliases of BacklinkType.
  */
-export const BACKLINK_TYPES = [
+export const SUBMISSION_TYPES = [
   'WEB_DIRECTORY',
   'BUSINESS_DIRECTORY',
   'LOCAL_DIRECTORY',
@@ -22,10 +22,9 @@ export const BACKLINK_TYPES = [
 ] as const;
 
 /** Canonical enum. Prefer this name in new code. */
-export type BacklinkType = (typeof BACKLINK_TYPES)[number];
+export type BacklinkType = (typeof SUBMISSION_TYPES)[number];
 
-/** @deprecated alias — same values as BacklinkType */
-export const SUBMISSION_TYPES = BACKLINK_TYPES;
+/** Canonical submission / backlink type ids. Do not export as BACKLINK_TYPES — that name is the legacy catalog. */
 export type SubmissionType = BacklinkType;
 
 export const PRICING_STATUSES = ['FREE', 'FREE_AND_PAID', 'PAID_ONLY', 'UNKNOWN'] as const;
@@ -82,7 +81,7 @@ export const BACKLINK_TYPE_FILTERS: Array<{ id: 'ALL' | BacklinkType; label: str
   { id: 'UNKNOWN', label: 'Unknown' },
 ];
 
-const TYPE_SET = new Set<string>(BACKLINK_TYPES);
+const TYPE_SET = new Set<string>(SUBMISSION_TYPES);
 
 export function isBacklinkType(value: string | null | undefined): value is BacklinkType {
   return !!value && TYPE_SET.has(value);

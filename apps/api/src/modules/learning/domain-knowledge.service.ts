@@ -1,7 +1,7 @@
 /**
  * Companion domain field-mapping knowledge — shared, deterministic, no AI.
  */
-import { BACKLINK_TYPES } from '@seo-os/backlink-builder';
+import { SUBMISSION_TYPES } from '@seo-os/backlink-builder';
 import { AppError } from '@seo-os/shared';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { logger } from '../../lib/logger.js';
@@ -442,7 +442,7 @@ export async function deleteFieldMapping(input: {
   });
 }
 
-const ALLOWED_SUBMISSION_TYPES = new Set<string>(BACKLINK_TYPES);
+const ALLOWED_SUBMISSION_TYPES = new Set<string>(SUBMISSION_TYPES);
 
 /** Persist a human correction of domain submission type (e.g. "This is actually Web 2.0 Article"). */
 export async function upsertSubmissionType(input: {
