@@ -216,7 +216,17 @@ async function main() {
   console.log({ API, WORKSPACE_ID, startedAt });
 
   const health = await fetch(`${API}/health`).then((r) => r.json());
-  const queues = await fetch(`${API}/ops/queues`).then((r) => r.json());
+  const opsHeaders = {};
+  if (env.OPS_INTERNAL_TOKEN) {
+    opsHeaders.Authorization = `Bearer ${env.OPS_INTERNAL_TOKEN}`;
+  }
+  const queuesRes = await fetch(`${API}/ops/queues`, { headers: opsHeaders });
+  if (!queuesRes.ok) {
+    throw new Error(
+      `GET /ops/queues failed (${queuesRes.status}). Set OPS_INTERNAL_TOKEN (or call with an org admin JWT).`
+    );
+  }
+  const queues = await queuesRes.json();
   console.log('health', health);
   console.log(
     'queues',

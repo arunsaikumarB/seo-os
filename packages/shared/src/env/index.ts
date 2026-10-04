@@ -26,6 +26,23 @@ export const apiEnvSchema = z.object({
   SENTRY_DSN: z.string().optional(),
   SENTRY_ENVIRONMENT: z.string().optional(),
   OTEL_SERVICE_NAME: z.string().optional(),
+  /**
+   * Reverse-proxy hop count for Express `trust proxy`.
+   * Unset: 1 on production/staging (Railway), off otherwise.
+   * Use a number (`1`). `true` is accepted as one hop, not trust-all.
+   */
+  TRUST_PROXY: z
+    .string()
+    .optional()
+    .transform((v) => {
+      const trimmed = v?.trim();
+      return trimmed ? trimmed : undefined;
+    }),
+  /** Bearer secret for /metrics and /ops/*. Empty is treated as unset. */
+  OPS_INTERNAL_TOKEN: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+    z.string().min(16, 'OPS_INTERNAL_TOKEN must be at least 16 characters').optional()
+  ),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;
@@ -48,6 +65,14 @@ export function parseApiEnv(env: NodeJS.ProcessEnv): ApiEnv {
     // Soft-fail: allow boot but /ready reports degraded (see health.readyHandler)
     console.warn(
       '[seo-os] ENCRYPTION_KEY is not set — integration credentials fall back to a dev key. Set ENCRYPTION_KEY in production.'
+    );
+  }
+  if (
+    (parsed.NODE_ENV === 'production' || parsed.NODE_ENV === 'staging') &&
+    !parsed.OPS_INTERNAL_TOKEN
+  ) {
+    console.warn(
+      '[seo-os] OPS_INTERNAL_TOKEN is not set — /metrics and /ops/* accept org admin JWTs only. Set OPS_INTERNAL_TOKEN for probes and scrapers.'
     );
   }
   return {

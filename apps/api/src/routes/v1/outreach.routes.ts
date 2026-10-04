@@ -239,6 +239,8 @@ outreachRouter.post(
   async (req, res, next) => {
     try {
       const { getSupabaseAdmin } = await import('../../lib/supabase.js');
+      // Service role, tenant-scoped: requireProjectAccess proved this workspace
+      // belongs to the caller's org. The update cannot cross workspaces.
       await getSupabaseAdmin()
         .from('email_accounts')
         .update({ last_inbox_sync_at: new Date().toISOString() })
@@ -265,6 +267,7 @@ outreachRouter.post(
     try {
       const { suggestReplyDraft } = await import('../../modules/integrations/oauth.service.js');
       const { getSupabaseAdmin } = await import('../../lib/supabase.js');
+      // Service role, tenant-scoped to the authorized workspace and this message.
       const { data: msg } = await getSupabaseAdmin()
         .from('outreach_messages')
         .select('subject, body_html')

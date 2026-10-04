@@ -20,6 +20,7 @@ import {
   reviewImageAsset,
 } from '../../modules/image-intelligence/iie.service.js';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
+import { workspaceOrGlobalFilter } from '../../lib/tenant-scope.js';
 
 function param(value: string | string[]): string {
   return Array.isArray(value) ? value[0] : value;
@@ -238,7 +239,10 @@ imageIntelligenceRouter.get(
       const status = typeof req.query.status === 'string' ? req.query.status : undefined;
       res.json({
         data: await listImages(param(req.params.projectId), status),
-        meta: { imageTypes: IMAGE_TYPES, generationEnabled: DEFAULT_FEATURE_FLAGS.v13_image_generation },
+        meta: {
+          imageTypes: IMAGE_TYPES,
+          generationEnabled: DEFAULT_FEATURE_FLAGS.v13_image_generation,
+        },
       });
     } catch (err) {
       next(err);
@@ -354,11 +358,14 @@ imageIntelligenceRouter.get(
   '/images/sites',
   authMiddleware,
   requireRole('viewer'),
-  async (_req, res, next) => {
+  async (req, res, next) => {
     try {
+      // Service role bypasses RLS. Match the table policy: global catalog
+      // (workspace_id null) plus this project, which requireProjectAccess authorized.
       const { data } = await getSupabaseAdmin()
         .from('image_submission_requirements')
         .select('*')
+        .or(workspaceOrGlobalFilter(param(req.params.projectId)))
         .eq('is_active', true)
         .is('deleted_at', null)
         .limit(50);
@@ -421,9 +428,7 @@ imageIntelligenceRouter.get(
           `Verified: ${stats.verified} · Rejected: ${stats.rejected}`,
           `Best provider: ${stats.bestProvider} · Best style: ${stats.bestStyle}`,
           '',
-          ...payload.images.slice(0, 40).map(
-            (i) => `${i.type} · ${i.status} · ${i.provider}`
-          ),
+          ...payload.images.slice(0, 40).map((i) => `${i.type} · ${i.status} · ${i.provider}`),
         ];
         for (const line of lines) {
           page.drawText(line.slice(0, 90), { x: 40, y, size: 10, font });

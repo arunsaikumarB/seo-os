@@ -17,8 +17,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useApi } from '@/hooks/use-api';
+import { useAppStore } from '@/stores/app-store';
 import { ImageGenerationReadinessPanel } from '@/components/images/image-generation-readiness';
-
 
 type OpsHealth = {
   status: string;
@@ -67,26 +67,67 @@ type PerfSnapshot = {
 
 function statusTone(status?: string) {
   if (status === 'ok' || status === 'healthy' || status === 'configured') return 'text-emerald-600';
-  if (status === 'degraded' || status === 'warning' || status === 'missing') return 'text-amber-600';
+  if (status === 'degraded' || status === 'warning' || status === 'missing')
+    return 'text-amber-600';
   if (status === 'down' || status === 'critical') return 'text-destructive';
   return 'text-muted-foreground';
 }
 
+function opsErrorMessage(err: unknown): string {
+  if (typeof err === 'object' && err !== null && 'status' in err) {
+    const status = (err as { status?: number }).status;
+    if (status === 401 || status === 403) {
+      return 'Ops health is limited to organization owners and admins.';
+    }
+  }
+  return 'Unable to load ops health. Check API connectivity and try again.';
+}
+
+const DEMO_OPS_HEALTH: OpsHealth = {
+  status: 'healthy',
+  latencyMs: 42,
+  checks: {
+    application: 'ok',
+    database: 'ok',
+    queue: 'ok',
+    api: 'ok',
+    workers: 'ok',
+  },
+  metrics: {
+    uptimeSec: 3600,
+    requests: 120,
+    errors: 0,
+    avgMs: 40,
+    successRate: 100,
+    pendingJobs: 0,
+  },
+  queues: { critical: 0, agents: 0 },
+  memory: { rssMb: 180, heapUsedMb: 90, heapTotalMb: 140 },
+  providerFramework: { healthy: 2, offline: 0, warning: 0 },
+  environment: { nodeEnv: 'demo', workersEnabled: true, providerMode: 'mvp' },
+  version: 'demo',
+};
+
+const DEMO_PERF: PerfSnapshot = {
+  stages: [],
+  cache: { hits: 0, misses: 0, hitRate: 0, skipRediscovery: 0, earlyCrawlStop: 0 },
+};
+
 export function DiagnosticsPage() {
   const { projectId = '' } = useParams();
   const { request } = useApi();
+  const currentOrgId = useAppStore((s) => s.currentOrgId);
+  const demoMode = useAppStore((s) => s.demoMode);
 
   const ops = useQuery({
-    queryKey: ['ops-health'],
+    queryKey: ['ops-health', currentOrgId, demoMode],
+    enabled: demoMode || !!currentOrgId,
     queryFn: async () => {
-      // Public ops endpoint — no project scope required
-      const base = import.meta.env.VITE_API_URL?.replace(/\/$/, '') ?? '';
-      const res = await fetch(`${base}/ops/health`);
-      if (!res.ok) throw new Error(`Ops health HTTP ${res.status}`);
-      const json = (await res.json()) as { data: OpsHealth };
+      if (demoMode) return DEMO_OPS_HEALTH;
+      const json = await request<{ data: OpsHealth }>('/ops/health');
       return json.data;
     },
-    refetchInterval: 30_000,
+    refetchInterval: demoMode ? false : 30_000,
   });
 
   const flags = useQuery({
@@ -121,15 +162,14 @@ export function DiagnosticsPage() {
   });
 
   const perf = useQuery({
-    queryKey: ['ops-performance'],
+    queryKey: ['ops-performance', currentOrgId, demoMode],
+    enabled: demoMode || !!currentOrgId,
     queryFn: async () => {
-      const base = import.meta.env.VITE_API_URL?.replace(/\/$/, '') ?? '';
-      const res = await fetch(`${base}/ops/performance`);
-      if (!res.ok) throw new Error(`Ops performance HTTP ${res.status}`);
-      const json = (await res.json()) as { data: PerfSnapshot };
+      if (demoMode) return DEMO_PERF;
+      const json = await request<{ data: PerfSnapshot }>('/ops/performance');
       return json.data;
     },
-    refetchInterval: 15_000,
+    refetchInterval: demoMode ? false : 15_000,
   });
 
   const d = ops.data;
@@ -147,12 +187,7 @@ export function DiagnosticsPage() {
             Enterprise health for API, workers, queues, providers, database, and environment.
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={ops.isFetching}
-          onClick={() => ops.refetch()}
-        >
+        <Button variant="outline" size="sm" disabled={ops.isFetching} onClick={() => ops.refetch()}>
           <RefreshCw className="h-3.5 w-3.5 mr-1" /> Refresh
         </Button>
       </div>
@@ -164,9 +199,9 @@ export function DiagnosticsPage() {
             <Gauge className="h-4 w-4" /> Performance
           </CardTitle>
           <CardDescription>
-            Pipeline stage timings (p50 / last). Cache hit rate{' '}
-            {p?.cache?.hitRate ?? 0}% · skip rediscovery {p?.cache?.skipRediscovery ?? 0} · early
-            crawl stop {p?.cache?.earlyCrawlStop ?? 0}
+            Pipeline stage timings (p50 / last). Cache hit rate {p?.cache?.hitRate ?? 0}% · skip
+            rediscovery {p?.cache?.skipRediscovery ?? 0} · early crawl stop{' '}
+            {p?.cache?.earlyCrawlStop ?? 0}
             {p?.browserPool
               ? ` · browser pool ${p.browserPool.headlessConnected ? 'warm' : 'cold'} (${p.browserPool.activeSessions} sessions)`
               : ''}
@@ -194,11 +229,7 @@ export function DiagnosticsPage() {
                   <div key={s.stage} className="rounded-md border px-3 py-2 text-sm">
                     <p className="text-xs text-muted-foreground">{s.label}</p>
                     <p className="tabular-nums font-medium">
-                      {s.count === 0
-                        ? '—'
-                        : s.lastMs != null
-                          ? `${s.lastMs}ms`
-                          : `${s.p50Ms}ms`}
+                      {s.count === 0 ? '—' : s.lastMs != null ? `${s.lastMs}ms` : `${s.p50Ms}ms`}
                     </p>
                     <p className="text-[10px] text-muted-foreground">
                       p50 {s.p50Ms}ms · p95 {s.p95Ms}ms · n={s.count}
@@ -212,10 +243,16 @@ export function DiagnosticsPage() {
 
       {ops.isLoading ? (
         <Skeleton className="h-40 w-full" />
+      ) : !demoMode && !currentOrgId ? (
+        <Card>
+          <CardContent className="pt-6 text-sm text-muted-foreground">
+            Select an organization to view ops health.
+          </CardContent>
+        </Card>
       ) : ops.isError ? (
         <Card>
           <CardContent className="pt-6 text-sm text-destructive">
-            Unable to load ops health. Check API connectivity and try again.
+            {opsErrorMessage(ops.error)}
           </CardContent>
         </Card>
       ) : (
@@ -252,7 +289,10 @@ export function DiagnosticsPage() {
             </CardHeader>
             <CardContent className="grid gap-2 sm:grid-cols-3 text-sm">
               {Object.entries(d?.checks ?? {}).map(([key, value]) => (
-                <div key={key} className="flex items-center justify-between rounded-md border px-3 py-2">
+                <div
+                  key={key}
+                  className="flex items-center justify-between rounded-md border px-3 py-2"
+                >
                   <span className="capitalize flex items-center gap-2">
                     {key === 'database' ? (
                       <Database className="h-3.5 w-3.5" />
@@ -344,7 +384,8 @@ export function DiagnosticsPage() {
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Image Generation Diagnostics</CardTitle>
             <CardDescription>
-              Current Provider · Health · API · Storage · Flags · Worker · Queue · Readiness · Status
+              Current Provider · Health · API · Storage · Flags · Worker · Queue · Readiness ·
+              Status
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">

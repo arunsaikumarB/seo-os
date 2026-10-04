@@ -30,9 +30,9 @@ describe('health routes', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body).toMatchObject({ status: 'ok', service: 'backlink-agent-api' });
 
-    versionHandler({} as Request, res as unknown as Response);
+    await versionHandler({} as Request, res as unknown as Response);
     expect(res.body).toMatchObject({
-      version: '1.2.4-enterprise',
+      version: '1.2.7-queue-init',
       api: 'v1',
     });
   });
