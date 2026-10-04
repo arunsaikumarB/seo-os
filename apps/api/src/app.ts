@@ -18,10 +18,21 @@ import {
 import { v1Router } from './routes/v1/index.js';
 import { rateLimit } from './middleware/rateLimit.js';
 import { metricsMiddleware } from './middleware/metrics.js';
+import { requireOpsAccess } from './middleware/ops-auth.js';
+import { resolveTrustProxy } from './lib/trust-proxy.js';
 
 export function createApp() {
   const env = getEnv();
   const app = express();
+  // One Railway hop by default in production so req.ip is the client, not the proxy.
+  app.set(
+    'trust proxy',
+    resolveTrustProxy({
+      nodeEnv: env.NODE_ENV,
+      raw: env.TRUST_PROXY,
+      railwayEnvironment: process.env.RAILWAY_ENVIRONMENT,
+    })
+  );
 
   // cross-origin so the Netlify SPA can read API responses (default helmet CORP is same-origin).
   app.use(
@@ -59,10 +70,10 @@ export function createApp() {
 
   app.get('/health', healthHandler);
   app.get('/ready', readyHandler);
-  app.get('/metrics', metricsHandler);
-  app.get('/ops/health', opsHealthHandler);
-  app.get('/ops/queues', opsQueuesHandler);
-  app.get('/ops/performance', opsPerformanceHandler);
+  app.get('/metrics', requireOpsAccess(), metricsHandler);
+  app.get('/ops/health', requireOpsAccess(), opsHealthHandler);
+  app.get('/ops/queues', requireOpsAccess(), opsQueuesHandler);
+  app.get('/ops/performance', requireOpsAccess(), opsPerformanceHandler);
   app.get('/v1/version', versionHandler);
 
   app.use('/v1', v1Router);

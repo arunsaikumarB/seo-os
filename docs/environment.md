@@ -19,22 +19,24 @@ cp apps/web/.env.example apps/web/.env
 
 ## API Variables (`apps/api/.env`)
 
-| Variable                    | Required | Default                 | Description                                          |
-| --------------------------- | -------- | ----------------------- | ---------------------------------------------------- |
-| `NODE_ENV`                  | No       | `development`           | `development` \| `test` \| `staging` \| `production` |
-| `PORT`                      | No       | `3001`                  | HTTP listen port                                     |
-| `API_URL`                   | No       | —                       | Public API URL (deploy)                              |
-| `SUPABASE_URL`              | **Yes**  | —                       | `https://<ref>.supabase.co`                          |
-| `SUPABASE_ANON_KEY`         | **Yes**  | —                       | Supabase anon key                                    |
-| `SUPABASE_SERVICE_ROLE_KEY` | **Yes**  | —                       | Server only — never expose to web                    |
-| `SUPABASE_JWT_SECRET`       | **Yes**  | —                       | JWT verification secret                              |
-| `DATABASE_URL`              | **Yes**  | —                       | Postgres connection string                           |
-| `CORS_ORIGIN`               | No       | `http://localhost:5173` | Comma-separated allowed origins                      |
-| `ENCRYPTION_KEY`            | No       | —                       | 32-byte hex (Sprint 7+)                              |
-| `GEMINI_API_KEY`            | No       | —                       | AI provider (Sprint 4+)                              |
-| `OLLAMA_BASE_URL`           | No       | —                       | Local AI fallback URL                                |
-| `PROVIDER_MODE`             | No       | `mvp`                   | `mvp` \| `free` \| `paid`                            |
-| `ENABLE_WORKERS`            | No       | `false`                 | Enable pg-boss workers                               |
+| Variable                    | Required | Default                 | Description                                                                                          |
+| --------------------------- | -------- | ----------------------- | ---------------------------------------------------------------------------------------------------- |
+| `NODE_ENV`                  | No       | `development`           | `development` \| `test` \| `staging` \| `production`                                                 |
+| `PORT`                      | No       | `3001`                  | HTTP listen port                                                                                     |
+| `API_URL`                   | No       | —                       | Public API URL (deploy)                                                                              |
+| `SUPABASE_URL`              | **Yes**  | —                       | `https://<ref>.supabase.co`                                                                          |
+| `SUPABASE_ANON_KEY`         | **Yes**  | —                       | Supabase anon key                                                                                    |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Yes**  | —                       | Server only — never expose to web                                                                    |
+| `SUPABASE_JWT_SECRET`       | **Yes**  | —                       | JWT verification secret                                                                              |
+| `DATABASE_URL`              | **Yes**  | —                       | Postgres connection string                                                                           |
+| `CORS_ORIGIN`               | No       | `http://localhost:5173` | Comma-separated allowed origins                                                                      |
+| `ENCRYPTION_KEY`            | No       | —                       | 32-byte hex (Sprint 7+)                                                                              |
+| `GEMINI_API_KEY`            | No       | —                       | AI provider (Sprint 4+)                                                                              |
+| `OLLAMA_BASE_URL`           | No       | —                       | Local AI fallback URL                                                                                |
+| `PROVIDER_MODE`             | No       | `mvp`                   | `mvp` \| `free` \| `paid`                                                                            |
+| `ENABLE_WORKERS`            | No       | `false`                 | Enable pg-boss workers                                                                               |
+| `OPS_INTERNAL_TOKEN`        | No       | —                       | Bearer for `/metrics` and `/ops/*` (min 16 chars). Org admin JWTs also work. `/health` stays public. |
+| `TRUST_PROXY`               | No       | `1` in prod/staging     | Express proxy hops so rate limits use the client IP. `1` on Railway.                                 |
 
 ### Local Supabase CLI
 

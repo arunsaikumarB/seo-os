@@ -3,16 +3,19 @@ import type { Request, Response, NextFunction } from 'express';
 /** Simple in-memory sliding-window rate limiter (per IP + path prefix). */
 const buckets = new Map<string, { count: number; resetAt: number }>();
 
-export function rateLimit(opts: {
-  windowMs?: number;
-  max?: number;
-  keyPrefix?: string;
-} = {}) {
+export function rateLimit(
+  opts: {
+    windowMs?: number;
+    max?: number;
+    keyPrefix?: string;
+  } = {}
+) {
   const windowMs = opts.windowMs ?? 60_000;
   const max = opts.max ?? 120;
   const keyPrefix = opts.keyPrefix ?? 'global';
 
   return (req: Request, res: Response, next: NextFunction) => {
+    // req.ip follows `trust proxy` (see createApp). Do not read X-Forwarded-For here.
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
     const key = `${keyPrefix}:${ip}`;
     const now = Date.now();

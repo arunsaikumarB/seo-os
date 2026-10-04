@@ -117,6 +117,8 @@ v1Router.get('/me', jwtOnlyMiddleware, async (req, res, next) => {
     const { userId } = (req as AuthenticatedRequest).auth;
     const profile = await getProfile(userId);
 
+    // Service role is safe here: jwtOnlyMiddleware verified the subject, and the
+    // query is limited to that user. No org header exists yet on first login.
     const { data: memberships } = await getSupabaseAdmin()
       .from('org_members')
       .select('role, org_id, organizations(id, name, slug, industry, plan)')

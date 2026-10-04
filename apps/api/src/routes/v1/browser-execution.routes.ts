@@ -1095,6 +1095,7 @@ browserExecutionRouter.get(
   async (req, res, next) => {
     try {
       requireBee();
+      // Service role, tenant-scoped: requireProjectAccess authorized this workspace.
       const { data } = await getSupabaseAdmin()
         .from('execution_profiles')
         .select('*')

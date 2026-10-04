@@ -25,5 +25,29 @@ describe('api env parsing', () => {
       ENABLE_WORKERS: 'false',
     });
     expect(env.SENTRY_DSN).toContain('sentry.io');
+    expect(env.OPS_INTERNAL_TOKEN).toBeUndefined();
+    expect(env.TRUST_PROXY).toBeUndefined();
+  });
+
+  it('accepts an ops token and treats a blank one as unset', () => {
+    const base = {
+      SUPABASE_URL: 'https://example.supabase.co',
+      SUPABASE_ANON_KEY: 'anon',
+      SUPABASE_SERVICE_ROLE_KEY: 'service',
+      SUPABASE_JWT_SECRET: 'jwt-secret-value',
+      DATABASE_URL: 'postgres://localhost/seo',
+      NODE_ENV: 'test',
+      ENABLE_WORKERS: 'false',
+    };
+    expect(parseApiEnv({ ...base, OPS_INTERNAL_TOKEN: '  ' }).OPS_INTERNAL_TOKEN).toBeUndefined();
+    expect(
+      parseApiEnv({ ...base, OPS_INTERNAL_TOKEN: '0123456789abcdef', TRUST_PROXY: '1' })
+    ).toMatchObject({
+      OPS_INTERNAL_TOKEN: '0123456789abcdef',
+      TRUST_PROXY: '1',
+    });
+    expect(() => parseApiEnv({ ...base, OPS_INTERNAL_TOKEN: 'short' })).toThrow(
+      /OPS_INTERNAL_TOKEN/
+    );
   });
 });
