@@ -189,7 +189,7 @@ class LiveKeywordStub extends BaseKeywordProvider {
       const r = await est.searchVolume(keyword);
       return {
         data: r.data,
-        meta: { ...r.meta, provider: this.key, isEstimated: false, dataSource: 'live' as const, cost: 'paid' as const },
+        meta: { ...r.meta, provider: this.key, isEstimated: true, dataSource: 'estimated' as const, cost: 'free' as const },
       };
     });
   }
@@ -199,7 +199,7 @@ class LiveKeywordStub extends BaseKeywordProvider {
     const r = await est.difficulty(keyword);
     return {
       data: r.data,
-      meta: { provider: this.key, isEstimated: false, dataSource: 'live' as const, cost: 'paid' as const },
+      meta: { provider: this.key, isEstimated: true, dataSource: 'estimated' as const, cost: 'free' as const },
     };
   }
   async competition(keyword: string) {
@@ -207,7 +207,7 @@ class LiveKeywordStub extends BaseKeywordProvider {
     const r = await new EstimatedKeywordProvider().competition(keyword);
     return {
       data: r.data,
-      meta: { provider: this.key, isEstimated: false, dataSource: 'live' as const, cost: 'paid' as const },
+      meta: { provider: this.key, isEstimated: true, dataSource: 'estimated' as const, cost: 'free' as const },
     };
   }
   async cpc(keyword: string) {
@@ -215,15 +215,15 @@ class LiveKeywordStub extends BaseKeywordProvider {
     const r = await new EstimatedKeywordProvider().cpc(keyword);
     return {
       data: r.data,
-      meta: { provider: this.key, isEstimated: false, dataSource: 'live' as const, cost: 'paid' as const },
+      meta: { provider: this.key, isEstimated: true, dataSource: 'estimated' as const, cost: 'free' as const },
     };
   }
   async relatedKeywords(seed: string) {
     this.requireLive();
     const r = await new EstimatedKeywordProvider().relatedKeywords(seed);
     return {
-      data: r.data.map((x) => ({ ...x, isEstimated: false })),
-      meta: { provider: this.key, isEstimated: false, dataSource: 'live' as const, cost: 'paid' as const },
+      data: r.data.map((x) => ({ ...x, isEstimated: true })),
+      meta: { provider: this.key, isEstimated: true, dataSource: 'estimated' as const, cost: 'free' as const },
     };
   }
   async longTailKeywords(seed: string) {
@@ -245,8 +245,8 @@ class LiveKeywordStub extends BaseKeywordProvider {
     this.requireLive();
     const r = await new EstimatedKeywordProvider().getRankings(domain, keywords);
     return {
-      data: r.data.map((x) => ({ ...x, isEstimated: false })),
-      meta: { provider: this.key, isEstimated: false, dataSource: 'live' as const, cost: 'paid' as const },
+      data: r.data.map((x) => ({ ...x, isEstimated: true })),
+      meta: { provider: this.key, isEstimated: true, dataSource: 'estimated' as const, cost: 'free' as const },
     };
   }
 }

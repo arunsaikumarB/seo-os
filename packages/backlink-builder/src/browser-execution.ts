@@ -317,7 +317,7 @@ export function mapAssetsToFields(
   const merged: AssetMapping = { ...assets, ...((overrides.assets as AssetMapping) ?? {}) };
 
   for (const control of controls) {
-    const key = control.name.toLowerCase().replace(/[\[\]]/g, '');
+    const key = control.name.toLowerCase().replace(/\[|\]/g, '');
     const alias = FIELD_ALIASES[key];
     if (alias && merged[alias] != null) {
       mapped[control.name] = merged[alias];

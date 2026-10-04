@@ -228,7 +228,12 @@ const FORM_SIGNAL_TESTS: Array<{
   {
     id: 'form_tag',
     kind: 'dom',
-    test: (h) => /<form[\s\S]{40,}?<\/form>/i.test(h),
+    test: (h) => {
+      if (!/<form[\s\S]{40,}?<\/form>/i.test(h)) return false;
+      // Password walls without a message box are login forms, not contact forms.
+      if (/type=["']password["']/i.test(h) && !/<textarea\b/i.test(h)) return false;
+      return true;
+    },
     detail: 'HTML form',
   },
   {
@@ -566,7 +571,7 @@ export function detectContactFormAntiSpam(html: string): ContactFormAntiSpam {
   const turnstile = /cf-turnstile|challenges\.cloudflare\.com\/turnstile/i.test(html);
   const recaptcha = /g-recaptcha|recaptcha\/api|google\.com\/recaptcha/i.test(html);
   const hcaptcha = /h-captcha|hcaptcha\.com/i.test(html);
-  const mathCaptcha = /what\s+is\s+\d+\s*[\+\-\*]\s*\d+|math.?captcha|captcha.?math/i.test(html);
+  const mathCaptcha = /what\s+is\s+\d+\s*[-+*]\s*\d+|math.?captcha|captcha.?math/i.test(html);
   const timeCheck = /time.?check|form.?timer|min.?submit.?time|data-start-time/i.test(html);
   const jsValidation = /novalidate|parsley|jquery\.validate|wpforms-validate|gform_validation/i.test(
     html
@@ -968,6 +973,24 @@ export function enrichWithContactFormIntelligence(params: {
     attachments: knowledge.attachments,
     antiSpam: knowledge.antiSpam,
   });
+  const keepIncoming =
+    selected.strategy === 'Unsupported' &&
+    [
+      'Direct Submission Form',
+      'Guest Post',
+      'Comment Posting',
+      'Platform Form',
+      'Dashboard Submission',
+      'Registration Strategy',
+    ].includes(params.strategy.chosen);
+  if (keepIncoming) {
+    return {
+      fingerprint,
+      pageClassifications: params.pageClassifications,
+      strategy: params.strategy,
+      contactForm: knowledge,
+    };
+  }
   knowledge.workflow = selected.strategy;
   knowledge.messageTemplate =
     selected.suitable && selected.strategy !== 'Unsupported'

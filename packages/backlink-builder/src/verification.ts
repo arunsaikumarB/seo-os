@@ -104,3 +104,37 @@ export function inspectBacklinkHtml(
     htmlSnippet: html.slice(0, 500),
   };
 }
+
+/**
+ * Delays before the next real HTTP check, indexed by the attempt that just finished.
+ * Attempt 0 is the first check (scheduled immediately by the worker). Each miss waits
+ * 15m, then 1h, 6h, 24h. After that, a still-missing link stays pending (moderation).
+ * Broken / unreachable / redirected links are marked lost only after the same retries.
+ */
+export const VERIFICATION_RETRY_DELAYS_SECONDS = [
+  15 * 60,
+  60 * 60,
+  6 * 60 * 60,
+  24 * 60 * 60,
+] as const;
+
+export function verificationFollowUp(input: {
+  outcome: HttpVerificationResult['outcome'];
+  attempt: number;
+}): {
+  action: 'verified' | 'retry' | 'pending' | 'lost';
+  nextAttempt?: number;
+  startAfterSeconds?: number;
+} {
+  if (input.outcome === 'verified') return { action: 'verified' };
+  const delay = VERIFICATION_RETRY_DELAYS_SECONDS[input.attempt];
+  if (delay != null) {
+    return {
+      action: 'retry',
+      nextAttempt: input.attempt + 1,
+      startAfterSeconds: delay,
+    };
+  }
+  if (input.outcome === 'pending') return { action: 'pending' };
+  return { action: 'lost' };
+}

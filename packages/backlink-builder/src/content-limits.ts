@@ -110,9 +110,9 @@ export function dedupeContentFields(input: {
   flagged: string[];
 } {
   const flagged: string[] = [];
-  let title = String(input.title ?? '').trim();
+  const title = String(input.title ?? '').trim();
   let shortDescription = fitDescriptionToCap(input.shortDescription).value;
-  let longDescription = fitDescriptionToCap(input.longDescription).value;
+  const longDescription = fitDescriptionToCap(input.longDescription).value;
   let metaDescription = fitMetaDescription(input.metaDescription ?? shortDescription);
 
   if (textsAreRepetitive(shortDescription, longDescription)) {

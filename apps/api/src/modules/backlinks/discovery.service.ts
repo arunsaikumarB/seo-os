@@ -84,21 +84,30 @@ export async function runDiscoverWebsites(
         recommended_action: c.recommendedAction,
         ai_recommendation: c.recommendedAction,
         discovery_source: 'ai_discover',
-        authority_estimated: true,
-        traffic_estimated: true,
-        metrics_source: 'estimated',
+        authority_estimated: c.metricsSource === 'estimated',
+        traffic_estimated: c.metricsSource === 'estimated',
+        metrics_source: c.metricsSource,
         queue_status: 'pending_review',
         metadata: {
           discovery_run_id: runId,
           match_reasons: c.matchReasons,
           difficulty: c.difficulty,
-          estimated: true,
-          metrics_labels: {
-            domain_rating: 'Estimated',
-            monthly_traffic: 'Estimated',
-            success_probability: 'Estimated',
-            difficulty: 'Estimated',
-          },
+          estimated: c.metricsSource === 'estimated',
+          metrics_unknown: c.metricsSource === 'unknown',
+          metrics_labels:
+            c.metricsSource === 'unknown'
+              ? {
+                  domain_rating: 'Unknown',
+                  monthly_traffic: 'Unknown',
+                  success_probability: 'Unknown',
+                  difficulty: 'Unknown',
+                }
+              : {
+                  domain_rating: 'Estimated',
+                  monthly_traffic: 'Estimated',
+                  success_probability: 'Estimated',
+                  difficulty: 'Estimated',
+                },
         },
       });
       created++;
@@ -108,7 +117,9 @@ export async function runDiscoverWebsites(
       candidates: safe.length,
       created,
       skippedDuplicates: safe.length - created,
-      metricsSource: 'estimated',
+      metricsSource: safe.some((c) => c.metricsSource === 'unknown')
+        ? 'mixed'
+        : (safe[0]?.metricsSource ?? 'estimated'),
     };
 
     await getSupabaseAdmin()

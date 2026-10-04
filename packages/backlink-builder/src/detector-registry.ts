@@ -87,18 +87,32 @@ function countPasswordInputs(html: string): number {
   return (html.match(/<input[^>]*\btype=["']password["'][^>]*>/gi) ?? []).length;
 }
 
+/** Listing fields that distinguish a directory/citation form from an auth wall. */
+const LISTING_FIELD_RE =
+  /<(?:textarea|input|select)[^>]*(?:name|id|placeholder|aria-label)=["'][^"']*(title|description|listing|company|website|url|business)[^"']*["']/i;
+
 /** True when a fillable non-auth submission form appears to be present. */
 export function hasFillableSubmissionForm(html: string): boolean {
   if (!DETECTOR_CONFIG.submissionForm.test(html)) return false;
-  // Login-only pages shouldn't count
-  if (
+  const listingField = LISTING_FIELD_RE.test(html);
+  const authWall =
     DETECTOR_CONFIG.passwordInput.test(html) &&
-    DETECTOR_CONFIG.loginHeading.test(html) &&
-    !/title|description|listing|company/i.test(html)
-  ) {
-    return false;
-  }
+    (DETECTOR_CONFIG.loginHeading.test(html) ||
+      DETECTOR_CONFIG.loginCta.test(html) ||
+      /action=["'][^"']*\/(?:login|signin|sign-in)/i.test(html));
+  // Password + sign-in, with no listing fields, is not a submission form.
+  if (authWall && !listingField) return false;
   return true;
+}
+
+/**
+ * reCAPTCHA / hCaptcha / Turnstile widgets and Cloudflare interstitials
+ * always block auto-submit. Text that merely says "captcha" does not.
+ */
+export function shouldBlockAutoSubmit(html: string): 'captcha' | 'cloudflare' | null {
+  if (DETECTOR_CONFIG.captchaWidget.test(html)) return 'captcha';
+  if (DETECTOR_CONFIG.cloudflareMarkers.test(html)) return 'cloudflare';
+  return null;
 }
 
 /**
@@ -149,21 +163,11 @@ export function isObstacleBlocking(
     if (!DETECTOR_CONFIG.captchaWidget.test(html)) {
       return { blocking: false, signals };
     }
-    // Widget attached to a submission form, or page has no fillable listing form
-    const forms = html.match(/<form[\s\S]*?<\/form>/gi) ?? [];
-    const attached = forms.some(
-      (f) =>
-        DETECTOR_CONFIG.captchaWidget.test(f) &&
-        /(type=["']submit["']|submit|title|description|listing|company)/i.test(f)
-    );
-    if (attached || !fillable) {
-      signals.push(signal('blocking_captcha_widget', 'blocking', 'CAPTCHA gates the form'));
-      return { blocking: true, signals };
-    }
+    // Any real widget blocks. A long form next to reCAPTCHA must not be clicked through.
     signals.push(
-      signal('captcha_widget_non_blocking', 'blocking', 'Widget present but not attached to target form')
+      signal('blocking_captcha_widget', 'blocking', 'CAPTCHA widget present — never auto-submit')
     );
-    return { blocking: false, signals };
+    return { blocking: true, signals };
   }
 
   // MFA / email / phone / approval — presence of flow is the block

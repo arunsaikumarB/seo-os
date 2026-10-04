@@ -749,6 +749,108 @@ export async function runBeeExecutionJob(data: {
   }
 }
 
+/**
+ * After a real submit: store a pending backlink and enqueue runVerificationCheck.
+ * The job stays waiting_verification until the checker finds the link on the page.
+ */
+async function scheduleRealVerification(input: {
+  workspaceId: string;
+  jobId: string;
+  job: {
+    opportunity_id?: string | null;
+    site_domain?: string | null;
+  };
+  plan: { mapping?: Record<string, unknown> };
+  runtime: { capture: (label: string) => Promise<{ url?: string }> };
+}): Promise<void> {
+  const { workspaceId, jobId, job, plan, runtime } = input;
+  let sourceUrl = '';
+  try {
+    const cap = await runtime.capture('verify_source');
+    sourceUrl = String(cap.url ?? '');
+  } catch {
+    sourceUrl = '';
+  }
+
+  const canonical = (plan.mapping?.__canonical ?? {}) as Record<string, unknown>;
+  const targetUrl = canonical.landingPage ? String(canonical.landingPage) : '';
+  const anchorText = canonical.anchorText ? String(canonical.anchorText) : undefined;
+
+  let domain = String(job.site_domain ?? '');
+  let backlinkType = 'directory';
+  let opportunityUrl = '';
+  if (job.opportunity_id) {
+    const { data: opp } = await getSupabaseAdmin()
+      .from('opportunities')
+      .select('url, domain, opportunity_type')
+      .eq('id', job.opportunity_id)
+      .maybeSingle();
+    if (opp) {
+      opportunityUrl = String(opp.url ?? '');
+      domain = domain || String(opp.domain ?? '');
+      if (opp.opportunity_type) backlinkType = String(opp.opportunity_type);
+    }
+  }
+  if (!sourceUrl) sourceUrl = opportunityUrl;
+  if (!domain) {
+    try {
+      domain = new URL(sourceUrl).hostname.replace(/^www\./, '');
+    } catch {
+      domain = 'unknown';
+    }
+  }
+
+  let backlinkId = '';
+  if (job.opportunity_id) {
+    const { data: existing } = await getSupabaseAdmin()
+      .from('backlinks')
+      .select('id')
+      .eq('workspace_id', workspaceId)
+      .eq('opportunity_id', job.opportunity_id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existing?.id) backlinkId = String(existing.id);
+  }
+
+  if (!backlinkId) {
+    backlinkId = randomUUID();
+    const { error } = await getSupabaseAdmin()
+      .from('backlinks')
+      .insert({
+        id: backlinkId,
+        workspace_id: workspaceId,
+        opportunity_id: job.opportunity_id ? String(job.opportunity_id) : null,
+        backlink_type: backlinkType,
+        source_url: sourceUrl || opportunityUrl || `https://${domain}`,
+        target_url: targetUrl || null,
+        anchor_text: anchorText ?? null,
+        domain,
+        verification_status: 'pending',
+      });
+    if (error) throw error;
+  }
+
+  await appendLog(workspaceId, jobId, 'info', 'Verification scheduled — link not marked verified', {
+    backlinkId,
+    sourceUrl,
+    targetUrl,
+  });
+  await updateJob(jobId, { status: 'waiting_verification' });
+  await enqueueJob(
+    QUEUES.CRAWL,
+    'backlink_verify',
+    {
+      type: 'backlink_verify',
+      workspaceId,
+      backlinkId,
+      attempt: 0,
+      executionJobId: jobId,
+    },
+    { singletonKey: `verify-${backlinkId}-0`, startAfter: 0 }
+  );
+}
+
 async function runBeeExecutionJobInner(
   data: {
     jobId: string;
@@ -1081,7 +1183,8 @@ async function runBeeExecutionJobInner(
                 g === 'phone_verify' ||
                 g === 'login' ||
                 g === 'signup' ||
-                g === 'category'
+                g === 'category' ||
+                g === 'cloudflare'
               ) {
                 await pauseForGate({
                   workspaceId,
@@ -1323,16 +1426,20 @@ async function runBeeExecutionJobInner(
           }
         } else if (action === 'verify') {
           await withStageTimeout('verify', async () => {
-            await appendLog(workspaceId, jobId, 'info', 'Verification Scheduled', {});
-            await updateJob(jobId, { status: 'waiting_verification' });
-            await enqueueJob(QUEUES.CRAWL, 'backlink_verify', {
-              type: 'backlink_reverify_hint',
+            await scheduleRealVerification({
               workspaceId,
-              opportunityId: job.opportunity_id,
-              executionJobId: jobId,
+              jobId,
+              job,
+              plan,
+              runtime,
             });
-            await updateJob(jobId, { status: 'verified' });
           });
+          await updateStep(jobId, step.step_index, {
+            status: 'done',
+            finished_at: new Date().toISOString(),
+          });
+          // Leave the job in waiting_verification. Do not fall through to completed.
+          return;
         } else if (action === 'login') {
           let gate: NonNullable<ExecutionGate> = 'login';
           let ctx: Record<string, unknown> = {
@@ -1448,6 +1555,23 @@ async function runBeeExecutionJobInner(
         .eq('id', sessionId);
       // Keep runtime disposed but storage in DB for next job on same domain
       await disposeSessionRuntime(sessionId);
+    }
+
+    const { data: latestJob } = await getSupabaseAdmin()
+      .from('execution_jobs')
+      .select('status')
+      .eq('id', jobId)
+      .maybeSingle();
+    const held = String(latestJob?.status ?? '');
+    if (
+      held === 'waiting_verification' ||
+      held === 'verified' ||
+      held === 'needs_approval' ||
+      held === 'paused' ||
+      held.startsWith('watching') ||
+      held.startsWith('blocked_')
+    ) {
+      return;
     }
 
     await updateJob(jobId, {

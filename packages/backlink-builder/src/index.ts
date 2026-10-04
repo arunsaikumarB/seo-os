@@ -11,6 +11,8 @@ export * from './opportunity-classifier.js';
 export * from './qualification.js';
 export * from './content-generator.js';
 export * from './discovery.js';
+export * from './form-fill.js';
+export * from './data/directory-citation-sources.js';
 export * from './keyword-engine.js';
 export * from './submission-estimates.js';
 export * from './queue-stages.js';

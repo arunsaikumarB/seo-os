@@ -202,14 +202,14 @@ class SearchAdapter implements SearchWebProvider {
   health() {
     return healthFromEnv(this.envKey);
   }
-  async webSearch(query: string, options?: { limit?: number }) {
+  async webSearch(
+    _query: string,
+    _options?: { limit?: number }
+  ): Promise<Array<{ title: string; url: string; snippet: string }>> {
     if (!process.env[this.envKey]) throw new Error(`${this.displayName} not configured`);
-    const limit = options?.limit ?? 5;
-    return Array.from({ length: limit }, (_, i) => ({
-      title: `${query} — ${this.displayName} ${i + 1}`,
-      url: `https://search.example/${encodeURIComponent(query)}/${i + 1}`,
-      snippet: `Live search result via ${this.displayName}`,
-    }));
+    throw new Error(
+      `${this.displayName} is not wired to a live search API — refusing to invent results`
+    );
   }
 }
 

@@ -284,7 +284,6 @@ export async function analyzeDomainLive(
   let fetchStatusCode: number | undefined;
   let homepageReachable = false;
   let metricsSource: 'estimated' | 'live' = 'estimated';
-  let websiteSignals: WebsiteInspectionSignals | undefined;
   let htmlRaw = '';
 
   // Company hosts often block outbound HTTPS — keep timeouts short and fall back to estimated.
@@ -441,7 +440,7 @@ export async function analyzeDomainLive(
 
   const fetchOk =
     homepageReachable && Boolean(htmlRaw) && (fetchStatusCode == null || fetchStatusCode < 400);
-  websiteSignals = extractWebsiteSignals(htmlRaw || '<html></html>', {
+  const websiteSignals = extractWebsiteSignals(htmlRaw || '<html></html>', {
     robotsOk: robotsTxtStatus === 'found',
     sitemapFound,
     fetchOk,

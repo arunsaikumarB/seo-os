@@ -54,6 +54,24 @@ describe('Provider Integration Framework', () => {
     expect(result.attempted.length).toBeGreaterThan(0);
   });
 
+  it('does not label hashed provider data as live when a key is present', async () => {
+    process.env.KEYWORD_DATAFORSEO_KEY = 'fake-key';
+    process.env.AUTHORITY_AHREFS_KEY = 'fake-key';
+    try {
+      const { DataForSEOKeywordProvider } = await import('./keyword.js');
+      const { AhrefsAuthorityProvider } = await import('./authority.js');
+      const vol = await DataForSEOKeywordProvider.searchVolume('seo tools');
+      expect(vol.meta.isEstimated).toBe(true);
+      expect(vol.meta.dataSource).toBe('estimated');
+      const da = await AhrefsAuthorityProvider.domainAuthority('example.com');
+      expect(da.meta.isEstimated).toBe(true);
+      expect(da.meta.dataSource).toBe('estimated');
+    } finally {
+      delete process.env.KEYWORD_DATAFORSEO_KEY;
+      delete process.env.AUTHORITY_AHREFS_KEY;
+    }
+  });
+
   it('enable/disable is hot-swappable', () => {
     resetProviderManager();
     const mgr = getProviderManager();

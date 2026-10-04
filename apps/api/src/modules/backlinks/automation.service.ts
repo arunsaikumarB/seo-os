@@ -15,6 +15,7 @@ import {
   extractUrlsFromText,
   generateContent,
   inspectBacklinkHtml,
+  verificationFollowUp,
   buildPrefillPayload,
   estimateApprovalHours,
   estimateReviewHours,
@@ -1763,7 +1764,11 @@ export async function updateSubmissionStatus(
   return data;
 }
 
-export async function runVerificationCheck(workspaceId: string, backlinkId: string) {
+export async function runVerificationCheck(
+  workspaceId: string,
+  backlinkId: string,
+  opts?: { attempt?: number; executionJobId?: string }
+) {
   const { data: bl } = await getSupabaseAdmin()
     .from('backlinks')
     .select('*')
@@ -1836,19 +1841,64 @@ export async function runVerificationCheck(workspaceId: string, backlinkId: stri
       },
     });
 
-  if (result.outcome === 'verified') {
+  const attempt = Number.isFinite(opts?.attempt) ? Number(opts?.attempt) : 0;
+  const follow = verificationFollowUp({ outcome: result.outcome, attempt });
+
+  if (follow.action === 'verified') {
     await getSupabaseAdmin()
       .from('backlinks')
       .update({ verification_status: 'verified', verified_at: new Date().toISOString() })
       .eq('id', backlinkId);
-  } else if (result.outcome === 'broken' || result.outcome === 'unreachable' || result.outcome === 'redirected') {
+    if (opts?.executionJobId) {
+      await getSupabaseAdmin()
+        .from('execution_jobs')
+        .update({
+          status: 'verified',
+          finished_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', opts.executionJobId)
+        .eq('workspace_id', workspaceId);
+    }
+  } else if (follow.action === 'retry' && follow.nextAttempt != null && follow.startAfterSeconds != null) {
+    await enqueueJob(
+      QUEUES.CRAWL,
+      'backlink_verify',
+      {
+        type: 'backlink_verify',
+        workspaceId,
+        backlinkId,
+        attempt: follow.nextAttempt,
+        executionJobId: opts?.executionJobId,
+      },
+      {
+        singletonKey: `verify-${backlinkId}-${follow.nextAttempt}`,
+        startAfter: follow.startAfterSeconds,
+      }
+    );
+  } else if (follow.action === 'lost') {
     await getSupabaseAdmin()
       .from('backlinks')
-      .update({ verification_status: result.outcome === 'redirected' ? 'unreachable' : 'lost' })
+      .update({
+        verification_status: result.outcome === 'redirected' ? 'unreachable' : 'lost',
+      })
       .eq('id', backlinkId);
+    if (opts?.executionJobId) {
+      await getSupabaseAdmin()
+        .from('execution_jobs')
+        .update({
+          status: 'failed',
+          error_code: 'LINK_NOT_VERIFIED',
+          error_message: `Link check finished as ${result.outcome} after retries`,
+          finished_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', opts.executionJobId)
+        .eq('workspace_id', workspaceId);
+    }
   }
 
-  return { checkId, outcome: result.outcome, backlinkId, details: result };
+  return { checkId, outcome: result.outcome, backlinkId, details: result, follow };
 }
 
 export async function enqueueVerificationCheck(workspaceId: string, backlinkId: string) {

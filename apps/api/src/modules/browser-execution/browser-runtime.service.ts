@@ -2,7 +2,13 @@
  * BrowserExecutionService — Playwright runtime for BEE.
  * Never bypasses CAPTCHA/MFA/email/phone/login. Pauses and returns gate reason.
  */
-import { detectInterventionSignals, type DetectedInterventionGate } from '@seo-os/backlink-builder';
+import {
+  detectInterventionSignals,
+  findSubmitSelector,
+  planFormFill,
+  shouldBlockAutoSubmit,
+  type DetectedInterventionGate,
+} from '@seo-os/backlink-builder';
 import { logger } from '../../lib/logger.js';
 
 export type BrowserMode = 'headless' | 'headed';
@@ -39,7 +45,7 @@ let playwrightMod: PlaywrightModule | null | undefined;
 
 /** Shared Chromium processes — contexts are cheap; browsers are expensive. */
 const browserPool = new Map<BrowserMode, PlaywrightBrowser>();
-let poolLaunchInFlight: Map<BrowserMode, Promise<PlaywrightBrowser>> = new Map();
+const poolLaunchInFlight: Map<BrowserMode, Promise<PlaywrightBrowser>> = new Map();
 const browserJobCounts = new Map<BrowserMode, number>();
 const browserLaunchedAt = new Map<BrowserMode, number>();
 const acquireWaiters: Array<() => void> = [];
@@ -307,7 +313,9 @@ export class BrowserExecutionService {
     const pageUrl = this.page.url();
     const signals = detectInterventionSignals(html, pageUrl);
     const detectedGates: PageCapture['detectedGates'] = [];
-    if (signals.captcha) detectedGates.push('captcha');
+    const hardGate = shouldBlockAutoSubmit(html);
+    if (signals.captcha || hardGate === 'captcha') detectedGates.push('captcha');
+    if (signals.cloudflare || hardGate === 'cloudflare') detectedGates.push('cloudflare');
     if (signals.mfa) detectedGates.push('mfa');
     if (signals.emailVerify) detectedGates.push('email_verify');
     if (signals.phoneVerify) detectedGates.push('phone_verify');
@@ -437,45 +445,34 @@ export class BrowserExecutionService {
 
   async fillFields(mapping: Record<string, unknown>): Promise<{ filled: string[]; missing: string[] }> {
     if (!this.page) throw new Error('No page');
+    const html = await this.page.content();
+    const plan = planFormFill(html, mapping);
     const filled: string[] = [];
     const missing: string[] = [];
-    const canonical = (mapping.__canonical as Record<string, unknown> | undefined) ?? mapping;
 
-    for (const [name, value] of Object.entries(mapping)) {
-      if (name.startsWith('__') || value == null) continue;
-      if (typeof value === 'object') continue;
-      const str = String(value);
+    for (const action of plan) {
       try {
-        const locator = this.page.locator(
-          `input[name="${name}"], textarea[name="${name}"], select[name="${name}"]`
-        );
-        if ((await locator.count()) > 0) {
-          await locator.first().fill(str);
-          filled.push(name);
+        const loc = this.page.locator(action.selector).first();
+        if ((await loc.count()) === 0) {
+          missing.push(action.intent);
+          continue;
+        }
+        if (action.kind === 'check') {
+          await loc.check({ force: true });
+        } else if (action.kind === 'select') {
+          const picked = await loc
+            .selectOption({ label: action.value })
+            .catch(async () => loc.selectOption(action.value));
+          if (!picked || (Array.isArray(picked) && picked.length === 0)) {
+            missing.push(action.intent);
+            continue;
+          }
         } else {
-          missing.push(name);
+          await loc.fill(action.value);
         }
+        filled.push(action.intent);
       } catch {
-        missing.push(name);
-      }
-    }
-
-    // Heuristic fills for common labels when name mapping missed
-    const heuristics: Array<[string, string]> = [
-      ['input[type="email"]', String(canonical.email ?? '')],
-      ['input[name*="phone" i], input[type="tel"]', String(canonical.phone ?? '')],
-      ['textarea', String(canonical.description ?? '')],
-    ];
-    for (const [sel, val] of heuristics) {
-      if (!val) continue;
-      try {
-        const loc = this.page.locator(sel);
-        if ((await loc.count()) > 0) {
-          await loc.first().fill(val);
-          filled.push(sel);
-        }
-      } catch {
-        // ignore
+        missing.push(action.intent);
       }
     }
 
@@ -641,8 +638,12 @@ export class BrowserExecutionService {
   }> {
     if (!this.page) throw new Error('No page');
     const before = await this.capture('before_submit_check');
-    if (before.detectedGates.includes('captcha')) {
+    const hardGate = shouldBlockAutoSubmit(await this.page.content());
+    if (hardGate === 'captcha' || before.detectedGates.includes('captcha')) {
       return { submitted: false, gate: 'captcha', capture: before };
+    }
+    if (hardGate === 'cloudflare' || before.detectedGates.includes('cloudflare')) {
+      return { submitted: false, gate: 'cloudflare', capture: before };
     }
     if (before.detectedGates.includes('mfa')) {
       return { submitted: false, gate: 'mfa', capture: before };
@@ -664,7 +665,8 @@ export class BrowserExecutionService {
     }
 
     try {
-      const btn = this.page.locator(submitSelector).first();
+      const fromPage = findSubmitSelector(await this.page.content());
+      const btn = this.page.locator(fromPage || submitSelector).first();
       if ((await btn.count()) === 0) {
         return { submitted: false, capture: await this.capture('submit_missing') };
       }

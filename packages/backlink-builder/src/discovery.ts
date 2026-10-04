@@ -3,6 +3,7 @@
 import { analyzeDomain } from './domain-analyzer.js';
 import { classifyOpportunity, type ClassificationContext } from './classification.js';
 import type { BacklinkTypeId } from './backlink-types.js';
+import { DIRECTORY_CITATION_SOURCES } from './data/directory-citation-sources.js';
 
 export interface DiscoverInputs {
   website?: string;
@@ -24,13 +25,14 @@ export interface DiscoveryCandidate {
   successProbability: number;
   difficulty: number;
   priority: string;
-  domainRating: number;
-  monthlyTraffic: number;
+  /** Null when no real authority metric is available. Never a hashed stand-in. */
+  domainRating: number | null;
+  monthlyTraffic: number | null;
   country: string;
   niche: string;
-  metricsSource: 'estimated';
-  authorityEstimated: true;
-  trafficEstimated: true;
+  metricsSource: 'estimated' | 'unknown';
+  authorityEstimated: boolean;
+  trafficEstimated: boolean;
   discoverySource: 'ai_discover';
   recommendedAction: string;
   matchReasons: string[];
@@ -150,6 +152,10 @@ export function discoverWebsiteCandidates(
   const seedDomains = new Map<string, { types: BacklinkTypeId[]; niches: string[]; matchReasons: string[] }>();
 
   for (const seed of SEED_SITES) {
+    // Directory and citation homepages are not submission pages. Those types
+    // come only from DIRECTORY_CITATION_SOURCES (real submit URLs, unknown metrics).
+    const types = seed.types.filter((t) => t !== 'directory' && t !== 'citation');
+    if (types.length === 0) continue;
     const reasons: string[] = [];
     const nicheHit =
       seed.niches.includes(industry) ||
@@ -163,7 +169,7 @@ export function discoverWebsiteCandidates(
       reasons.push('general-catalog');
     }
     if (reasons.length === 0) continue;
-    seedDomains.set(seed.domain, { types: seed.types, niches: seed.niches, matchReasons: reasons });
+    seedDomains.set(seed.domain, { types, niches: seed.niches, matchReasons: reasons });
   }
 
   for (const hint of keywordPlatformHints(keywords)) {
@@ -222,6 +228,35 @@ export function discoverWebsiteCandidates(
     });
   }
 
-  candidates.sort((a, b) => b.relevanceScore * 0.6 + b.score * 0.4 - (a.relevanceScore * 0.6 + a.score * 0.4));
-  return candidates.slice(0, limit);
+  const curated: DiscoveryCandidate[] = DIRECTORY_CITATION_SOURCES.map((src) => ({
+    domain: src.domain,
+    url: src.url,
+    title: src.title,
+    opportunityType: src.kind,
+    score: 60,
+    relevanceScore: 72,
+    spamRisk: 20,
+    successProbability: 0,
+    difficulty: 0,
+    priority: 'medium',
+    domainRating: null,
+    monthlyTraffic: null,
+    country,
+    niche: industry,
+    metricsSource: 'unknown',
+    authorityEstimated: false,
+    trafficEstimated: false,
+    discoverySource: 'ai_discover',
+    recommendedAction: `Open the free ${src.kind} form. Pause if a human gate appears. Do not treat metrics as live.`,
+    matchReasons: ['curated-submit-url', `kind:${src.kind}`, 'metrics:unknown'],
+  }));
+
+  const seen = new Set<string>();
+  const merged: DiscoveryCandidate[] = [];
+  for (const candidate of [...curated, ...candidates]) {
+    if (seen.has(candidate.domain)) continue;
+    seen.add(candidate.domain);
+    merged.push(candidate);
+  }
+  return merged.slice(0, Math.max(limit, curated.length));
 }

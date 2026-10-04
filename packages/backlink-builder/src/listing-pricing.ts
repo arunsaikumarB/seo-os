@@ -20,7 +20,7 @@ const FREE_DISABLED_RE =
 const PREMIUM_TOKEN_RE =
   /\bpremium\s+(?:listing\s+)?token\b|\benter\s+your\s+premium\s+token\b|\b(?:a\s+)?premium\s+token\s+is\s+required\b|\btoken\s+(?:is\s+)?required\s+to\s+submit\b|\bpaid\s+(?:listing\s+)?token\b|\bpremium\s+token\s*\(required\)/i;
 
-const COST_RE = /\$\s*\d+(?:\.\d+)?|\€\s*\d+(?:\.\d+)?|£\s*\d+(?:\.\d+)?|\b\d+(?:\.\d+)?\s*(?:usd|eur|gbp)\b/i;
+const COST_RE = /\$\s*\d+(?:\.\d+)?|€\s*\d+(?:\.\d+)?|£\s*\d+(?:\.\d+)?|\b\d+(?:\.\d+)?\s*(?:usd|eur|gbp)\b/i;
 const FREE_WORD_RE = /\bfree\b/i;
 const ZERO_COST_RE = /\$\s*0(?:\.0+)?\b|\b0\s*(?:usd|eur|gbp)\b|\bno\s+cost\b|\bcomplimentary\b/i;
 

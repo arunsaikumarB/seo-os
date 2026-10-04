@@ -18,8 +18,8 @@ type Candidate = {
   opportunityType: string;
   score: number;
   relevanceScore: number;
-  domainRating: number;
-  monthlyTraffic: number;
+  domainRating: number | null;
+  monthlyTraffic: number | null;
   difficulty: number;
   priority: string;
   metricsSource: string;
@@ -219,8 +219,14 @@ export function BacklinkDiscoverPage() {
                 <div className="flex gap-2 flex-wrap">
                   <Badge className="text-[10px]">{c.opportunityType}</Badge>
                   <Badge className="text-[10px] border-muted-foreground/30">Score {c.score}</Badge>
-                  <Badge className="text-[10px] border-muted-foreground/30">DR Est. {c.domainRating}</Badge>
-                  <Badge className="text-[10px] border-muted-foreground/30">Diff Est. {c.difficulty}</Badge>
+                  <Badge className="text-[10px] border-muted-foreground/30">
+                    {c.metricsSource === 'unknown' || c.domainRating == null
+                      ? 'DR Unknown'
+                      : `DR Est. ${c.domainRating}`}
+                  </Badge>
+                  <Badge className="text-[10px] border-muted-foreground/30">
+                    {c.metricsSource === 'unknown' ? 'Difficulty unknown' : `Diff Est. ${c.difficulty}`}
+                  </Badge>
                 </div>
               </div>
             ))}

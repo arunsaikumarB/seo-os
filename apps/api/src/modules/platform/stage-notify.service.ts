@@ -90,7 +90,7 @@ async function recentlyNotified(
   fingerprint?: string
 ): Promise<boolean> {
   const since = new Date(Date.now() - withinMs).toISOString();
-  let q = getSupabaseAdmin()
+  const q = getSupabaseAdmin()
     .from('platform_events')
     .select('id, payload')
     .eq('workspace_id', workspaceId)

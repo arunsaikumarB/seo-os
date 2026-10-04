@@ -50,7 +50,21 @@ describe('discovery', () => {
     });
     expect(candidates.length).toBeGreaterThan(5);
     expect(candidates.every((c) => !c.domain.includes('example'))).toBe(true);
-    expect(candidates.every((c) => c.metricsSource === 'estimated')).toBe(true);
+    expect(candidates.every((c) => c.metricsSource !== 'live')).toBe(true);
+    const estimated = candidates.filter((c) => c.metricsSource === 'estimated');
+    const unknown = candidates.filter((c) => c.metricsSource === 'unknown');
+    expect(estimated.length).toBeGreaterThan(5);
+    expect(estimated.every((c) => c.authorityEstimated && typeof c.domainRating === 'number')).toBe(true);
+    expect(unknown.length).toBeGreaterThan(0);
+    expect(
+      unknown.every(
+        (c) =>
+          (c.opportunityType === 'directory' || c.opportunityType === 'citation') &&
+          c.domainRating == null &&
+          c.monthlyTraffic == null &&
+          /submit|\/add/i.test(c.url)
+      )
+    ).toBe(true);
   });
 });
 
@@ -115,6 +129,16 @@ describe('browser execution planner', () => {
     );
     expect(form.gates.captcha).toBe(true);
     expect(form.gates.login).toBe(true);
+    const { shouldBlockAutoSubmit } = await import('../src/detector-registry.js');
+    expect(
+      shouldBlockAutoSubmit(
+        '<form><div class="cf-turnstile" data-sitekey="x"></div><button>Submit listing</button></form>'
+      )
+    ).toBe('captcha');
+    expect(
+      shouldBlockAutoSubmit('<html><title>Just a moment...</title><div id="challenge-platform"></div></html>')
+    ).toBe('cloudflare');
+    expect(shouldBlockAutoSubmit('<p>This page mentions the word captcha in a blog post.</p>')).toBeNull();
     const plan = buildExecutionPlan({
       url: 'https://example.com/submit',
       opportunityType: 'directory',
