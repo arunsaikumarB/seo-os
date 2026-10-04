@@ -209,7 +209,7 @@ export async function sendViaOAuthProvider(input: {
     const text = await res.text();
     throw new Error(`Outlook send failed: ${text}`);
   }
-  return { messageId: `outlook-${Date.now()}` };
+  return { messageId: null as string | null };
 }
 
 export async function suggestReplyDraft(input: {

@@ -17,7 +17,8 @@ import {
   getConnectionState,
   onActivePackageChange,
 } from '../core/runtime/memory';
-import { getLearningAuth } from '../core/learning/api';
+import { getLearningAuth, reportHumanSubmission } from '../core/learning/api';
+import { analyzeScannedPage, type UrlScanVerdict } from '../../../../packages/backlink-builder/src/url-scanner.ts';
 import {
   disableInspector,
   enableInspector,
@@ -79,6 +80,8 @@ export function Widget() {
   const [teachUid, setTeachUid] = useState<string | null>(null);
   const [teachBusy, setTeachBusy] = useState(false);
   const [missingIndex, setMissingIndex] = useState(0);
+  const [verdict, setVerdict] = useState<UrlScanVerdict | null>(null);
+  const [reportNote, setReportNote] = useState<string | null>(null);
 
   const active = getActivePackage();
   const connected = getConnectionState() === 'connected';
@@ -118,6 +121,21 @@ export function Widget() {
     if (!expanded || !connected) return;
     refreshPreview();
   }, [expanded, connected, tick, refreshPreview]);
+
+  useEffect(() => {
+    if (!expanded) return;
+    const html = document.documentElement?.outerHTML ?? '';
+    setVerdict(
+      analyzeScannedPage({
+        requestedUrl: location.href,
+        finalUrl: location.href,
+        httpStatus: 200,
+        pages: [{ url: location.href, html, httpStatus: 200 }],
+        renderedWith: 'browser',
+        requestedCategory: active?.backlinkType ?? active?.submissionType ?? null,
+      })
+    );
+  }, [expanded, tick, active?.backlinkType, active?.submissionType]);
 
   useEffect(() => {
     if (!inspect) {
@@ -259,6 +277,20 @@ export function Widget() {
       </header>
 
       <div className="soc-body">
+        {verdict && (
+          <div className="soc-warn">
+            <p className="soc-error-title">{verdict.truthStatus.replace(/_/g, ' ')}</p>
+            <p>{verdict.nextAction}</p>
+            <p className="soc-meta">
+              {verdict.forms.length} form{verdict.forms.length === 1 ? '' : 's'}
+              {verdict.submissionFormIndex != null ? ' · submission form found' : ' · no submission form'}
+              {verdict.loginRequired ? ' · login required' : ''}
+              {verdict.captcha || verdict.cloudflare ? ' · human gate' : ''}
+              {' · '}
+              {verdict.linkPolicy} links
+            </p>
+          </div>
+        )}
         {connected && active ? (
           <>
             <div className="soc-opp">
@@ -308,6 +340,20 @@ export function Widget() {
             <button type="button" className="soc-primary" disabled={busy} onClick={onFill}>
               {busy ? 'Filling…' : 'Fill Current Step'}
             </button>
+            <button
+              type="button"
+              className="soc-secondary"
+              onClick={() => {
+                void reportHumanSubmission({
+                  opportunityId: active.opportunityId,
+                  sourceUrl: location.href,
+                }).then((result) => setReportNote(result.message));
+              }}
+            >
+              I submitted this page
+            </button>
+            {reportNote && <p className="soc-meta">{reportNote}</p>}
+            <p className="soc-meta">Fill does not click Submit. Use the site’s own Submit button.</p>
             <button
               type="button"
               className="soc-secondary"

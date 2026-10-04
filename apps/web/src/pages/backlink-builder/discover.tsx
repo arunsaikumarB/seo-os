@@ -117,8 +117,8 @@ export function BacklinkDiscoverPage() {
           <Radar className="h-6 w-6" /> Discover Websites
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          AI-assisted opportunity discovery from industry, country, and keywords. Authority and traffic are
-          labeled Estimated.
+          Homepage seeds and curated submit URLs. Authority and traffic are unknown unless a scan or a connected
+          source measured them.
         </p>
       </div>
 

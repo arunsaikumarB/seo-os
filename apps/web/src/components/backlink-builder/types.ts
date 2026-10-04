@@ -86,7 +86,26 @@ export type BacklinkOpportunity = {
   suggested_target_page?: string;
   outreach_strategy?: string;
   url?: string;
+  metadata?: {
+    truth_status?: string;
+    scan?: { truthStatus?: string; nextAction?: string; brokenReason?: string | null };
+    approval?: { source?: string; decision?: string; summary?: string };
+  } | null;
 };
+
+export function truthStatusLabel(row: {
+  metadata?: { truth_status?: string } | null;
+  pipeline_stage?: string;
+  queue_status?: string;
+  verification_status?: string;
+}): string {
+  const truth = row.metadata?.truth_status;
+  if (truth) return truth.replace(/_/g, ' ');
+  if (row.verification_status === 'verified') return 'verified';
+  if (row.verification_status === 'lost') return 'lost';
+  if (row.verification_status === 'pending') return 'pending verification';
+  return (row.pipeline_stage ?? row.queue_status ?? 'discovered').replace(/_/g, ' ');
+}
 
 export type BacklinkRecord = {
   id: string;

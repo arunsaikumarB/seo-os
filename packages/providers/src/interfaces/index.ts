@@ -54,7 +54,7 @@ export interface EmailProvider {
     subject: string;
     bodyHtml: string;
     bodyText?: string;
-  }): Promise<{ messageId: string }>;
+  }): Promise<{ messageId: string | null }>;
 }
 
 export type ProviderType = 'backlink' | 'keyword' | 'serp' | 'competitor' | 'ai' | 'email';

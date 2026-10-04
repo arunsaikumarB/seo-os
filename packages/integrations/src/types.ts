@@ -55,7 +55,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
   {
     key: 'google_search_console',
     name: 'Google Search Console',
-    description: 'Search performance, queries, pages, devices, index coverage, sitemaps',
+    description: 'not connected — this build does not call the Search Console API',
     category: 'search',
     authType: 'oauth',
     scopes: ['https://www.googleapis.com/auth/webmasters.readonly'],
@@ -74,7 +74,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
   {
     key: 'google_analytics_4',
     name: 'Google Analytics 4',
-    description: 'Sessions, users, conversions, traffic sources, engagement',
+    description: 'not connected — this build does not call the Google Analytics API',
     category: 'analytics',
     authType: 'oauth',
     scopes: ['https://www.googleapis.com/auth/analytics.readonly'],
@@ -92,7 +92,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
   {
     key: 'smtp',
     name: 'SMTP',
-    description: 'Generic SMTP relay for Outreach Engine',
+    description: 'not connected in this hub — outreach SMTP sends only when an email account has a real host',
     category: 'email',
     authType: 'smtp',
     scopes: ['email.send'],
@@ -122,7 +122,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
   {
     key: 'wordpress',
     name: 'WordPress',
-    description: 'Posts, pages, categories, tags, media — draft publishing only',
+    description: 'not connected — this build does not call the WordPress API',
     category: 'cms',
     authType: 'app_password',
     scopes: ['posts', 'pages', 'media'],
@@ -139,7 +139,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
   {
     key: 'slack',
     name: 'Slack',
-    description: 'Notifications for workflows, SEO alerts, approvals, campaigns',
+    description: 'not connected — this build does not call the Slack API',
     category: 'notifications',
     authType: 'webhook',
     scopes: ['chat:write'],

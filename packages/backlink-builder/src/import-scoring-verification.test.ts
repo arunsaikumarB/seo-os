@@ -50,18 +50,14 @@ describe('discovery', () => {
     });
     expect(candidates.length).toBeGreaterThan(5);
     expect(candidates.every((c) => !c.domain.includes('example'))).toBe(true);
-    expect(candidates.every((c) => c.metricsSource !== 'live')).toBe(true);
-    const estimated = candidates.filter((c) => c.metricsSource === 'estimated');
-    const unknown = candidates.filter((c) => c.metricsSource === 'unknown');
-    expect(estimated.length).toBeGreaterThan(5);
-    expect(estimated.every((c) => c.authorityEstimated && typeof c.domainRating === 'number')).toBe(true);
-    expect(unknown.length).toBeGreaterThan(0);
+    expect(candidates.every((c) => c.metricsSource === 'unknown')).toBe(true);
+    expect(candidates.every((c) => c.domainRating == null && c.monthlyTraffic == null)).toBe(true);
+    const curated = candidates.filter((c) => c.matchReasons.includes('curated-submit-url'));
+    expect(curated.length).toBeGreaterThan(0);
     expect(
-      unknown.every(
+      curated.every(
         (c) =>
           (c.opportunityType === 'directory' || c.opportunityType === 'citation') &&
-          c.domainRating == null &&
-          c.monthlyTraffic == null &&
           /submit|\/add/i.test(c.url)
       )
     ).toBe(true);

@@ -119,25 +119,6 @@ function keywordPlatformHints(keywords: string[]): Array<{ domain: string; path:
   return hints;
 }
 
-function difficultyFromType(type: BacklinkTypeId, dr: number): number {
-  const base: Record<string, number> = {
-    directory: 25,
-    profile: 20,
-    citation: 30,
-    forum: 40,
-    qa_site: 45,
-    guest_post: 65,
-    resource_page: 55,
-    broken_link: 50,
-    press_release: 70,
-    digital_pr: 75,
-    edu: 80,
-    gov: 85,
-    partnership: 60,
-  };
-  return Math.min(95, (base[type] ?? 50) + Math.round(dr / 10));
-}
-
 export function discoverWebsiteCandidates(
   inputs: DiscoverInputs,
   ctx: ClassificationContext = {},
@@ -183,8 +164,7 @@ export function discoverWebsiteCandidates(
 
   for (const [domain, meta] of seedDomains) {
     const analysis = analyzeDomain(domain, `https://${domain}`);
-    if (targetDr > 0 && analysis.domainRating < targetDr - 15) continue;
-    if (targetTraffic > 0 && analysis.monthlyTraffic < targetTraffic * 0.5) continue;
+    // Do not drop or rank seeds with a hashed domain rating. It was never measured.
 
     const primaryType = meta.types[0] ?? analysis.primaryType;
     const typedAnalysis = { ...analysis, primaryType, opportunityTypes: meta.types };
@@ -202,7 +182,6 @@ export function discoverWebsiteCandidates(
     if (analysis.country === country) relevanceBoost += 5;
 
     const relevanceScore = Math.min(100, classification.relevanceScore + relevanceBoost);
-    const difficulty = difficultyFromType(primaryType, analysis.domainRating);
 
     candidates.push({
       domain,
@@ -212,19 +191,25 @@ export function discoverWebsiteCandidates(
       score: classification.opportunityScore,
       relevanceScore,
       spamRisk: classification.spamRisk,
-      successProbability: classification.successProbability,
-      difficulty,
+      successProbability: 0,
+      difficulty: 0,
       priority: classification.priority,
-      domainRating: analysis.domainRating,
-      monthlyTraffic: analysis.monthlyTraffic,
+      domainRating: null,
+      monthlyTraffic: null,
       country: analysis.country,
       niche: analysis.niche,
-      metricsSource: 'estimated',
-      authorityEstimated: true,
-      trafficEstimated: true,
+      metricsSource: 'unknown',
+      authorityEstimated: false,
+      trafficEstimated: false,
       discoverySource: 'ai_discover',
-      recommendedAction: classification.recommendedAction,
-      matchReasons: meta.matchReasons,
+      recommendedAction:
+        'Homepage seed only. Scan the URL before any submit or outreach. Authority and traffic were not measured.',
+      matchReasons: [
+        ...meta.matchReasons,
+        'metrics:unknown',
+        'homepage-seed-not-a-submission-page',
+        ...(targetDr > 0 || targetTraffic > 0 ? ['requested DR or traffic was not measured'] : []),
+      ],
     });
   }
 

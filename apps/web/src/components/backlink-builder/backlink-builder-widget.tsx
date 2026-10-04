@@ -158,6 +158,9 @@ export function BacklinkBuilderNav() {
       <Button variant="outline" size="sm" asChild>
         <Link to={`/projects/${projectId}/home`}>Dashboard</Link>
       </Button>
+      <Button variant="outline" size="sm" asChild>
+        <Link to={`/projects/${projectId}/backlink-builder/scan`}>Scan URL</Link>
+      </Button>
       <Button size="sm" asChild>
         <Link to={`/projects/${projectId}/backlink-builder/import`}>
           Continue <ArrowRight className="h-3 w-3 ml-1" />

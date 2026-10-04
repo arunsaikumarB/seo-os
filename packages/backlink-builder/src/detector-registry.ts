@@ -65,7 +65,7 @@ export const DETECTOR_CONFIG = {
   signupIntent: /sign[\s-]?up|register|create (an )?account|join (now|us|free)/i,
   /** Real CAPTCHA widgets only — never the word "captcha" alone */
   captchaWidget:
-    /g-recaptcha|h-captcha|hcaptcha|cf-turnstile|data-sitekey|iframe[^>]+(recaptcha|hcaptcha|turnstile)|class=["'][^"']*(g-recaptcha|h-captcha|cf-turnstile)/i,
+    /g-recaptcha|h-captcha|hcaptcha|cf-turnstile|data-sitekey|captcha-delivery\.com|please enable js and disable any ad blocker|iframe[^>]+(recaptcha|hcaptcha|turnstile)|class=["'][^"']*(g-recaptcha|h-captcha|cf-turnstile)/i,
   cloudflareMarkers:
     /cf-browser-verification|challenge-platform|cf-challenge|attention required|just a moment|cdn-cgi\/challenge/i,
   mfa:

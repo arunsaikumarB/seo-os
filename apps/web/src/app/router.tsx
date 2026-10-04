@@ -159,6 +159,9 @@ const ClassificationDashboardPage = lazy(() =>
 const BacklinkDiscoverPage = lazy(() =>
   import('@/pages/backlink-builder/discover').then((m) => ({ default: m.BacklinkDiscoverPage }))
 );
+const BacklinkScanPage = lazy(() =>
+  import('@/pages/backlink-builder/scan').then((m) => ({ default: m.BacklinkScanPage }))
+);
 const BacklinkAutomationPage = lazy(() =>
   import('@/pages/backlink-builder/automation').then((m) => ({
     default: m.BacklinkAutomationPage,
@@ -473,6 +476,7 @@ export function AppRouter() {
                       path="backlink-builder/discover"
                       element={lazyEl(BacklinkDiscoverPage)}
                     />
+                    <Route path="backlink-builder/scan" element={lazyEl(BacklinkScanPage)} />
                     <Route
                       path="backlink-builder/automation"
                       element={lazyEl(BacklinkAutomationPage)}

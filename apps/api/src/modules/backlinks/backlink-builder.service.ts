@@ -9,9 +9,6 @@ import {
   canTransition,
   estimateSuccessProbability,
   faviconUrl,
-  generateEmailDraft,
-  generateGuestPostDraft,
-  generatePressReleaseDraft,
   getTypesByCategory,
   normalizePipelineStage,
   parsePagination,
@@ -21,7 +18,6 @@ import {
   suggestBacklinkTypes,
   suggestOutreachStrategy,
   suggestTargetPage,
-  summarizeWebsite,
   type BacklinkCategory,
   type PipelineStage,
 } from '@seo-os/backlink-builder';
@@ -474,13 +470,19 @@ export async function generateAiDraft(
     score: Number(d.score),
   };
 
-  const contentMap = {
-    email: generateEmailDraft(ctx, brand),
-    guest_post: generateGuestPostDraft(ctx, brand),
-    press_release: generatePressReleaseDraft(ctx, brand),
-    outreach_strategy: suggestOutreachStrategy(ctx),
-    website_summary: summarizeWebsite(ctx),
-  };
+  const { draftWithConfiguredAi } = await import('./ai-draft.service.js');
+  const draft = await draftWithConfiguredAi(
+    draftType.replace(/_/g, ' '),
+    [
+      `Write a ${draftType.replace(/_/g, ' ')} for a backlink opportunity.`,
+      `Brand: ${brand}`,
+      `Page title: ${ctx.title}`,
+      `Domain: ${ctx.domain ?? 'unknown'}`,
+      `Type: ${ctx.opportunity_type}`,
+      'Use only the facts above. If a fact is missing, say it is unknown. Do not invent metrics, quotes, or publication dates.',
+    ].join('\n')
+  );
+  const content = draft.content;
 
   const titleMap: Record<typeof draftType, string> = {
     email: `Email — ${ctx.title}`,
@@ -498,7 +500,8 @@ export async function generateAiDraft(
       opportunity_id: opportunityId,
       draft_type: draftType,
       title: titleMap[draftType],
-      content: contentMap[draftType],
+      content,
+      metadata: { provider: draft.provider, generated: draft.generated },
     })
     .select()
     .single();

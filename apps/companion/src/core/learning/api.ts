@@ -188,6 +188,50 @@ export async function uploadFieldMapping(input: {
   }
 }
 
+/** Person clicked "I submitted". Does not click the page Submit control. */
+export async function reportHumanSubmission(input: {
+  opportunityId: string;
+  sourceUrl: string;
+}): Promise<{ ok: boolean; message: string }> {
+  if (!auth?.projectId || !auth.accessToken) {
+    return {
+      ok: false,
+      message:
+        'Nothing was marked submitted or verified. Sign in to Backlink Agent so this page can be checked later.',
+    };
+  }
+  try {
+    const res = await fetch(
+      `${auth.apiBase}/v1/projects/${auth.projectId}/backlink-builder/opportunities/${input.opportunityId}/report-submitted`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${auth.accessToken}`,
+          'X-Org-Id': auth.orgId,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({ sourceUrl: input.sourceUrl }),
+      }
+    );
+    if (!res.ok) {
+      return {
+        ok: false,
+        message: `The report was not saved (HTTP ${res.status}). Nothing was marked verified.`,
+      };
+    }
+    return {
+      ok: true,
+      message: 'Reported. Verification is pending until the link is found on the page. This is not verified yet.',
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      message: err instanceof Error ? err.message : 'The report failed. Nothing was marked verified.',
+    };
+  }
+}
+
 export function createDomainLearningHook() {
   return {
     getDomainMappings(hostname: string) {

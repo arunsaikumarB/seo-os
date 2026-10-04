@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { OpportunityLogo } from './opportunity-logo';
-import { scoreBadgeClass, formatType, formatNumber, type BacklinkOpportunity } from './types';
+import { scoreBadgeClass, formatType, formatNumber, truthStatusLabel, type BacklinkOpportunity } from './types';
 import { ExternalLink, Check, X, FileText } from 'lucide-react';
 
 interface OpportunityTableProps {
@@ -117,10 +117,10 @@ export function OpportunityTable({
       },
       {
         id: 'success',
-        header: 'Success %',
+        header: 'Est. success',
         cell: ({ row }) => (
-          <span className="text-xs font-medium text-primary tabular-nums">
-            {row.original.success_probability ?? '—'}%
+          <span className="text-xs font-medium text-muted-foreground tabular-nums" title="Estimate, not a measured rate">
+            {row.original.success_probability != null ? `${row.original.success_probability}% est.` : 'unknown'}
           </span>
         ),
         size: 72,
@@ -130,10 +130,7 @@ export function OpportunityTable({
         header: 'Status',
         cell: ({ row }) => (
           <Badge className="text-[10px] border-muted-foreground/30 capitalize">
-            {(row.original.pipeline_stage ?? row.original.queue_status ?? 'discovered').replace(
-              /_/g,
-              ' '
-            )}
+            {truthStatusLabel(row.original)}
           </Badge>
         ),
       },
