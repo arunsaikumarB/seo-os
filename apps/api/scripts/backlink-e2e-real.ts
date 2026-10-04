@@ -3,8 +3,9 @@
  * and runVerificationCheck. Loads .env before any API env parse.
  *
  * From the repo root (PowerShell):
- *   npm run e2e:backlinks -- --url "https://www.jayde.com/submit.html" --target "https://your-site.example/" --to "editor@example.com" --dry-run
- * Add --send and omit --dry-run to deliver the email.
+ *   npm run e2e:backlinks -- --url "https://www.jayde.com/submit.html" --target "https://your-site.example/" --to "you@gmail.com" --dry-run
+ * --to is the SMTP test inbox, not the editor. --editor names a real editor.
+ * --send delivers an outreach email only. --dry-run never sends.
  */
 import { config as loadDotenv } from 'dotenv';
 import { randomUUID } from 'node:crypto';
@@ -61,7 +62,7 @@ async function main() {
     url,
     target,
     to,
-    category: categoryArg ?? '(from scan, else directory)',
+    category: categoryArg ?? '(from scan, else unknown)',
     dryRun,
     sendRequested: process.argv.includes('--send'),
     sendWillRun: send,
@@ -80,47 +81,70 @@ async function main() {
   const { draftWithConfiguredAi, reviewWithConfiguredAi } = await import(
     '../src/modules/backlinks/ai-draft.service.js'
   );
-  const { approvalReview, resolveExecutionMode, workflowFor } = await import('@seo-os/backlink-builder');
+  const {
+    approvalReview,
+    buildApprovalPrompt,
+    buildDraftPrompt,
+    clientLabelFromTarget,
+    deriveNiche,
+    groundFormFieldDraft,
+    planBacklinkDraft,
+    resolveExecutionMode,
+    workflowFor,
+  } = await import('@seo-os/backlink-builder');
 
   const verdict = await scanLiveUrl({ url, category: categoryArg ?? null });
   print('scan', verdict);
 
-  const category = categoryArg || verdict.suggestedCategory || 'directory';
-  const workflow = workflowFor(category);
-  const mode = workflow
-    ? resolveExecutionMode(category, verdict)
-    : { mode: 'stop', reason: `Unknown category ${category}.` };
+  const targetScan = await scanLiveUrl({ url: target, category: null });
+  const niche = deriveNiche({
+    title: targetScan.title,
+    metaDescription: targetScan.metaDescription,
+    h1: targetScan.h1,
+  });
+  const clientLabel = clientLabelFromTarget({ title: targetScan.title || targetScan.h1, hostname: targetHost });
+  const clientDescription = [targetScan.metaDescription, targetScan.h1, targetScan.title]
+    .map((part) => (part ?? '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join('. ');
+  print('client', {
+    targetFinalUrl: targetScan.finalUrl,
+    targetTitle: targetScan.title,
+    niche: niche || null,
+    clientLabel,
+    nicheSource: niche ? 'target page title, h1, and meta description' : 'the target page did not provide a title, h1, or description',
+  });
+
+  const category = categoryArg || verdict.suggestedCategory || null;
+  const workflow = category ? workflowFor(category) : null;
+  const mode = !category
+    ? { mode: 'stop' as const, reason: `No category. ${verdict.nextAction}` }
+    : workflow
+      ? resolveExecutionMode(category, verdict)
+      : { mode: 'stop' as const, reason: `Unknown category ${category}.` };
   print('workflow', {
-    category,
+    category: category ?? 'unknown',
     catalogMode: workflow?.mode ?? null,
     chosen: mode.mode,
     reason: mode.reason,
     humanStep: workflow?.humanStep ?? null,
   });
 
-  const pageText = `${verdict.pageKind} ${verdict.nextAction} ${verdict.linkPolicyEvidence}`;
-  const ai = await reviewWithConfiguredAi(
-    [
-      'Review this backlink opportunity. Reply with one of: approve, reject, needs_human, then one sentence.',
-      `URL: ${url}`,
-      `Target: ${target}`,
-      `Scanner: ${JSON.stringify({
-        broken: verdict.broken,
-        brokenReason: verdict.brokenReason,
-        captcha: verdict.captcha,
-        cloudflare: verdict.cloudflare,
-        loginRequired: verdict.loginRequired,
-        noForm: verdict.noForm,
-        linkPolicy: verdict.linkPolicy,
-        indexable: verdict.indexable,
-        truthStatus: verdict.truthStatus,
-      })}`,
-      'Do not invent metrics.',
-    ].join('\n')
-  );
-  const review = approvalReview({
-    title: verdict.finalUrl || url,
+  const pageText = verdict.pageExcerpt || `${verdict.title} ${verdict.h1}`;
+  const prompt = buildApprovalPrompt({
+    niche,
     pageText,
+    url: verdict.finalUrl || url,
+    workflowMode: mode.mode,
+    workflowReason: mode.reason,
+    verdict,
+  });
+  const ai = await reviewWithConfiguredAi(prompt);
+  const review = approvalReview({
+    niche,
+    title: verdict.title || verdict.finalUrl || url,
+    pageText,
+    workflowMode: mode.mode === 'stop' ? 'stop' : mode.mode,
     verdict,
     aiText: ai?.text ?? null,
     aiSource: ai?.source ?? null,
@@ -130,24 +154,55 @@ async function main() {
     source: review.source,
     summary: review.summary,
     requiresHumanConfirm: review.requiresHumanConfirm,
-    reasons: review.reasons,
+    relevanceScore: review.relevanceScore,
     checks: review.checks,
+    ai: review.ai,
+    reasons: review.reasons,
     aiConfigured: Boolean(ai),
   });
 
-  const draft = await draftWithConfiguredAi(
-    'outreach email',
-    [
-      `Write one outreach email from the site ${target} to ${to}.`,
-      `The page being discussed is ${verdict.finalUrl || url}.`,
-      `Category: ${category}. Workflow: ${mode.mode}. ${mode.reason}`,
-      'Return a subject line and a short body. Do not invent metrics, a message id, or a claim that the link is already placed.',
-    ].join('\n')
-  );
+  const editor = arg('--editor');
+  const plan = planBacklinkDraft({
+    category,
+    mode: mode.mode,
+    verdict,
+    editorEmail: editor,
+  });
+  const draftPrompt = buildDraftPrompt({
+    plan,
+    category: category ?? 'unknown',
+    clientLabel,
+    niche,
+    targetUrl: target,
+    pageUrl: verdict.finalUrl || url,
+    pageExcerpt: pageText,
+  });
+  const draft = draftPrompt
+    ? await draftWithConfiguredAi(plan.kind, draftPrompt)
+    : {
+        content: plan.reason,
+        provider: null,
+        generated: false,
+      };
+  const grounded =
+    plan.kind === 'form_fields' && plan.fieldNames.length > 0
+      ? groundFormFieldDraft(draft.generated ? draft.content : null, plan.fieldNames, {
+          label: clientLabel,
+          niche,
+          url: target,
+          description: clientDescription,
+        })
+      : null;
   print('draft', {
-    generated: draft.generated,
-    provider: draft.provider,
-    content: draft.content,
+    kind: plan.kind,
+    reason: plan.reason,
+    generated: grounded ? true : draft.generated,
+    provider: grounded ? grounded.source : draft.provider,
+    recipientEmail: plan.recipientEmail,
+    recipientName: plan.recipientName ?? (plan.kind === 'outreach_email' ? 'unknown' : null),
+    fieldNames: plan.fieldNames,
+    content: grounded ? grounded.json : draft.content,
+    smtpTestInbox: to,
   });
 
   if (!send) {
@@ -161,8 +216,8 @@ async function main() {
         'SMTP env is incomplete. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, and SMTP_FROM. Nothing was sent.'
       );
       process.exitCode = 1;
-    } else if (!draft.generated) {
-      print('send', 'The draft was not generated by an AI provider. Nothing was sent.');
+    } else if (plan.kind !== 'outreach_email' || !draft.generated) {
+      print('send', 'Nothing was sent. --send only delivers an outreach email that was actually generated for a real editor.');
       process.exitCode = 1;
     } else {
       const subjectLine = draft.content.split('\n').find((line) => line.trim()) ?? 'Outreach';

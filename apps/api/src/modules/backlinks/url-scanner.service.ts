@@ -5,6 +5,7 @@
 
 import {
   analyzeScannedPage,
+  htmlNeedsBrowserRender,
   looksLikeSpaShell,
   type ScanPageEvidence,
   type UrlScanVerdict,
@@ -139,7 +140,9 @@ export async function scanLiveUrl(input: {
     !first.error &&
     first.httpStatus != null &&
     first.httpStatus < 400 &&
-    (looksLikeSpaShell(html) || (!/<form[\s>]/i.test(html) && (html.match(/<script[\s>]/gi) ?? []).length >= 5));
+    (looksLikeSpaShell(html) ||
+      htmlNeedsBrowserRender(html, first.finalUrl || requested) ||
+      (!/<form[\s>]/i.test(html) && (html.match(/<script[\s>]/gi) ?? []).length >= 5));
   if (needsRender) {
     const rendered = await renderWithPlaywright(first.finalUrl || requested);
     if (rendered) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeScannedPage } from './url-scanner.js';
+import { analyzeScannedPage, clientLabelFromTarget, deriveNiche, htmlNeedsBrowserRender } from './url-scanner.js';
 
 function scan(partial: Parameters<typeof analyzeScannedPage>[0]) {
   return analyzeScannedPage(partial);
@@ -221,6 +221,63 @@ describe('url scanner verdicts', () => {
     expect(verdict.forms[0]?.isBacklinkSubmission).toBe(true);
   });
 
+  it('treats an n49-style add-business widget plus signup as citation, not a guest post', () => {
+    const html = `
+      <html><head><title>Add your Business | n49</title></head>
+      <body>
+        <p>Read our blog article about local restaurants.</p>
+        <form action="#">
+          <input placeholder="E.g. Burgers, Plumbers">
+          <input placeholder="Address, city or postal code">
+        </form>
+        <label>business name you want to add</label>
+        <input name="businessName" placeholder="business name you want to add">
+        <a href="/login?returnTo=/add-business">Sign Up</a>
+      </body></html>`;
+    const verdict = scan({
+      requestedUrl: 'https://www.n49.com/add-business',
+      finalUrl: 'https://www.n49.com/add-business',
+      httpStatus: 200,
+      pages: [{ url: 'https://www.n49.com/add-business', html, httpStatus: 200 }],
+      renderedWith: 'fixture',
+    });
+    expect(verdict.suggestedCategory).toBe('citation');
+    expect(verdict.pageKind).not.toBe('article');
+    expect(verdict.loginRequired).toBe(true);
+    expect(verdict.signupRequired).toBe(true);
+    expect(verdict.loginUrl).toMatch(/login\?returnTo/);
+    expect(verdict.truthStatus).toBe('login_required');
+    expect(verdict.forms.some((form) => form.fields.some((field) => /business name/i.test(field.label)))).toBe(true);
+    expect(htmlNeedsBrowserRender('<form><input placeholder="E.g. Burgers"></form>', 'https://www.n49.com/add-business')).toBe(true);
+  });
+
+  it('reports a contact form URL when the hop has no email address', () => {
+    const verdict = scan({
+      requestedUrl: 'https://www.jayde.com/submit.html',
+      finalUrl: 'https://www.jayde.com/submit.html',
+      httpStatus: 200,
+      pages: [
+        {
+          url: 'https://www.jayde.com/submit.html',
+          html: '<form action="/go"><input name="URL"><input name="BUSINESS_NAME"><button>Submit</button></form>',
+          httpStatus: 200,
+        },
+        {
+          url: 'https://www.jayde.com/contact.html',
+          html: '<form action="/mail"><input name="NAME"><input name="SUBJECT"><input name="EMAIL"><textarea name="COMMENTS"></textarea></form>',
+          httpStatus: 200,
+        },
+      ],
+      renderedWith: 'fixture',
+    });
+    expect(verdict.contactEmails).toEqual([]);
+    expect(verdict.contactChannels).toEqual([
+      { kind: 'form', value: 'https://www.jayde.com/contact.html' },
+    ]);
+    expect(verdict.suggestedCategory).toBe('directory');
+    expect(verdict.nextAction).toMatch(/contact\.html/);
+  });
+
   it('reads noindex', () => {
     const verdict = scan({
       requestedUrl: 'https://blog.example/hidden',
@@ -232,5 +289,22 @@ describe('url scanner verdicts', () => {
     });
     expect(verdict.robotsNoindex).toBe(true);
     expect(verdict.indexable).toBe(false);
+  });
+
+  it('reads the brand and niche from a tagline title', () => {
+    expect(
+      clientLabelFromTarget({
+        title: 'All-in-one restaurant POS platform | Chefgaa',
+        hostname: 'go.chefgaa.com',
+      })
+    ).toBe('Chefgaa');
+    const niche = deriveNiche({
+      title: 'All-in-one restaurant POS platform | Chefgaa',
+      h1: 'All-in-One POS Software for Restaurants',
+      metaDescription: 'Discover Chefgaa',
+    });
+    expect(niche).toMatch(/restaurant/);
+    expect(niche).toMatch(/POS/);
+    expect(niche.toLowerCase()).not.toMatch(/discover|platform|software|\ball\b/);
   });
 });

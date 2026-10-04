@@ -20,10 +20,12 @@ Email is sent only through a connected Gmail or Outlook OAuth account (`sendViaO
 Real run from the repo root in PowerShell, after `.env` has `DATABASE_URL`, `COMPANY_STACK=true`, Ollama, and SMTP:
 
 ```powershell
-npm run e2e:backlinks -- --url "https://www.jayde.com/submit.html" --target "https://your-site.example/" --to "editor@example.com" --dry-run
+npm run e2e:backlinks -- --url "https://www.jayde.com/submit.html" --target "https://your-site.example/" --to "you@gmail.com" --dry-run
 ```
 
-Add `--send` and omit `--dry-run` to deliver the drafted email. `--dry-run` never submits and never sends. The script prints the scan verdict, the approval decision with its source (`ollama`, `gemini`, or `rules`), the category workflow, the drafted email, and a `runVerificationCheck` result of pending or verified.
+`--to` is only the mailbox that receives a test send. It is never the editor's name. Pass `--editor` when the page has no contact address and a person already knows the editor. `--send` delivers an outreach email only, and only when that email was actually generated. `--dry-run` never submits and never sends.
+
+The script prints the scan (including a contact-form URL when no email is on the page), the client niche taken from the target title, h1, and meta description, and the workflow. A page with no suggested category stays `unknown` and stops. The approval review asks the model for JSON (relevance score and reason, spam signals, link value, risks, verdict) and falls back to rules when that JSON is invalid. A stopped page is reject. Login or captcha is needs_human. A public directory form is not approved by a one-line model reply that disagrees with the scan. Directory and citation drafts are form-field values from the target site, with unknown address, phone, and email left blank. Assisted drafts are pasteable post or profile text. Outreach drafts are emails, and only when a real recipient exists. Nothing is drafted for a stopped page. Verification is `pending` or `verified` from `runVerificationCheck`.
 
 | Category | Mode | What is automatic | What a person does | Footprints | Curated URLs |
 | --- | --- | --- | --- | --- | --- |

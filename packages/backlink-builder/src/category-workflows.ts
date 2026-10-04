@@ -103,12 +103,19 @@ export function workflowFor(id: string): CategoryWorkflow | null {
   return BY_ID.get(id as BacklinkTypeId) ?? null;
 }
 
+function hasContactChannel(
+  verdict: Pick<UrlScanVerdict, 'contactEmails'> & { contactChannels?: UrlScanVerdict['contactChannels'] }
+): boolean {
+  if (verdict.contactEmails.length > 0) return true;
+  return (verdict.contactChannels ?? []).some((channel) => channel.kind === 'form');
+}
+
 export function resolveExecutionMode(
   id: string,
   verdict: Pick<
     UrlScanVerdict,
     'broken' | 'captcha' | 'cloudflare' | 'loginRequired' | 'noForm' | 'submissionFormIndex' | 'contactEmails'
-  >
+  > & { contactChannels?: UrlScanVerdict['contactChannels'] }
 ): { mode: 'stop' | WorkflowMode; reason: string } {
   const workflow = workflowFor(id);
   if (verdict.broken) return { mode: 'stop', reason: 'The URL is broken. Stop.' };
@@ -125,11 +132,12 @@ export function resolveExecutionMode(
   if (verdict.submissionFormIndex != null) {
     return { mode: 'assisted', reason: 'A form exists. A person submits it.' };
   }
-  if (verdict.noForm && verdict.contactEmails.length > 0 && workflow.mode === 'outreach') {
-    return { mode: 'outreach', reason: 'No submission form. A contact email was found, so this is outreach.' };
+  const contact = hasContactChannel(verdict);
+  if (!contact && (verdict.noForm || workflow.mode === 'automatic')) {
+    return { mode: 'stop', reason: 'No submission form and no contact channel. There is no automatic next step.' };
   }
-  if (verdict.noForm && verdict.contactEmails.length === 0) {
-    return { mode: 'stop', reason: 'No form and no contact email. There is no automatic next step.' };
+  if (contact && (verdict.noForm || workflow.mode === 'automatic' || workflow.mode === 'outreach')) {
+    return { mode: 'outreach', reason: 'No public submission form. A contact email or contact form was found, so this is outreach.' };
   }
   return { mode: workflow.mode, reason: workflow.summary };
 }

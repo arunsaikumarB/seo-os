@@ -6,6 +6,8 @@
 import { randomUUID } from 'node:crypto';
 import {
   approvalReview,
+  buildApprovalPrompt,
+  resolveExecutionMode,
   type UrlScanVerdict,
 } from '@seo-os/backlink-builder';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
@@ -58,23 +60,29 @@ export async function reviewOpportunity(
   const row = await readOpportunity(workspaceId, opportunityId);
   const metadata = metaOf(row);
   const verdict = (metadata.scan ?? null) as UrlScanVerdict | null;
-  const pageText = verdict
-    ? `${verdict.pageKind} ${verdict.nextAction} ${verdict.linkPolicyEvidence}`
-    : String(row.title ?? '');
+  const category = verdict?.suggestedCategory ?? null;
+  const mode = !verdict
+    ? { mode: 'stop' as const, reason: 'The URL has not been scanned.' }
+    : !category
+      ? { mode: 'stop' as const, reason: `No category. ${verdict.nextAction}` }
+      : resolveExecutionMode(category, verdict);
+  const pageText = verdict?.pageExcerpt || String(row.title ?? '');
+  const niche = opts.niche?.trim() || '';
   const ai = await reviewWithConfiguredAi(
-    [
-      'Review this backlink opportunity. Reply with one of: approve, reject, needs_human, then one sentence.',
-      `Niche: ${opts.niche ?? 'unknown'}`,
-      `Title: ${String(row.title ?? '')}`,
-      `URL: ${String(row.url ?? '')}`,
-      `Scanner: ${verdict ? JSON.stringify({ broken: verdict.broken, brokenReason: verdict.brokenReason, captcha: verdict.captcha, cloudflare: verdict.cloudflare, loginRequired: verdict.loginRequired, noForm: verdict.noForm, linkPolicy: verdict.linkPolicy, indexable: verdict.indexable }) : 'not scanned'}`,
-      'Do not invent metrics.',
-    ].join('\n')
+    buildApprovalPrompt({
+      niche,
+      pageText,
+      url: String(row.url ?? ''),
+      workflowMode: mode.mode,
+      workflowReason: mode.reason,
+      verdict,
+    })
   );
   const review = approvalReview({
-    niche: opts.niche,
-    title: String(row.title ?? ''),
+    niche,
+    title: verdict?.title || String(row.title ?? ''),
     pageText,
+    workflowMode: mode.mode === 'stop' ? 'stop' : mode.mode,
     verdict,
     aiText: ai?.text ?? null,
     aiSource: ai?.source ?? null,

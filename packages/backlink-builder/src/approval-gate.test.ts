@@ -48,23 +48,148 @@ describe('approval gate', () => {
     const review = approvalReview({
       niche: 'bakery',
       pageText: 'buy backlinks cheap casino',
-      verdict: { broken: false, httpStatus: 200, robotsNoindex: false, linkPolicy: 'dofollow', linkPolicyEvidence: 'dofollow' },
+      verdict: { broken: false, httpStatus: 200, robotsNoindex: false, linkPolicy: 'dofollow', linkPolicyEvidence: 'dofollow', noForm: false, submissionFormIndex: 0, pageKind: 'submission', suggestedCategory: 'directory' },
       aiSource: 'gemini',
-      aiText: 'approve — looks fine',
+      aiText: JSON.stringify({
+        relevanceScore: 90,
+        relevanceReason: 'looks fine',
+        spamSignals: [],
+        linkValue: 'high',
+        risks: [],
+        verdict: 'approve',
+      }),
     });
     expect(review.source).toBe('gemini');
     expect(review.decision).toBe('reject');
     expect(review.reasons.join(' ')).toMatch(/Rules rejected/);
+    expect(review.ai?.verdict).toBe('approve');
   });
 
-  it('falls back to rules when the model reply is unusable', () => {
+  it('falls back to rules when the model reply is not JSON', () => {
     const review = approvalReview({
       niche: 'bakery',
       pageText: 'bakery listing',
       aiSource: 'ollama',
-      aiText: 'I am not sure what to do',
+      aiText: 'approve. This appears valid.',
     });
     expect(review.source).toBe('rules');
-    expect(review.reasons[0]).toMatch(/did not contain approve/);
+    expect(review.reasons[0]).toMatch(/not valid review JSON/);
+    expect(review.ai).toBeNull();
+  });
+
+  it('rejects a stopped page even when the model approves it', () => {
+    const review = approvalReview({
+      niche: 'ChefGaa restaurant food',
+      pageText: 'Example Domain This domain is for use in illustrative examples.',
+      workflowMode: 'stop',
+      verdict: {
+        broken: false,
+        stop: false,
+        httpStatus: 200,
+        robotsNoindex: false,
+        linkPolicy: 'unknown',
+        noForm: true,
+        submissionFormIndex: null,
+        contactEmails: [],
+        contactChannels: [],
+        pageKind: 'homepage',
+      },
+      aiSource: 'ollama',
+      aiText: JSON.stringify({
+        relevanceScore: 80,
+        relevanceReason: 'appears valid',
+        spamSignals: [],
+        linkValue: 'some',
+        risks: [],
+        verdict: 'approve',
+      }),
+    });
+    expect(review.decision).toBe('reject');
+    expect(review.reasons.join(' ')).toMatch(/cannot be approved/);
+    expect(review.checks.relevance).toBe('fail');
+  });
+
+  it('keeps login and captcha as needs_human when the model says reject', () => {
+    const review = approvalReview({
+      niche: 'restaurant food',
+      pageText: 'GitHub login sign in',
+      workflowMode: 'assisted',
+      verdict: {
+        broken: false,
+        httpStatus: 200,
+        robotsNoindex: false,
+        captcha: true,
+        loginRequired: true,
+        indexable: null,
+        linkPolicy: 'dofollow',
+        noForm: false,
+        pageKind: 'login',
+      },
+      aiSource: 'ollama',
+      aiText: JSON.stringify({
+        relevanceScore: 20,
+        relevanceReason: 'login wall',
+        spamSignals: [],
+        linkValue: 'low',
+        risks: ['captcha'],
+        verdict: 'reject',
+      }),
+    });
+    expect(review.decision).toBe('needs_human');
+    expect(review.checks.indexable).toBe('unknown');
+    expect(review.reasons.join(' ')).toMatch(/human step/);
+  });
+
+  it('does not let a model deny a submission form the scanner already found', () => {
+    const review = approvalReview({
+      niche: 'restaurant pos',
+      pageText: 'Submit your site to the directory',
+      workflowMode: 'automatic',
+      verdict: {
+        broken: false,
+        httpStatus: 200,
+        robotsNoindex: false,
+        linkPolicy: 'dofollow',
+        linkPolicyEvidence: 'dofollow',
+        noForm: false,
+        submissionFormIndex: 1,
+        pageKind: 'submission',
+        suggestedCategory: 'directory',
+        captcha: false,
+        loginRequired: false,
+      },
+      aiSource: 'ollama',
+      aiText: JSON.stringify({
+        relevanceScore: 0,
+        relevanceReason: 'The page is not a restaurant POS submission page.',
+        spamSignals: [],
+        linkValue: 'https://www.jayde.com/submit.html',
+        risks: ['not a restaurant page'],
+        verdict: 'needs_human',
+      }),
+    });
+    expect(review.decision).toBe('approve');
+    expect(review.requiresHumanConfirm).toBe(true);
+    expect(review.reasons.join(' ')).toMatch(/Decision follows the scan/);
+  });
+
+  it('does not treat a marketing word as niche overlap', () => {
+    const review = rulesApprovalReview({
+      niche: 'restaurant pos',
+      pageText: 'Discover more local businesses. Sign up to add a listing.',
+      verdict: {
+        broken: false,
+        httpStatus: 200,
+        robotsNoindex: false,
+        linkPolicy: 'dofollow',
+        suggestedCategory: 'citation',
+        pageKind: 'signup',
+        loginRequired: true,
+      },
+    });
+    expect(review.checks.relevance).toBe('pass');
+    expect(review.relevanceScore).toBe(40);
+    expect(review.reasons.join(' ')).not.toMatch(/discover/);
+    expect(review.decision).toBe('needs_human');
   });
 });
