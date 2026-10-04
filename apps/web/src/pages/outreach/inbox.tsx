@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { Card, CardContent } from '@/components/ui/card';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useApi } from '@/hooks/use-api';
 import { PageTransition } from '@/components/demo/page-transition';
@@ -31,10 +34,60 @@ type ThreadDetail = Thread & {
   relationshipTimeline?: Array<{ title: string; event_type: string; created_at: string }>;
 };
 
+type EmailAccount = {
+  id: string;
+  label: string;
+  provider_type: string;
+  from_email: string;
+  from_name?: string | null;
+  is_default: boolean;
+  status: string;
+};
+
 export function OutreachInboxPage() {
   const { projectId = '' } = useParams();
   const { request } = useApi();
+  const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [label, setLabel] = useState('Gmail');
+  const [fromEmail, setFromEmail] = useState('');
+  const [fromName, setFromName] = useState('');
+  const [host, setHost] = useState('smtp.gmail.com');
+  const [port, setPort] = useState('465');
+  const [secure, setSecure] = useState(true);
+  const [user, setUser] = useState('');
+  const [pass, setPass] = useState('');
+  const [makeDefault, setMakeDefault] = useState(true);
+
+  const accounts = useQuery({
+    queryKey: ['outreach-accounts', projectId],
+    queryFn: () => request<{ data: EmailAccount[] }>(`/v1/projects/${projectId}/outreach/accounts`),
+    enabled: !!projectId,
+  });
+
+  const saveAccount = useMutation({
+    mutationFn: () =>
+      request<{ data: EmailAccount }>(`/v1/projects/${projectId}/outreach/accounts`, {
+        method: 'POST',
+        body: JSON.stringify({
+          label,
+          fromEmail,
+          fromName: fromName || undefined,
+          host,
+          port: Number(port),
+          secure,
+          user,
+          pass,
+          makeDefault,
+        }),
+      }),
+    onSuccess: () => {
+      setPass('');
+      toast.success('SMTP account saved. The password is encrypted at rest.');
+      void queryClient.invalidateQueries({ queryKey: ['outreach-accounts', projectId] });
+    },
+    onError: (err: Error) => toast.error(err.message || 'Could not save the SMTP account'),
+  });
 
   const threads = useQuery({
     queryKey: ['outreach-threads', projectId],
@@ -76,6 +129,80 @@ export function OutreachInboxPage() {
           </Button>
         </div>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">SMTP email account</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Saved here with ENCRYPTION_KEY. If no account exists, the API can also send with SMTP_HOST,
+            SMTP_PORT, SMTP_USER, SMTP_PASS, and SMTP_FROM.
+          </p>
+          {(accounts.data?.data ?? []).length > 0 && (
+            <ul className="text-sm space-y-1">
+              {(accounts.data?.data ?? []).map((account) => (
+                <li key={account.id}>
+                  {account.label} · {account.provider_type} · {account.from_email}
+                  {account.is_default ? ' · default' : ''} · {account.status}
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label htmlFor="smtp-label">Label</Label>
+              <Input id="smtp-label" value={label} onChange={(e) => setLabel(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="smtp-from">From email</Label>
+              <Input id="smtp-from" type="email" value={fromEmail} onChange={(e) => setFromEmail(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="smtp-from-name">From name</Label>
+              <Input id="smtp-from-name" value={fromName} onChange={(e) => setFromName(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="smtp-host">Host</Label>
+              <Input id="smtp-host" value={host} onChange={(e) => setHost(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="smtp-port">Port</Label>
+              <Input id="smtp-port" value={port} onChange={(e) => setPort(e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="smtp-user">Username</Label>
+              <Input id="smtp-user" value={user} onChange={(e) => setUser(e.target.value)} />
+            </div>
+            <div className="space-y-1 sm:col-span-2">
+              <Label htmlFor="smtp-pass">App password</Label>
+              <Input
+                id="smtp-pass"
+                type="password"
+                autoComplete="new-password"
+                value={pass}
+                onChange={(e) => setPass(e.target.value)}
+              />
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={secure} onChange={(e) => setSecure(e.target.checked)} />
+            TLS (SMTP_SECURE). Port 465 is secure by default.
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={makeDefault} onChange={(e) => setMakeDefault(e.target.checked)} />
+            Use as the default account
+          </label>
+          <Button
+            type="button"
+            size="sm"
+            disabled={saveAccount.isPending || !fromEmail || !host || !user || !pass}
+            onClick={() => saveAccount.mutate()}
+          >
+            {saveAccount.isPending ? 'Saving…' : 'Save SMTP account'}
+          </Button>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 lg:grid-cols-5 min-h-[480px]">
         <Card className="lg:col-span-2">

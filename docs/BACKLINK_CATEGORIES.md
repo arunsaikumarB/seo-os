@@ -13,7 +13,17 @@ Free resources used by every category:
 - The site's own `sitemap.xml` when it is public.
 - URL scanner: HTTP fetch, then local Playwright if the body is a JavaScript shell.
 
-Content is written by Gemini (`GEMINI_API_KEY`) or Ollama (`OLLAMA_BASE_URL`). If neither is configured, the draft says it was not generated. Email is sent only through a connected Gmail or Outlook OAuth account (`sendViaOAuthProvider`) or real SMTP (`nodemailer`). A missing mailbox is "not connected".
+Content is written by Gemini (`GEMINI_API_KEY`) or local Ollama. Ollama is used only when `OLLAMA_ENABLED=true` and `OLLAMA_BASE_URL` are both set. `OLLAMA_MODEL` selects the model (default `llama3.2`; a local example is `qwen2.5:7b`). If neither provider answers, the draft says it was not generated. `GENERATION_MOCK=true` does not create backlink or outreach copy.
+
+Email is sent only through a connected Gmail or Outlook OAuth account (`sendViaOAuthProvider`), an SMTP account saved in the inbox (password encrypted with `ENCRYPTION_KEY`), or the env mailbox `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM` when no account row exists. The relay message id is the one nodemailer returns. A missing mailbox is "not connected".
+
+Real run from the repo root in PowerShell, after `.env` has `DATABASE_URL`, `COMPANY_STACK=true`, Ollama, and SMTP:
+
+```powershell
+npm run e2e:backlinks -- --url "https://www.jayde.com/submit.html" --target "https://your-site.example/" --to "editor@example.com" --dry-run
+```
+
+Add `--send` and omit `--dry-run` to deliver the drafted email. `--dry-run` never submits and never sends. The script prints the scan verdict, the approval decision with its source (`ollama`, `gemini`, or `rules`), the category workflow, the drafted email, and a `runVerificationCheck` result of pending or verified.
 
 | Category | Mode | What is automatic | What a person does | Footprints | Curated URLs |
 | --- | --- | --- | --- | --- | --- |

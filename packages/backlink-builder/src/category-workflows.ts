@@ -135,5 +135,5 @@ export function resolveExecutionMode(
 }
 
 export function unavailableAiDraftMessage(kind: string): string {
-  return `No AI provider is configured. Set GEMINI_API_KEY (free tier) or OLLAMA_BASE_URL. This ${kind} was not generated. Write it yourself. The app will not present a template as AI content.`;
+  return `No AI provider is configured. Set GEMINI_API_KEY (free tier) or OLLAMA_ENABLED=true with OLLAMA_BASE_URL (OLLAMA_MODEL defaults to llama3.2). This ${kind} was not generated. Write it yourself. The app will not present a template as AI content.`;
 }

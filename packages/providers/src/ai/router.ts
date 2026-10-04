@@ -1,6 +1,6 @@
 import type { AIProvider } from '../interfaces/index.js';
 import { createGeminiProvider, checkGeminiHealth } from './gemini.js';
-import { createOllamaProvider, checkOllamaHealth } from './ollama.js';
+import { createOllamaProvider, checkOllamaHealth, isOllamaEnabled } from './ollama.js';
 import {
   createDeepSeekProvider,
   createMistralProvider,
@@ -61,8 +61,11 @@ export function buildEnvLlmProviders(options: AIProviderRouterOptions): Array<{
       provider: createOpenRouterProvider(process.env.OPENROUTER_API_KEY),
     });
   }
-  if (options.ollamaBaseUrl) {
-    chain.push({ key: 'llm.ollama', provider: createOllamaProvider(options.ollamaBaseUrl) });
+  if (isOllamaEnabled(options.ollamaBaseUrl)) {
+    chain.push({
+      key: 'llm.ollama',
+      provider: createOllamaProvider(options.ollamaBaseUrl!),
+    });
   }
   return chain;
 }
@@ -99,7 +102,7 @@ export function createAIProviderRouter(options: AIProviderRouterOptions): AIProv
     async completeWithFailover(messages, opts = {}) {
       if (!chain.length) {
         throw new Error(
-          'No AI provider configured. Set GEMINI_API_KEY, MISTRAL_API_KEY, or OLLAMA_BASE_URL.'
+          'No AI provider configured. Set GEMINI_API_KEY, or OLLAMA_ENABLED=true with OLLAMA_BASE_URL.'
         );
       }
 
@@ -157,7 +160,7 @@ export function createAIProviderRouter(options: AIProviderRouterOptions): AIProv
               status: 'disabled' as const,
               message: 'Not configured',
             }),
-        options.ollamaBaseUrl
+        isOllamaEnabled(options.ollamaBaseUrl)
           ? checkOllamaHealth(options.ollamaBaseUrl).then((h) => ({ name: 'ollama', ...h }))
           : Promise.resolve(undefined),
       ]);

@@ -1174,6 +1174,11 @@ export function resolveDemoApi(path: string, method: string, body?: string): unk
     return { data: { messageId: 'msg-demo', status: 'pending_approval' } };
   if (m.includes('/outreach/messages') && method === 'POST')
     return { data: { messageId: 'msg-demo', threadId: 'th1' } };
+  if (m.includes('/outreach/accounts') && method === 'POST')
+    return {
+      error:
+        'Demo mode does not store an SMTP password. This account was not created. Use the API with ENCRYPTION_KEY.',
+    };
   if (m.includes('/outreach/accounts'))
     return {
       data: [

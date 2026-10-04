@@ -39,7 +39,20 @@ export const apiEnvSchema = z.object({
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
   ENCRYPTION_KEY: z.string().optional(),
   GEMINI_API_KEY: z.string().optional(),
+  /** Ollama is used only when this is the string "true" and OLLAMA_BASE_URL is set. */
+  OLLAMA_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => v === 'true'),
   OLLAMA_BASE_URL: optionalUrl,
+  /** Defaults to llama3.2 inside the Ollama provider when unset. */
+  OLLAMA_MODEL: z.string().optional(),
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.string().optional(),
+  SMTP_SECURE: z.string().optional(),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  SMTP_FROM: z.string().optional(),
   PROVIDER_MODE: z.enum(['mvp', 'free', 'paid']).default('mvp'),
   ENABLE_WORKERS: z
     .string()

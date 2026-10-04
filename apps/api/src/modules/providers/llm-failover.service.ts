@@ -7,6 +7,7 @@ import {
   createGeminiProvider,
   createMistralProvider,
   createOllamaProvider,
+  isOllamaEnabled,
   createOpenAIChatProvider,
   createOpenRouterProvider,
   getProviderManager,
@@ -67,10 +68,7 @@ function envConfigured(providerKey: string): boolean {
     case 'llm.ollama':
       // Require explicit enable — a stale OLLAMA_BASE_URL alone caused long timeouts
       // when Ollama was not running locally.
-      return (
-        Boolean(process.env.OLLAMA_BASE_URL) &&
-        String(process.env.OLLAMA_ENABLED ?? '').toLowerCase() === 'true'
-      );
+      return isOllamaEnabled();
     case 'llm.deepseek':
       return Boolean(process.env.DEEPSEEK_API_KEY);
     case 'llm.openrouter':
@@ -97,8 +95,8 @@ function createProviderClient(providerKey: string): AIProvider | null {
         ? createOpenAIChatProvider(process.env.OPENAI_API_KEY)
         : null;
     case 'llm.ollama':
-      return process.env.OLLAMA_BASE_URL
-        ? createOllamaProvider(process.env.OLLAMA_BASE_URL)
+      return isOllamaEnabled()
+        ? createOllamaProvider(process.env.OLLAMA_BASE_URL!.trim())
         : null;
     case 'llm.deepseek':
       return process.env.DEEPSEEK_API_KEY

@@ -54,6 +54,7 @@ export interface EmailProvider {
     subject: string;
     bodyHtml: string;
     bodyText?: string;
+    from?: string;
   }): Promise<{ messageId: string | null }>;
 }
 

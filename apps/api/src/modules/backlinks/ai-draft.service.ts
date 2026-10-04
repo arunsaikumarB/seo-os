@@ -4,7 +4,7 @@
  */
 
 import { unavailableAiDraftMessage } from '@seo-os/backlink-builder';
-import { createGeminiProvider, createOllamaProvider } from '@seo-os/providers';
+import { createGeminiProvider, createOllamaProvider, isOllamaEnabled } from '@seo-os/providers';
 import { logger } from '../../lib/logger.js';
 
 export interface DraftResult {
@@ -27,7 +27,7 @@ async function complete(prompt: string): Promise<{ text: string; provider: 'gemi
     }
   }
   const ollama = process.env.OLLAMA_BASE_URL?.trim();
-  if (ollama) {
+  if (ollama && isOllamaEnabled(ollama)) {
     try {
       const result = await createOllamaProvider(ollama).complete(
         [{ role: 'user', content: prompt }],

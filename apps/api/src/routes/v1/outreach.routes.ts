@@ -11,6 +11,7 @@ import {
   getOutreachSummary,
   getSequence,
   getThread,
+  createSmtpEmailAccount,
   listEmailAccounts,
   listSequences,
   listTasks,
@@ -158,6 +159,29 @@ outreachRouter.get(
 outreachRouter.get('/accounts', authMiddleware, requireRole('viewer'), async (req, res, next) => {
   try {
     res.json({ data: await listEmailAccounts(param(req.params.projectId)) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const createSmtpAccountSchema = z.object({
+  label: z.string().min(1),
+  fromEmail: z.string().email(),
+  fromName: z.string().optional(),
+  host: z.string().min(1),
+  port: z.number().int().min(1).max(65535),
+  secure: z.boolean().optional(),
+  user: z.string().min(1),
+  pass: z.string().min(1),
+  makeDefault: z.boolean().optional(),
+});
+
+outreachRouter.post('/accounts', authMiddleware, requireRole('member'), async (req, res, next) => {
+  try {
+    const body = createSmtpAccountSchema.parse(req.body);
+    res.status(201).json({
+      data: await createSmtpEmailAccount(param(req.params.projectId), body),
+    });
   } catch (err) {
     next(err);
   }

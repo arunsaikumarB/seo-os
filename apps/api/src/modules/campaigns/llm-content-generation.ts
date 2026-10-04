@@ -1,9 +1,8 @@
 /**
  * Phase 5.6/5.8 — Real LLM content pack generation with provider selection + failover.
- * Templates when GENERATION_MOCK=true, or as a local/mvp fallback when no LLM works.
+ * GENERATION_MOCK and the company/mvp template fallback do not produce a pack.
  */
 import {
-  generateContentPack,
   isGenerationMockEnabled,
   scanPackForPlaceholders,
   scoreContentPackQuality,
@@ -15,9 +14,6 @@ import {
   pickKeywordsForOpportunity,
   pickTitleDescriptionBlock,
   listBankKeywordSamples,
-  pickBankIndex,
-  textSimilarity,
-  CONTENT_SIMILARITY_THRESHOLD,
   findForeignBrandContamination,
   resolveSubmissionPlatformType,
   isArticleLikePlatform,
@@ -267,166 +263,6 @@ type LiveGenParams = {
   formHints?: string | null;
 };
 
-/** Local/mvp path: unique per target URL + form fields (not one shared brand blurb). */
-function buildMockContentPack(params: LiveGenParams): Record<string, unknown> {
-  const pack = generateContentPack(
-    params.storageType,
-    params.opp,
-    params.brand,
-    {
-      classificationId: params.classificationId,
-      classificationLabel: params.classificationLabel,
-      reason: params.reason,
-      // Explicit fallback path — generateContentPack refuses silent templates otherwise.
-      allowMockFallback: true,
-    }
-  ) as unknown as Record<string, unknown>;
-
-  const site = String(params.opp.website_name || params.opp.domain || 'this listing site');
-  const domain = String(params.opp.domain || 'unknown').replace(/^www\./, '');
-  const submitUrl = String(params.websiteUrl || (domain !== 'unknown' ? `https://${domain}` : ''));
-  const brandName = String(params.brand.brandName || 'Our company');
-  const brandDomain = String(params.brand.projectDomain || 'example.com');
-  const industry = String(params.brand.industry || 'professional services');
-  const typeLabel = String(params.classificationLabel || params.storageType || 'directory');
-  const fields =
-    params.requiredFields?.filter(Boolean).slice(0, 16) ??
-    ['title', 'description', 'url', 'keywords', 'email'];
-  const features = (params.brand.keyFeatures ?? []).map(String).filter(Boolean);
-  const attempt = params.uniquenessAttempt ?? 1;
-  const avoid = params.avoidTexts ?? [];
-
-  let bankBlock = pickTitleDescriptionBlock(`${domain}:${submitUrl}`, { brandName });
-  let bankKeywords = '';
-  let seoTitle = '';
-  let shortDescription = '';
-  let longDescription = '';
-  let furtherCompanyInfo = '';
-  let body = '';
-  let metaDescription = '';
-
-  for (let offset = 0; offset < 28; offset++) {
-    const seed = `${params.opportunityId ?? ''}:${domain}:${submitUrl}:${typeLabel}:a${attempt}:o${offset}`;
-    bankBlock = pickTitleDescriptionBlock(seed, { brandName });
-    bankKeywords = pickKeywordsForOpportunity(seed, {
-      brandName,
-      maxKeywords: 8,
-      maxChars: 220,
-    });
-
-    const feature =
-      params.featureEmphasis ||
-      (features.length ? features[pickBankIndex(`${seed}:feat`, features.length)]! : `${industry} solutions`);
-    const angle = params.openingAngle || 'problem-solution';
-    const openers = [
-      `Built for operators discovering ${brandName} on ${site}`,
-      `${site} readers evaluating ${industry} tools get a clear fit with ${brandName}`,
-      `Listing on ${site}: ${brandName} leads with ${feature}`,
-      `${brandName} is a practical ${industry} pick for the ${site} audience`,
-      `For this ${typeLabel} form on ${domain}, ${brandName} highlights ${feature}`,
-      `Submit-ready for ${site} — ${brandName} focuses on ${feature}`,
-    ];
-    const opener = openers[pickBankIndex(`${seed}:opener`, openers.length)]!;
-
-    seoTitle = `${bankBlock?.title || `${brandName} — ${feature}`} · ${site}`.slice(0, 70);
-    shortDescription = fitDescriptionToCap(
-      `${opener}. ${bankBlock?.description || `${brandName} helps growing ${industry} teams.`}`.trim()
-    ).value;
-    longDescription = fitDescriptionToCap(
-      `${brandName} (https://${brandDomain}) — ${feature}. Written for the ${typeLabel} submission on ${domain} using a ${angle.replace(/-/g, ' ')} angle.`.trim()
-    ).value;
-    if (textSimilarity(shortDescription, longDescription) >= 0.75) {
-      longDescription = fitDescriptionToCap(
-        `Why ${site}? ${brandName} brings ${feature} to ${industry} teams who need reliable day-to-day results at https://${brandDomain}.`
-      ).value;
-    }
-    metaDescription = fitMetaDescription(
-      `${brandName} on ${site}: ${feature}. ${industry} teams — https://${brandDomain}`
-    );
-
-    furtherCompanyInfo = fitFurtherCompanyInfo(
-      [
-        `${brandName} is preparing a unique ${typeLabel} package for ${site} (${submitUrl || domain}).`,
-        `Form fields covered: ${fields.join(', ')}.`,
-        `Lead feature: ${feature}. Opening style: ${angle.replace(/-/g, ' ')}.`,
-        params.formHints || params.reason || '',
-        bankBlock?.description || '',
-        ...features.slice(0, 5).map((f) => `Capability: ${f}.`),
-        `Product URL: https://${brandDomain}. This copy is specific to ${domain} and must not match other campaign listings.`,
-      ]
-        .filter(Boolean)
-        .join(' ')
-    ).value;
-
-    body = [
-      `# ${seoTitle}`,
-      ``,
-      `## Why this fits ${site}`,
-      `${opener}. This ${typeLabel} listing is written for the form at ${submitUrl || domain}.`,
-      ``,
-      `## What ${brandName} offers`,
-      ...(features.slice(0, 5).length
-        ? features.slice(0, 5).map((f, i) => `${i + 1}. ${f}`)
-        : [`1. Practical ${industry} capabilities for growing teams.`]),
-      ``,
-      `## Form-ready details`,
-      `Prepared fields: ${fields.join(', ')}.`,
-      `Keywords: ${bankKeywords}.`,
-      ``,
-      `Visit https://${brandDomain} for full product context.`,
-    ].join('\n');
-
-    const candidate = longDescription || shortDescription;
-    const tooClose = avoid.some(
-      (prev) => textSimilarity(candidate, prev) >= CONTENT_SIMILARITY_THRESHOLD
-    );
-    if (!tooClose) break;
-  }
-
-  pack.seoTitle = seoTitle;
-  pack.h1 = bankBlock?.h1 || seoTitle;
-  pack.shortDescription = shortDescription;
-  pack.longDescription = longDescription;
-  pack.metaDescription = metaDescription;
-  pack.businessDescription = fitDescriptionToCap(
-    `${brandName} for ${site}: ${params.featureEmphasis || industry} at https://${brandDomain}.`
-  ).value;
-  pack.keywords = bankKeywords;
-  pack.furtherCompanyInfo = furtherCompanyInfo;
-  pack.body = body;
-  pack.articleBody = body;
-  pack.bodyOutline = body;
-  pack.excerpt = shortDescription;
-  pack.targetSite = site;
-  pack.targetDomain = domain;
-  pack.targetUrl = submitUrl;
-  pack.formFields = fields;
-  pack.generatedBy = 'mock_template_unique';
-  pack.seoBankSeed = {
-    title: bankBlock?.title ?? null,
-    keywords: bankKeywords,
-    section: bankBlock?.section ?? null,
-  };
-  pack.quality = scoreLivePack(pack, brandName);
-  pack.projectId = params.workspaceId;
-  pack.platformType = resolveSubmissionPlatformType({
-    storageType: params.storageType,
-    classificationLabel: params.classificationLabel,
-    domain: params.opp.domain,
-    url: params.websiteUrl,
-  });
-  assertPackBrandIsolation(pack, brandName, params.workspaceId);
-  return pack;
-}
-
-function allowMockFallback(): boolean {
-  if (isGenerationMockEnabled()) return true;
-  if (String(process.env.PROVIDER_MODE ?? '').toLowerCase() === 'mvp') return true;
-  // Company Postgres stack often has no LLM keys yet — use unique template packs.
-  if (String(process.env.COMPANY_STACK ?? '').toLowerCase() === 'true') return true;
-  return String(process.env.NODE_ENV ?? '').toLowerCase() === 'development';
-}
-
 /**
  * Generate a content pack via selected/failover LLM providers.
  */
@@ -434,11 +270,12 @@ export async function generateLiveContentPack(
   params: LiveGenParams
 ): Promise<Record<string, unknown>> {
   if (isGenerationMockEnabled()) {
-    logger.warn(
-      { workspaceId: params.workspaceId },
-      'GENERATION_MOCK=true — using template path (NOT for production)'
+    throw Object.assign(
+      new Error(
+        'GENERATION_MOCK=true is set. Backlink content was not generated. This flag does not create real copy. Unset GENERATION_MOCK and set OLLAMA_ENABLED=true with OLLAMA_BASE_URL, or GEMINI_API_KEY.'
+      ),
+      { code: 'GENERATION_MOCK_IGNORED' }
     );
-    return buildMockContentPack(params);
   }
 
   const prompt = buildPrompt({
@@ -603,18 +440,6 @@ export async function generateLiveContentPack(
   }
 
   const chainSuffix = lastChain ? ` [${lastChain}]` : '';
-  if (allowMockFallback()) {
-    logger.warn(
-      {
-        workspaceId: params.workspaceId,
-        err: lastErr?.message,
-        chain: lastChain || undefined,
-      },
-      'LLM unavailable — falling back to template content pack (local/mvp)'
-    );
-    return buildMockContentPack(params);
-  }
-
   throw Object.assign(
     new Error(
       lastErr?.message

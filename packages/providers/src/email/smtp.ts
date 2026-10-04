@@ -8,6 +8,25 @@ export interface SmtpConfig {
   pass?: string;
 }
 
+export interface SmtpEnvConfig extends SmtpConfig {
+  from: string;
+}
+
+/** Env mailbox used when no outreach email account row exists. */
+export function smtpConfigFromEnv(): SmtpEnvConfig | null {
+  const host = process.env.SMTP_HOST?.trim();
+  const port = Number(process.env.SMTP_PORT);
+  const user = process.env.SMTP_USER?.trim();
+  const pass = process.env.SMTP_PASS;
+  const from = process.env.SMTP_FROM?.trim() || user;
+  if (!host || !Number.isFinite(port) || port <= 0 || !user || pass == null || pass === '' || !from) {
+    return null;
+  }
+  const secureEnv = process.env.SMTP_SECURE?.trim().toLowerCase();
+  const secure = secureEnv ? secureEnv === 'true' || secureEnv === '1' : port === 465;
+  return { host, port, secure, user, pass, from };
+}
+
 /** SMTP through nodemailer. The message id is the one the relay returns. */
 export function createSmtpEmailProvider(config: SmtpConfig): ExtendedEmailProvider {
   return {

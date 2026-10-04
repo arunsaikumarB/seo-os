@@ -6,8 +6,6 @@ import {
   canTransitionQueueStage,
   detectSubmissionRequirements,
   generateContentPack,
-  generateImageBrief,
-  generateVideoBrief,
   queueStageToAutomationStatus,
   queueStageToTrackingStatus,
   recommendBacklinkTypes,
@@ -914,30 +912,20 @@ export async function createMediaBrief(
     .single();
   if (!opp) throw new Error('Opportunity not found');
   const brand = await brandFor(workspaceId, orgId);
-  const ctx = {
-    title: String(opp.title),
-    domain: opp.domain as string | null,
-    opportunity_type: String(opp.opportunity_type),
-    score: Number(opp.score ?? 0),
-    website_name: opp.website_name as string | null,
-  };
-  // Phase 5.6 — never invent example.com template briefs; pixel path is IIE / honest n/a
   const { isGenerationMockEnabled } = await import('@seo-os/backlink-builder');
-  const brief = isGenerationMockEnabled()
-    ? kind === 'image'
-      ? generateImageBrief(ctx, brand)
-      : generateVideoBrief(ctx, brand)
-    : {
-        suggestions: [],
-        generationStatus: kind === 'image' ? 'pending_provider' : 'n/a',
-        metricsSource: 'live',
-        note:
-          kind === 'image'
-            ? 'Image pixels via configured image provider only — no fabricated metadata.'
-            : 'Video render not configured — metadata deferred.',
-        brand: brand.brandName,
-        projectDomain: brand.projectDomain,
-      };
+  const mockIgnored = isGenerationMockEnabled();
+  const brief = {
+    suggestions: [] as unknown[],
+    generationStatus: kind === 'image' ? 'pending_provider' : 'n/a',
+    metricsSource: 'live',
+    note: mockIgnored
+      ? 'GENERATION_MOCK=true was ignored. No image or video brief was invented.'
+      : kind === 'image'
+        ? 'Image pixels via configured image provider only — no fabricated metadata.'
+        : 'Video render not configured — metadata deferred.',
+    brand: brand.brandName,
+    projectDomain: brand.projectDomain,
+  };
   const { data, error } = await getSupabaseAdmin()
     .from('media_asset_briefs')
     .insert({

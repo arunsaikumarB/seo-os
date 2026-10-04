@@ -7,7 +7,8 @@ import {
   type AiEmailType,
   type EmailTone,
 } from '@seo-os/outreach-engine';
-import { createEmailProviderFromAccount } from '@seo-os/providers';
+import { decryptSecret, encryptSecret } from '@seo-os/integrations';
+import { createEmailProviderFromAccount, createSmtpEmailProvider, smtpConfigFromEnv } from '@seo-os/providers';
 import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { createApproval } from '../campaigns/approval.service.js';
 import { logRelationshipTimeline } from '../relationships/relationship-intelligence.service.js';
@@ -65,6 +66,73 @@ export async function listEmailAccounts(workspaceId: string) {
     .select('id, label, provider_type, from_email, from_name, is_default, status')
     .eq('workspace_id', workspaceId);
   return data ?? [];
+}
+
+export async function createSmtpEmailAccount(
+  workspaceId: string,
+  input: {
+    label: string;
+    fromEmail: string;
+    fromName?: string | null;
+    host: string;
+    port: number;
+    secure?: boolean;
+    user: string;
+    pass: string;
+    makeDefault?: boolean;
+  }
+) {
+  if (!process.env.ENCRYPTION_KEY?.trim()) {
+    throw new Error('Set ENCRYPTION_KEY before storing an SMTP password.');
+  }
+  const passEnc = encryptSecret(input.pass);
+  const secure = input.secure ?? input.port === 465;
+  if (input.makeDefault) {
+    await getSupabaseAdmin()
+      .from('email_accounts')
+      .update({ is_default: false })
+      .eq('workspace_id', workspaceId);
+  }
+  const { data, error } = await getSupabaseAdmin()
+    .from('email_accounts')
+    .insert({
+      id: randomUUID(),
+      workspace_id: workspaceId,
+      label: input.label,
+      provider_type: 'smtp',
+      from_email: input.fromEmail,
+      from_name: input.fromName ?? null,
+      config: {
+        host: input.host.trim(),
+        port: input.port,
+        secure,
+        user: input.user.trim(),
+        passEnc,
+      },
+      is_default: Boolean(input.makeDefault),
+      status: 'active',
+    })
+    .select('id, label, provider_type, from_email, from_name, is_default, status')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+function smtpConfigFromAccount(config: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...config };
+  const passEnc = next.passEnc as { ciphertext?: string; iv?: string; authTag?: string | null } | undefined;
+  if (passEnc?.ciphertext && passEnc.iv) {
+    if (!process.env.ENCRYPTION_KEY?.trim()) {
+      throw new Error('ENCRYPTION_KEY is required to read the stored SMTP password. No message was sent.');
+    }
+    next.pass = decryptSecret({
+      ciphertext: passEnc.ciphertext,
+      iv: passEnc.iv,
+      authTag: passEnc.authTag ?? null,
+    });
+    delete next.passEnc;
+  }
+  return next;
 }
 
 export async function listTemplates(workspaceId: string) {
@@ -425,23 +493,36 @@ export async function executeSendMessage(messageId: string, workspaceId: string)
       .single();
     account = data;
   }
+  let provider;
+  let fromEmail: string;
+  let accountId: string | null = null;
   if (!account || String(account.provider_type ?? 'mock') === 'mock') {
-    throw new Error(
-      'Email is not connected. Connect Gmail, Outlook, or SMTP before sending. No message was sent.'
-    );
+    const envSmtp = smtpConfigFromEnv();
+    if (!envSmtp) {
+      throw new Error(
+        'Email is not connected. Connect Gmail, Outlook, or SMTP, or set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, and SMTP_FROM. No message was sent.'
+      );
+    }
+    provider = createSmtpEmailProvider(envSmtp);
+    fromEmail = envSmtp.from;
+  } else {
+    const providerType = String(account.provider_type);
+    const rawConfig = (account.config as Record<string, unknown>) ?? {};
+    const config = providerType === 'smtp' ? smtpConfigFromAccount(rawConfig) : rawConfig;
+    provider = createEmailProviderFromAccount(providerType, config);
+    fromEmail = String(account.from_email ?? '');
+    accountId = String(account.id);
+    if (!fromEmail) {
+      throw new Error('The email account has no from address. No message was sent.');
+    }
   }
 
-  const provider = createEmailProviderFromAccount(
-    String(account.provider_type),
-    (account.config as Record<string, unknown>) ?? {}
-  );
-
-  const fromEmail = String(account?.from_email ?? 'outreach@seoos.demo');
   const result = await provider.send({
     to: String(msg.to_email),
     subject: String(msg.subject),
     bodyHtml: String(msg.body_html),
     bodyText: msg.body_text ? String(msg.body_text) : undefined,
+    from: fromEmail,
   });
 
   const now = new Date().toISOString();
@@ -451,7 +532,7 @@ export async function executeSendMessage(messageId: string, workspaceId: string)
       status: 'sent',
       sent_at: now,
       from_email: fromEmail,
-      email_account_id: account?.id,
+      email_account_id: accountId,
       provider_message_id: result.messageId,
     })
     .eq('id', messageId);

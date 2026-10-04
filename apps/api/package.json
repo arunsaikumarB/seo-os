@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "clean": "rimraf dist",
-    "lint": "eslint src --max-warnings 0"
+    "lint": "eslint src --max-warnings 0",
+    "e2e:backlinks": "tsx scripts/backlink-e2e-real.ts"
   },
   "dependencies": {
     "@seo-os/agent-contracts": "*",
