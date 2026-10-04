@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildDraftPrompt, groundFormFieldDraft, planBacklinkDraft } from './draft-plan.js';
+import {
+  acceptBusinessDescription,
+  buildDraftPrompt,
+  dedupeDescription,
+  groundFormFieldDraft,
+  planBacklinkDraft,
+} from './draft-plan.js';
 import type { UrlScanVerdict } from './url-scanner.js';
 
 function verdict(partial: Partial<UrlScanVerdict>): UrlScanVerdict {
@@ -186,5 +192,27 @@ describe('draft plan', () => {
     );
     expect(wrongKey.source).toBe('rules');
     expect(JSON.parse(wrongKey.json)).toEqual({ 'Type the business name you want to add': 'Chefgaa' });
+  });
+
+  it('dedupes a repeated directory description and keeps two model sentences', () => {
+    const repeated =
+      'Discover Chefgaa. All-in-One POS Software for Restaurants. All-in-one restaurant POS platform | Chefgaa';
+    const deduped = dedupeDescription(repeated);
+    expect(deduped).not.toMatch(/\|/);
+    expect(deduped.match(/Chefgaa/gi)?.length).toBe(1);
+    const values = JSON.parse(
+      groundFormFieldDraft(null, ['XDESCRIPTION'], {
+        label: 'Chefgaa',
+        niche: 'restaurant POS',
+        url: 'https://go.chefgaa.com/',
+        description: 'Discover Chefgaa. Discover Chefgaa.',
+      }).json
+    ) as Record<string, string>;
+    expect(values.XDESCRIPTION).toBe('Discover Chefgaa.');
+    expect(
+      acceptBusinessDescription(
+        'Chefgaa is all-in-one POS software for restaurants. It helps a restaurant run orders and payments. Extra sentence.'
+      )
+    ).toBe('Chefgaa is all-in-one POS software for restaurants. It helps a restaurant run orders and payments.');
   });
 });

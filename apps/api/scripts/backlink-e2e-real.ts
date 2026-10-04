@@ -84,10 +84,14 @@ async function main() {
   const {
     approvalReview,
     buildApprovalPrompt,
+    acceptBusinessDescription,
+    buildBusinessDescriptionPrompt,
     buildDraftPrompt,
     clientLabelFromTarget,
+    dedupeDescription,
     deriveNiche,
     groundFormFieldDraft,
+    humanStepForChosenMode,
     planBacklinkDraft,
     resolveExecutionMode,
     workflowFor,
@@ -103,10 +107,6 @@ async function main() {
     h1: targetScan.h1,
   });
   const clientLabel = clientLabelFromTarget({ title: targetScan.title || targetScan.h1, hostname: targetHost });
-  const clientDescription = [targetScan.metaDescription, targetScan.h1, targetScan.title]
-    .map((part) => (part ?? '').replace(/\s+/g, ' ').trim())
-    .filter(Boolean)
-    .join('. ');
   print('client', {
     targetFinalUrl: targetScan.finalUrl,
     targetTitle: targetScan.title,
@@ -127,7 +127,7 @@ async function main() {
     catalogMode: workflow?.mode ?? null,
     chosen: mode.mode,
     reason: mode.reason,
-    humanStep: workflow?.humanStep ?? null,
+    humanStep: humanStepForChosenMode(mode.mode, workflow),
   });
 
   const pageText = verdict.pageExcerpt || `${verdict.title} ${verdict.h1}`;
@@ -151,12 +151,15 @@ async function main() {
   });
   print('approval', {
     decision: review.decision,
+    rulesDecision: review.rulesDecision,
+    aiVerdict: review.aiVerdict,
     source: review.source,
     summary: review.summary,
     requiresHumanConfirm: review.requiresHumanConfirm,
     relevanceScore: review.relevanceScore,
     checks: review.checks,
     ai: review.ai,
+    rawReply: review.rawReply,
     reasons: review.reasons,
     aiConfigured: Boolean(ai),
   });
@@ -184,13 +187,37 @@ async function main() {
         provider: null,
         generated: false,
       };
+  const wantsDescription =
+    plan.kind === 'form_fields' && plan.fieldNames.some((name) => /description|about|summary/i.test(name));
+  let businessDescription = wantsDescription ? dedupeDescription(targetScan.metaDescription || '') : '';
+  let descriptionSource: 'ollama' | 'meta' | 'none' | null = wantsDescription
+    ? businessDescription
+      ? 'meta'
+      : 'none'
+    : null;
+  if (wantsDescription) {
+    const written = await draftWithConfiguredAi(
+      'business description',
+      buildBusinessDescriptionPrompt({
+        label: clientLabel,
+        title: targetScan.title,
+        h1: targetScan.h1,
+        metaDescription: targetScan.metaDescription,
+      })
+    );
+    const accepted = written.generated ? acceptBusinessDescription(written.content) : null;
+    if (accepted) {
+      businessDescription = accepted;
+      descriptionSource = 'ollama';
+    }
+  }
   const grounded =
     plan.kind === 'form_fields' && plan.fieldNames.length > 0
       ? groundFormFieldDraft(draft.generated ? draft.content : null, plan.fieldNames, {
           label: clientLabel,
           niche,
           url: target,
-          description: clientDescription,
+          description: businessDescription,
         })
       : null;
   print('draft', {
@@ -198,6 +225,7 @@ async function main() {
     reason: plan.reason,
     generated: grounded ? true : draft.generated,
     provider: grounded ? grounded.source : draft.provider,
+    descriptionSource: plan.kind === 'form_fields' ? descriptionSource : null,
     recipientEmail: plan.recipientEmail,
     recipientName: plan.recipientName ?? (plan.kind === 'outreach_email' ? 'unknown' : null),
     fieldNames: plan.fieldNames,

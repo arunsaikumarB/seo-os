@@ -103,6 +103,16 @@ export function workflowFor(id: string): CategoryWorkflow | null {
   return BY_ID.get(id as BacklinkTypeId) ?? null;
 }
 
+/** Human step for the path actually chosen, not the catalog sentence. */
+export function humanStepForChosenMode(
+  mode: 'stop' | WorkflowMode,
+  catalog: CategoryWorkflow | null
+): string | null {
+  if (mode === 'stop') return null;
+  if (mode === 'automatic') return 'Person confirms the filled fields, then the app submits and verifies.';
+  return catalog?.humanStep ?? null;
+}
+
 function hasContactChannel(
   verdict: Pick<UrlScanVerdict, 'contactEmails'> & { contactChannels?: UrlScanVerdict['contactChannels'] }
 ): boolean {

@@ -115,9 +115,54 @@ function fieldRole(name: string): 'url' | 'business' | 'description' | 'category
   return 'skip';
 }
 
+/** Drop repeated sentences such as a title pasted after the same meta description. */
+export function dedupeDescription(text: string): string {
+  const pieces = text
+    .split(/\s*\|\s*|(?<=[.!?])\s+/)
+    .map((part) => part.replace(/\s+/g, ' ').trim())
+    .filter((part) => part.length > 1);
+  const kept: string[] = [];
+  const keys: string[] = [];
+  for (const part of pieces) {
+    const key = part.toLowerCase().replace(/[^a-z0-9]+/g, '');
+    if (!key) continue;
+    if (keys.some((existing) => existing === key || existing.includes(key) || key.includes(existing))) continue;
+    keys.push(key);
+    kept.push(/[.!?]$/.test(part) ? part : `${part}.`);
+  }
+  return kept.join(' ').slice(0, 400);
+}
+
+export function buildBusinessDescriptionPrompt(input: {
+  label: string;
+  title?: string | null;
+  h1?: string | null;
+  metaDescription?: string | null;
+}): string {
+  const facts = [input.metaDescription, input.h1, input.title]
+    .map((part) => (part ?? '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  return [
+    `Write 1 or 2 sentences describing ${input.label} for a directory listing.`,
+    'Use only the facts below. Do not invent an address, phone, email, country, or award.',
+    'Return the sentences only, with no heading and no JSON.',
+    facts.join('\n') || '(no page text)',
+  ].join('\n');
+}
+
+/** Keep a model description only when it is one or two plain sentences. */
+export function acceptBusinessDescription(modelText: string): string | null {
+  const stripped = modelText.replace(/```[\s\S]*?```/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!stripped || stripped.startsWith('{') || stripped.startsWith('[')) return null;
+  const sentences = stripped.match(/[^.!?]+[.!?]+/g)?.map((sentence) => sentence.trim()).filter(Boolean) ?? [];
+  const chosen = (sentences.length > 0 ? sentences.slice(0, 2).join(' ') : stripped).slice(0, 400);
+  if (chosen.length < 12) return null;
+  return dedupeDescription(chosen);
+}
+
 /** Values taken only from the target site. Unknown contact details stay empty. */
 export function formValuesFromFacts(fieldNames: string[], facts: ClientFacts): Record<string, string> {
-  const description = (facts.description || facts.niche || '').replace(/\s+/g, ' ').trim().slice(0, 400);
+  const description = dedupeDescription(facts.description || '');
   const label = facts.label.toLowerCase();
   const category = facts.niche
     .split(/\s+/)

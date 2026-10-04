@@ -3,7 +3,13 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { BACKLINK_TYPES } from './backlink-types.js';
-import { CATEGORY_WORKFLOWS, resolveExecutionMode, unavailableAiDraftMessage, workflowFor } from './category-workflows.js';
+import {
+  CATEGORY_WORKFLOWS,
+  humanStepForChosenMode,
+  resolveExecutionMode,
+  unavailableAiDraftMessage,
+  workflowFor,
+} from './category-workflows.js';
 import { parseCommonCrawlCdx, parseDuckDuckGoHtml, sitemapLocs } from './free-search.js';
 
 describe('category workflows', () => {
@@ -40,6 +46,14 @@ describe('category workflows', () => {
       submissionFormIndex: null,
       contactEmails: [],
     }).mode).toBe('assisted');
+  });
+
+  it('sets the human step from the chosen path', () => {
+    expect(humanStepForChosenMode('automatic', workflowFor('directory'))).toBe(
+      'Person confirms the filled fields, then the app submits and verifies.'
+    );
+    expect(humanStepForChosenMode('stop', workflowFor('directory'))).toBeNull();
+    expect(humanStepForChosenMode('assisted', workflowFor('citation'))).toMatch(/signs in/i);
   });
 
   it('says when no AI provider can write the draft', () => {

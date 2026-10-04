@@ -46,6 +46,36 @@ export interface ApprovalReview {
   summary: string;
   relevanceScore: number | null;
   ai: AiApprovalJson | null;
+  /** Rules decision before the model verdict is applied. */
+  rulesDecision: ApprovalDecision;
+  /** Model verdict when the reply parsed. Null when there was no usable JSON. */
+  aiVerdict: ApprovalDecision | null;
+  /** Present when a model replied and the JSON could not be used. Truncated. */
+  rawReply: string | null;
+}
+
+/** Ollama `format` value for a review call. */
+export const APPROVAL_REVIEW_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    relevanceScore: { type: 'number' },
+    relevanceReason: { type: 'string' },
+    spamSignals: { type: 'array', items: { type: 'string' } },
+    linkValue: { type: 'string' },
+    risks: { type: 'array', items: { type: 'string' } },
+    verdict: { type: 'string', enum: ['approve', 'reject', 'needs_human'] },
+  },
+  required: ['relevanceScore', 'verdict'],
+} as const;
+
+const DECISION_RANK: Record<ApprovalDecision, number> = {
+  approve: 0,
+  needs_human: 1,
+  reject: 2,
+};
+
+function stricterDecision(rulesDecision: ApprovalDecision, aiVerdict: ApprovalDecision): ApprovalDecision {
+  return DECISION_RANK[aiVerdict] > DECISION_RANK[rulesDecision] ? aiVerdict : rulesDecision;
 }
 
 const SPAM_RE =
@@ -205,35 +235,52 @@ export function rulesApprovalReview(input: ApprovalReviewInput): ApprovalReview 
     summary,
     relevanceScore: relevanceScored.score,
     ai: null,
+    rulesDecision: decision,
+    aiVerdict: null,
+    rawReply: null,
   };
 }
 
+function statedText(value: unknown): string {
+  if (typeof value !== 'string') return 'not stated';
+  const trimmed = value.trim();
+  return trimmed || 'not stated';
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string');
+}
+
+function coerceScore(value: unknown): number | null {
+  const numeric = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : Number.NaN;
+  if (!Number.isFinite(numeric) || numeric < 0 || numeric > 100) return null;
+  return numeric;
+}
+
 export function parseAiApprovalJson(text: string): AiApprovalJson | null {
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
+  const stripped = text.replace(/```(?:json)?/gi, '').trim();
+  const start = stripped.indexOf('{');
+  const end = stripped.lastIndexOf('}');
   if (start < 0 || end <= start) return null;
   let raw: unknown;
   try {
-    raw = JSON.parse(text.slice(start, end + 1));
+    raw = JSON.parse(stripped.slice(start, end + 1));
   } catch {
     return null;
   }
-  if (!raw || typeof raw !== 'object') return null;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const obj = raw as Record<string, unknown>;
-  const verdict = String(obj.verdict ?? '').toLowerCase();
+  const verdict = String(obj.verdict ?? '').trim().toLowerCase();
   if (verdict !== 'approve' && verdict !== 'reject' && verdict !== 'needs_human') return null;
-  const relevanceScore = obj.relevanceScore;
-  if (typeof relevanceScore !== 'number' || relevanceScore < 0 || relevanceScore > 100) return null;
-  if (typeof obj.relevanceReason !== 'string' || !obj.relevanceReason.trim()) return null;
-  if (!Array.isArray(obj.spamSignals) || !obj.spamSignals.every((item) => typeof item === 'string')) return null;
-  if (typeof obj.linkValue !== 'string' || !obj.linkValue.trim()) return null;
-  if (!Array.isArray(obj.risks) || !obj.risks.every((item) => typeof item === 'string')) return null;
+  const relevanceScore = coerceScore(obj.relevanceScore);
+  if (relevanceScore == null) return null;
   return {
     relevanceScore,
-    relevanceReason: obj.relevanceReason.trim(),
-    spamSignals: obj.spamSignals,
-    linkValue: obj.linkValue.trim(),
-    risks: obj.risks,
+    relevanceReason: statedText(obj.relevanceReason),
+    spamSignals: stringList(obj.spamSignals),
+    linkValue: statedText(obj.linkValue),
+    risks: stringList(obj.risks),
     verdict,
   };
 }
@@ -319,33 +366,41 @@ export function approvalReview(input: ApprovalReviewInput): ApprovalReview {
 
   const parsed = parseAiApprovalJson(raw);
   if (!parsed) {
+    const rawReply = raw.slice(0, 500);
     return {
       ...rules,
+      rawReply,
       reasons: [
         `${aiSource} reply was not valid review JSON. Rules review is the decision.`,
+        `Raw reply: ${rawReply}`,
         ...rules.reasons,
       ],
     };
   }
-  const constrained = constrainDecision(parsed.verdict, input, rules.decision);
-  let decision = constrained.decision;
-  let note = constrained.note;
-  const publicForm =
-    input.workflowMode === 'automatic' &&
-    input.verdict?.submissionFormIndex != null &&
-    !humanGate(input) &&
-    !stoppedWorkflow(input);
-  if (publicForm && rules.decision === 'approve' && decision !== 'approve') {
-    decision = 'approve';
-    note =
-      'The model did not approve, but the scan found a public submission form and every rules check passed. Decision follows the scan: approve. A person still confirms before submit.';
-  }
+  const combined = stricterDecision(rules.decision, parsed.verdict);
+  const constrained = constrainDecision(combined, input, rules.decision);
+  const decision = constrained.decision;
+  const note = constrained.note;
+  const stricterNote =
+    parsed.verdict !== rules.decision && DECISION_RANK[parsed.verdict] > DECISION_RANK[rules.decision]
+      ? `${aiSource} verdict ${parsed.verdict} is stricter than the rules decision ${rules.decision}.`
+      : null;
+  const blockedNote =
+    rules.decision === 'reject' && parsed.verdict !== 'reject'
+      ? 'Rules rejected the page, so the model decision was not applied.'
+      : null;
   return {
     source: aiSource,
     decision,
+    rulesDecision: rules.decision,
+    aiVerdict: parsed.verdict,
+    rawReply: null,
     reasons: [
+      `Rules decision: ${rules.decision}. ${aiSource} verdict: ${parsed.verdict}. Combined decision: ${decision}.`,
       `${aiSource} JSON: relevance ${parsed.relevanceScore}/100 (${parsed.relevanceReason}). Link value: ${parsed.linkValue}. Spam signals: ${parsed.spamSignals.join('; ') || 'none'}. Risks: ${parsed.risks.join('; ') || 'none'}. Model verdict: ${parsed.verdict}.`,
-      ...(note && !rules.reasons.includes(note) ? [note] : []),
+      ...(stricterNote ? [stricterNote] : []),
+      ...(blockedNote ? [blockedNote] : []),
+      ...(note && note !== blockedNote && !rules.reasons.includes(note) ? [note] : []),
       ...rules.reasons,
     ],
     checks: rules.checks,

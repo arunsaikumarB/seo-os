@@ -3,7 +3,7 @@
  * Otherwise the caller gets an explicit "not generated" message.
  */
 
-import { unavailableAiDraftMessage } from '@seo-os/backlink-builder';
+import { APPROVAL_REVIEW_JSON_SCHEMA, unavailableAiDraftMessage } from '@seo-os/backlink-builder';
 import { createGeminiProvider, createOllamaProvider, isOllamaEnabled } from '@seo-os/providers';
 import { logger } from '../../lib/logger.js';
 
@@ -50,7 +50,30 @@ export async function draftWithConfiguredAi(kind: string, prompt: string): Promi
 }
 
 export async function reviewWithConfiguredAi(prompt: string): Promise<{ text: string; source: 'gemini' | 'ollama' } | null> {
-  const ai = await complete(prompt);
-  if (!ai) return null;
-  return { text: ai.text, source: ai.provider };
+  const geminiKey = process.env.GEMINI_API_KEY?.trim();
+  if (geminiKey) {
+    try {
+      const result = await createGeminiProvider(geminiKey).complete([{ role: 'user', content: prompt }], {
+        maxTokens: 800,
+        temperature: 0.1,
+      });
+      if (result.text.trim()) return { text: result.text.trim(), source: 'gemini' };
+    } catch (err) {
+      logger.warn({ err }, 'Gemini review failed');
+    }
+  }
+  const ollama = process.env.OLLAMA_BASE_URL?.trim();
+  if (ollama && isOllamaEnabled(ollama)) {
+    try {
+      const result = await createOllamaProvider(ollama).complete([{ role: 'user', content: prompt }], {
+        maxTokens: 800,
+        temperature: 0.1,
+        format: APPROVAL_REVIEW_JSON_SCHEMA,
+      });
+      if (result.text.trim()) return { text: result.text.trim(), source: 'ollama' };
+    } catch (err) {
+      logger.warn({ err }, 'Ollama review failed');
+    }
+  }
+  return null;
 }

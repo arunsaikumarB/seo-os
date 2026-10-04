@@ -29,6 +29,7 @@ export function createOllamaProvider(baseUrl: string, model?: string): AIProvide
           model: (options.model as string) ?? resolved,
           messages,
           stream: false,
+          ...(options.format != null ? { format: options.format } : {}),
           options: {
             temperature: (options.temperature as number) ?? 0.7,
             num_predict: (options.maxTokens as number) ?? 2048,

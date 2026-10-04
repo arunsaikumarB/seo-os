@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { approvalReview, rulesApprovalReview } from './approval-gate.js';
+import { approvalReview, parseAiApprovalJson, rulesApprovalReview } from './approval-gate.js';
 
 describe('approval gate', () => {
   it('rejects a broken page and always asks a person to confirm', () => {
@@ -74,6 +74,8 @@ describe('approval gate', () => {
     });
     expect(review.source).toBe('rules');
     expect(review.reasons[0]).toMatch(/not valid review JSON/);
+    expect(review.rawReply).toBe('approve. This appears valid.');
+    expect(review.reasons.join('\n')).toMatch(/Raw reply: approve\. This appears valid\./);
     expect(review.ai).toBeNull();
   });
 
@@ -140,7 +142,7 @@ describe('approval gate', () => {
     expect(review.reasons.join(' ')).toMatch(/human step/);
   });
 
-  it('does not let a model deny a submission form the scanner already found', () => {
+  it('lets a valid model verdict make an approval stricter and still shows the rules decision', () => {
     const review = approvalReview({
       niche: 'restaurant pos',
       pageText: 'Submit your site to the directory',
@@ -168,9 +170,52 @@ describe('approval gate', () => {
         verdict: 'needs_human',
       }),
     });
-    expect(review.decision).toBe('approve');
+    expect(review.decision).toBe('needs_human');
+    expect(review.source).toBe('ollama');
+    expect(review.rulesDecision).toBe('approve');
+    expect(review.aiVerdict).toBe('needs_human');
     expect(review.requiresHumanConfirm).toBe(true);
-    expect(review.reasons.join(' ')).toMatch(/Decision follows the scan/);
+    expect(review.reasons.join(' ')).toMatch(/stricter than the rules decision approve/);
+  });
+
+  it('accepts the qwen2.5:7b review JSON with an empty linkValue', () => {
+    const reply = [
+      '```json',
+      '{"relevanceScore":20,"relevanceReason":"...","spamSignals":[],"linkValue":"","risks":["..."],"verdict":"needs_human"}',
+      '```',
+    ].join('\n');
+    expect(parseAiApprovalJson(reply)).toEqual({
+      relevanceScore: 20,
+      relevanceReason: '...',
+      spamSignals: [],
+      linkValue: 'not stated',
+      risks: ['...'],
+      verdict: 'needs_human',
+    });
+    expect(parseAiApprovalJson('{"verdict":"reject","relevanceScore":"0"}')).toMatchObject({
+      relevanceScore: 0,
+      relevanceReason: 'not stated',
+      spamSignals: [],
+      linkValue: 'not stated',
+      risks: [],
+      verdict: 'reject',
+    });
+    expect(parseAiApprovalJson('{"verdict":"maybe","relevanceScore":20}')).toBeNull();
+    expect(parseAiApprovalJson('{"relevanceScore":20}')).toBeNull();
+
+    const review = approvalReview({
+      niche: 'restaurant pos',
+      pageText: '',
+      workflowMode: 'stop',
+      verdict: { broken: true, brokenReason: 'DNS failure', httpStatus: null, stop: true },
+      aiSource: 'ollama',
+      aiText: reply,
+    });
+    expect(review.source).toBe('ollama');
+    expect(review.rulesDecision).toBe('reject');
+    expect(review.aiVerdict).toBe('needs_human');
+    expect(review.decision).toBe('reject');
+    expect(review.reasons[0]).toMatch(/Rules decision: reject/);
   });
 
   it('does not treat a marketing word as niche overlap', () => {
