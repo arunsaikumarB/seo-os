@@ -13,5 +13,5 @@ export interface ExtendedEmailSendOptions {
 
 export interface ExtendedEmailProvider extends EmailProvider {
   readonly providerType: 'mock' | 'smtp' | 'gmail' | 'outlook';
-  sendExtended(options: ExtendedEmailSendOptions): Promise<{ messageId: string }>;
+  sendExtended(options: ExtendedEmailSendOptions): Promise<{ messageId: string | null }>;
 }

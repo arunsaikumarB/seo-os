@@ -15,6 +15,7 @@ import {
   textsAreRepetitive,
 } from './content-limits.js';
 import { htmlHasCoreContentFields } from './wizard-walk.js';
+import { isFormUnavailableFailure } from './form-unavailable.js';
 import {
   resolveListingPricing,
   type ListingPricingKind,
@@ -934,7 +935,7 @@ export function leadingLabelToken(raw: string | null | undefined): string {
  */
 export function leadingAttrToken(raw: string | null | undefined): string {
   if (!raw) return '';
-  return leadingLabelToken(String(raw).replace(/[_\-]+/g, ' '));
+  return leadingLabelToken(String(raw).replace(/[_-]+/g, ' '));
 }
 
 /** Snapshot used in production logs / debugging — matches unit-test inputs. */
@@ -2647,12 +2648,28 @@ export function buildAssistedPackage(input: {
             ? 'Needs a person — content ready to paste on the site'
             : null);
     } else {
-      formUnavailable = true;
-      bucket = 'no_form';
-      failureReason =
-        input.discoveryFailureReason?.trim() ||
-        input.recipe.formFailureReason?.trim() ||
-        'No submission form found — content/blog pages cannot be submitted';
+      const discoveryReason = input.discoveryFailureReason?.trim() || '';
+      const recipeReason = input.recipe.formFailureReason?.trim() || '';
+      if (gateRequiresPerson(input.recipe.gate)) {
+        // Login / captcha / Cloudflare with no listing form still needs a person.
+        formUnavailable = false;
+        bucket = 'needs_person';
+        failureReason =
+          recipeReason ||
+          discoveryReason ||
+          `Gate: ${input.recipe.gate} — needs a person (not paste-and-submit Ready)`;
+      } else if (discoveryReason && !isFormUnavailableFailure(discoveryReason)) {
+        // Crawl looked and missed. Keep the crawl reason; this is not a dead SPA shell.
+        formUnavailable = false;
+        failureReason = discoveryReason;
+      } else {
+        formUnavailable = true;
+        bucket = 'no_form';
+        failureReason =
+          discoveryReason ||
+          recipeReason ||
+          'No submission form found — content/blog pages cannot be submitted';
+      }
     }
   } else if (input.content.contentTooSimilar) {
     failureReason =

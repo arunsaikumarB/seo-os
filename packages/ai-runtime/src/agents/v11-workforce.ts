@@ -2,12 +2,10 @@ import type { AgentType } from '@seo-os/agent-contracts';
 import {
   detectSubmissionRequirements,
   discoverKeywordCandidates,
-  generateContentPack,
   recommendBacklinkTypes,
   buildDomainStyleProfile,
   buildImagePrompt,
   buildImageMetadata,
-  type OpportunityAiContext,
 } from '@seo-os/backlink-builder';
 import type { AgentHandler } from '../agent-registry.js';
 
@@ -18,15 +16,6 @@ function asString(v: unknown, fallback = ''): string {
 function asStringArray(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
   return v.map((x) => String(x)).filter(Boolean);
-}
-
-function oppFromInput(input: Record<string, unknown>): OpportunityAiContext {
-  return {
-    domain: asString(input.domain, 'example.com'),
-    title: asString(input.title, asString(input.websiteName, 'Opportunity')),
-    website_name: asString(input.websiteName, asString(input.domain, 'Site')),
-    opportunity_type: asString(input.backlinkType, asString(input.opportunityType, 'directory')),
-  };
 }
 
 /** V1.1 specialized agents — dispatch to @seo-os/backlink-builder domain logic */
@@ -81,33 +70,13 @@ export function registerV11WorkforceAgents(
     };
   });
 
-  register('content_agent', async ({ input }) => {
-    const { isGenerationMockEnabled } = await import('@seo-os/backlink-builder');
-    if (!isGenerationMockEnabled()) {
-      return {
-        agentType: 'content_agent',
-        status: 'error',
-        summary:
-          'Template content_agent disabled — use campaign Generate Content (LLM). Set GENERATION_MOCK=true only for local mock.',
-        metricsSource: 'live',
-      };
-    }
-    const opp = oppFromInput(input);
-    const pack = generateContentPack(
-      asString(input.backlinkType, opp.opportunity_type),
-      opp,
-      {
-        brandName: asString(input.brandName, 'Brand'),
-        industry: asString(input.industry, 'general'),
-        projectDomain: asString(input.projectDomain),
-      }
-    );
+  register('content_agent', async () => {
     return {
       agentType: 'content_agent',
-      status: 'ok',
-      summary: `Generated editable ${pack.backlinkType} content pack`,
-      pack,
-      metricsSource: 'estimated',
+      status: 'error',
+      summary:
+        'GENERATION_MOCK does not create a content pack. Configure GEMINI_API_KEY or OLLAMA_ENABLED=true with OLLAMA_BASE_URL and use campaign Generate Content.',
+      metricsSource: 'live',
     };
   });
 

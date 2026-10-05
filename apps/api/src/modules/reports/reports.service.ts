@@ -32,8 +32,6 @@ import { getSupabaseAdmin } from '../../lib/supabase.js';
 import { getAnalyticsOverview } from '../analytics/analytics.service.js';
 import { enqueueJob, QUEUES } from '../../jobs/boss.js';
 import { logger } from '../../lib/logger.js';
-import { createEmailProviderFromAccount } from '@seo-os/providers';
-
 function hexToRgb(hex: string) {
   const h = hex.replace('#', '');
   const n = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16);
@@ -66,15 +64,22 @@ async function metricsFromAnalytics(workspaceId: string) {
   try {
     const { getSyncedMetrics } = await import('../integrations/integrations.service.js');
     const m = await getSyncedMetrics(workspaceId);
-    integrations = {
-      gscClicks: m.searchConsole.clicks,
-      gscImpressions: m.searchConsole.impressions,
-      gscCtr: Math.round(m.searchConsole.ctr * 10000) / 100,
-      gscPosition: m.searchConsole.position,
-      ga4Sessions: m.analytics.sessions,
-      ga4Users: m.analytics.users,
-      ga4Conversions: m.analytics.conversions,
-    };
+    if (m.searchConsole.source === 'stored_snapshot' && m.searchConsole.clicks != null) {
+      integrations = {
+        gscClicks: m.searchConsole.clicks,
+        gscImpressions: m.searchConsole.impressions ?? 0,
+        gscCtr: Math.round((m.searchConsole.ctr ?? 0) * 10000) / 100,
+        gscPosition: m.searchConsole.position ?? 0,
+      };
+    }
+    if (m.analytics.source === 'stored_snapshot' && m.analytics.sessions != null) {
+      integrations = {
+        ...integrations,
+        ga4Sessions: m.analytics.sessions,
+        ga4Users: m.analytics.users ?? 0,
+        ga4Conversions: m.analytics.conversions ?? 0,
+      };
+    }
   } catch {
     /* optional until integrations synced */
   }
@@ -601,24 +606,9 @@ export async function emailReportRun(
   recipient: string
 ) {
   const exported = await exportReportRun(runId, workspaceId, 'pdf');
-  const provider = createEmailProviderFromAccount('mock', {});
-  const result = await provider.send({
-    to: recipient,
-    subject: `Backlink Agent Report — ${exported.filename}`,
-    bodyText: `Your report is attached as ${exported.filename}.`,
-    bodyHtml: `<p>Your report <strong>${exported.filename}</strong> is ready.</p>`,
-  });
-
-  await getSupabaseAdmin().from('report_deliveries').insert({
-    run_id: runId,
-    workspace_id: workspaceId,
-    channel: 'email',
-    recipient,
-    status: 'sent',
-    sent_at: new Date().toISOString(),
-  });
-
-  return { ok: true, messageId: result.messageId, filename: exported.filename };
+  throw new Error(
+    `Email is not connected. The report ${exported.filename} was not emailed to ${recipient}. Connect Gmail, Outlook, or SMTP.`
+  );
 }
 
 export async function shareReportInternally(runId: string, workspaceId: string) {

@@ -276,6 +276,7 @@ export function fillMatchedFields(options: FillFormOptions): FillResult {
 export function previewClassifications(options: {
   root?: ParentNode;
   domainLearning?: DomainLearningHook;
+  submissionType?: string | null;
 }): {
   fields: ReturnType<typeof scanDomFields>;
   classifications: FieldClassification[];

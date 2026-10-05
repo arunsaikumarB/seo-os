@@ -7,6 +7,7 @@ export * from './ai/openai-compatible.js';
 export * from './ai/gemini.js';
 export * from './ai/ollama.js';
 export * from './email/router.js';
+export * from './email/smtp.js';
 export * from './email/types.js';
 export * from './image/index.js';
 export * from './framework/index.js';

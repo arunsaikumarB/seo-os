@@ -123,7 +123,7 @@ async function probeUrl(
   browserBudget: { used: number; max: number }
 ): Promise<LinkProbeResult> {
   const http = await fetchHttp(url);
-  let html = http.html;
+  const html = http.html;
   let result = classifyProbedPage({
     url,
     html,

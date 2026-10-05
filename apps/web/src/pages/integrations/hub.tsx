@@ -199,7 +199,8 @@ export function IntegrationsHubPage({ projectIdOverride }: { projectIdOverride?:
           <Plug className="h-6 w-6" /> Integration Hub
         </h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Modular providers — connect, sync, monitor, and replace without changing the core platform
+          GSC, GA4, WordPress, Slack, and the hub SMTP card are not connected to a live API. Gmail and Outlook
+          use OAuth. A sync from a stub stores no metrics.
         </p>
       </div>
 
@@ -280,9 +281,11 @@ export function IntegrationsHubPage({ projectIdOverride }: { projectIdOverride?:
                   size="sm"
                   disabled={
                     connectedKeys.has(p.key) ||
-                    connect.isPending
+                    connect.isPending ||
+                    (p.key !== 'gmail' && p.key !== 'outlook')
                   }
                   onClick={async () => {
+                    if (p.key !== 'gmail' && p.key !== 'outlook') return;
                     if (p.key === 'gmail' || p.key === 'outlook') {
                       try {
                         const provider = p.key === 'gmail' ? 'google' : 'microsoft';
@@ -306,7 +309,7 @@ export function IntegrationsHubPage({ projectIdOverride }: { projectIdOverride?:
                     ? 'Connected'
                     : p.key === 'gmail' || p.key === 'outlook'
                       ? 'Connect OAuth'
-                      : 'Connect'}
+                      : 'not connected'}
                 </Button>
               </div>
             ))}

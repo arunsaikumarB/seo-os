@@ -9,7 +9,6 @@ import {
   scoreContentPackQuality,
   type ContentStudioMode,
 } from './intelligent-content.js';
-import { isGenerationMockEnabled } from './placeholder-tripwire.js';
 
 export type ContentPackPayload = GuestPostPack & {
   backlinkType: string;
@@ -71,9 +70,9 @@ export function generateContentPack(
     allowMockFallback?: boolean;
   } = {}
 ): ContentPackPayload {
-  if (!isGenerationMockEnabled() && !opts.allowMockFallback) {
+  if (!opts.allowMockFallback) {
     throw new Error(
-      'Silent template generateContentPack is disabled. Set GENERATION_MOCK=true for local mock only, or use LLM generation.'
+      'GENERATION_MOCK does not create backlink or outreach copy. This template pack was not generated. Configure GEMINI_API_KEY or OLLAMA_ENABLED=true with OLLAMA_BASE_URL.'
     );
   }
   const plan = buildIntelligentContentPlan({
@@ -274,29 +273,29 @@ function topicSafe(oppCtx: OpportunityAiContext): string {
 }
 
 export function generateImageBrief(
-  oppCtx: OpportunityAiContext,
+  _oppCtx: OpportunityAiContext,
   brand: BrandContext
 ): Record<string, unknown> {
-  const pack = generateContentPack(oppCtx.opportunity_type || 'guest_post', oppCtx, brand);
   return {
-    suggestions: pack.imageMetadata,
-    generationStatus: 'v1.1_provider_required',
-    metricsSource: 'estimated',
-    note: 'Metadata and prompts only — pixel generation requires Image Studio / provider.',
-    intelligence: pack.intelligence,
+    suggestions: [],
+    generationStatus: 'pending_provider',
+    metricsSource: 'live',
+    note: 'GENERATION_MOCK does not create an image brief. No metadata was invented.',
+    brand: brand.brandName,
+    projectDomain: brand.projectDomain,
   };
 }
 
 export function generateVideoBrief(
-  oppCtx: OpportunityAiContext,
+  _oppCtx: OpportunityAiContext,
   brand: BrandContext
 ): Record<string, unknown> {
-  const pack = generateContentPack(oppCtx.opportunity_type || 'guest_post', oppCtx, brand);
   return {
-    suggestions: pack.videoMetadata,
-    generationStatus: 'v1.1_provider_required',
-    metricsSource: 'estimated',
-    note: 'Titles, descriptions, tags, and transcript drafts only — video render requires a provider later.',
-    intelligence: pack.intelligence,
+    suggestions: [],
+    generationStatus: 'n/a',
+    metricsSource: 'live',
+    note: 'GENERATION_MOCK does not create a video brief. No metadata was invented.',
+    brand: brand.brandName,
+    projectDomain: brand.projectDomain,
   };
 }

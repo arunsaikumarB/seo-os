@@ -1017,7 +1017,7 @@ export async function startJob(workspaceId: string, jobId: string, userId?: stri
   }
 
   const headed = DEFAULT_FEATURE_FLAGS.bee_headed_debug === true;
-  let sessionId = randomUUID();
+  const sessionId = randomUUID();
   let reusedStorage: unknown | null = null;
   let reusedFrom: string | null = null;
 

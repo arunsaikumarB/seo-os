@@ -163,47 +163,47 @@ class LiveAuthorityStub implements AuthorityProvider {
   async domainAuthority(domain: string) {
     this.require();
     const r = await this.est().domainAuthority(domain);
-    return { data: r.data, meta: meta(this.key, false) };
+    return { data: r.data, meta: meta(this.key, true) };
   }
   async pageAuthority(url: string) {
     this.require();
     const r = await this.est().pageAuthority(url);
-    return { data: r.data, meta: meta(this.key, false) };
+    return { data: r.data, meta: meta(this.key, true) };
   }
   async spam(domain: string) {
     this.require();
     const r = await this.est().spam(domain);
-    return { data: r.data, meta: meta(this.key, false) };
+    return { data: r.data, meta: meta(this.key, true) };
   }
   async traffic(domain: string) {
     this.require();
     const r = await this.est().traffic(domain);
-    return { data: r.data, meta: meta(this.key, false) };
+    return { data: r.data, meta: meta(this.key, true) };
   }
   async refDomains(domain: string) {
     this.require();
     const r = await this.est().refDomains(domain);
-    return { data: r.data, meta: meta(this.key, false) };
+    return { data: r.data, meta: meta(this.key, true) };
   }
   async backlinks(domain: string) {
     this.require();
     const r = await this.est().backlinks(domain);
-    return { data: r.data, meta: meta(this.key, false) };
+    return { data: r.data, meta: meta(this.key, true) };
   }
   async topPages(domain: string) {
     this.require();
     const r = await this.est().topPages(domain);
-    return { data: r.data, meta: meta(this.key, false) };
+    return { data: r.data, meta: meta(this.key, true) };
   }
   async keywords(domain: string) {
     this.require();
     const r = await this.est().keywords(domain);
-    return { data: r.data, meta: meta(this.key, false) };
+    return { data: r.data, meta: meta(this.key, true) };
   }
   async profile(domain: string) {
     this.require();
     const r = await this.est().profile(domain);
-    return { data: { ...r.data, isEstimated: false }, meta: meta(this.key, false) };
+    return { data: { ...r.data, isEstimated: true }, meta: meta(this.key, true) };
   }
 }
 

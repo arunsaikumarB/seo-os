@@ -160,8 +160,20 @@ export function BacklinkOpportunityDetailPage() {
                     </CardDescription>
                     <p className="text-xs text-muted-foreground mt-1 capitalize">
                       {opp.type_label ?? formatType(opp.opportunity_type)}
-                      {opp.pipeline_stage ? ` · ${opp.pipeline_stage.replace(/_/g, ' ')}` : ''}
+                      {opp.metadata?.truth_status
+                        ? ` · ${opp.metadata.truth_status.replace(/_/g, ' ')}`
+                        : opp.pipeline_stage
+                          ? ` · ${opp.pipeline_stage.replace(/_/g, ' ')}`
+                          : ''}
                     </p>
+                    {opp.metadata?.scan?.nextAction && (
+                      <p className="text-xs mt-2">{opp.metadata.scan.nextAction}</p>
+                    )}
+                    {opp.metadata?.approval?.summary && (
+                      <p className="text-xs mt-1">
+                        Review ({opp.metadata.approval.source ?? 'rules'}): {opp.metadata.approval.summary}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <Badge className={scoreBadgeClass(opp.score)}>Score {opp.score}</Badge>
@@ -170,20 +182,20 @@ export function BacklinkOpportunityDetailPage() {
             <CardContent className="space-y-4 text-sm">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <Metric
-                  label="Domain Rating"
-                  value={opp.domain_rating != null ? String(opp.domain_rating) : '—'}
+                  label="Domain rating"
+                  value={opp.domain_rating != null ? `${opp.domain_rating} stored` : 'unknown'}
                 />
                 <Metric
                   label="Traffic"
-                  value={opp.monthly_traffic != null ? formatNumber(opp.monthly_traffic) : '—'}
+                  value={opp.monthly_traffic != null ? `${formatNumber(opp.monthly_traffic)} stored` : 'unknown'}
                 />
                 <Metric
-                  label="Spam Score"
-                  value={opp.spam_score != null ? String(opp.spam_score) : '—'}
+                  label="Spam score"
+                  value={opp.spam_score != null ? `${opp.spam_score} stored` : 'unknown'}
                 />
                 <Metric
-                  label="Success %"
-                  value={opp.success_probability != null ? `${opp.success_probability}%` : '—'}
+                  label="Est. success"
+                  value={opp.success_probability != null ? `${opp.success_probability}% est.` : 'unknown'}
                 />
                 <Metric
                   label="Reply Rate"

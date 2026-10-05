@@ -2,7 +2,23 @@ import type { AIProvider } from '../interfaces/index.js';
 
 const DEFAULT_MODEL = 'llama3.2';
 
-export function createOllamaProvider(baseUrl: string, model = DEFAULT_MODEL): AIProvider {
+/** Explicit argument, then OLLAMA_MODEL, then llama3.2. */
+export function resolveOllamaModel(explicit?: string | null): string {
+  const fromArg = explicit?.trim();
+  if (fromArg) return fromArg;
+  const fromEnv = process.env.OLLAMA_MODEL?.trim();
+  return fromEnv || DEFAULT_MODEL;
+}
+
+/** Ollama is on only when both OLLAMA_ENABLED=true and a base URL are set. */
+export function isOllamaEnabled(baseUrl?: string | null): boolean {
+  const url = (baseUrl ?? process.env.OLLAMA_BASE_URL)?.trim();
+  const enabled = String(process.env.OLLAMA_ENABLED ?? '').toLowerCase() === 'true';
+  return Boolean(url) && enabled;
+}
+
+export function createOllamaProvider(baseUrl: string, model?: string): AIProvider {
+  const resolved = resolveOllamaModel(model);
   return {
     name: 'ollama',
     async complete(messages, options = {}) {
@@ -10,9 +26,10 @@ export function createOllamaProvider(baseUrl: string, model = DEFAULT_MODEL): AI
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: (options.model as string) ?? model,
+          model: (options.model as string) ?? resolved,
           messages,
           stream: false,
+          ...(options.format != null ? { format: options.format } : {}),
           options: {
             temperature: (options.temperature as number) ?? 0.7,
             num_predict: (options.maxTokens as number) ?? 2048,

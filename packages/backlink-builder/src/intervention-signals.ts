@@ -32,6 +32,8 @@ export interface InterventionSignals {
   emailVerify: boolean;
   phoneVerify: boolean;
   categoryManual: boolean;
+  /** Cloudflare / anti-bot interstitial (separate from a captcha widget). */
+  cloudflare: boolean;
   /** Highest-priority gate for pausing automation, if any */
   primaryGate: DetectedInterventionGate | null;
   /** Short human-readable pause reason */
@@ -156,7 +158,8 @@ export function detectInterventionSignals(
 
   const loginHit = ev.all.find((r) => r.detectorId === 'login');
   const signupHit = ev.all.find((r) => r.detectorId === 'signup');
-  const captchaHit = ev.all.find((r) => r.detectorId === 'captcha' || r.detectorId === 'cloudflare');
+  const captchaHit = ev.all.find((r) => r.detectorId === 'captcha');
+  const cloudflareHit = ev.all.find((r) => r.detectorId === 'cloudflare');
   const mfaHit = ev.all.find((r) => r.detectorId === 'mfa');
   const emailHit = ev.all.find((r) => r.detectorId === 'email_verify');
   const phoneHit = ev.all.find((r) => r.detectorId === 'phone_verify');
@@ -169,6 +172,7 @@ export function detectInterventionSignals(
     emailVerify: Boolean(emailHit?.matched),
     phoneVerify: Boolean(phoneHit?.matched),
     categoryManual,
+    cloudflare: Boolean(cloudflareHit?.matched),
     primaryGate,
     reason,
     explanation,

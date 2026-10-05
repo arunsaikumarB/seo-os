@@ -1210,7 +1210,7 @@ async function prepareOnePackage(
   const entryUrl = resolved.formUrl;
   let html = resolved.html;
   let pagesChecked = [...resolved.pagesChecked];
-  let discoverySource = resolved.source;
+  const discoverySource = resolved.source;
 
   // Phase 14 — walk multi-step wizards to the real content form (Playwright, max 4 steps)
   let wizardReachedForm = false;

@@ -1,5 +1,6 @@
 /** Wrap existing Image / Email / LLM / Embedding implementations into FrameworkProvider */
 
+import { isOllamaEnabled, resolveOllamaModel } from '../ai/ollama.js';
 import { createImageProviderRegistry } from '../image/index.js';
 import type { FrameworkProvider, FrameworkProviderHealth } from './types.js';
 
@@ -73,9 +74,12 @@ class LlmFrameworkAdapter implements FrameworkProvider {
       };
     }
     if (this.kind === 'ollama') {
+      const on = isOllamaEnabled();
       return {
-        status: process.env.OLLAMA_BASE_URL ? 'healthy' : 'unconfigured',
-        message: process.env.OLLAMA_BASE_URL ? 'Ollama endpoint set' : 'Set OLLAMA_BASE_URL',
+        status: on ? 'healthy' : 'unconfigured',
+        message: on
+          ? `Ollama ${resolveOllamaModel()} at ${process.env.OLLAMA_BASE_URL}`
+          : 'Set OLLAMA_ENABLED=true and OLLAMA_BASE_URL',
         checkedAt,
       };
     }

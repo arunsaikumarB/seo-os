@@ -28,7 +28,7 @@ export function buildBrowserActionPlan(input: {
   emailVerifyRequired?: boolean;
 }): BrowserActionPlanResult {
   const html = (input.htmlSnippet ?? '').toLowerCase();
-  let metricsSource: 'estimated' | 'live' = input.htmlSnippet ? 'live' : 'estimated';
+  const metricsSource: 'estimated' | 'live' = input.htmlSnippet ? 'live' : 'estimated';
 
   const signals = detectInterventionSignals(input.htmlSnippet, input.url);
   const loginRequired = input.loginRequired || signals.loginForm;

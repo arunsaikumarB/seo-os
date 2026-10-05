@@ -9,7 +9,10 @@ export async function handleBacklinkJobs(
     const type = String(job.data.type ?? '');
     try {
       if (type === 'backlink_verify') {
-        await runVerificationCheck(String(job.data.workspaceId), String(job.data.backlinkId));
+        await runVerificationCheck(String(job.data.workspaceId), String(job.data.backlinkId), {
+          attempt: job.data.attempt != null ? Number(job.data.attempt) : 0,
+          executionJobId: job.data.executionJobId ? String(job.data.executionJobId) : undefined,
+        });
         logger.info({ jobId: job.id }, 'Backlink verification completed');
       } else if (type === 'backlink_automation') {
         await runAutomationPipeline(

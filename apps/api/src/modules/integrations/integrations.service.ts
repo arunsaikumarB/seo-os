@@ -603,19 +603,25 @@ export async function getSyncedMetrics(workspaceId: string) {
 
   const gsc = latestByType.get('google_search_console:search_performance') ?? {};
   const ga4 = latestByType.get('google_analytics_4:ga4_overview') ?? {};
+  const gscStub = gsc.clicks === 1240 && gsc.impressions === 48200;
+  const ga4Stub = ga4.sessions === 8200 && ga4.users === 6400;
+  const gscConnected = Object.keys(gsc).length > 0 && gsc.notConnected !== true && !gscStub;
+  const ga4Connected = Object.keys(ga4).length > 0 && ga4.notConnected !== true && !ga4Stub;
 
   return {
     searchConsole: {
-      clicks: Number(gsc.clicks ?? 0),
-      impressions: Number(gsc.impressions ?? 0),
-      ctr: Number(gsc.ctr ?? 0),
-      position: Number(gsc.position ?? 0),
+      source: gscConnected ? 'stored_snapshot' : 'not connected',
+      clicks: gscConnected ? Number(gsc.clicks ?? 0) : null,
+      impressions: gscConnected ? Number(gsc.impressions ?? 0) : null,
+      ctr: gscConnected ? Number(gsc.ctr ?? 0) : null,
+      position: gscConnected ? Number(gsc.position ?? 0) : null,
     },
     analytics: {
-      sessions: Number(ga4.sessions ?? 0),
-      users: Number(ga4.users ?? 0),
-      conversions: Number(ga4.conversions ?? 0),
-      engagementRate: Number(ga4.engagementRate ?? 0),
+      source: ga4Connected ? 'stored_snapshot' : 'not connected',
+      sessions: ga4Connected ? Number(ga4.sessions ?? 0) : null,
+      users: ga4Connected ? Number(ga4.users ?? 0) : null,
+      conversions: ga4Connected ? Number(ga4.conversions ?? 0) : null,
+      engagementRate: ga4Connected ? Number(ga4.engagementRate ?? 0) : null,
     },
     snapshots: data ?? [],
   };

@@ -956,6 +956,129 @@ backlinkBuilderRouter.get(
   }
 );
 
+backlinkBuilderRouter.post(
+  '/scan',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const body = z
+        .object({
+          url: z.string().min(4).max(2000),
+          category: z.string().max(80).optional(),
+        })
+        .safeParse(req.body ?? {});
+      if (!body.success) throw new AppError(400, 'VALIDATION_ERROR', 'A url is required');
+      const { scanLiveUrl } = await import('../../modules/backlinks/url-scanner.service.js');
+      const verdict = await scanLiveUrl({ url: body.data.url, category: body.data.category ?? null });
+      res.json({ data: verdict });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+backlinkBuilderRouter.get(
+  '/categories',
+  authMiddleware,
+  requireRole('viewer'),
+  async (_req, res, next) => {
+    try {
+      const { CATEGORY_WORKFLOWS } = await import('@seo-os/backlink-builder');
+      res.json({ data: CATEGORY_WORKFLOWS });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+backlinkBuilderRouter.post(
+  '/category-search',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const body = z.object({ category: z.string().min(2).max(80) }).safeParse(req.body ?? {});
+      if (!body.success) throw new AppError(400, 'VALIDATION_ERROR', 'A category is required');
+      const { discoverCategory } = await import('../../modules/backlinks/free-discovery.service.js');
+      const result = await discoverCategory(body.data.category);
+      if (!result.workflow) throw new AppError(404, 'RESOURCE_NOT_FOUND', 'Unknown backlink category');
+      res.json({ data: result });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+backlinkBuilderRouter.post(
+  '/opportunities/:opportunityId/scan',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const { scanOpportunity } = await import('../../modules/backlinks/truth-status.service.js');
+      const verdict = await scanOpportunity(param(req.params.projectId), param(req.params.opportunityId));
+      res.json({ data: verdict });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+backlinkBuilderRouter.post(
+  '/opportunities/:opportunityId/approval-review',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const body = z
+        .object({
+          confirm: z.boolean().optional(),
+          niche: z.string().max(200).optional(),
+        })
+        .safeParse(req.body ?? {});
+      if (!body.success) throw new AppError(400, 'VALIDATION_ERROR', 'Invalid approval review');
+      const { reviewOpportunity } = await import('../../modules/backlinks/truth-status.service.js');
+      const result = await reviewOpportunity(param(req.params.projectId), param(req.params.opportunityId), {
+        confirm: body.data.confirm,
+        niche: body.data.niche,
+      });
+      res.json({ data: result });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+backlinkBuilderRouter.post(
+  '/opportunities/:opportunityId/report-submitted',
+  authMiddleware,
+  requireRole('member'),
+  async (req, res, next) => {
+    try {
+      const body = z
+        .object({
+          sourceUrl: z.string().min(4).max(2000),
+          targetUrl: z.string().max(2000).optional(),
+          anchorText: z.string().max(300).optional(),
+        })
+        .safeParse(req.body ?? {});
+      if (!body.success) throw new AppError(400, 'VALIDATION_ERROR', 'sourceUrl is required');
+      const { reportHumanSubmission } = await import('../../modules/backlinks/truth-status.service.js');
+      const result = await reportHumanSubmission({
+        workspaceId: param(req.params.projectId),
+        opportunityId: param(req.params.opportunityId),
+        sourceUrl: body.data.sourceUrl,
+        targetUrl: body.data.targetUrl,
+        anchorText: body.data.anchorText,
+      });
+      res.json({ data: result });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 backlinkBuilderRouter.get(
   '/opportunities/:opportunityId',
   authMiddleware,

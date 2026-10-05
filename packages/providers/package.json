@@ -20,9 +20,11 @@
     "lint": "eslint src --max-warnings 0"
   },
   "dependencies": {
-    "@seo-os/shared": "*"
+    "@seo-os/shared": "*",
+    "nodemailer": "^7.0.6"
   },
   "devDependencies": {
+    "@types/nodemailer": "^6.4.17",
     "rimraf": "^6.0.1",
     "typescript": "^5.7.2",
     "vitest": "^2.1.9"

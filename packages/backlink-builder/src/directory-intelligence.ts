@@ -331,7 +331,7 @@ const FREE_PLAN_NAME_RE =
   /\b(free|regular|basic|normal|standard|nofollow\s*free|free\s*listing|complimentary)\b/i;
 const PAID_PLAN_NAME_RE =
   /\b(premium|featured|paid|sponsored|gold|silver|platinum|business\s*pro|pro\s*listing|express|priority)\b/i;
-const COST_RE = /(\$\s*\d+(?:\.\d+)?|\€\s*\d+|£\s*\d+|\d+\s*(?:usd|eur|gbp)(?:\s*\/\s*(?:mo|month|yr|year))?)/i;
+const COST_RE = /(\$\s*\d+(?:\.\d+)?|€\s*\d+|£\s*\d+|\d+\s*(?:usd|eur|gbp)(?:\s*\/\s*(?:mo|month|yr|year))?)/i;
 
 /**
  * Extract concrete listing / link-type plans from page HTML (radios, options, labels).
